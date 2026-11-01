@@ -3294,7 +3294,8 @@ export function ClientDetail({
 
   const { isRequired } = useFormRequirements(
     "clients",
-    activeSection === "profile",
+    activeSection === "profile" && (userIsAdmin || clientPermissions.canView),
+    { ownerScope: JSON.stringify([clientId, user?.id, user?.role?.id, userIsAdmin, clientPermissions, clientProfileEditing, clientFormState.kind]) },
   );
 
   const [statsReloadToken, setStatsReloadToken] = useState(0);

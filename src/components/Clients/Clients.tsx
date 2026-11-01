@@ -2072,6 +2072,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
 
         <ClientModal
           isOpen={isModalOpen}
+          ownerScope={clientOwnerScope}
           onClose={handleCloseModal}
           onSubmit={handleSubmitClient}
           onDelete={handleDeleteClient}

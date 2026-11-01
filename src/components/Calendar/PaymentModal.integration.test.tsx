@@ -13,6 +13,7 @@ import { documentCopyTestSession } from '../../test/documentCopySession';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useClients } from '../../hooks/useClients';
 import { useDictionaries } from '../../hooks/useDictionaries';
+import { useFormRequirements } from '../../hooks/useFormRequirements';
 import { acknowledgePaymentCreate, assertPaymentCreateOwner, bindPaymentCreateOwner, createPaymentGuarded, fencePaymentCreateAdoption, inspectPaymentCreate, pendingPaymentCreates,
   paymentCreateTokenMatches,
   openCommittedPaymentCreate, type PaymentAttemptState, type PaymentCreateContext, type PaymentCreatePorts } from '../../services/paymentCreateAttempts';
@@ -136,7 +137,7 @@ vi.mock('../../hooks/useDialog', () => ({
 }));
 
 vi.mock('../../hooks/useFormRequirements', () => ({
-  useFormRequirements: () => ({ isRequired: () => false }),
+  useFormRequirements: vi.fn(() => ({ isRequired: () => false })),
 }));
 
 vi.mock('../../hooks/useToast', () => ({
@@ -390,6 +391,12 @@ function doc04RealAttemptFixture(primary = doc04Payment(), rest = doc04Payment({
 }
 
 describe('PaymentModal integration', () => {
+  it('requirements caller: payment rules follow its confirmation owner and closing', async () => {
+    const p = { isOpen: true, onClose: vi.fn(), onSubmit: vi.fn() }; const view = render(<PaymentModal {...p} />); const first = vi.mocked(useFormRequirements).mock.lastCall;
+    expect(first?.[0]).toBe('payments'); expect(first?.[1]).toBe(true); expect(first?.[2]?.ownerScope).toBeTruthy();
+    paymentScopeState.value = 'own'; view.rerender(<PaymentModal {...p} />); expect(vi.mocked(useFormRequirements).mock.lastCall?.[2]?.ownerScope).not.toBe(first?.[2]?.ownerScope);
+    view.rerender(<PaymentModal {...p} isOpen={false} />); expect(vi.mocked(useFormRequirements).mock.lastCall?.[1]).toBe(false); await act(async () => {});
+  });
   it('dictionary caller: payment uses four groups under the confirmation scope and stops when closed', async () => {
     const p = { isOpen: true, onClose: vi.fn(), onSubmit: vi.fn() }; const view = render(<PaymentModal {...p} />); const first = vi.mocked(useDictionaries).mock.lastCall?.[0];
     expect(first?.include).toEqual(['dealTypes', 'incomeTypes', 'paymentSources', 'services']); expect(first?.enabled).toBe(true);

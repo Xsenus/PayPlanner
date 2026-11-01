@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ActModal } from './ActModal';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
+import { useFormRequirements } from '../../hooks/useFormRequirements';
 import type { Act, ActInput, ActResponsible, Client, Invoice } from '../../types';
 
 const {
@@ -38,9 +39,9 @@ vi.mock('../../hooks/useTranslation', () => ({
 }));
 
 vi.mock('../../hooks/useFormRequirements', () => ({
-  useFormRequirements: () => ({
+  useFormRequirements: vi.fn(() => ({
     isRequired: () => false,
-  }),
+  })),
 }));
 
 vi.mock('../../hooks/useDocumentStatusSettings', () => ({
@@ -84,6 +85,7 @@ vi.mock('../../services/api', () => ({
     getLegalEntities: getLegalEntitiesMock,
     getLegalEntitiesPaged: getLegalEntitiesPagedMock,
     getOwnCompanyOptions: getOwnCompanyOptionsMock,
+    getRolePermissions: vi.fn().mockResolvedValue({}),
   },
 }));
 
@@ -148,6 +150,12 @@ async function selectPickerOption(name: string): Promise<void> {
 }
 
 describe('ActModal integration', () => {
+  it('requirements caller: act rules follow the editor access scope and closing', async () => {
+    const p = { open: true, mode: 'create' as const, act: null, onClose: vi.fn(), onSubmit: vi.fn(), submitting: false, clients: [], responsibles: [], lookupsLoading: false, presentation: 'page' as const, accessScopeKey: 'all' };
+    const view = render(<ActModal {...p} />); const first = vi.mocked(useFormRequirements).mock.lastCall; expect(first?.[0]).toBe('acts'); expect(first?.[1]).toBe(true);
+    view.rerender(<ActModal {...p} accessScopeKey="own" />); expect(vi.mocked(useFormRequirements).mock.lastCall?.[2]?.ownerScope).not.toBe(first?.[2]?.ownerScope);
+    view.rerender(<ActModal {...p} open={false} />); expect(vi.mocked(useFormRequirements).mock.lastCall?.[1]).toBe(false); await act(async () => {});
+  });
   it('directory caller: act editor changes lookup owner with access and closes reads', async () => {
     const props = { open: true, mode: 'create' as const, act: null, onClose: vi.fn(), onSubmit: vi.fn(), submitting: false, clients: [], responsibles: [], lookupsLoading: false, presentation: 'page' as const, accessScopeKey: 'all' };
     const view = render(<ActModal {...props} />); const first = vi.mocked(useLegalEntities).mock.lastCall?.[0]; expect(first?.enabled).toBe(true);

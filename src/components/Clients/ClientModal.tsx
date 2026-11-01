@@ -21,6 +21,7 @@ interface ClientModalProps {
   onSubmit: (client: ClientInput) => Promise<void>;
   onDelete?: (id: number) => Promise<void>;
   client?: Client;
+  ownerScope?: string;
 }
 
 export function ClientModal({
@@ -29,6 +30,7 @@ export function ClientModal({
   onSubmit,
   onDelete,
   client,
+  ownerScope,
 }: ClientModalProps) {
   const { t } = useTranslation();
   const { confirm } = useDialog();
@@ -37,9 +39,9 @@ export function ClientModal({
   const [dadataLoading, setDadataLoading] = useState(false);
   const [dadataMessage, setDadataMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [formData, setFormData] = useState(() => parseQuickClientModalFormData());
+  const [formData, setFormData] = useState(() => parseQuickClientModalFormData(client));
   const requirementsSection = formData.kind === 'legal' ? 'clients-modal-legal' : 'clients-modal';
-  const { isRequired } = useFormRequirements(requirementsSection, isOpen);
+  const { isRequired } = useFormRequirements(requirementsSection, isOpen, { ownerScope: JSON.stringify([ownerScope, client?.id, formData.kind]) });
 
   useEffect(() => {
     if (!isOpen) return;

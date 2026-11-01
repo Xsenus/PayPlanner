@@ -526,7 +526,7 @@ export function ActModal({
   const [actReadState, setActReadState] = useState<ActReadState>({ scope: editorScope, kind: 'loading' });
   const actReadStateRef = useRef(actReadState);
   actReadStateRef.current = actReadState;
-  const { isRequired } = useFormRequirements('acts', open);
+  const { isRequired } = useFormRequirements('acts', open, { ownerScope: editorScope });
   const documentStatusSettings = useDocumentStatusSettings();
   const { legalEntities } = useLegalEntities({ enabled: open, ownerScope: editorScope });
   const profileTimeZoneId = useUserTimeZone();

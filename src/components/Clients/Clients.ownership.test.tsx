@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Clients } from './Clients';
 import { apiService } from '../../services/api';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
+import { ClientModal } from './ClientModal';
 import { documentCopyTestSession } from '../../test/documentCopySession';
 import type { Client } from '../../types';
 
@@ -15,7 +16,7 @@ vi.mock('../../hooks/useUserTimeZone', () => ({ useUserTimeZone: () => 'UTC' }))
 vi.mock('../../hooks/useClientStatuses', () => ({ useClientStatuses: vi.fn(() => ({ statuses: [] })) }));
 vi.mock('../../hooks/useDialog', () => ({ useDialog: () => ({ confirm: vi.fn() }) }));
 vi.mock('../../hooks/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn(), info: vi.fn() }) }));
-vi.mock('./ClientModal', () => ({ ClientModal: () => null }));
+vi.mock('./ClientModal', () => ({ ClientModal: vi.fn(() => null) }));
 vi.mock('./ClientDetail', () => ({ ClientDetail: () => null }));
 vi.mock('./CaseModal', () => ({ CaseModal: () => null }));
 vi.mock('../../services/api', () => ({ apiService: { getClientsV2: vi.fn(), getUserSetting: vi.fn(), upsertUserSetting: vi.fn() } }));
@@ -26,6 +27,10 @@ describe('client list parent ownership', () => {
   beforeEach(() => { vi.clearAllMocks(); session = documentCopyTestSession(); permissions.clients.canView = true; permissions.clients.viewScope = 'all'; permissions.cases.viewScope = 'all';
     vi.mocked(apiService.getClientsV2).mockResolvedValue({ items: [row], total: 1, page: 1, pageSize: 25 }); vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'synthetic-client-setting', value: '' }); });
   afterEach(() => session.restore());
+  it('requirements parent: client page passes current permission scope to its quick editor', async () => {
+    const view = render(<Clients />); await screen.findByText('Разрешённый клиент'); const first = vi.mocked(ClientModal).mock.lastCall?.[0].ownerScope; expect(first).toBeTruthy();
+    permissions.clients.viewScope = 'own'; view.rerender(<Clients />); await waitFor(() => expect(vi.mocked(ClientModal).mock.lastCall?.[0].ownerScope).not.toBe(first));
+  });
   it('dictionary caller: client list scopes its statuses and disables them without view access', async () => {
     const view = render(<Clients />); await screen.findByText('Разрешённый клиент'); const first = vi.mocked(useClientStatuses).mock.lastCall?.[0]; expect(first?.enabled).toBe(true);
     permissions.clients.viewScope = 'own'; view.rerender(<Clients />); expect(vi.mocked(useClientStatuses).mock.lastCall?.[0]?.ownerScope).not.toBe(first?.ownerScope);

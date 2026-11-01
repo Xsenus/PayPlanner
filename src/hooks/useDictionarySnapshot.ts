@@ -11,8 +11,8 @@ export function assertDictionaryRows(data: unknown): asserts data is { id: numbe
   }
 }
 
-// Both dictionary hooks share one request lifetime and the same event/retry rules.
-export function useDictionarySnapshot<T>(load: (signal: AbortSignal) => Promise<T>, empty: T, options?: DictionaryReadOptions) {
+// Readonly reference snapshots share one request lifetime; form rules do not listen to dictionary edits.
+export function useDictionarySnapshot<T>(load: (signal: AbortSignal) => Promise<T>, empty: T, options?: DictionaryReadOptions, listenForChanges = true) {
   const enabled = options?.enabled ?? true;
   const { capture, scope } = useDocumentDeliveryOwner(JSON.stringify([enabled, options?.ownerScope ?? '']));
   const [view, setView] = useState<{ scope: string; owner: DocumentDeliveryRead | null; value: T; loading: boolean; error: string | null }>({ scope, owner: null, value: empty, loading: enabled, error: null });
@@ -48,11 +48,11 @@ export function useDictionarySnapshot<T>(load: (signal: AbortSignal) => Promise<
   }, [enabled, capture, scope, cancel, load, empty]);
   useEffect(() => { void refresh(); return cancel; }, [refresh, cancel]);
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !listenForChanges) return;
     const changed = () => { void refresh(); };
     window.addEventListener('dicts:changed', changed);
     return () => window.removeEventListener('dicts:changed', changed);
-  }, [enabled, refresh]);
+  }, [enabled, refresh, listenForChanges]);
   const visible = enabled && view.scope === scope && view.owner?.isCurrent() ? view : null;
-  return { value: visible?.value ?? empty, loading: enabled && (visible?.loading ?? true), error: visible?.error ?? null, refresh };
+  return { value: visible?.value ?? empty, loading: enabled && (visible?.loading ?? true), error: visible?.error ?? null, refresh, capture };
 }

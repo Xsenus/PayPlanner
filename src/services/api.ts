@@ -4359,9 +4359,9 @@ export class ApiService {
     });
   }
 
-  async getFormRequirements(section?: string) {
+  async getFormRequirements(section?: string, options?: { signal?: AbortSignal }) {
     const q = buildQuery({ section });
-    return this.request<FormFieldRequirementDto[]>(`/form-requirements${q}`);
+    return this.request<FormFieldRequirementDto[]>(`/form-requirements${q}`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async getFormRequirementSections() {

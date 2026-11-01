@@ -994,6 +994,7 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
 
       <ContactEditorModal
         open={Boolean(editor)}
+        ownerScope={JSON.stringify([scope, user?.id, user?.role?.id])}
         mode={editor?.mode ?? 'create-external'}
         contact={editor?.contact ?? null}
         legalEntities={legalEntities}

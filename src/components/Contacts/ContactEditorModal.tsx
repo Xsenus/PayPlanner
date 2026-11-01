@@ -19,6 +19,7 @@ interface ContactEditorModalProps {
   responsibles: ActResponsible[];
   organizationContacts?: ContactDirectoryItemDto[];
   canManageResponsible: boolean;
+  ownerScope?: string;
   onClose: () => void;
   onSaved: (contact: ContactDirectoryItemDto) => void;
 }
@@ -84,12 +85,15 @@ export function ContactEditorModal({
   responsibles,
   organizationContacts = [],
   canManageResponsible,
+  ownerScope,
   onClose,
   onSaved,
 }: ContactEditorModalProps) {
   const toast = useToast();
   const requirementsSection = mode === 'edit-client' ? 'contacts-client' : 'contacts-external';
-  const { isRequired } = useFormRequirements(requirementsSection, open);
+  const { isRequired } = useFormRequirements(requirementsSection, open, {
+    ownerScope: JSON.stringify([ownerScope, mode, contact?.sourceType, contact?.sourceId, canManageResponsible]),
+  });
   const [form, setForm] = useState<ContactFormState>(DEFAULT_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

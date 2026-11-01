@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Contacts } from './Contacts';
+import { ContactEditorModal } from './ContactEditorModal';
 import { apiService, type ContactDirectoryItemDto } from '../../services/api';
 
 const isAdminMock = vi.hoisted(() => vi.fn(() => false));
@@ -44,7 +45,7 @@ vi.mock('../../hooks/usePersistedTableSettings', () => ({
   }),
 }));
 
-vi.mock('./ContactEditorModal', () => ({ ContactEditorModal: () => null }));
+vi.mock('./ContactEditorModal', () => ({ ContactEditorModal: vi.fn(() => null) }));
 vi.mock('./YealinkImportPreviewModal', () => ({ YealinkImportPreviewModal: () => null }));
 
 vi.mock('../../services/api', () => ({
@@ -73,6 +74,10 @@ function createContact(id: number, fullName: string): ContactDirectoryItemDto {
 }
 
 describe('Contacts phone directory', () => {
+  it('requirements parent: contacts pass their current directory scope to the editor', async () => {
+    vi.mocked(apiService.getContacts).mockResolvedValue([]); render(<Contacts />); const first = vi.mocked(ContactEditorModal).mock.lastCall?.[0].ownerScope; expect(first).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: /Организации/i })); expect(vi.mocked(ContactEditorModal).mock.lastCall?.[0].ownerScope).not.toBe(first);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.removeItem('pp.contacts_view.v1');

@@ -7,6 +7,7 @@ import { LegalEntityModal } from './LegalEntityModal';
 import { apiService } from '../../services/api';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
+import { useFormRequirements } from '../../hooks/useFormRequirements';
 import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { documentCopyTestSession } from '../../test/documentCopySession';
 import { bankConnectionFixture, bankReportFixture, bankVersion, bindingFixture } from '../../test/companyBankBindingFixtures';
@@ -106,9 +107,9 @@ vi.mock('../../hooks/useDictionaries', () => ({
 vi.mock('../../hooks/useClientStatuses', () => ({ useClientStatuses: vi.fn(() => ({ statuses: [] })) }));
 
 vi.mock('../../hooks/useFormRequirements', () => ({
-  useFormRequirements: () => ({
+  useFormRequirements: vi.fn(() => ({
     isRequired: () => false,
-  }),
+  })),
 }));
 
 vi.mock('../../services/api', () => ({
@@ -1424,6 +1425,13 @@ describe('LegalEntityModal integration', () => {
   });
 
   describe('company directory parent ownership', () => {
+    it.each(['page', 'modal'] as const)('requirements caller: company %s uses its current profile scope and stops when closed', async mode => {
+      const p = { isOpen: true, mode, initial: createInitialLegalEntity({ shortName: 'Профиль', isOwnCompany: false }), allowEdit: true, allowDelete: false,
+        canViewCases: false, canViewAccounts: false, canViewActs: false, canViewPayments: false, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() };
+      const view = render(<LegalEntityModal {...p} deleteOwnerScope="all" />); const first = vi.mocked(useFormRequirements).mock.lastCall; expect(first?.[0]).toBe('legal-entities'); expect(first?.[1]).toBe(true); expect(first?.[2]?.ownerScope).toBeTruthy();
+      view.rerender(<LegalEntityModal {...p} deleteOwnerScope="own" />); expect(vi.mocked(useFormRequirements).mock.lastCall?.[2]?.ownerScope).not.toBe(first?.[2]?.ownerScope);
+      view.rerender(<LegalEntityModal {...p} isOpen={false} />); expect(vi.mocked(useFormRequirements).mock.lastCall?.[1]).toBe(false); await act(async () => {});
+    });
     it.each(['page', 'modal'] as const)('dictionary caller: profile %s requests only its fields and scopes both hooks to current access', async mode => {
       const p = { isOpen: true, mode, initial: createInitialLegalEntity({ shortName: 'Справочники', isOwnCompany: false }), allowEdit: true, allowDelete: false,
         canViewCases: false, canViewAccounts: false, canViewActs: false, canViewPayments: false, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() };

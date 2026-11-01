@@ -462,7 +462,7 @@ export function PaymentModal({
     prevOpenRef.current = false;
   }, [confirmedPaymentId, initialPayment?.id]);
   const toast = useToast();
-  const { isRequired } = useFormRequirements('payments', isOpen);
+  const { isRequired } = useFormRequirements('payments', isOpen, { ownerScope: confirmationOwner.scope });
   const profileTimeZoneId = useUserTimeZone();
   const defaultDate = todayYMDInTimeZone(profileTimeZoneId);
   const defaultDateRef = useRef(defaultDate);

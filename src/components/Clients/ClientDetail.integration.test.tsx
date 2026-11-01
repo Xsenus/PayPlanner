@@ -6,6 +6,7 @@ import { ClientDetail } from './ClientDetail';
 import type { Act, Client, Contract, Invoice, LegalEntityDetail, LegalEntityInput, Payment, PowerOfAttorney } from '../../types';
 import { apiService } from '../../services/api';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
+import { useFormRequirements } from '../../hooks/useFormRequirements';
 import * as timeZoneHook from '../../hooks/useUserTimeZone';
 import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 
@@ -297,7 +298,7 @@ vi.mock('../../hooks/useTranslation', () => ({
 }));
 
 vi.mock('../../hooks/useFormRequirements', () => ({
-  useFormRequirements: () => ({ isRequired: () => false }),
+  useFormRequirements: vi.fn(() => ({ isRequired: () => false })),
 }));
 
 vi.mock('../../hooks/useRolePermissions', () => ({
@@ -560,6 +561,11 @@ vi.mock('./ClientStatusBadge', () => ({
 }));
 
 describe('ClientDetail integration', () => {
+  it('requirements caller: client profile rules follow the current client and view access', async () => {
+    const p = { onBack: vi.fn(), initialSection: 'profile' as const }; const view = render(<ClientDetail {...p} clientId={1} />); const first = vi.mocked(useFormRequirements).mock.lastCall;
+    expect(first?.[0]).toBe('clients'); expect(first?.[1]).toBe(true); view.rerender(<ClientDetail {...p} clientId={2} />); expect(vi.mocked(useFormRequirements).mock.lastCall?.[2]?.ownerScope).not.toBe(first?.[2]?.ownerScope);
+    permissionsResult.clients.canView = false; view.rerender(<ClientDetail {...p} clientId={2} />); expect(vi.mocked(useFormRequirements).mock.lastCall?.[1]).toBe(false); await act(async () => {});
+  });
   it('dictionary caller: client profile status scope follows the opened client and its rights', async () => {
     const onBack = vi.fn(); const view = render(<ClientDetail clientId={1} onBack={onBack} initialSection="profile" />); const first = vi.mocked(useClientStatuses).mock.lastCall?.[0]; expect(first?.enabled).toBe(true);
     view.rerender(<ClientDetail clientId={2} onBack={onBack} initialSection="profile" />); expect(vi.mocked(useClientStatuses).mock.lastCall?.[0]?.ownerScope).not.toBe(first?.ownerScope);

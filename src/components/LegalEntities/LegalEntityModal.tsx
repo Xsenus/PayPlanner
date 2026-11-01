@@ -875,7 +875,6 @@ export function LegalEntityModal({
 
     return raw || fallback;
   }, []);
-  const { isRequired } = useFormRequirements("legal-entities", isOpen);
   const [formState, setFormState] = useState<FormState>(DEFAULT_STATE);
   const [profileEditVersion, setProfileEditVersion] = useState(initial?.profileEditVersion ?? null);
   const [selectedClients, setSelectedClients] = useState<
@@ -1072,6 +1071,7 @@ export function LegalEntityModal({
   const responsibles = responsibleLookupEnabled ? currentResponsibleLookup?.items ?? [] : [];
   const responsiblesLoading = responsibleLookupEnabled && (currentResponsibleLookup?.loading ?? true);
   const responsiblesError = responsibleLookupEnabled ? currentResponsibleLookup?.error ?? null : null;
+  const { isRequired } = useFormRequirements('legal-entities', responsibleLookupEnabled, { ownerScope: responsibleOwner.scope });
   const { countries, baseCurrencies, serviceLanguages, organizationForms, timezones, taxSystems, taxSystemModes } = useDictionaries({
     enabled: responsibleLookupEnabled, ownerScope: responsibleOwner.scope,
     include: ['countries', 'baseCurrencies', 'serviceLanguages', 'organizationForms', 'timezones', 'taxSystems', 'taxSystemModes'],
