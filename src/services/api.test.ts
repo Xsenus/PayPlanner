@@ -2415,6 +2415,28 @@ describe('apiService case calendar', () => {
     expect(String(url)).toContain('reminderMinutes=30');
   });
 
+  it('bypasses the browser cache for case references while preserving cancellation and filters', async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json([]));
+    vi.stubGlobal('fetch', fetchMock);
+    await apiService.getCasesV1({ clientId: 701 }, { signal: controller.signal });
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/v1/cases?clientId=701');
+    expect(options?.signal).toBe(controller.signal);
+    expect(options?.cache).toBe('no-store');
+  });
+
+  it('passes cancellation and no-store to the task assignee catalogue', async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json([]));
+    vi.stubGlobal('fetch', fetchMock);
+    await apiService.getTaskJournalAssignees({ calendarView: true }, { signal: controller.signal });
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/tasks/assignees?calendarView=true');
+    expect(options?.signal).toBe(controller.signal);
+    expect(options?.cache).toBe('no-store');
+  });
+
   it('passes calendar visibility flag to task journal endpoints', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ items: [], total: 0, page: 1, pageSize: 100 }), {
       headers: { 'Content-Type': 'application/json' },

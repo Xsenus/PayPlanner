@@ -5093,11 +5093,11 @@ export class ApiService {
     return this.request<TaskJournalListSummary>(`/tasks/summary${q}`, options);
   }
 
-  async getTaskJournalAssignees(params?: { calendarView?: boolean }) {
+  async getTaskJournalAssignees(params?: { calendarView?: boolean }, options?: Pick<RequestInit, 'signal'>) {
     const q = buildQuery({
       calendarView: params?.calendarView,
     });
-    return this.request<TaskJournalAssignee[]>(`/tasks/assignees${q}`);
+    return this.request<TaskJournalAssignee[]>(`/tasks/assignees${q}`, { ...options, cache: 'no-store' });
   }
 
   async getTaskBillingContext(params: { clientId?: number; legalEntityId?: number; clientCaseId: number }) {
@@ -6857,7 +6857,7 @@ export class ApiService {
     sortDir?: SortDir;
   }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<ClientCase[]>(`/v1/cases${q}`, { signal: options?.signal });
+    return this.request<ClientCase[]>(`/v1/cases${q}`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async getCasesV2(params?: {

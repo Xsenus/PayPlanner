@@ -10,6 +10,7 @@ import { cloneDefaultTaskStickerStyles } from '../../utils/taskStickerStyles';
 
 const apiMock = vi.hoisted(() => ({
   getTaskJournalItems: vi.fn(),
+  getCasesV1: vi.fn(),
   getTaskJournalSummary: vi.fn(),
   getTaskJournalAssignees: vi.fn(),
   getTaskJournalSettings: vi.fn(),
@@ -103,6 +104,7 @@ const authState = vi.hoisted((): { user: { id: number; fullName: string; email: 
 }));
 
 const permissionsState = vi.hoisted(() => ({
+  taskCanView: true,
   taskCanCreate: true,
   taskCanEdit: true,
   taskCanDelete: true,
@@ -146,7 +148,7 @@ vi.mock('../../hooks/useClients', () => ({
 }));
 
 vi.mock('../../hooks/useClientCases', () => ({
-  useClientCases: (clientId?: number | string, options?: { legalEntityId?: number | string }) => ({
+  useClientCases: vi.fn((clientId?: number | string, options?: { legalEntityId?: number | string }) => ({
     cases: casesState.staleCases ?? casesState.cases.filter((clientCase) => {
       const normalizedClientId = clientId == null ? undefined : Number(clientId);
       const normalizedLegalEntityId = options?.legalEntityId == null ? undefined : Number(options.legalEntityId);
@@ -157,7 +159,7 @@ vi.mock('../../hooks/useClientCases', () => ({
           : true;
     }),
     loading: casesState.loading,
-  }),
+  })),
 }));
 
 vi.mock('../../hooks/useLegalEntities', () => ({
@@ -194,6 +196,7 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       },
       tasks: {
         ...section,
+        canView: permissionsState.taskCanView,
         canCreate: permissionsState.taskCanCreate,
         canEdit: permissionsState.taskCanEdit,
         canDelete: permissionsState.taskCanDelete,
@@ -548,11 +551,13 @@ export function setupTaskJournalTests() {
   beforeEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    apiMock.getCasesV1.mockResolvedValue([]);
     dialogMock.confirm.mockResolvedValue(true);
     dialogMock.prompt.mockResolvedValue('Срочные задачи');
     window.localStorage.clear();
     authState.user = { id: 7, fullName: 'Администратор', email: 'admin@example.com' };
     authState.isAdmin = true;
+    permissionsState.taskCanView = true;
     permissionsState.taskCanCreate = true;
     permissionsState.taskCanEdit = true;
     permissionsState.taskCanDelete = true;

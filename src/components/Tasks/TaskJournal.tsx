@@ -66,6 +66,8 @@ import { useDialog } from '../../hooks/useDialog';
 import { useModalFocusTrap } from '../../hooks/useModalFocusTrap';
 import { useClients } from '../../hooks/useClients';
 import { useClientCases } from '../../hooks/useClientCases';
+import { useDocumentDeliveryOwner, type DocumentReadOwner } from '../../hooks/useDocumentDeliveryOwner';
+import { useDictionarySnapshot } from '../../hooks/useDictionarySnapshot';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
@@ -167,6 +169,8 @@ import { TaskTemplatesPanel } from './TaskTemplatesPanel';
 import { TaskChatPanel } from '../Messenger/InternalMessenger';
 import { TaskJournalColumnSettings, TaskTableColumns } from './TaskJournalColumnSettings';
 import { TASK_JOURNAL_TABLE_COLUMNS, type TaskJournalSortKey, type TaskTableColumnKey } from '../../utils/taskJournalColumns';
+
+const EMPTY_TASK_ASSIGNEES: TaskJournalAssignee[] = [];
 
 type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
 type TaskCardLayoutMode = 'compact' | 'expanded';
@@ -2498,6 +2502,8 @@ export function TaskJournal({
   const canViewClients = isAdminUser || permissions.clients.canView;
   const canViewLegalEntities = isAdminUser || permissions.legalEntities.canView;
   const canViewCases = isAdminUser || permissions.cases.canView;
+  const caseReferenceScope = JSON.stringify([currentUserId, user?.role?.id, user?.departmentId, isAdminUser,
+    permissions.cases, permissions.clients, permissions.legalEntities]);
   const { clients } = useClients({ enabled: canViewClients,
     ownerScope: JSON.stringify([currentUserId, user?.role?.id, isAdminUser, permissions.clients, permissions.cases, permissions.contracts,
       permissions.accounts, permissions.acts, permissions.payments]) });
@@ -2583,7 +2589,6 @@ export function TaskJournal({
   const requireCompletionResult = taskSettings.requireCompletionResult !== false;
   const [completedTaskCalendarAction, setCompletedTaskCalendarAction] = useState<'color' | 'hide'>('color');
   const [taskNotificationDefaults, setTaskNotificationDefaults] = useState<TaskNotificationDefaults>(DEFAULT_TASK_NOTIFICATION_DEFAULTS);
-  const [assignees, setAssignees] = useState<TaskJournalAssignee[]>([]);
   const [automationCandidates, setAutomationCandidates] = useState<TaskJournalCaseAutomationCandidate[]>([]);
   const [automationSummary, setAutomationSummary] = useState<TaskJournalCaseAutomationSummary>(EMPTY_AUTOMATION_SUMMARY);
   const [automationStateFilter, setAutomationStateFilter] = useState<AutomationCandidateStateFilter>('all');
@@ -3335,6 +3340,16 @@ export function TaskJournal({
     }
   }, [listFilterKey, taskPageState.filterKey, viewMode]);
 
+  const loadTaskAssignees = useCallback((signal: AbortSignal) => apiService.getTaskJournalAssignees(
+    { calendarView: shouldUseCalendarVisibility }, { signal }), [shouldUseCalendarVisibility]);
+  const canReadTaskAssignees = Boolean(currentUserId) && (isAdminUser || (shouldUseCalendarVisibility ? permissions.calendar.canView : permissions.tasks.canView));
+  const assigneeSnapshot = useDictionarySnapshot(loadTaskAssignees, EMPTY_TASK_ASSIGNEES, {
+    enabled: canReadTaskAssignees,
+    ownerScope: JSON.stringify([currentUserId, user?.role?.id, user?.departmentId, isAdminUser,
+      shouldUseCalendarVisibility, permissions.tasks, permissions.calendar]),
+  }, false);
+  const assignees = offlineCalendarSnapshot ? EMPTY_TASK_ASSIGNEES : assigneeSnapshot.value;
+
   // Загружает редко меняющиеся справочники и настройки отдельно от списка задач,
   // чтобы создание или редактирование задачи не повторяло эти запросы.
   const refreshTaskMetadata = useCallback(async () => {
@@ -3363,8 +3378,7 @@ export function TaskJournal({
       const trustedDevicePromise = currentUserId
         ? getOfflineCalendarTrustedDevice(currentUserId).catch(() => false)
         : Promise.resolve(false);
-      const [assigneeResponse, , notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, featureFlagsResponse, trustedDevice] = await Promise.all([
-        apiService.getTaskJournalAssignees({ calendarView: shouldUseCalendarVisibility }),
+      const [, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, featureFlagsResponse, trustedDevice] = await Promise.all([
         settingsPromise,
         apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
         apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY).catch(() => null),
@@ -3380,14 +3394,13 @@ export function TaskJournal({
         await clearOfflineCalendarSnapshot(currentUserId).catch(() => undefined);
       }
       if (!isCurrent()) return;
-      setAssignees(assigneeResponse);
       setTaskNotificationDefaults(parseTaskNotificationDefaults(notificationDefaultsResponse?.value));
       setCurrentTimeZoneId(normalizeUserTimeZoneId(timeZoneResponse?.value));
       setCompletedTaskCalendarAction(calendarSyncSettingsResponse?.completedTaskCalendarAction === 'hide' ? 'hide' : 'color');
     } catch {
       if (isCurrent()) toast.error('Не удалось загрузить настройки журнала задач.', 'Журнал задач');
     }
-  }, [currentUserId, shouldUseCalendarVisibility, toast]);
+  }, [currentUserId, toast]);
 
   useEffect(() => {
     void refreshTaskMetadata();
@@ -3511,7 +3524,6 @@ export function TaskJournal({
         taskListLoadedRef.current = true;
         setTaskListTotal(snapshot.items.length);
         setTaskListSummary(null);
-        setAssignees([]);
         setAutomationCandidates([]);
         setOfflineCalendarEnabled(true);
         setOfflineCalendarSnapshot(snapshot);
@@ -6307,6 +6319,12 @@ export function TaskJournal({
             state={routeTaskState}
             calendarView={shouldUseCalendarVisibility}
             assignees={assignees}
+            assigneesAllowed={canReadTaskAssignees}
+            assigneesLoading={assigneeSnapshot.loading}
+            assigneesError={assigneeSnapshot.error}
+            onRetryAssignees={assigneeSnapshot.refresh}
+            captureAssignees={assigneeSnapshot.capture}
+            caseReferenceScope={caseReferenceScope}
             clients={clients}
             legalEntities={legalEntities}
             counterpartyOptions={counterpartyOptions}
@@ -7281,6 +7299,12 @@ export function TaskJournal({
           state={modal}
           calendarView={shouldUseCalendarVisibility}
           assignees={assignees}
+          assigneesAllowed={canReadTaskAssignees}
+          assigneesLoading={assigneeSnapshot.loading}
+          assigneesError={assigneeSnapshot.error}
+          onRetryAssignees={assigneeSnapshot.refresh}
+          captureAssignees={assigneeSnapshot.capture}
+          caseReferenceScope={caseReferenceScope}
           clients={clients}
           legalEntities={legalEntities}
           counterpartyOptions={counterpartyOptions}
@@ -11371,6 +11395,12 @@ type TaskModalProps = {
   externalUploadStatusRevision?: number;
   state: ModalState;
   assignees: TaskJournalAssignee[];
+  assigneesAllowed: boolean;
+  assigneesLoading: boolean;
+  assigneesError: string | null;
+  onRetryAssignees: () => Promise<void>;
+  captureAssignees: DocumentReadOwner['capture'];
+  caseReferenceScope: string;
   clients: Client[];
   legalEntities: LegalEntitySummary[];
   counterpartyOptions: LookupSelectOption[];
@@ -11457,6 +11487,12 @@ function TaskModal({
   externalUploadStatusRevision = 0,
   state,
   assignees,
+  assigneesAllowed,
+  assigneesLoading,
+  assigneesError,
+  onRetryAssignees,
+  captureAssignees,
+  caseReferenceScope,
   clients,
   legalEntities,
   counterpartyOptions,
@@ -11725,10 +11761,12 @@ function TaskModal({
     setLegacyChatOpen(false);
     setExecutorWorkflowGuideOpen(true);
   }, [taskId]);
-  const { cases: clientCases, loading: casesLoading } = useClientCases(form.clientId ?? undefined, {
-    enabled: !form.isInternal && Boolean(form.clientId || form.legalEntityId),
+  const caseReadOwner = useDocumentDeliveryOwner(JSON.stringify([caseReferenceScope, currentUserId, taskId,
+    form.isInternal, form.clientId, form.legalEntityId, canViewCases]));
+  const { cases: clientCases, loading: casesLoading, error: casesError, refresh: refreshCases } = useClientCases(form.clientId ?? undefined, {
+    enabled: canViewCases && !form.isInternal && Boolean(form.clientId || form.legalEntityId),
     legalEntityId: form.legalEntityId ?? undefined,
-  });
+  }, caseReadOwner);
   const selectableClientCases = useMemo(
     () => clientCases.filter((clientCase) => !isClosedClientCase(clientCase) || clientCase.id === form.clientCaseId),
     [clientCases, form.clientCaseId],
@@ -11826,9 +11864,10 @@ function TaskModal({
   };
 
   const handleCaseChange = (value: string) => {
-    if (isReadOnly || form.isInternal) return;
+    if (isReadOnly || form.isInternal || !canViewCases || casesLoading || casesError || !caseReadOwner.capture()) return;
     const clientCaseId = Number(value) || null;
     const clientCase = selectableClientCases.find((item) => item.id === clientCaseId);
+    if (clientCaseId && !clientCase) return;
     setForm((prev) => ({
       ...prev,
       clientCaseId,
@@ -11853,7 +11892,7 @@ function TaskModal({
     (form.participants ?? []).some((participant) => participant.role === role && participant.userId === userId);
 
   const addParticipant = (role: TaskJournalParticipantRole, assignee: TaskJournalAssignee) => {
-    if (isReadOnly) return;
+    if (isReadOnly || !assigneesAllowed || assigneesLoading || assigneesError || !captureAssignees()) return;
 
     setForm((prev) => {
       const participants = prev.participants ?? [];
@@ -11914,8 +11953,9 @@ function TaskModal({
     assignees.filter((assignee) => assignee.id !== form.assigneeUserId && !isParticipantSelected(role, assignee.id));
 
   const setPrimaryAssignee = (assigneeId: number | null) => {
-    if (isReadOnly) return;
+    if (isReadOnly || !assigneesAllowed || assigneesLoading || assigneesError || !captureAssignees()) return;
     const selected = assignees.find((assignee) => assignee.id === assigneeId);
+    if (assigneeId && !selected) return;
     const paymentAllowed = Boolean(selected?.isExternalContractor);
     setForm((prev) => {
       const previousAssigneeUserId = prev.assigneeUserId;
@@ -11933,6 +11973,13 @@ function TaskModal({
         }),
       };
     });
+  };
+
+  const setTaskAuthor = (value: string) => {
+    if (isReadOnly || !isAdminUser || !assigneesAllowed || assigneesLoading || assigneesError || !captureAssignees()) return;
+    const authorUserId = Number(value) || null;
+    if (authorUserId && !assignees.some(item => item.id === authorUserId)) return;
+    update('authorUserId', authorUserId);
   };
 
   const getCreationMaterials = (): TaskCreationMaterials | undefined => taskId ? undefined : {
@@ -12713,12 +12760,18 @@ function TaskModal({
       </span>
     );
   };
+  const caseReferenceError = canViewCases && casesError ? (
+    <div role="alert" className="mt-1 text-xs text-rose-700">
+      Не удалось загрузить дела. {extractDisplayErrorMessage(casesError, 'Не удалось загрузить дела.')}
+      <button type="button" onClick={() => void refreshCases()} className="ml-2 underline">Повторить загрузку дел</button>
+    </div>
+  ) : null;
   const renderAssigneeControl = (compact = false) => (
     <div className="space-y-2" data-testid="task-assignees-control">
       <SystemSelect
         value={form.assigneeUserId ?? ''}
         onChange={(event) => setPrimaryAssignee(Number(event.target.value) || null)}
-        disabled={isReadOnly}
+        disabled={isReadOnly || !assigneesAllowed || assigneesLoading || Boolean(assigneesError)}
         data-testid="task-assignee-select"
         aria-label="Основной исполнитель"
         renderOption={renderAssigneeIdentity}
@@ -12728,6 +12781,7 @@ function TaskModal({
           : 'form-input'}
       >
         <option value="">Без привязки к пользователю</option>
+        {form.assigneeUserId && !assignees.some(item => item.id === form.assigneeUserId) ? <option value={form.assigneeUserId}>{form.assigneeName || 'Назначенный исполнитель'}</option> : null}
         {assignees.map((assignee) => (
           <option key={assignee.id} value={assignee.id}>
             {assignee.email ? `${assignee.name} — ${assignee.email}` : assignee.name}
@@ -12735,6 +12789,7 @@ function TaskModal({
         ))}
       </SystemSelect>
 
+      {assigneesError ? <div role="alert" className="text-xs text-rose-700">Не удалось загрузить исполнителей. {extractDisplayErrorMessage(new Error(assigneesError), 'Не удалось загрузить исполнителей.')} <button type="button" onClick={() => void onRetryAssignees()} className="underline">Повторить загрузку исполнителей</button></div> : assigneesLoading ? <div className="text-xs text-slate-500">Загрузка исполнителей…</div> : !assigneesAllowed ? <div className="text-xs text-slate-500">Нет доступа к списку исполнителей.</div> : null}
       {visibleAdditionalAssignees.length > 0 ? (
         <div className="space-y-1.5" data-testid="task-additional-assignees-list">
           {visibleAdditionalAssignees.map((participant, index) => {
@@ -12782,7 +12837,7 @@ function TaskModal({
           className={compact
             ? 'w-full rounded-lg border border-dashed border-blue-200 bg-white px-2 py-2 text-sm font-medium text-blue-700 outline-none focus:border-blue-400'
             : 'form-input border-dashed border-blue-200 bg-white text-blue-700'}
-          disabled={!form.assigneeUserId || availableAdditionalAssignees.length === 0}
+          disabled={!assigneesAllowed || assigneesLoading || Boolean(assigneesError) || !form.assigneeUserId || availableAdditionalAssignees.length === 0}
         >
           <option value="">
             {!form.assigneeUserId
@@ -13802,8 +13857,8 @@ function TaskModal({
                   <ModernTaskQuickField icon={<Pencil className="h-4 w-4" />} label="Постановщик">
                     <SystemSelect
                       value={form.authorUserId ?? ''}
-                      onChange={(event) => update('authorUserId', Number(event.target.value) || null)}
-                      disabled={isReadOnly || !isAdminUser}
+                      onChange={(event) => setTaskAuthor(event.target.value)}
+                      disabled={isReadOnly || !isAdminUser || !assigneesAllowed || assigneesLoading || Boolean(assigneesError)}
                       data-testid="task-author-select"
                       className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white disabled:text-slate-500"
                     >
@@ -14022,15 +14077,17 @@ function TaskModal({
                     aria-label="Дело"
                     value={form.clientCaseId ?? ''}
                     onChange={(event) => handleCaseChange(event.target.value)}
-                    disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked || (!form.clientId && !form.legalEntityId) || casesLoading}
+                    disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked || (!form.clientId && !form.legalEntityId) || !canViewCases || casesLoading || Boolean(casesError)}
                     className="min-w-0 flex-1 rounded-lg border border-amber-200 bg-white px-2 py-2 text-sm outline-none focus:border-amber-400 disabled:text-slate-400"
                   >
                     <option value="">Без дела</option>
+                    {form.clientCaseId && !selectableClientCases.some(item => item.id === form.clientCaseId) ? <option value={form.clientCaseId}>{state?.task?.clientCaseId === form.clientCaseId && state.task.clientCaseTitle || 'Связанное дело'}</option> : null}
                     {selectableClientCases.map((clientCase) => (
                       <option key={clientCase.id} value={clientCase.id}>{clientCase.title}</option>
                     ))}
                   </SystemSelect>
-                  {form.clientCaseId && onOpenCase ? (
+                  {caseReferenceError}
+                  {canViewCases && form.clientCaseId && onOpenCase ? (
                     <a href={`/cases/${form.clientCaseId}`} target="_blank" rel="noopener noreferrer" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-amber-200 bg-white text-amber-700 transition hover:bg-amber-100" aria-label="Открыть карточку дела" title="Открыть карточку дела в новой вкладке">
                       <ExternalLink className="h-4 w-4" />
                     </a>
@@ -14060,6 +14117,7 @@ function TaskModal({
                     {!isReadOnly ? (
                       <SystemSelect
                         aria-label="Добавить согласующего"
+                        disabled={!assigneesAllowed || assigneesLoading || Boolean(assigneesError)}
                         value=""
                         onChange={(event) => {
                           const selected = assignees.find((assignee) => assignee.id === Number(event.target.value));
@@ -14088,6 +14146,7 @@ function TaskModal({
                     {!isReadOnly ? (
                       <SystemSelect
                         aria-label="Добавить наблюдателя"
+                        disabled={!assigneesAllowed || assigneesLoading || Boolean(assigneesError)}
                         value=""
                         onChange={(event) => {
                           const selected = assignees.find((assignee) => assignee.id === Number(event.target.value));
@@ -14503,8 +14562,8 @@ function TaskModal({
               {state?.task && isAdminUser ? (
                 <SystemSelect
                   value={form.authorUserId ?? ''}
-                  onChange={(event) => update('authorUserId', Number(event.target.value) || null)}
-                  disabled={isReadOnly}
+                  onChange={(event) => setTaskAuthor(event.target.value)}
+                  disabled={isReadOnly || !assigneesAllowed || assigneesLoading || Boolean(assigneesError)}
                   data-testid="task-author-select"
                   className="form-input disabled:bg-slate-50 disabled:text-slate-600"
                 >
@@ -14554,15 +14613,17 @@ function TaskModal({
                   aria-label="Дело"
                   value={form.clientCaseId ?? ''}
                   onChange={(event) => handleCaseChange(event.target.value)}
-                  disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked || (!form.clientId && !form.legalEntityId) || casesLoading}
+                  disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked || (!form.clientId && !form.legalEntityId) || !canViewCases || casesLoading || Boolean(casesError)}
                   className="form-input min-w-0 flex-1 disabled:bg-slate-50 disabled:text-slate-400"
                 >
                   <option value="">Без дела</option>
+                  {form.clientCaseId && !selectableClientCases.some(item => item.id === form.clientCaseId) ? <option value={form.clientCaseId}>{state?.task?.clientCaseId === form.clientCaseId && state.task.clientCaseTitle || 'Связанное дело'}</option> : null}
                   {selectableClientCases.map((clientCase) => (
                     <option key={clientCase.id} value={clientCase.id}>{clientCase.title}</option>
                   ))}
                 </SystemSelect>
-                {form.clientCaseId && onOpenCase ? (
+                {caseReferenceError}
+                {canViewCases && form.clientCaseId && onOpenCase ? (
                   <a href={`/cases/${form.clientCaseId}`} target="_blank" rel="noopener noreferrer" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-700 transition hover:bg-amber-100" aria-label="Открыть карточку дела" title="Открыть карточку дела в новой вкладке">
                     <ExternalLink className="h-4 w-4" />
                   </a>
