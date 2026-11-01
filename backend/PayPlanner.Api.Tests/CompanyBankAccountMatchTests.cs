@@ -177,7 +177,7 @@ public sealed class CompanyBankAccountMatchTests(PostgreSqlModelTemplate templat
     [InlineData("no-id", HttpStatusCode.Forbidden)]
     [InlineData("unknown", HttpStatusCode.NotFound)]
     [InlineData("not-own", HttpStatusCode.NotFound)]
-    [InlineData("archived", HttpStatusCode.NotFound)]
+    [InlineData("archived", HttpStatusCode.OK)]
     public async Task HttpUsesCurrentBankAdministrationAndOwnCompanyOnly(string mode, HttpStatusCode expected)
     {
         await using var db = await SqliteTestContextFactory.CreateAsync(); var f = await SeedAsync(db);
@@ -194,7 +194,10 @@ public sealed class CompanyBankAccountMatchTests(PostgreSqlModelTemplate templat
         if (expected == HttpStatusCode.OK)
         {
             var report = (await response.Content.ReadFromJsonAsync<CompanyBankAccountMatchReport>())!;
-            Assert.Equal("local", Assert.Single(Group(report, Assert.Single(report.Accounts))!.ProfileCandidates).Id); Assert.True(response.Headers.CacheControl!.NoStore);
+            Assert.Equal(mode != "archived", report.CanBind);
+            if (report.CanBind) Assert.Equal("local", Assert.Single(Group(report, Assert.Single(report.Accounts))!.ProfileCandidates).Id);
+            else { Assert.Empty(report.Accounts); Assert.Contains("CompanyUnavailable", report.ProfileIssues); }
+            Assert.True(response.Headers.CacheControl!.NoStore);
         }
     }
 

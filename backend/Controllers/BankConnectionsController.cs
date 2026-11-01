@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -72,6 +73,22 @@ public sealed class BankAccountSettingsRequest
     public bool? IsDefault { get; set; }
     public bool? IsHidden { get; set; }
     public bool? StatementsEnabled { get; set; }
+}
+
+public sealed class CompanyBankBindRequest
+{
+    [Range(1, int.MaxValue)]
+    public int BankAccountId { get; set; }
+    [Required, StringLength(16000)]
+    public string ProfileAccountId { get; set; } = "";
+    [Required, StringLength(86)]
+    public string ExpectedVersion { get; set; } = "";
+}
+
+public sealed class CompanyBankRevokeRequest
+{
+    [Required, StringLength(86)]
+    public string ExpectedVersion { get; set; } = "";
 }
 
 public sealed record BankStatementRunItemDto(int AccountId, int Inserted, int Updated, string? Error, int? BatchId = null);
@@ -153,6 +170,30 @@ public class BankConnectionsController : ControllerBase, IAsyncActionFilter
         catch (CompanyBankAccountMatchLimitException error) { return Conflict(new { message = error.Message }); }
         catch (Exception error) when (error is SellerSnapshotConflictException || DocumentSellerLease.IsConflict(error))
         { return Conflict(new { message = "Сверка счетов сейчас недоступна. Повторите чтение данных." }); }
+    }
+
+    [HttpPost("{id:int}/profile-account-bindings")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public Task<ActionResult<CompanyBankBindingReceipt>> BindProfileAccount(int id, [FromBody] CompanyBankBindRequest request, CancellationToken ct)
+        => RunBindingCommandAsync(() => new CompanyBankAccountBindingService(_db)
+            .BindAsync(User, id, request.BankAccountId, request.ProfileAccountId, request.ExpectedVersion, ct));
+
+    [HttpPost("{id:int}/profile-account-bindings/{bindingId:int}/revoke")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public Task<ActionResult<CompanyBankBindingReceipt>> RevokeProfileAccount(int id, int bindingId, [FromBody] CompanyBankRevokeRequest request, CancellationToken ct)
+        => RunBindingCommandAsync(() => new CompanyBankAccountBindingService(_db)
+            .RevokeAsync(User, id, bindingId, request.ExpectedVersion, ct));
+
+    private async Task<ActionResult<CompanyBankBindingReceipt>> RunBindingCommandAsync(Func<Task<CompanyBankBindingReceipt>> command)
+    {
+        try { return Ok(await command()); }
+        catch (CompanyBankBindingException error) when (error.Code == "Forbidden") { return Forbid(); }
+        catch (CompanyBankBindingException error) when (error.Code == "NotFound") { return NotFound(new { code = error.Code, message = error.Message }); }
+        catch (CompanyBankBindingException error) when (error.Code == "InvalidSelection") { return BadRequest(new { code = error.Code, message = error.Message }); }
+        catch (CompanyBankBindingException error) { return Conflict(new { code = error.Code, message = error.Message }); }
+        catch (CompanyBankAccountMatchLimitException error) { return Conflict(new { code = "MatchLimit", message = error.Message }); }
+        catch (Exception error) when (error is SellerSnapshotConflictException || DocumentSellerLease.IsConflict(error))
+        { return Conflict(new { code = "Changed", message = "Счета или связь изменились. Обновите сверку и повторите выбор." }); }
     }
 
     [HttpPost("{id:int}/sync-accounts")]

@@ -14,8 +14,11 @@ public sealed record CompanyBankAccountMatchGroup(int Id, string ProfileMatchSta
     IReadOnlyList<int> ManualMoneyAccountCandidateIds, bool HasArchivedProfileCandidates);
 public sealed record CompanyBankAccountMatch(int BankAccountId, int? GroupId,
     IReadOnlyList<int> LinkedMoneyAccountIds, IReadOnlyList<string> Issues);
+public sealed record CompanyBankActiveBinding(int Id, string? ProfileAccountId, int BankAccountId,
+    string AccountNumber, string Bik, string Currency, DateTime ConfirmedAtUtc);
 public sealed record CompanyBankAccountMatchReport(int CompanyId, int BankConnectionId, string Version,
-    IReadOnlyList<string> ProfileIssues, IReadOnlyList<CompanyBankAccountMatchGroup> Groups, IReadOnlyList<CompanyBankAccountMatch> Accounts);
+    IReadOnlyList<string> ProfileIssues, IReadOnlyList<CompanyBankAccountMatchGroup> Groups, IReadOnlyList<CompanyBankAccountMatch> Accounts,
+    bool CanBind, IReadOnlyList<CompanyBankActiveBinding> ActiveBindings);
 
 public sealed class CompanyBankAccountMatchLimitException : Exception
 {
@@ -52,19 +55,29 @@ public sealed class CompanyBankAccountMatchService(PaymentContext db)
         if (db.Database.CurrentTransaction is null) throw new SellerSnapshotConflictException();
         var companyId = await db.BankConnections.AsNoTracking().Where(x => x.Id == connectionId)
             .Select(x => (int?)x.LegalEntityId).SingleOrDefaultAsync(ct);
-        if (!companyId.HasValue || !(await OwnCompanyRegistry.LoadIdsAsync(db, ct)).Contains(companyId.Value)) return null;
-        var company = await db.LegalEntities.AsNoTracking().Where(x => x.Id == companyId && x.ProfileStatus == CompanyProfileStatuses.Active)
+        if (!companyId.HasValue) return null;
+        var isOwnCompany = (await OwnCompanyRegistry.LoadIdsAsync(db, ct)).Contains(companyId.Value);
+        // A former own company is visible here only while server-owned confirmation
+        // history proves the cleanup scope. Arbitrary profile JSON grants no access.
+        if (!isOwnCompany && !await db.CompanyBankAccountBindings.AsNoTracking().AnyAsync(x => x.LegalEntityId == companyId, ct)) return null;
+        var company = await db.LegalEntities.AsNoTracking().Where(x => x.Id == companyId)
             .Select(x => new
             {
                 x.Id,
+                x.ProfileStatus,
                 TooLarge = x.BankAccountsJson != null && x.BankAccountsJson.Length > CompanyBankAccountList.MaxJsonLength,
                 Json = x.BankAccountsJson == null || x.BankAccountsJson.Length <= CompanyBankAccountList.MaxJsonLength ? x.BankAccountsJson : null,
             }).SingleOrDefaultAsync(ct);
         if (company is null) return null;
+        var canBind = isOwnCompany && company.ProfileStatus == CompanyProfileStatuses.Active;
         var profileIssues = new List<string>();
-        var profiles = company.TooLarge ? [] : ReadProfiles(company.Json, profileIssues);
+        if (!isOwnCompany) profileIssues.Add("CompanyNotOwn");
+        if (company.ProfileStatus != CompanyProfileStatuses.Active) profileIssues.Add("CompanyUnavailable");
+        // Cleanup does not need candidate scans or valid editable profile JSON.
+        // Only the bounded authoritative confirmations are returned in this mode.
+        var profiles = !canBind || company.TooLarge ? [] : ReadProfiles(company.Json, profileIssues);
         if (company.TooLarge) profileIssues.Add("ProfileAccountsTooLarge");
-        var banks = await db.BankConnectionAccounts.AsNoTracking().Where(x => x.BankConnection.LegalEntityId == company.Id)
+        var banks = !canBind ? [] : await db.BankConnectionAccounts.AsNoTracking().Where(x => x.BankConnection.LegalEntityId == company.Id)
             .OrderBy(x => x.Id).Select(x => new BankRow(x.Id, x.BankConnectionId, x.BankConnection.Provider, x.ExternalAccountId, x.AccountNumber, x.Bik, x.Currency,
                 x.Status, x.IsHidden, x.BankConnection.Status)).Take(MaximumBankAccounts + 1).ToArrayAsync(ct);
         if (banks.Length > MaximumBankAccounts) throw new CompanyBankAccountMatchLimitException();
@@ -148,8 +161,11 @@ public sealed class CompanyBankAccountMatchService(PaymentContext db)
         }
         // Include all relevant company connections: a duplicate elsewhere must not
         // turn into a false unique candidate. No company images or financial history are loaded.
-        var version = "bank-profile-match-v2:" + Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new { company.Id, connectionId, company.Json, company.TooLarge, banks, money, bindings, lastBindingId })));
-        return new(company.Id, connectionId, version, profileIssues.Distinct(StringComparer.Ordinal).ToArray(), groups.Values.OrderBy(x => x.Id).ToArray(), rows);
+        var version = "bank-profile-match-v2:" + Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new { company.Id, company.ProfileStatus, isOwnCompany, connectionId, company.Json, company.TooLarge, banks, money, bindings, lastBindingId })));
+        return new(company.Id, connectionId, version, profileIssues.Distinct(StringComparer.Ordinal).ToArray(), groups.Values.OrderBy(x => x.Id).ToArray(), rows,
+            canBind,
+            bindings.Where(x => x.LegalEntityId == company.Id).Select(x => new CompanyBankActiveBinding(x.Id, x.ProfileId, x.BankConnectionAccountId,
+                x.AccountNumber, x.Bik, x.Currency, x.CreatedAtUtc)).ToArray());
     }
 
     internal static Identity? Key(string? number, string? bik, string? currency)

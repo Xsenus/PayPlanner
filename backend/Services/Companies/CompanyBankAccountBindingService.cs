@@ -15,8 +15,8 @@ public sealed class CompanyBankBindingException(string code, string message) : E
 public sealed record CompanyBankBindingReceipt(int BindingId, string State, bool IsReplay);
 
 /// <summary>
-/// Server-only command core. Do not expose HTTP writes until all profile/import
-/// writers preserve active identities. Never rewrites money accounts or documents.
+/// Administrative commands shared by HTTP and profile/import identity guards.
+/// Never rewrites money accounts or documents.
 /// </summary>
 public sealed class CompanyBankAccountBindingService(PaymentContext db)
 {
@@ -80,7 +80,7 @@ public sealed class CompanyBankAccountBindingService(PaymentContext db)
             db.CompanyBankAccountBindings.Add(binding);
             await db.SaveChangesAsync(ct);
             return new(binding.Id, "Bound", false);
-        }, ct);
+        }, true, ct);
 
     public Task<CompanyBankBindingReceipt> RevokeAsync(ClaimsPrincipal principal, int connectionId, int bindingId, string expectedVersion, CancellationToken ct)
         => RunAsync(principal, connectionId, expectedVersion, async (companyId, actor) =>
@@ -106,12 +106,12 @@ public sealed class CompanyBankAccountBindingService(PaymentContext db)
             binding.RevocationMatchVersion = expectedVersion;
             await db.SaveChangesAsync(ct);
             return new(binding.Id, "Revoked", false);
-        }, ct);
+        }, false, ct);
 
     private sealed record Actor(int Id, string Name);
 
     private async Task<CompanyBankBindingReceipt> RunAsync(ClaimsPrincipal principal, int connectionId, string expectedVersion,
-        Func<int, Actor, Task<CompanyBankBindingReceipt>> action, CancellationToken ct)
+        Func<int, Actor, Task<CompanyBankBindingReceipt>> action, bool requireBindableCompany, CancellationToken ct)
     {
         if (!ValidVersion(expectedVersion)) throw Changed();
         try
@@ -133,14 +133,15 @@ public sealed class CompanyBankAccountBindingService(PaymentContext db)
                 if (actor.AuthTokenVersion != tokenVersion) throw Denied();
                 await lease.LockRegistryAsync(ct);
                 var companyId = await db.BankConnections.AsNoTracking().Where(x => x.Id == connectionId).Select(x => (int?)x.LegalEntityId).SingleOrDefaultAsync(ct);
-                if (!companyId.HasValue || !(await OwnCompanyRegistry.LoadIdsAsync(db, ct)).Contains(companyId.Value)) throw Missing();
+                if (!companyId.HasValue) throw Missing();
+                if (requireBindableCompany && !(await OwnCompanyRegistry.LoadIdsAsync(db, ct)).Contains(companyId.Value)) throw Missing();
                 await lease.LockCompanyRowAsync(companyId.Value, ct);
                 if (db.Database.IsNpgsql())
                     await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"BankConnections\" WHERE \"Id\" = {connectionId} FOR SHARE NOWAIT").ToArrayAsync(ct);
                 // Discard clean cached entities only after admission. All authority is
                 // read from the locked database, never from principal role/name claims.
                 db.ChangeTracker.Clear();
-                if (!await db.LegalEntities.AsNoTracking().AnyAsync(x => x.Id == companyId.Value && x.ProfileStatus == CompanyProfileStatuses.Active, ct))
+                if (requireBindableCompany && !await db.LegalEntities.AsNoTracking().AnyAsync(x => x.Id == companyId.Value && x.ProfileStatus == CompanyProfileStatuses.Active, ct))
                     throw Missing();
                 return await action(companyId.Value, new(id, actor.FullName.Length <= 200 ? actor.FullName : actor.FullName[..200]));
             }, static _ => true, ct);

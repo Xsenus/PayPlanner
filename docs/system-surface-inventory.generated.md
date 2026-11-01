@@ -7,9 +7,9 @@
 
 - Разделов frontend: 55.
 - Backend-контроллеров: 97.
-- HTTP endpoints: 961; с прямой тестовой связью: 675.
-- HTTP endpoints с точной ссылкой из документации: 262; критичных без такой ссылки: 532.
-- Критичных endpoints без прямой тестовой связи: 238.
+- HTTP endpoints: 963; с прямой тестовой связью: 675.
+- HTTP endpoints с точной ссылкой из документации: 264; критичных без такой ссылки: 532.
+- Критичных endpoints без прямой тестовой связи: 240.
 - Реальных HTML-форм: 21; с найденной тестовой связью: 19.
 - Фоновых сервисов: 35; с найденной тестовой связью: 28.
 - Исходящих HTTP-интеграций: 12; с найденной тестовой связью: 12.
@@ -170,7 +170,7 @@
 | AppVersionController | backend/Controllers/AppVersionController.cs | 8 | [Authorize] | да |
 | AuthController | backend/Controllers/AuthController.cs | 5 | не задано | да |
 | AuthProvidersAdminController | backend/Controllers/AuthProvidersAdminController.cs | 8 | [Authorize(Policy = "Admin")] | да |
-| BankConnectionsController | backend/Controllers/BankConnectionsController.cs | 8 | [Authorize(Policy = "Admin")] | да |
+| BankConnectionsController | backend/Controllers/BankConnectionsController.cs | 10 | [Authorize(Policy = "Admin")] | да |
 | BanksController | backend/Controllers/BanksController.cs | 5 | [Authorize] | да |
 | CalendarSyncController | backend/Controllers/CalendarSyncController.cs | 5 | [Authorize] | да |
 | CasesController | backend/Controllers/CasesController.cs | 5 | [Authorize] | да |
@@ -297,6 +297,8 @@
 | DELETE | api/auth/admin/users/{id:int} | AdminUsersController.DeleteUser | изменение данных, чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:116 |
 | POST | api/auth/admin/users/{id:int}/approve | AdminUsersController.ApproveUser | изменение данных, чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:146 |
 | POST | api/auth/admin/users/{id:int}/reject | AdminUsersController.RejectUser | изменение данных, чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:159 |
+| POST | api/bank-connections/{id:int}/profile-account-bindings | BankConnectionsController.BindProfileAccount | изменение данных, чувствительные данные или операция | backend/Controllers/BankConnectionsController.cs:175 |
+| POST | api/bank-connections/{id:int}/profile-account-bindings/{bindingId:int}/revoke | BankConnectionsController.RevokeProfileAccount | изменение данных, чувствительные данные или операция | backend/Controllers/BankConnectionsController.cs:181 |
 | POST | api/contacts/imports/yealink | ContactsController.ImportYealinkXml | изменение данных, чувствительные данные или операция | backend/Controllers/ContactsController.cs:810 |
 | POST | api/database/backups | DatabaseAdminController.CreateBackupAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:189 |
 | DELETE | api/database/backups/all | DatabaseAdminController.DeleteAllBackupsAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:273 |
@@ -391,7 +393,7 @@
 | GET | api/auth/admin/roles | AdminUsersController.GetRoles | чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:192 |
 | GET | api/auth/admin/users | AdminUsersController.GetUsers | чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:38 |
 | GET | api/auth/admin/users/{id:int} | AdminUsersController.GetUser | чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:42 |
-| GET | api/bank-connections/{id:int}/profile-account-matches | BankConnectionsController.GetProfileAccountMatches | чувствительные данные или операция | backend/Controllers/BankConnectionsController.cs:144 |
+| GET | api/bank-connections/{id:int}/profile-account-matches | BankConnectionsController.GetProfileAccountMatches | чувствительные данные или операция | backend/Controllers/BankConnectionsController.cs:161 |
 | GET | api/calendar-sync/settings | CalendarSyncController.GetSettings | чувствительные данные или операция | backend/Controllers/CalendarSyncController.cs:74 |
 | GET | api/database/backups | DatabaseAdminController.GetBackupsAsync | чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:70 |
 | GET | api/database/backups/attempts | DatabaseAdminController.GetBackupAttemptsAsync | чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:104 |
@@ -584,14 +586,16 @@
 | PUT | api/auth/admin/providers/telegram/bot | AuthProvidersAdminController | UpdateTelegramBotSettings | backend/Controllers/AuthProvidersAdminController.cs:101 | [Authorize(Policy = "Admin")] | нет | нет |
 | PUT | api/auth/admin/providers/telegram/widget | AuthProvidersAdminController | UpdateTelegramWidgetSettings | backend/Controllers/AuthProvidersAdminController.cs:116 | [Authorize(Policy = "Admin")] | нет | нет |
 | POST | api/auth/admin/providers/telegram/sync | AuthProvidersAdminController | SyncTelegram | backend/Controllers/AuthProvidersAdminController.cs:131 | [Authorize(Policy = "Admin")] | нет | нет |
-| GET | api/bank-connections | BankConnectionsController | List | backend/Controllers/BankConnectionsController.cs:115 | [Authorize(Policy = "Admin")] | да | docs/company-bank-binding-checkpoint-2026-11-01.md, docs/deployment-manual-2026-10-21.md, docs/pay-33-36-implementation-log-2026-10-09.md |
-| GET | api/bank-connections/{id:int}/profile-account-matches | BankConnectionsController | GetProfileAccountMatches | backend/Controllers/BankConnectionsController.cs:144 | [Authorize(Policy = "Admin")] | нет | docs/company-bank-binding-checkpoint-2026-11-01.md |
-| POST | api/bank-connections/{id:int}/sync-accounts | BankConnectionsController | SyncAccounts | backend/Controllers/BankConnectionsController.cs:158 | [Authorize(Policy = "Admin")] | да | нет |
-| POST | api/bank-connections/{id:int}/sync-statements | BankConnectionsController | SyncAllStatements | backend/Controllers/BankConnectionsController.cs:170 | [Authorize(Policy = "Admin")] | да | нет |
-| POST | api/bank-connections/accounts/{accountId:int}/sync-statement | BankConnectionsController | SyncStatement | backend/Controllers/BankConnectionsController.cs:187 | [Authorize(Policy = "Admin")] | да | нет |
-| PATCH | api/bank-connections/accounts/{accountId:int} | BankConnectionsController | UpdateAccount | backend/Controllers/BankConnectionsController.cs:204 | [Authorize(Policy = "Admin")] | да | нет |
-| GET | api/bank-connections/accounts/{accountId:int}/operations | BankConnectionsController | GetOperations | backend/Controllers/BankConnectionsController.cs:217 | [Authorize(Policy = "Admin")] | да | нет |
-| GET | api/bank-connections/{id:int}/logs | BankConnectionsController | GetLogs | backend/Controllers/BankConnectionsController.cs:257 | [Authorize(Policy = "Admin")] | да | нет |
+| GET | api/bank-connections | BankConnectionsController | List | backend/Controllers/BankConnectionsController.cs:132 | [Authorize(Policy = "Admin")] | да | docs/company-bank-binding-checkpoint-2026-11-01.md, docs/deployment-manual-2026-10-21.md, docs/pay-33-36-implementation-log-2026-10-09.md |
+| GET | api/bank-connections/{id:int}/profile-account-matches | BankConnectionsController | GetProfileAccountMatches | backend/Controllers/BankConnectionsController.cs:161 | [Authorize(Policy = "Admin")] | нет | docs/company-bank-binding-checkpoint-2026-11-01.md |
+| POST | api/bank-connections/{id:int}/profile-account-bindings | BankConnectionsController | BindProfileAccount | backend/Controllers/BankConnectionsController.cs:175 | [Authorize(Policy = "Admin")] | нет | docs/company-bank-binding-checkpoint-2026-11-01.md |
+| POST | api/bank-connections/{id:int}/profile-account-bindings/{bindingId:int}/revoke | BankConnectionsController | RevokeProfileAccount | backend/Controllers/BankConnectionsController.cs:181 | [Authorize(Policy = "Admin")] | нет | docs/company-bank-binding-checkpoint-2026-11-01.md |
+| POST | api/bank-connections/{id:int}/sync-accounts | BankConnectionsController | SyncAccounts | backend/Controllers/BankConnectionsController.cs:199 | [Authorize(Policy = "Admin")] | да | нет |
+| POST | api/bank-connections/{id:int}/sync-statements | BankConnectionsController | SyncAllStatements | backend/Controllers/BankConnectionsController.cs:211 | [Authorize(Policy = "Admin")] | да | нет |
+| POST | api/bank-connections/accounts/{accountId:int}/sync-statement | BankConnectionsController | SyncStatement | backend/Controllers/BankConnectionsController.cs:228 | [Authorize(Policy = "Admin")] | да | нет |
+| PATCH | api/bank-connections/accounts/{accountId:int} | BankConnectionsController | UpdateAccount | backend/Controllers/BankConnectionsController.cs:245 | [Authorize(Policy = "Admin")] | да | нет |
+| GET | api/bank-connections/accounts/{accountId:int}/operations | BankConnectionsController | GetOperations | backend/Controllers/BankConnectionsController.cs:258 | [Authorize(Policy = "Admin")] | да | нет |
+| GET | api/bank-connections/{id:int}/logs | BankConnectionsController | GetLogs | backend/Controllers/BankConnectionsController.cs:298 | [Authorize(Policy = "Admin")] | да | нет |
 | GET | api/banks | BanksController | GetBanks | backend/Controllers/BanksController.cs:31 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | GET | api/banks/{id:int} | BanksController | GetBank | backend/Controllers/BanksController.cs:62 | [Authorize] | да | нет |
 | POST | api/banks | BanksController | CreateBank | backend/Controllers/BanksController.cs:79 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
