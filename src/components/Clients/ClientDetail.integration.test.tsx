@@ -1442,7 +1442,7 @@ describe('ClientDetail integration', () => {
 
     await user.click(screen.getByRole('button', { name: /Доверенности/ }));
     await waitFor(() => {
-      expect(apiService.getClientPowersOfAttorney).toHaveBeenCalledWith(1);
+      expect(apiService.getClientPowersOfAttorney).toHaveBeenCalledWith(1, { signal: expect.any(AbortSignal) });
     });
   });
 
@@ -1995,6 +1995,124 @@ describe('ClientDetail integration', () => {
     await screen.findByText('Кем выдана: Старый нотариус');
     return { props, view };
   }
+  async function openPoaReadProfile() {
+    const props = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const };
+    const view = render(<ClientDetail {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Дополнительная информация' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Доверенности' }));
+    return { props, view };
+  }
+  it('poa list read: explicit retry preserves client draft, is single flight and distinguishes an empty result', async () => {
+    let finish!: (value: PowerOfAttorney[]) => void;
+    vi.mocked(apiService.getClientPowersOfAttorney).mockRejectedValueOnce(new Error('Сеть доверенностей недоступна'))
+      .mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    await openPoaReadProfile();
+    fireEvent.change(screen.getByDisplayValue('Иванов'), { target: { value: 'Черновик фамилии' } });
+    expect((await screen.findByRole('alert')).textContent).toContain('Сеть доверенностей недоступна');
+    expect(screen.queryByText('Доверенности не найдены.')).toBeNull();
+    expect(apiService.getClientPowersOfAttorney).toHaveBeenCalledOnce();
+    const retry = screen.getByRole('button', { name: 'Повторить загрузку доверенностей' });
+    fireEvent.click(retry); fireEvent.click(retry);
+    expect(apiService.getClientPowersOfAttorney).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('Загрузка доверенностей…')).toBeTruthy();
+    await act(async () => finish([]));
+    expect(screen.getByText('Доверенности не найдены.')).toBeTruthy();
+    expect(screen.getByDisplayValue('Черновик фамилии')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+  it('poa list read: closing the group aborts a pending read and reopening rejects its late response', async () => {
+    let finish!: (value: PowerOfAttorney[]) => void;
+    vi.mocked(apiService.getClientPowersOfAttorney).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }))
+      .mockResolvedValueOnce([createPowerOfAttorney({ number: 'Актуальная доверенность' })]);
+    await openPoaReadProfile();
+    expect(screen.queryByText('Доверенности не найдены.')).toBeNull();
+    const signal = vi.mocked(apiService.getClientPowersOfAttorney).mock.calls[0][1]?.signal;
+    fireEvent.click(screen.getByRole('button', { name: 'Скрыть дополнительную информацию' }));
+    expect(signal?.aborted).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Дополнительная информация' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Доверенности' }));
+    await screen.findByText('№Актуальная доверенность');
+    await act(async () => finish([createPowerOfAttorney({ number: 'Запоздалая доверенность' })]));
+    expect(screen.queryByText('№Запоздалая доверенность')).toBeNull();
+    expect(screen.getByText('№Актуальная доверенность')).toBeTruthy();
+  });
+  it('poa list read: a role change aborts its old read and accepts only the reopened role', async () => {
+    let finish!: (value: PowerOfAttorney[]) => void;
+    vi.mocked(apiService.getClientPowersOfAttorney).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }))
+      .mockResolvedValueOnce([createPowerOfAttorney({ number: 'Доверенность новой роли' })]);
+    const { props, view } = await openPoaReadProfile();
+    const signal = vi.mocked(apiService.getClientPowersOfAttorney).mock.calls[0][1]?.signal;
+    authState.roleId = 2; view.rerender(<ClientDetail {...props} />);
+    expect(signal?.aborted).toBe(true);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Дополнительная информация' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Доверенности' }));
+    await screen.findByText('№Доверенность новой роли');
+    await act(async () => finish([createPowerOfAttorney({ number: 'Доверенность старой роли' })]));
+    expect(screen.queryByText('№Доверенность старой роли')).toBeNull();
+    expect(screen.getByText('№Доверенность новой роли')).toBeTruthy();
+  });
+  it.each([
+    { label: 'foreign client', rows: [createPowerOfAttorney({ clientId: 2 })] },
+    { label: 'duplicate IDs', rows: [createPowerOfAttorney(), createPowerOfAttorney()] },
+    { label: 'null body', rows: null },
+    { label: 'zero ID', rows: [createPowerOfAttorney({ id: 0 })] },
+    { label: 'invalid issuer', rows: [createPowerOfAttorney({ issuer: {} as unknown as string })] },
+    { label: 'invalid end date', rows: [createPowerOfAttorney({ validUntil: {} as unknown as string })] },
+  ])('poa list read: invalid or foreign rows are not shown as current records ($label)', async ({ rows }) => {
+    vi.mocked(apiService.getClientPowersOfAttorney).mockResolvedValueOnce(rows as PowerOfAttorney[]);
+    await openPoaReadProfile();
+    expect((await screen.findByRole('alert')).textContent).toContain('подтвердить список доверенностей');
+    expect(screen.queryByRole('button', { name: 'Изменить доверенность' })).toBeNull();
+    expect(screen.queryByText('Доверенности не найдены.')).toBeNull();
+  });
+  it('poa list read: an empty success is stable through a render, token refresh and unrelated dictionary edits', async () => {
+    const session = documentCopyTestSession();
+    const { props, view } = await openPoaReadProfile();
+    await screen.findByText('Доверенности не найдены.');
+    session.refresh(); view.rerender(<ClientDetail {...props} />);
+    await act(async () => window.dispatchEvent(new Event('dicts:changed')));
+    expect(apiService.getClientPowersOfAttorney).toHaveBeenCalledOnce();
+  });
+  it('poa list read: unmount aborts its read and ignores a late failure', async () => {
+    let fail!: (reason: Error) => void;
+    vi.mocked(apiService.getClientPowersOfAttorney).mockReturnValueOnce(new Promise((_, reject) => { fail = reject; }));
+    const { view } = await openPoaReadProfile();
+    const signal = vi.mocked(apiService.getClientPowersOfAttorney).mock.calls[0][1]?.signal;
+    view.unmount(); expect(signal?.aborted).toBe(true);
+    await act(async () => fail(new Error('Поздняя ошибка доверенностей')));
+    expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+  it('poa list read: an abandoned retry cannot block retrying a newly opened group', async () => {
+    let finish!: (value: PowerOfAttorney[]) => void;
+    vi.mocked(apiService.getClientPowersOfAttorney).mockRejectedValueOnce(new Error('Первая ошибка списка'))
+      .mockReturnValueOnce(new Promise(resolve => { finish = resolve; }))
+      .mockRejectedValueOnce(new Error('Ошибка нового открытия')).mockResolvedValueOnce([]);
+    await openPoaReadProfile();
+    fireEvent.click(await screen.findByRole('button', { name: 'Повторить загрузку доверенностей' }));
+    const oldSignal = vi.mocked(apiService.getClientPowersOfAttorney).mock.calls[1][1]?.signal;
+    fireEvent.click(screen.getByRole('button', { name: 'Скрыть дополнительную информацию' }));
+    expect(oldSignal?.aborted).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Дополнительная информация' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Доверенности' }));
+    await screen.findByText('Ошибка нового открытия');
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку доверенностей' }));
+    await screen.findByText('Доверенности не найдены.');
+    expect(apiService.getClientPowersOfAttorney).toHaveBeenCalledTimes(4);
+    await act(async () => finish([createPowerOfAttorney({ number: 'Старый повтор' })]));
+    expect(screen.queryByText('№Старый повтор')).toBeNull();
+  });
+  it('poa list read: a forbidden response shows a readable message without an internal URL', async () => {
+    vi.mocked(apiService.getClientPowersOfAttorney).mockRejectedValueOnce(new Error('HTTP 403 at https://synthetic.invalid/api/clients/1/powers-of-attorney - Protected response'));
+    await openPoaReadProfile();
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Недостаточно прав для выполнения действия.');
+    expect(alert.textContent).not.toContain('https://');
+    expect(alert.textContent).not.toContain('/api/');
+    expect(screen.getByRole('button', { name: '+ Добавить доверенность' })).toHaveProperty('disabled', true);
+    expect(screen.queryByText('Доверенности не найдены.')).toBeNull();
+  });
   it('poa operation permissions: profile edit alone does not allow creating or deleting a power', async () => {
     await openPoaPermissionProfile();
     expect(screen.getByRole('button', { name: '+ Добавить доверенность' })).toHaveProperty('disabled', true);

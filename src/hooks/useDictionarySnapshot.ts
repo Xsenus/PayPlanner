@@ -53,6 +53,15 @@ export function useDictionarySnapshot<T>(load: (signal: AbortSignal) => Promise<
     window.addEventListener('dicts:changed', changed);
     return () => window.removeEventListener('dicts:changed', changed);
   }, [enabled, refresh, listenForChanges]);
+  // A confirmed local mutation supersedes any read that started before it.
+  const updateValue = useCallback((update: (previous: T) => T) => {
+    const owner = enabled ? capture() : null;
+    if (!owner) return;
+    cancel();
+    setView(previous => owner.isCurrent() ? { scope, owner,
+      value: update(previous.scope === scope && previous.owner?.isCurrent() ? previous.value : empty),
+      loading: false, error: null } : previous);
+  }, [enabled, capture, cancel, scope, empty]);
   const visible = enabled && view.scope === scope && view.owner?.isCurrent() ? view : null;
-  return { value: visible?.value ?? empty, loading: enabled && (visible?.loading ?? true), error: visible?.error ?? null, refresh, capture };
+  return { value: visible?.value ?? empty, loading: enabled && (visible?.loading ?? true), error: visible?.error ?? null, refresh, capture, updateValue };
 }

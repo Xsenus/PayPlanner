@@ -289,6 +289,7 @@ const LEGAL_ENTITY_LOOKUP_PAGE_SIZE = 20;
 const EMPTY_LEGAL_LOOKUP: Awaited<ReturnType<typeof apiService.getLegalEntitiesPaged>> = { items: [], total: 0, page: 1, pageSize: LEGAL_ENTITY_LOOKUP_PAGE_SIZE };
 const EMPTY_CLIENT_LOOKUP: Client[] = [];
 const EMPTY_RESPONSIBLE_LOOKUP: ActResponsible[] = [];
+const EMPTY_POA_LIST: PowerOfAttorney[] = [];
 async function loadClientLookup(signal: AbortSignal) {
   const rows = await apiService.getClients({ signal });
   assertDictionaryRows(rows);
@@ -1721,10 +1722,6 @@ function ClientDetailScreen({
   const debouncedOkpdtrSearch = useDebouncedValue(okpdtrSearch.trim(), 300);
   const [oksoLoading, setOksoLoading] = useState(false);
   const [okpdtrLoading, setOkpdtrLoading] = useState(false);
-  const [powersOfAttorney, setPowersOfAttorney] = useState<PowerOfAttorney[]>(
-    [],
-  );
-  const [powersOfAttorneyLoaded, setPowersOfAttorneyLoaded] = useState(false);
   const [activeProfileGroup, setActiveProfileGroup] = useState<
     | "main"
     | "passports"
@@ -1738,6 +1735,32 @@ function ClientDetailScreen({
     | "poa"
   >("main");
   const [profileAdditionalOpen, setProfileAdditionalOpen] = useState(false);
+  const poaReadEnabled = canReadClient && profileReady && activeSection === "profile" && profileAdditionalOpen
+    && activeProfileGroup === "poa" && clientFormState.kind === "individual";
+  const loadPoaList = useCallback(async (signal: AbortSignal) => {
+    const rows = await apiService.getClientPowersOfAttorney(clientId, { signal });
+    if (!Array.isArray(rows) || !rows.every(item => item && Number.isSafeInteger(item.id) && item.id > 0 && item.clientId === clientId
+      && typeof item.number === 'string' && typeof item.issuedAt === 'string' && typeof item.isActive === 'boolean'
+      && [item.validUntil, item.issuer, item.notes].every(value => value == null || typeof value === 'string'))
+      || new Set(rows.map(item => item.id)).size !== rows.length) {
+      throw new Error('Не удалось подтвердить список доверенностей клиента. Повторите загрузку.');
+    }
+    return rows;
+  }, [clientId]);
+  const poaList = useDictionarySnapshot(loadPoaList, EMPTY_POA_LIST,
+    { enabled: poaReadEnabled, ownerScope: screenOwner.scope }, false);
+  const powersOfAttorney = poaList.value;
+  const setPowersOfAttorney = poaList.updateValue;
+  const poaListAtRender = useRef(poaList);
+  poaListAtRender.current = poaList;
+  const poaRetryPending = useRef<DocumentDeliveryRead | null>(null);
+  const retryPoaList = async () => {
+    if (poaRetryPending.current?.isCurrent() || poaListAtRender.current !== poaList || !poaReadEnabled || poaList.loading) return;
+    const owner = poaList.capture();
+    if (!owner) return;
+    poaRetryPending.current = owner;
+    try { await poaList.refresh(); } finally { if (poaRetryPending.current === owner) poaRetryPending.current = null; }
+  };
   const [legalEntityPromptOpen, setLegalEntityPromptOpen] = useState(false);
   const [legalEntityPromptSubmitting, setLegalEntityPromptSubmitting] =
     useState(false);
@@ -2000,14 +2023,15 @@ function ClientDetailScreen({
   };
 
   const openCreatePoaPrompt = () => {
-    if (!captureScreen() || !canEditClientProfile || (!userIsAdmin && !clientPermissions.canCreate)) return;
+    if (!captureScreen() || !canEditClientProfile || (!userIsAdmin && !clientPermissions.canCreate) || poaList.loading || poaList.error) return;
     setPoaPromptError(null);
     setPoaDraft(createEmptyPoaDraft());
     setPoaPromptOpen(true);
   };
 
   const openEditPoaPrompt = (poa: PowerOfAttorney) => {
-    if (!captureScreen() || !canEditClientProfile || (!userIsAdmin && !clientPermissions.canEdit)) return;
+    if (!captureScreen() || !canEditClientProfile || (!userIsAdmin && !clientPermissions.canEdit)
+      || poaList.loading || poaList.error || !poaList.value.includes(poa)) return;
     setPoaPromptError(null);
     setPoaDraft(createPoaDraftFromItem(poa));
     setPoaPromptOpen(true);
@@ -2015,7 +2039,7 @@ function ClientDetailScreen({
 
   const submitQuickPowerOfAttorney = async () => {
     const owner = captureScreen();
-    if (!owner || !canEditClientProfile || (!userIsAdmin && (poaDraft.id === null ? !clientPermissions.canCreate : !clientPermissions.canEdit))) return;
+    if (!owner || !canEditClientProfile || (!userIsAdmin && (poaDraft.id === null ? !clientPermissions.canCreate : !clientPermissions.canEdit)) || poaList.loading || poaList.error) return;
     const number = poaDraft.number.trim();
     const issuedAt = poaDraft.issuedAt.trim();
 
@@ -2074,7 +2098,8 @@ function ClientDetailScreen({
   const deletePowerOfAttorney = async (poa: PowerOfAttorney) => {
     const owner = captureScreen();
     if (currentPoaConfirmationScope.current !== poaConfirmationScope || poaDeleteConfirmation.current) return;
-    if (!owner || !canEditClientProfile || (!userIsAdmin && !clientPermissions.canDelete)) {
+    if (!owner || !canEditClientProfile || (!userIsAdmin && !clientPermissions.canDelete)
+      || poaList.loading || poaList.error || !poaList.value.includes(poa)) {
       if (owner) showPermissionWarning("Недостаточно прав для удаления доверенности.");
       return;
     }
@@ -2182,11 +2207,6 @@ function ClientDetailScreen({
   );
 
   useEffect(() => {
-    setPowersOfAttorney([]);
-    setPowersOfAttorneyLoaded(false);
-  }, [clientId]);
-
-  useEffect(() => {
     if (
       activeSection !== "profile" ||
       activeProfileGroup !== "education"
@@ -2249,33 +2269,6 @@ function ClientDetailScreen({
       controller.abort();
     };
   }, [activeProfileGroup, activeSection, debouncedOkpdtrSearch]);
-
-  useEffect(() => {
-    if (
-      activeSection !== "profile" ||
-      activeProfileGroup !== "poa" ||
-      powersOfAttorneyLoaded
-    ) {
-      return;
-    }
-
-    let alive = true;
-    apiService
-      .getClientPowersOfAttorney(clientId)
-      .then((items) => {
-        if (!alive) return;
-        setPowersOfAttorney(items ?? []);
-        setPowersOfAttorneyLoaded(true);
-      })
-      .catch(() => {
-        if (!alive) return;
-        setPowersOfAttorneyLoaded(true);
-      });
-
-    return () => {
-      alive = false;
-    };
-  }, [activeProfileGroup, activeSection, clientId, powersOfAttorneyLoaded]);
 
   const [monthFrom, setMonthFrom] = useState<string>("");
   const [monthTo, setMonthTo] = useState<string>("");
@@ -7886,7 +7879,7 @@ function ClientDetailScreen({
                               </label>
                               <button
                                 type="button"
-                                disabled={!canEditClientProfile || (!userIsAdmin && !clientPermissions.canCreate)}
+                                disabled={!canEditClientProfile || (!userIsAdmin && !clientPermissions.canCreate) || poaList.loading || Boolean(poaList.error)}
                                 onClick={openCreatePoaPrompt}
                                 className="text-sm text-emerald-600"
                               >
@@ -7894,7 +7887,12 @@ function ClientDetailScreen({
                               </button>
                             </div>
                             <div className="rounded-lg border border-gray-200 p-3">
-                              {powersOfAttorney.length === 0 ? (
+                              {poaList.loading ? <p role="status" className="text-sm text-gray-500">Загрузка доверенностей…</p> : null}
+                              {poaList.error ? <div role="alert" className="mb-2 text-sm text-red-700">
+                                <p>{extractDisplayErrorMessage(new Error(poaList.error), 'Не удалось загрузить доверенности. Повторите загрузку.')}</p>
+                                <button type="button" disabled={poaList.loading} onClick={() => { void retryPoaList(); }} className="mt-1 text-emerald-700 underline">Повторить загрузку доверенностей</button>
+                              </div> : null}
+                              {!poaList.loading && !poaList.error && powersOfAttorney.length === 0 ? (
                                 <p className="text-sm text-gray-500">
                                   Доверенности не найдены.
                                 </p>
@@ -7927,7 +7925,7 @@ function ClientDetailScreen({
                                           <button
                                             type="button"
                                             onClick={() => openEditPoaPrompt(poa)}
-                                            disabled={!canEditClientProfile}
+                                            disabled={!canEditClientProfile || poaList.loading || Boolean(poaList.error)}
                                             className={
                                               PROFILE_SECONDARY_ICON_BUTTON_CLASS
                                             }
@@ -7941,7 +7939,7 @@ function ClientDetailScreen({
                                             onClick={() =>
                                               void deletePowerOfAttorney(poa)
                                             }
-                                            disabled={!canEditClientProfile || (!userIsAdmin && !clientPermissions.canDelete)}
+                                            disabled={!canEditClientProfile || (!userIsAdmin && !clientPermissions.canDelete) || poaList.loading || Boolean(poaList.error)}
                                             className={PROFILE_DELETE_ICON_BUTTON_CLASS}
                                             title="Удалить доверенность"
                                             aria-label="Удалить доверенность"

@@ -6268,8 +6268,8 @@ export class ApiService {
     });
   }
 
-  async getClientPowersOfAttorney(clientId: number) {
-    return this.request<PowerOfAttorney[]>(`/clients/${clientId}/powers-of-attorney`);
+  async getClientPowersOfAttorney(clientId: number, options?: { signal?: AbortSignal }) {
+    return this.request<PowerOfAttorney[]>(`/clients/${clientId}/powers-of-attorney`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async createClientPowerOfAttorney(clientId: number, payload: PowerOfAttorneyInput) {
