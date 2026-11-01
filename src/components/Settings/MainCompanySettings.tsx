@@ -62,7 +62,7 @@ function MainCompanySettingsScreen({ session }: { session: AuthSessionIdentity }
     legalEntities,
     error: legalEntitiesError,
     refresh: refreshLegalEntities,
-  } = useLegalEntities();
+  } = useLegalEntities({ ownerScope: 'main-company-settings' });
 
   const [settings, setSettings] = useState<MainCompanySettingsDto | null>(null);
   const [savedSnapshot, setSavedSnapshot] = useState<string>('');

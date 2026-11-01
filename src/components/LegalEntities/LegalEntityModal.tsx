@@ -1148,7 +1148,8 @@ export function LegalEntityModal({
     legalEntities,
     loading: legalEntitiesLoading,
     error: legalEntitiesError,
-  } = useLegalEntities();
+  } = useLegalEntities({ enabled: isOpen && documentClientsNeeded,
+    ownerScope: JSON.stringify([classificationScope, relatedInvoiceOwner.scope, relatedActOwner.scope]) });
   const {
     cases: legalEntityCases,
     loading: legalEntityCasesLoading,

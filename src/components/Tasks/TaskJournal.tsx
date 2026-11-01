@@ -2499,7 +2499,8 @@ export function TaskJournal({
   const canViewLegalEntities = isAdminUser || permissions.legalEntities.canView;
   const canViewCases = isAdminUser || permissions.cases.canView;
   const { clients } = useClients({ enabled: canViewClients });
-  const { legalEntities } = useLegalEntities({ enabled: canViewLegalEntities });
+  const { legalEntities } = useLegalEntities({ enabled: canViewLegalEntities,
+    ownerScope: JSON.stringify([currentUserId, user?.role?.id, isAdminUser, permissions.legalEntities]) });
   const canCreateTasks = !offlineCalendarSnapshot && (isAdminUser || permissions.tasks.canCreate);
   const canEditTasks = !offlineCalendarSnapshot && (isAdminUser || permissions.tasks.canEdit);
   const canDeleteTasks = !offlineCalendarSnapshot

@@ -10,6 +10,7 @@ import { acknowledgeBalanceApplication, applyBalanceGuarded, cancelBalanceApplic
   inspectBalanceApplication, openAcknowledgedBalanceApplication, pendingBalanceApplications, type BalanceApplicationPorts, type CommittedBalanceApplication } from '../../services/balanceApplicationAttempts';
 import { API_BASE_URL } from '../../services/apiBaseUrl';
 import { documentCopyTestSession } from '../../test/documentCopySession';
+import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { acknowledgePaymentCreate, assertPaymentCreateOwner, bindPaymentCreateOwner, createPaymentGuarded, fencePaymentCreateAdoption, inspectPaymentCreate, pendingPaymentCreates,
   paymentCreateTokenMatches,
   openCommittedPaymentCreate, type PaymentAttemptState, type PaymentCreateContext, type PaymentCreatePorts } from '../../services/paymentCreateAttempts';
@@ -80,7 +81,7 @@ vi.mock('../../hooks/useClients', () => ({
 }));
 
 vi.mock('../../hooks/useLegalEntities', () => ({
-  useLegalEntities: () => ({
+  useLegalEntities: vi.fn(() => ({
     legalEntities: [
       {
         id: 301,
@@ -103,7 +104,7 @@ vi.mock('../../hooks/useLegalEntities', () => ({
     ],
     loading: false,
     error: null,
-  }),
+  })),
 }));
 
 vi.mock('../../hooks/useDictionaries', () => ({
@@ -387,6 +388,12 @@ function doc04RealAttemptFixture(primary = doc04Payment(), rest = doc04Payment({
 }
 
 describe('PaymentModal integration', () => {
+  it('directory caller: payment access scope owns its lookup and closing disables it', async () => {
+    const props = { isOpen: true, onClose: vi.fn(), onSubmit: vi.fn() }; const view = render(<PaymentModal {...props} />);
+    const first = vi.mocked(useLegalEntities).mock.lastCall?.[0]; expect(first?.enabled).toBe(true);
+    paymentScopeState.value = 'own'; view.rerender(<PaymentModal {...props} />); expect(vi.mocked(useLegalEntities).mock.lastCall?.[0]?.ownerScope).not.toBe(first?.ownerScope);
+    view.rerender(<PaymentModal {...props} isOpen={false} />); expect(vi.mocked(useLegalEntities).mock.lastCall?.[0]?.enabled).toBe(false); await act(async () => undefined);
+  });
   describe('durable balance recovery with the real lifecycle', () => {
     afterEach(() => { bindPaymentCreateOwner(null, API_BASE_URL); localStorage.clear(); vi.unstubAllGlobals(); });
     const start = async () => {

@@ -372,7 +372,6 @@ export function PaymentModal({
   const autoCashOrderDraftRef = useRef<{ number: string; date: string; type: CashOrderType } | null>(null);
 
   const { clients, loading: clientsLoading } = useClients();
-  const { legalEntities, loading: legalEntitiesLoading, error: legalEntitiesError } = useLegalEntities();
   const { dealTypes, incomeTypes, paymentSources, services = [] } = useDictionaries();
   const { t } = useTranslation();
   const { user, isAdmin } = useAuth();
@@ -386,6 +385,7 @@ export function PaymentModal({
     canViewLinkedInvoices, canCreateLinkedInvoices, !!onDelete, !!onCreateRemainder, !!onTransferRemainder, !!onRollbackRemainderTransfer, !!onAdjustRemainderTransfer,
     user?.id, user?.role?.id, user?.role?.name, paymentPermissions.canView, paymentPermissions.viewScope]));
   const { capture: captureConfirmationOwner } = confirmationOwner;
+  const { legalEntities, loading: legalEntitiesLoading, error: legalEntitiesError } = useLegalEntities({ enabled: isOpen, ownerScope: confirmationOwner.scope });
   const { begin: beginSourceRefresh, scope: sourceRefreshScope, busy: sourceRefreshBusy } = useDocumentDeliveryOwner(confirmationOwner.scope);
   const sourceReadController = useRef<{ scope: string; sourceId: number; controller: AbortController } | null>(null);
   const sourceRefreshBlocked = unverifiedSourceId !== null && unverifiedSourceId === payment?.id;

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MainCompanySettings } from './MainCompanySettings';
 import { documentCopyTestSession } from '../../test/documentCopySession';
 import { StrictMode } from 'react';
+import { useLegalEntities } from '../../hooks/useLegalEntities';
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(), put: vi.fn(), refresh: vi.fn(), error: vi.fn(), success: vi.fn(), userId: 3, roleId: 4, admin: true,
@@ -10,10 +11,15 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: mocks.userId, role: { id: mocks.roleId } }, isAdmin: () => mocks.admin }) }));
 vi.mock('../../contexts/TabContext', () => ({ useTabNavigation: () => ({ setActiveTab: vi.fn() }) }));
 vi.mock('../../hooks/useToast', () => ({ useToast: () => ({ error: mocks.error, success: mocks.success }) }));
-vi.mock('../../hooks/useLegalEntities', () => ({ useLegalEntities: () => ({ legalEntities: [], error: null, refresh: mocks.refresh }) }));
+vi.mock('../../hooks/useLegalEntities', () => ({ useLegalEntities: vi.fn(() => ({ legalEntities: [], error: null, refresh: mocks.refresh })) }));
 vi.mock('../../services/api', () => ({ apiService: { getMainCompanySettings: mocks.get, updateMainCompanySettings: mocks.put } }));
 
 describe('MainCompanySettings snapshot timing', () => {
+  it('directory caller: own-company settings uses its explicit lookup scope only while admitted', async () => {
+    const view = render(<MainCompanySettings />); await waitFor(() => expect(mocks.get).toHaveBeenCalled());
+    expect(vi.mocked(useLegalEntities).mock.lastCall?.[0]?.ownerScope).toBe('main-company-settings'); const count = vi.mocked(useLegalEntities).mock.calls.length;
+    mocks.admin = false; view.rerender(<MainCompanySettings />); expect(vi.mocked(useLegalEntities).mock.calls).toHaveLength(count);
+  });
   let session: ReturnType<typeof documentCopyTestSession>;
   beforeEach(() => {
     vi.clearAllMocks();

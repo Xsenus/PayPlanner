@@ -1,9 +1,17 @@
 import { setupTaskJournalTests, apiMock, authState, permissionsState, todayAt, toDatetimeLocalInputValue, createTask, renderJournal } from './TaskJournal.test-support';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { useLegalEntities } from '../../hooks/useLegalEntities';
 
 describe('TaskJournal', () => {
   setupTaskJournalTests();
+  it.each(['legacy', 'modern'] as const)('directory caller: %s task card uses the current role lookup scope', async taskCardWindowMode => {
+    await renderJournal([createTask()], { withRoute: true, withRoleRerender: true, settings: { taskCardWindowMode } });
+    fireEvent.click(screen.getByTitle('Просмотр')); await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const first = vi.mocked(useLegalEntities).mock.lastCall?.[0]; expect(first?.enabled).toBe(true);
+    authState.user = { ...authState.user, role: { id: 42 } }; fireEvent.click(screen.getByRole('button', { name: 'Обновить роль для теста' }));
+    expect(vi.mocked(useLegalEntities).mock.lastCall?.[0]?.ownerScope).not.toBe(first?.ownerScope);
+  });
 
 
   it.each(['legacy', 'modern'] as const)('separately allows editing another user task in the %s task card', async (taskCardWindowMode) => {

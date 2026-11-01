@@ -22,6 +22,7 @@ import type {
   ActInput,
   LegalEntityDadataDetails,
   LegalEntityDetail,
+  LegalEntitySummary,
   LegalEntityInput,
   LegalEntitySuggestion,
   Payment,
@@ -1417,6 +1418,25 @@ describe('LegalEntityModal integration', () => {
     expect(screen.queryByRole('heading', { name: 'Счета' })).toBeNull();
     expect(screen.queryByRole('heading', { name: 'Акты' })).toBeNull();
     expect(screen.queryByText('Платежи')).toBeNull();
+  });
+
+  describe('company directory parent ownership', () => {
+    it.each(['page', 'modal'] as const)('directory caller: profile %s reads companies only for an open document and clears a changed scope', async mode => {
+      const p = { isOpen: true, mode, initial: createInitialLegalEntity({ shortName: 'Компания', isOwnCompany: false }), allowEdit: true, allowDelete: false,
+        canManageOwnCompanySettings: false, canViewCases: false, canViewAccounts: true, canViewActs: false, canViewPayments: false,
+        onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() };
+      vi.mocked(apiService.getLegalEntities).mockClear().mockResolvedValue([{ id: 301, shortName: 'Каталог all', clientsCount: 0, createdAt: '2026-11-01T00:00:00Z' }]);
+      const view = render(<LegalEntityModal {...p} />); await act(async () => undefined); expect(apiService.getLegalEntities).not.toHaveBeenCalled();
+      fireEvent.click(screen.getAllByRole('button', { name: 'Счёт' })[0]); await screen.findByTestId('invoice-lookup-fixture');
+      const last = () => invoiceModalPropsSpy.mock.calls.at(-1)![0] as { legalEntities: { id: number }[] };
+      await waitFor(() => expect(last().legalEntities.map(row => row.id)).toEqual([301]));
+      let resolve!: (value: LegalEntitySummary[]) => void;
+      vi.mocked(apiService.getLegalEntities).mockReturnValueOnce(new Promise(done => { resolve = done; }));
+      view.rerender(<LegalEntityModal {...p} relatedRecordPermissions={{ accounts: relatedPermissions({ canCreate: true, viewScope: 'own' }) }} />);
+      expect(last().legalEntities).toEqual([]);
+      await act(async () => resolve([{ id: 302, shortName: 'Каталог own', clientsCount: 0, createdAt: '2026-11-01T00:00:00Z' }]));
+      await waitFor(() => expect(last().legalEntities.map(row => row.id)).toEqual([302]));
+    });
   });
 
   describe('company address autofill ownership', () => {

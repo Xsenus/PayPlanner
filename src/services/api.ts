@@ -6314,12 +6314,12 @@ export class ApiService {
   }
 
   // ===== Legal entities =====
-  async getLegalEntities(params?: { search?: string; counterpartyRole?: 'client' | 'supplier' }) {
+  async getLegalEntities(params?: { search?: string; counterpartyRole?: 'client' | 'supplier' }, options?: { signal?: AbortSignal }) {
     const q = buildQuery({
       search: params?.search,
       counterpartyRole: params?.counterpartyRole,
     });
-    return this.request<LegalEntitySummary[]>(`/legal-entities${q}`);
+    return this.request<LegalEntitySummary[]>(`/legal-entities${q}`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async getLegalEntitiesPaged(

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ActModal } from './ActModal';
+import { useLegalEntities } from '../../hooks/useLegalEntities';
 import type { Act, ActInput, ActResponsible, Client, Invoice } from '../../types';
 
 const {
@@ -47,7 +48,7 @@ vi.mock('../../hooks/useDocumentStatusSettings', () => ({
 }));
 
 vi.mock('../../hooks/useLegalEntities', () => ({
-  useLegalEntities: () => ({
+  useLegalEntities: vi.fn(() => ({
     legalEntities: [
       {
         id: 301,
@@ -70,7 +71,7 @@ vi.mock('../../hooks/useLegalEntities', () => ({
     ],
     loading: false,
     error: null,
-  }),
+  })),
 }));
 
 vi.mock('../../services/api', () => ({
@@ -147,6 +148,13 @@ async function selectPickerOption(name: string): Promise<void> {
 }
 
 describe('ActModal integration', () => {
+  it('directory caller: act editor changes lookup owner with access and closes reads', async () => {
+    const props = { open: true, mode: 'create' as const, act: null, onClose: vi.fn(), onSubmit: vi.fn(), submitting: false, clients: [], responsibles: [], lookupsLoading: false, presentation: 'page' as const, accessScopeKey: 'all' };
+    const view = render(<ActModal {...props} />); const first = vi.mocked(useLegalEntities).mock.lastCall?.[0]; expect(first?.enabled).toBe(true);
+    view.rerender(<ActModal {...props} accessScopeKey="own" />); expect(vi.mocked(useLegalEntities).mock.lastCall?.[0]?.ownerScope).not.toBe(first?.ownerScope);
+    view.rerender(<ActModal {...props} open={false} />); expect(vi.mocked(useLegalEntities).mock.lastCall?.[0]?.enabled).toBe(false);
+    await act(async () => undefined);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     modalAuthState.user = { id: 1, role: { id: 1 } };

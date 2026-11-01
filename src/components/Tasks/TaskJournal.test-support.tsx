@@ -161,10 +161,10 @@ vi.mock('../../hooks/useClientCases', () => ({
 }));
 
 vi.mock('../../hooks/useLegalEntities', () => ({
-  useLegalEntities: (options?: { enabled?: boolean }) => ({
+  useLegalEntities: vi.fn((options?: { enabled?: boolean }) => ({
     legalEntities: options?.enabled === false ? [] : legalEntitiesState.legalEntities,
     loading: false,
-  }),
+  })),
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({
