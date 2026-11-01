@@ -957,7 +957,10 @@ export function LegalEntityModal({
   const [dictModalOpen, setDictModalOpen] = useState(false);
   const [dictModalTab, setDictModalTab] =
     useState<LegalEntityDictTab>("countries");
-  const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
+  const [responsibleLookup, setResponsibleLookup] = useState<{
+    owner: DocumentDeliveryRead; items: ActResponsible[]; loading: boolean; error: string | null;
+  } | null>(null);
+  const [responsibleReload, setResponsibleReload] = useState(0);
   const [selectedLegalEntityCaseId, setSelectedLegalEntityCaseId] =
     useState<LegalEntityCaseFilter>("all");
   const [caseSearch, setCaseSearch] = useState("");
@@ -1081,6 +1084,14 @@ export function LegalEntityModal({
   const relatedPaymentOwner = useDocumentDeliveryOwner(JSON.stringify([classificationScope, paymentModalOpen, paymentModalMode, selectedPayment?.id,
     selectedLegalEntityCaseId, canMutateRelated('payments', 'canCreate'), canMutateRelated('payments', 'canEdit'),
     relatedRecordPermissions?.payments?.viewScope, canViewCases, canViewAccounts, canViewActs]));
+  const responsibleOwner = useDocumentDeliveryOwner(JSON.stringify([classificationScope, canViewCases, canViewAccounts, canViewActs,
+    relatedRecordPermissions?.cases, relatedRecordPermissions?.accounts, relatedRecordPermissions?.acts]));
+  const { capture: captureResponsibleOwner } = responsibleOwner;
+  const responsibleLookupEnabled = isOpen && deleteSession.authenticated;
+  const currentResponsibleLookup = responsibleLookup?.owner.isCurrent() ? responsibleLookup : null;
+  const responsibles = responsibleLookupEnabled ? currentResponsibleLookup?.items ?? [] : [];
+  const responsiblesLoading = responsibleLookupEnabled && (currentResponsibleLookup?.loading ?? true);
+  const responsiblesError = responsibleLookupEnabled ? currentResponsibleLookup?.error ?? null : null;
   const relatedReadScope = JSON.stringify([currentLegalEntityId, isOpen, deleteOwnerScope]);
   const casesReadOwner = useDocumentDeliveryOwner(JSON.stringify([relatedReadScope, canViewCases, relatedRecordPermissions?.cases?.viewScope]));
   const invoicesReadOwner = useDocumentDeliveryOwner(JSON.stringify([relatedReadScope, canViewAccounts, relatedRecordPermissions?.accounts?.viewScope]));
@@ -1501,12 +1512,23 @@ export function LegalEntityModal({
   }, [initial, isOpen]);
 
   useEffect(() => {
-    if (!isOpen) return;
-    void apiService
-      .getActResponsibles()
-      .then((items) => setResponsibles(items ?? []))
-      .catch(() => setResponsibles([]));
-  }, [isOpen]);
+    const owner = responsibleLookupEnabled ? captureResponsibleOwner() : null;
+    if (!owner) return;
+    const controller = new AbortController();
+    let cancelled = false;
+    const current = () => !cancelled && !controller.signal.aborted && owner.isCurrent();
+    setResponsibleLookup({ owner, items: [], loading: true, error: null });
+    void apiService.getActResponsibles({ signal: controller.signal }).then(items => {
+      if (!current()) return;
+      if (!Array.isArray(items) || !items.every(item => item && Number.isSafeInteger(item.id) && item.id > 0 && typeof item.fullName === 'string')
+        || new Set(items.map(item => item.id)).size !== items.length) throw new Error('Не удалось подтвердить список ответственных.');
+      setResponsibleLookup(previous => current() ? { owner, items, loading: false, error: null } : previous);
+    }).catch(error => {
+      if (current()) setResponsibleLookup(previous => current() ? { owner, items: [], loading: false,
+        error: extractDisplayErrorMessage(error, 'Не удалось загрузить ответственных.') } : previous);
+    });
+    return () => { cancelled = true; controller.abort(); };
+  }, [responsibleLookupEnabled, captureResponsibleOwner, responsibleReload]);
 
   useEffect(() => {
     if (
@@ -3018,10 +3040,11 @@ export function LegalEntityModal({
     ? { legalEntityId: currentLegalEntityId } : undefined, [actModalMode, currentLegalEntityId]);
 
   const documentsLookupsLoading =
-    documentClientsLoading || documentClientsRefreshing || legalEntitiesLoading;
+    documentClientsLoading || documentClientsRefreshing || legalEntitiesLoading || responsiblesLoading;
   const documentsLookupsError = [
     documentClientsError,
     legalEntitiesError,
+    responsiblesError,
   ]
     .filter(Boolean)
     .join("; ");
@@ -4171,7 +4194,7 @@ export function LegalEntityModal({
                   name="responsibleUserId"
                   value={formState.responsibleUserId}
                   onChange={handleInputChange}
-                  disabled={readOnly}
+                  disabled={readOnly || responsiblesLoading || Boolean(responsiblesError)}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">Не выбрано</option>
@@ -4181,6 +4204,12 @@ export function LegalEntityModal({
                     </option>
                   ))}
                 </SystemSelect>
+                {responsiblesError ? <div role="alert" className="mt-1 text-sm text-red-600">
+                  {responsiblesError}{" "}
+                  <button type="button" onClick={() => setResponsibleReload(value => value + 1)} className="underline">
+                    Повторить загрузку ответственных
+                  </button>
+                </div> : null}
               </div>
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700">

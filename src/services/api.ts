@@ -3630,8 +3630,8 @@ export class ApiService {
     return this.request<ActsSummary>(`/acts/summary${q}`, { signal: options?.signal });
   }
 
-  async getActResponsibles() {
-    return this.request<ActResponsible[]>('/acts/responsibles');
+  async getActResponsibles(options?: { signal?: AbortSignal }) {
+    return this.request<ActResponsible[]>('/acts/responsibles', { signal: options?.signal, cache: 'no-store' });
   }
 
   async getAct(id: number) {

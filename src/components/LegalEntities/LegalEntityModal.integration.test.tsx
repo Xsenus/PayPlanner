@@ -1421,6 +1421,71 @@ describe('LegalEntityModal integration', () => {
   });
 
   describe('company directory parent ownership', () => {
+    describe('company responsible lookup ownership', () => {
+    beforeEach(() => vi.mocked(apiService.getActResponsibles).mockReset().mockResolvedValue([]));
+    afterEach(() => vi.mocked(apiService.getActResponsibles).mockReset().mockResolvedValue([]));
+    const responsibleNames = () => Array.from(document.querySelectorAll<HTMLSelectElement>('select[name="responsibleUserId"] option')).map(option => option.textContent);
+    const responsibleProps = (mode: 'page' | 'modal') => ({ isOpen: true, mode, initial: createInitialLegalEntity({ shortName: 'Профиль', isOwnCompany: false }), allowEdit: true,
+      allowDelete: false, canViewCases: false, canViewAccounts: false, canViewActs: false, canViewPayments: false,
+      onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() });
+    it.each(['page', 'modal'] as const)('responsible baseline: %s hides the previous catalogue on permission change', async mode => {
+      vi.mocked(apiService.getActResponsibles).mockReset().mockResolvedValueOnce([{ id: 7, fullName: 'Прежний ответственный' }]).mockReturnValue(new Promise(() => {}));
+      const p = responsibleProps(mode); const view = render(<LegalEntityModal {...p} deleteOwnerScope="all" />);
+      await waitFor(() => expect(responsibleNames()).toContain('Прежний ответственный')); view.rerender(<LegalEntityModal {...p} deleteOwnerScope="own" />);
+      expect(responsibleNames()).not.toContain('Прежний ответственный');
+    });
+    it.each(['page', 'modal'] as const)('responsible baseline: %s rejects a late catalogue from another company', async mode => {
+      let resolve!: (items: { id: number; fullName: string }[]) => void;
+      vi.mocked(apiService.getActResponsibles).mockReset().mockReturnValueOnce(new Promise(done => { resolve = done; })).mockResolvedValue([{ id: 8, fullName: 'Текущий ответственный' }]);
+      const p = responsibleProps(mode); const view = render(<LegalEntityModal {...p} />); view.rerender(<LegalEntityModal {...p} initial={{ ...p.initial, id: 12 }} />);
+      await act(async () => resolve([{ id: 7, fullName: 'Ответ другой компании' }])); expect(responsibleNames()).not.toContain('Ответ другой компании');
+    });
+    it.each(['page', 'modal'] as const)('responsible regression: %s clears loaded names on login replacement', async mode => {
+      vi.mocked(apiService.getActResponsibles).mockResolvedValueOnce([{ id: 7, fullName: 'Прежний вход' }]).mockReturnValue(new Promise(() => {}));
+      const p = responsibleProps(mode); const view = render(<LegalEntityModal {...p} />); await waitFor(() => expect(responsibleNames()).toContain('Прежний вход'));
+      baseAuthSession.replace(); view.rerender(<LegalEntityModal {...p} />); expect(responsibleNames()).not.toContain('Прежний вход'); expect(apiService.getActResponsibles).toHaveBeenCalledTimes(2);
+    });
+    it.each(['page', 'modal'] as const)('responsible regression: %s old failure cannot clear the new role catalogue', async mode => {
+      let reject!: (error: Error) => void;
+      vi.mocked(apiService.getActResponsibles).mockReturnValueOnce(new Promise((_done, fail) => { reject = fail; })).mockResolvedValue([{ id: 8, fullName: 'Разрешённый ответственный' }]);
+      const p = responsibleProps(mode); const view = render(<LegalEntityModal {...p} deleteOwnerScope="all" />); view.rerender(<LegalEntityModal {...p} deleteOwnerScope="own" />);
+      await waitFor(() => expect(responsibleNames()).toContain('Разрешённый ответственный')); await act(async () => reject(new Error('HTTP 403 Old role')));
+      expect(responsibleNames()).toContain('Разрешённый ответственный'); expect(screen.queryByText('HTTP 403 Old role')).toBeNull();
+    });
+    it.each(['page', 'modal'] as const)('responsible regression: %s closed profile aborts and ignores its old request after reopening', async mode => {
+      let resolve!: (items: { id: number; fullName: string }[]) => void;
+      vi.mocked(apiService.getActResponsibles).mockReturnValueOnce(new Promise(done => { resolve = done; })).mockResolvedValue([{ id: 8, fullName: 'Новый список' }]);
+      const p = responsibleProps(mode); const view = render(<LegalEntityModal {...p} />); const signal = vi.mocked(apiService.getActResponsibles).mock.calls[0][0]?.signal;
+      view.rerender(<LegalEntityModal {...p} isOpen={false} />); expect(signal?.aborted).toBe(true); expect(apiService.getActResponsibles).toHaveBeenCalledTimes(1);
+      view.rerender(<LegalEntityModal {...p} />); await waitFor(() => expect(responsibleNames()).toContain('Новый список'));
+      await act(async () => resolve([{ id: 7, fullName: 'Закрытое окно' }])); expect(responsibleNames()).not.toContain('Закрытое окно'); expect(responsibleNames()).toContain('Новый список');
+    });
+    it.each(['page', 'modal'] as const)('responsible regression: %s retries a current denial without losing profile input', async mode => {
+      vi.mocked(apiService.getActResponsibles).mockRejectedValueOnce(new Error('HTTP 403 Список недоступен')).mockResolvedValue([{ id: 7, fullName: 'Ответственный после загрузки' }]);
+      const p = { ...responsibleProps(mode), initial: createInitialLegalEntity({ shortName: 'Ввод сохраняется', isOwnCompany: false, responsibleUserId: 7 }) };
+      render(<LegalEntityModal {...p} />); const retry = await screen.findByRole('button', { name: 'Повторить загрузку ответственных' }); expect(screen.getByDisplayValue('Ввод сохраняется')).toBeTruthy();
+      fireEvent.click(retry); await waitFor(() => expect(responsibleNames()).toContain('Ответственный после загрузки')); expect(screen.queryByRole('button', { name: 'Повторить загрузку ответственных' })).toBeNull();
+      expect(document.querySelector<HTMLSelectElement>('select[name="responsibleUserId"]')?.value).toBe('7'); expect(screen.getByDisplayValue('Ввод сохраняется')).toBeTruthy(); expect(apiService.getActResponsibles).toHaveBeenCalledTimes(2);
+    });
+    it.each(['page', 'modal'] as const)('responsible regression: %s shares one current catalogue with its invoice without refetching on input', async mode => {
+      vi.mocked(apiService.getActResponsibles).mockResolvedValue([{ id: 7, fullName: 'Текущий сотрудник' }]);
+      const p = { ...responsibleProps(mode), canViewAccounts: true }; render(<LegalEntityModal {...p} />); await waitFor(() => expect(responsibleNames()).toContain('Текущий сотрудник'));
+      fireEvent.change(screen.getByDisplayValue('Профиль'), { target: { value: 'Правка имени' } });
+      fireEvent.click(screen.getAllByRole('button', { name: 'Счёт' })[0]); await screen.findByTestId('invoice-lookup-fixture');
+      await waitFor(() => expect((invoiceModalPropsSpy.mock.lastCall![0] as { lookupsLoading: boolean }).lookupsLoading).toBe(false));
+      expect((invoiceModalPropsSpy.mock.lastCall![0] as { responsibles: { id: number }[] }).responsibles).toEqual([{ id: 7, fullName: 'Текущий сотрудник' }]); expect(apiService.getActResponsibles).toHaveBeenCalledTimes(1);
+    });
+    for (const mode of ['page', 'modal'] as const) {
+      it.each(['duplicate', 'invalid'] as const)(`responsible regression: ${mode} rejects %s employee identities`, async shape => {
+        vi.mocked(apiService.getActResponsibles).mockResolvedValue(shape === 'duplicate' ? [{ id: 7, fullName: 'A' }, { id: 7, fullName: 'B' }] : [{ id: -1, fullName: 'X' }]);
+        render(<LegalEntityModal {...responsibleProps(mode)} />); await screen.findByRole('button', { name: 'Повторить загрузку ответственных' }); expect(responsibleNames()).toEqual(['Не выбрано']);
+      });
+    }
+    it('responsible regression: closed and unauthenticated profiles do not load employee names', async () => {
+      const p = responsibleProps('page'); const view = render(<LegalEntityModal {...p} isOpen={false} />); await act(async () => {}); expect(apiService.getActResponsibles).not.toHaveBeenCalled();
+      baseAuthSession.replace('logout'); view.rerender(<LegalEntityModal {...p} />); await act(async () => {}); expect(apiService.getActResponsibles).not.toHaveBeenCalled();
+    });
+    });
     it.each(['page', 'modal'] as const)('client caller: profile %s reads clients for its document and clears old permissions', async mode => {
       const p = { isOpen: true, mode, initial: createInitialLegalEntity({ shortName: 'Компания', isOwnCompany: false }), allowEdit: true, allowDelete: false,
         canManageOwnCompanySettings: false, canViewCases: false, canViewAccounts: true, canViewActs: false, canViewPayments: false,
