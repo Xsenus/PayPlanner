@@ -1,6 +1,6 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import {
   Building2,
   Download,
@@ -26,13 +26,17 @@ import {
   type YealinkContactImportDecisionAction,
   type YealinkContactImportResultDto,
 } from '../../services/api';
-import type { ActResponsible, LegalEntitySummary } from '../../types';
+import type { ActResponsible } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useDocumentDeliveryOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
+import { useLegalEntities } from '../../hooks/useLegalEntities';
+import { useDictionarySnapshot } from '../../hooks/useDictionarySnapshot';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
-import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { extractDisplayErrorMessage, isHttpErrorStatus } from '../../utils/errorUtils';
 import { readSessionViewState, writeSessionViewState } from '../../utils/sessionViewState';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
@@ -40,10 +44,7 @@ import { ContactEditorModal } from './ContactEditorModal';
 import { YealinkImportPreviewModal } from './YealinkImportPreviewModal';
 import { ContactMergeModal } from './ContactMergeModal';
 
-type EditorState =
-  | { mode: 'create-external'; contact: null }
-  | { mode: 'edit-client'; contact: ContactDirectoryItemDto }
-  | { mode: 'edit-external'; contact: ContactDirectoryItemDto };
+type EditorState = ({ mode: 'create-external'; contact: null } | { mode: 'edit-client'; contact: ContactDirectoryItemDto } | { mode: 'edit-external'; contact: ContactDirectoryItemDto }) & { scope: string; owner: DocumentDeliveryRead };
 
 type YealinkImportState = {
   file: File;
@@ -65,6 +66,9 @@ interface ContactsProps {
   onOpenClient?: (id: number) => void;
   onOpenLegalEntity?: (id: number) => void;
 }
+
+const EMPTY_CONTACT_RESPONSIBLES: ActResponsible[] = [];
+const EMPTY_CONTACT_ROWS: ContactDirectoryItemDto[] = [];
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100];
 const CONTACT_VIEW_STORAGE_KEY = 'pp.contacts_view.v1';
@@ -116,6 +120,15 @@ const ROLE_LABELS: Record<ContactRole, string> = {
 
 export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, onOpenLegalEntity }: ContactsProps) {
   const { isAdmin, user } = useAuth();
+  const admin = isAdmin();
+  const permissions = useRolePermissions(user?.role?.id);
+  const canViewDirectory = Boolean(user?.id) && (admin || permissions.clients.canView || permissions.legalEntities.canView);
+  const canCreateContact = canViewDirectory && (admin || permissions.clients.canCreate);
+  const canEditContact = canViewDirectory && (admin || permissions.clients.canEdit);
+  const canDeleteContact = canViewDirectory && (admin || permissions.clients.canDelete);
+  const directoryOwner = useDocumentDeliveryOwner(JSON.stringify([user?.id, user?.role?.id, user?.departmentId, admin, permissions.clients, permissions.legalEntities, canViewDirectory]));
+  const { scope: directoryScope, capture: captureDirectory } = directoryOwner;
+
   const { confirm } = useDialog();
   const toast = useToast();
   const viewStateKey = useMemo(() => `pp.contacts.${user?.id ?? 'guest'}.viewState.v1`, [user?.id]);
@@ -136,16 +149,28 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
     return saved === 'only-sync' || saved === 'excluded' ? saved : 'all';
   });
   const [includeInactive, setIncludeInactive] = useState(() => savedViewState?.includeInactive === true);
-  const [contacts, setContacts] = useState<ContactDirectoryItemDto[]>([]);
-  const [summaryContacts, setSummaryContacts] = useState<ContactDirectoryItemDto[]>([]);
-  const [legalEntities, setLegalEntities] = useState<LegalEntitySummary[]>([]);
-  const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [storedContacts, setContacts] = useState<ContactDirectoryItemDto[]>([]);
+  const [storedSummaryContacts, setSummaryContacts] = useState<ContactDirectoryItemDto[]>([]);
+  const [rawLoading, setLoading] = useState(true);
+  const [rawRefreshing, setRefreshing] = useState(false);
   const [downloadingXml, setDownloadingXml] = useState(false);
   const [importingXml, setImportingXml] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [storedError, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [viewScope, setViewScope] = useState<string | null>(null);
+  const currentView = canViewDirectory && viewScope === directoryScope;
+  const contacts = currentView ? storedContacts : EMPTY_CONTACT_ROWS;
+  const summaryContacts = currentView ? storedSummaryContacts : EMPTY_CONTACT_ROWS;
+  const loading = canViewDirectory && (!currentView || rawLoading);
+  const refreshing = currentView && rawRefreshing;
+  const error = currentView ? storedError : null;
+  const editorScope = JSON.stringify([directoryScope, scope]);
+  const activeEditor = editor?.scope === editorScope && editor.owner.isCurrent() ? editor : null;
+  const { legalEntities, loading: entitiesLoading, error: entitiesError, refresh: refreshEntities } = useLegalEntities({ enabled: canViewDirectory && (admin || permissions.legalEntities.canView), ownerScope: directoryScope });
+  const loadResponsibles = useCallback((signal: AbortSignal) => apiService.getActResponsibles({ signal }), []);
+  const responsibleSnapshot = useDictionarySnapshot(loadResponsibles, EMPTY_CONTACT_RESPONSIBLES, { enabled: canViewDirectory && admin, ownerScope: directoryScope }, false);
+  const responsibles = responsibleSnapshot.value;
+
   const [yealinkImport, setYealinkImport] = useState<YealinkImportState | null>(null);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [page, setPage] = useState(() => (
@@ -205,7 +230,14 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
     minColumnWidth: 140,
   });
 
+  useLayoutEffect(() => {
+    requestIdRef.current++; activeRequestControllerRef.current?.abort(); activeRequestControllerRef.current = null;
+    hasLoadedRef.current = false; setViewScope(null); setContacts([]); setSummaryContacts([]); setError(null); setEditor(null);
+  }, [directoryScope]);
+
   const loadDirectory = useCallback(async () => {
+    const owner = canViewDirectory ? captureDirectory() : null;
+    if (!owner) return;
     const requestId = ++requestIdRef.current;
     activeRequestControllerRef.current?.abort();
     const controller = new AbortController();
@@ -218,6 +250,7 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
       } else {
         setRefreshing(true);
       }
+      setViewScope(directoryScope);
       setError(null);
 
       const baseParams = {
@@ -243,28 +276,29 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
             );
       const [data, summaryData] = await Promise.all([dataRequest, summaryRequest]);
 
-      if (requestId !== requestIdRef.current || controller.signal.aborted) {
+      if (requestId !== requestIdRef.current || controller.signal.aborted || !owner.isCurrent()) {
         return;
       }
 
       setContacts(data);
       setSummaryContacts(summaryData);
     } catch (nextError) {
-      if (requestId !== requestIdRef.current || controller.signal.aborted) {
+      if (requestId !== requestIdRef.current || controller.signal.aborted || !owner.isCurrent()) {
         return;
       }
+      if (isHttpErrorStatus(nextError, 401) || isHttpErrorStatus(nextError, 403)) { setContacts([]); setSummaryContacts([]); setEditor(null); }
       setError(extractDisplayErrorMessage(nextError, 'Не удалось загрузить контакты'));
     } finally {
       if (activeRequestControllerRef.current === controller) {
         activeRequestControllerRef.current = null;
       }
-      if (requestId === requestIdRef.current) {
+      if (requestId === requestIdRef.current && owner.isCurrent()) {
         hasLoadedRef.current = true;
         setLoading(false);
         setRefreshing(false);
       }
     }
-  }, [debouncedSearch, includeInactive, legalEntityId, scope, syncOnly]);
+  }, [debouncedSearch, includeInactive, legalEntityId, scope, syncOnly, canViewDirectory, captureDirectory, directoryScope]);
 
   const handleScopeChange = (nextScope: ContactScope) => {
     setScope(nextScope);
@@ -304,24 +338,6 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
     if (viewMode !== 'table') setSettingsOpen(false);
   }, [viewMode]);
 
-  useEffect(() => {
-    const loadLookups = async () => {
-      try {
-        const [entities, nextResponsibles] = await Promise.all([
-          apiService.getLegalEntities(),
-          isAdmin() ? apiService.getActResponsibles() : Promise.resolve([]),
-        ]);
-
-        setLegalEntities(entities);
-        setResponsibles(nextResponsibles);
-      } catch {
-        // lookup issues should not block the directory itself
-      }
-    };
-
-    void loadLookups();
-  }, [isAdmin]);
-
   const counts = useMemo(
     () => ({
       all: summaryContacts.length,
@@ -342,11 +358,21 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
     setPage((current) => Math.min(current, totalPages));
   }, [loading, totalPages]);
 
+  const openEditor = (mode: 'create-external' | 'edit-client' | 'edit-external', contact: ContactDirectoryItemDto | null) => {
+    const owner = captureDirectory();
+    if (!owner || (mode === 'create-external' ? !canCreateContact : !canEditContact)) return;
+    if (mode === 'create-external') { setEditor({ mode, contact: null, scope: editorScope, owner }); return; }
+    const current = contacts.find(item => item.sourceId === contact?.sourceId && item.sourceType === contact.sourceType);
+    if (!current || current.hasFullProfile || current.sourceType === 'legal') return;
+    setEditor({ mode, contact: current, scope: editorScope, owner });
+  };
+
   const handleSaved = () => {
     void loadDirectory();
   };
 
   const handleDelete = async (contact: ContactDirectoryItemDto) => {
+    const owner = canDeleteContact ? captureDirectory() : null; if (!owner) return;
     const approved = await confirm({
       title: 'Удалить контакт',
       description: `Удалить контакт "${contact.fullName}" из справочника?`,
@@ -355,12 +381,13 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
       variant: 'danger',
     });
 
-    if (!approved) {
+    if (!approved || !owner.isCurrent()) {
       return;
     }
 
     try {
       await apiService.deleteExternalContact(contact.sourceId);
+      if (!owner.isCurrent()) return;
       setContacts((prev) =>
         prev.filter((item) => !(item.sourceType === contact.sourceType && item.sourceId === contact.sourceId)),
       );
@@ -369,7 +396,7 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
       );
       toast.success('Контакт удалён', 'Контакты');
     } catch (nextError) {
-      toast.error(extractDisplayErrorMessage(nextError, 'Не удалось удалить контакт'), 'Контакты');
+      if (owner.isCurrent()) toast.error(extractDisplayErrorMessage(nextError, 'Не удалось удалить контакт'), 'Контакты');
     }
   };
 
@@ -594,13 +621,10 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
 
   const renderContactActions = (contact: ContactDirectoryItemDto) => (
     <div className="flex flex-wrap items-center justify-end gap-2">
-      {contact.sourceType !== 'legal' && !contact.hasFullProfile ? (
+      {canEditContact && contact.sourceType !== 'legal' && !contact.hasFullProfile ? (
         <button
           type="button"
-          onClick={() => setEditor({
-            mode: contact.sourceType === 'client' ? 'edit-client' : 'edit-external',
-            contact,
-          })}
+          onClick={() => openEditor(contact.sourceType === 'client' ? 'edit-client' : 'edit-external', contact)}
           className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
           aria-label={`Редактировать ${contact.fullName}`}
         >
@@ -624,13 +648,15 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
       {contact.sourceType === 'external' && contact.linkedLegalEntityId && onOpenLegalEntity ? (
         <button type="button" onClick={() => onOpenLegalEntity(contact.linkedLegalEntityId!)} className="rounded-xl border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">Открыть</button>
       ) : null}
-      {contact.sourceType === 'external' && !contact.hasFullProfile ? (
+      {canDeleteContact && contact.sourceType === 'external' && !contact.hasFullProfile ? (
         <button type="button" onClick={() => void handleDelete(contact)} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-200 text-rose-600 transition hover:bg-rose-50" aria-label={`Удалить ${contact.fullName}`}>
           <Trash2 className="h-4 w-4" />
         </button>
       ) : null}
     </div>
   );
+
+  if (!canViewDirectory) return <div className="p-3 lg:p-4">Нет доступа к контактам.</div>;
 
   return (
     <div className="space-y-3 p-3 lg:p-4">
@@ -712,7 +738,8 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
 
             <button
               type="button"
-              onClick={() => setEditor({ mode: 'create-external', contact: null })}
+              onClick={() => openEditor('create-external', null)}
+              disabled={!canCreateContact}
               className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
             >
               <Plus className="h-4 w-4" />
@@ -993,14 +1020,23 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
       </div>
 
       <ContactEditorModal
-        open={Boolean(editor)}
-        ownerScope={JSON.stringify([scope, user?.id, user?.role?.id])}
-        mode={editor?.mode ?? 'create-external'}
-        contact={editor?.contact ?? null}
+        open={Boolean(activeEditor)}
+        ownerScope={editorScope}
+        editorOwner={directoryOwner}
+        allowSave={activeEditor?.mode === 'create-external' ? canCreateContact : canEditContact}
+        canViewLegalEntities={admin || permissions.legalEntities.canView}
+        legalEntitiesLoading={entitiesLoading}
+        legalEntitiesError={entitiesError}
+        onRetryLegalEntities={refreshEntities}
+        responsiblesLoading={responsibleSnapshot.loading}
+        responsiblesError={responsibleSnapshot.error}
+        onRetryResponsibles={responsibleSnapshot.refresh}
+        mode={activeEditor?.mode ?? 'create-external'}
+        contact={activeEditor?.contact ?? null}
         legalEntities={legalEntities}
         responsibles={responsibles}
         organizationContacts={summaryContacts.filter((item) => item.contactType === 'Organization')}
-        canManageResponsible={isAdmin()}
+        canManageResponsible={admin}
         onClose={() => setEditor(null)}
         onSaved={handleSaved}
       />

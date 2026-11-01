@@ -8,8 +8,10 @@ import { apiService, type ContactDirectoryItemDto } from '../../services/api';
 const isAdminMock = vi.hoisted(() => vi.fn(() => false));
 
 vi.mock('../../contexts/AuthContext', () => ({
-  useAuth: () => ({ isAdmin: isAdminMock }),
+  useAuth: () => ({ isAdmin: isAdminMock, user: { id: 7, role: { id: 4 } } }),
 }));
+
+vi.mock('../../hooks/useRolePermissions', () => ({ useRolePermissions: () => ({ clients: { canView: true, canCreate: true, canEdit: true, canDelete: true }, legalEntities: { canView: true, canCreate: true, canEdit: true } }) }));
 
 vi.mock('../../hooks/useDialog', () => ({
   useDialog: () => ({ confirm: vi.fn().mockResolvedValue(true) }),
