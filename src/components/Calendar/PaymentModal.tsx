@@ -648,6 +648,7 @@ export function PaymentModal({
   }, [contracts, formData.contractId, selectedContract]);
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [clientPickerMode, setClientPickerMode] = useState<'client' | 'expense'>('client');
+  const [clientPickerPaymentId, setClientPickerPaymentId] = useState(payment?.id);
 
   const [syncDateWithPayment, setSyncDateWithPayment] = useState(false);
 
@@ -676,6 +677,14 @@ export function PaymentModal({
   const canChangePaymentType = !hasLockedInvoice || !payment;
   const canEditExpenseAttribution = !hasLockedInvoice || (!payment && formData.type === 'Expense');
   const canEditContract = !hasLockedInvoice || !payment;
+  const counterpartyPickerAllowed = isOpen && paymentPermissions.canView && canSavePayment
+    && !loading && !sourceRefreshBlocked && !remainderPending && !pendingBalance.blocked;
+  const counterpartyPickerOwner = useDocumentDeliveryOwner(JSON.stringify([
+    confirmationOwner.scope, payment?.id, clientPickerPaymentId, counterpartyPickerAllowed, clientPickerOpen, clientPickerMode, formData.type,
+    hasLockedInvoice, canEditExpenseAttribution, permissions.clients, permissions.legalEntities,
+    permissions.cases, permissions.contracts, permissions.accounts, permissions.acts,
+  ]));
+  const counterpartyPickerContext = counterpartyPickerOwner.capture();
   const caseOwnerClientId = formData.type === 'Expense'
     ? formData.expenseClientId
     : formData.clientId;
@@ -2182,11 +2191,13 @@ export function PaymentModal({
   };
 
   const openClientPicker = (mode: 'client' | 'expense' = 'client') => {
+    if (!counterpartyPickerAllowed) return;
     if (hasLockedInvoice && (mode !== 'expense' || !canEditExpenseAttribution)) {
       return;
     }
 
     setClientPickerMode(mode);
+    setClientPickerPaymentId(payment?.id);
     setClientPickerOpen(true);
   };
 
@@ -4488,7 +4499,8 @@ export function PaymentModal({
           </form>
 
           <CounterpartyPickerModal
-            open={clientPickerOpen}
+            key={counterpartyPickerOwner.scope}
+            open={clientPickerOpen && counterpartyPickerAllowed && clientPickerPaymentId === payment?.id}
             title={clientPickerMode === 'expense' ? 'Выбор контрагента расхода' : 'Выбор контрагента'}
             initialScope={clientPickerMode === 'expense' && formData.expenseLegalEntityId ? 'legalEntity' : formData.legalEntityId ? 'legalEntity' : 'client'}
             counterpartyRole={
@@ -4499,9 +4511,10 @@ export function PaymentModal({
                   : 'client'
             }
             overlayClassName="z-[1600]"
-            onClose={() => setClientPickerOpen(false)}
+            onClose={() => { if (counterpartyPickerContext?.isCurrent()) setClientPickerOpen(false); }}
             onSelect={(selection) => {
-              if (!selection) return;
+              if (!selection || !counterpartyPickerAllowed || !counterpartyPickerContext?.isCurrent()
+                || (hasLockedInvoice && (clientPickerMode !== 'expense' || !canEditExpenseAttribution))) return;
               if (selection.kind === 'client' && selection.client) {
                 handleClientPick(selection.client);
               } else if (selection.kind === 'legalEntity' && selection.legalEntity) {

@@ -145,6 +145,26 @@ describe('CounterpartyPickerModal', () => {
     expect(apiService.getLegalEntities).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['client', 'legalEntity'] as const)('lookup display errors: hides technical details for %s', async scope => {
+    const request = scope === 'client' ? apiService.getClients : apiService.getLegalEntities;
+    vi.mocked(request).mockRejectedValueOnce(new Error('HTTP 403 at https://internal.example/api/private-company - private server details'));
+    render(<CounterpartyPickerModal open initialScope={scope} allowedScopes={[scope]} onClose={vi.fn()} />);
+    expect(await screen.findByText('Недостаточно прав для выполнения действия.')).toBeTruthy();
+    expect(screen.queryByText(/internal\.example|private server details/)).toBeNull();
+  });
+  it.each(['client', 'legalEntity'] as const)('lookup display errors: explains an expired session for %s', async scope => {
+    const request = scope === 'client' ? apiService.getClients : apiService.getLegalEntities;
+    vi.mocked(request).mockRejectedValueOnce(new Error('HTTP 401 at https://internal.example/api/private-company'));
+    render(<CounterpartyPickerModal open initialScope={scope} allowedScopes={[scope]} onClose={vi.fn()} />);
+    expect(await screen.findByText('Сессия истекла. Войдите снова.')).toBeTruthy();
+  });
+  it.each(['client', 'legalEntity'] as const)('lookup display errors: gives a readable network failure for %s', async scope => {
+    const request = scope === 'client' ? apiService.getClients : apiService.getLegalEntities;
+    vi.mocked(request).mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    render(<CounterpartyPickerModal open initialScope={scope} allowedScopes={[scope]} onClose={vi.fn()} />);
+    expect(await screen.findByText('Не удалось загрузить контрагентов')).toBeTruthy();
+  });
+
   it('does not load clients or legal entities when all scopes are forbidden', async () => {
     render(
       <CounterpartyPickerModal

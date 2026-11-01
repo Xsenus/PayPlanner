@@ -6,6 +6,7 @@ import { apiService } from '../../services/api';
 import type { Client, LegalEntitySummary } from '../../types';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { useModalFocusTrap } from '../../hooks/useModalFocusTrap';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
 export type CounterpartyKind = 'client' | 'legalEntity';
 export type CounterpartyRole = 'client' | 'supplier';
@@ -246,7 +247,7 @@ export function CounterpartyPickerModal({
         if (cancelled) return;
         setItems([]);
         setTotal(0);
-        setError(loadError instanceof Error ? loadError.message : 'Не удалось загрузить контрагентов');
+        setError(extractDisplayErrorMessage(loadError, 'Не удалось загрузить контрагентов'));
       } finally {
         if (!cancelled) {
           setLoading(false);

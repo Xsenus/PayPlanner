@@ -14,6 +14,7 @@ import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useClients } from '../../hooks/useClients';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
+import type { CounterpartyPickerModal } from '../ui/CounterpartyPickerModal';
 import { acknowledgePaymentCreate, assertPaymentCreateOwner, bindPaymentCreateOwner, createPaymentGuarded, fencePaymentCreateAdoption, inspectPaymentCreate, pendingPaymentCreates,
   paymentCreateTokenMatches,
   openCommittedPaymentCreate, type PaymentAttemptState, type PaymentCreateContext, type PaymentCreatePorts } from '../../services/paymentCreateAttempts';
@@ -40,6 +41,7 @@ const {
   toastErrorMock,
   toastSuccessMock,
   paymentScopeState,
+  counterpartyPickerPropsSpy,
 } = vi.hoisted(() => ({
   confirmMock: vi.fn(),
   createInvoiceMock: vi.fn(),
@@ -62,7 +64,16 @@ const {
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
   paymentScopeState: { value: 'all' as 'all' | 'own', canView: true },
+  counterpartyPickerPropsSpy: vi.fn(),
 }));
+
+vi.mock('../ui/CounterpartyPickerModal', async importOriginal => {
+  const actual = await importOriginal<typeof import('../ui/CounterpartyPickerModal')>();
+  return { ...actual, CounterpartyPickerModal: (props: Parameters<typeof actual.CounterpartyPickerModal>[0]) => {
+    counterpartyPickerPropsSpy(props);
+    return <actual.CounterpartyPickerModal {...props} />;
+  } };
+});
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ user: { role: { id: 1 } }, isAdmin: () => false }),
@@ -391,6 +402,69 @@ function doc04RealAttemptFixture(primary = doc04Payment(), rest = doc04Payment({
 }
 
 describe('PaymentModal integration', () => {
+  it.each(['close', 'payment', 'permission', 'editing', 'view', 'session', 'direction'] as const)('counterparty ownership guard: retained selection and close cannot affect the current picker after %s', async change => {
+    const session = documentCopyTestSession();
+    let props = { isOpen: true, canEditPayment: true, onClose: vi.fn(), onSubmit: vi.fn(), payment: doc04Payment({ clientId: null, legalEntityId: 301 }), availableClientBalance: 0, canViewLinkedInvoices: false };
+    const view = render(<PaymentModal {...props} />);
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Выбрать контрагента' }));
+      await act(async () => {});
+      const held = counterpartyPickerPropsSpy.mock.lastCall![0] as Parameters<typeof CounterpartyPickerModal>[0];
+      expect(held.open).toBe(true);
+      if (change === 'close') fireEvent.click(within(screen.getByRole('dialog', { name: 'Выбор контрагента' })).getByRole('button', { name: 'Закрыть' }));
+      if (change === 'payment') props = { ...props, payment: doc04Payment({ id: 9902, clientId: null, legalEntityId: 301 }) };
+      if (change === 'permission') paymentScopeState.value = 'own';
+      if (change === 'editing') props = { ...props, canEditPayment: false };
+      if (change === 'view') paymentScopeState.canView = false;
+      if (change === 'session') session.replace('login');
+      if (change === 'direction') fireEvent.change(document.querySelector<HTMLSelectElement>('select[name="type"]')!, { target: { value: 'Expense' } });
+      view.rerender(<PaymentModal {...props} />);
+      if (change === 'close' || change === 'payment') fireEvent.click(screen.getByRole('button', { name: 'Выбрать контрагента' }));
+      await act(async () => {});
+      const currentOpen = counterpartyPickerPropsSpy.mock.lastCall![0].open as boolean;
+      const selectedBefore = document.querySelector<HTMLSelectElement>('select[name="legalEntityId"]')!.value;
+      act(() => { held.onSelect?.({ kind: 'legalEntity', id: 302, name: 'Obsolete selection', legalEntity: { id: 302, shortName: 'Obsolete selection', clientsCount: 0, createdAt: '2026-11-01T00:00:00Z' } }); });
+      expect(document.querySelector<HTMLSelectElement>('select[name="legalEntityId"]')!.value).toBe(selectedBefore);
+      act(() => { held.onClose(); });
+      expect(Boolean(screen.queryByRole('dialog', { name: 'Выбор контрагента' }))).toBe(currentOpen);
+      expect(props.onSubmit).not.toHaveBeenCalled();
+    } finally { view.unmount(); session.restore(); }
+  });
+  it('counterparty ownership baseline: clears an open picker before a narrower payment scope is loaded', async () => {
+    const privateCompany = { id: 801, shortName: 'Company from the former payment scope', inn: '7701000000', clientsCount: 0, createdAt: '2026-11-01T00:00:00Z' };
+    getLegalEntitiesMock.mockResolvedValueOnce([privateCompany]).mockRejectedValueOnce(new Error('Current company lookup forbidden'));
+    const props = { isOpen: true, onClose: vi.fn(), onSubmit: vi.fn(), payment: doc04Payment({ clientId: null, legalEntityId: 301 }), availableClientBalance: 0, canViewLinkedInvoices: false };
+    const view = render(<PaymentModal {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Выбрать контрагента' }));
+    await screen.findByText(privateCompany.shortName);
+    paymentScopeState.value = 'own'; view.rerender(<PaymentModal {...props} />);
+    expect(screen.queryByText(privateCompany.shortName)).toBeNull();
+    await screen.findByText('Current company lookup forbidden');
+    expect(getLegalEntitiesMock).toHaveBeenCalledTimes(2);
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+  it('counterparty ownership baseline: a late picker response cannot enter another payment', async () => {
+    let finishOld!: (rows: unknown[]) => void; let finishNew!: (rows: unknown[]) => void;
+    getLegalEntitiesMock.mockReturnValueOnce(new Promise(resolve => { finishOld = resolve; })).mockReturnValueOnce(new Promise(resolve => { finishNew = resolve; }));
+    const props = { isOpen: true, onClose: vi.fn(), onSubmit: vi.fn(), payment: doc04Payment({ clientId: null, legalEntityId: 301 }), availableClientBalance: 0, canViewLinkedInvoices: false };
+    const view = render(<PaymentModal {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Выбрать контрагента' }));
+    await waitFor(() => expect(getLegalEntitiesMock).toHaveBeenCalledOnce());
+    view.rerender(<PaymentModal {...props} payment={doc04Payment({ id: 9902, clientId: null, legalEntityId: 301 })} />);
+    expect(screen.queryByRole('dialog', { name: 'Выбор контрагента' })).toBeNull();
+    expect(getLegalEntitiesMock).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Выбрать контрагента' }));
+    expect(getLegalEntitiesMock).toHaveBeenCalledTimes(2);
+    await act(async () => { finishOld([{ id: 801, shortName: 'Old picker company', clientsCount: 0 }]); });
+    expect(screen.queryByText('Old picker company')).toBeNull();
+    expect(getLegalEntitiesMock).toHaveBeenCalledTimes(2);
+    await act(async () => { finishNew([{ id: 302, shortName: 'Current picker company', clientsCount: 0 }]); });
+    const row = await screen.findByText('Current picker company');
+    fireEvent.click(within(row.closest('[data-counterparty-option]') as HTMLElement).getByRole('button', { name: 'Выбрать' }));
+    expect(document.querySelector<HTMLSelectElement>('select[name="legalEntityId"]')?.value).toBe('302');
+    expect(screen.queryByRole('dialog', { name: 'Выбор контрагента' })).toBeNull();
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
   it('requirements caller: payment rules follow its confirmation owner and closing', async () => {
     const p = { isOpen: true, onClose: vi.fn(), onSubmit: vi.fn() }; const view = render(<PaymentModal {...p} />); const first = vi.mocked(useFormRequirements).mock.lastCall;
     expect(first?.[0]).toBe('payments'); expect(first?.[1]).toBe(true); expect(first?.[2]?.ownerScope).toBeTruthy();
@@ -687,6 +761,7 @@ describe('PaymentModal integration', () => {
   });
 
   beforeEach(() => {
+    counterpartyPickerPropsSpy.mockClear();
     paymentScopeState.value = 'all';
     paymentScopeState.canView = true;
     doc04CanonicalPayments.clear();
