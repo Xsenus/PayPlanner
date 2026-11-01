@@ -23,6 +23,7 @@ public class LegalEntitiesControllerCoverageTests
     public async Task CleanEndpoints_ValidateInputs_HandleNotFound_AndMapResponses()
     {
         await using var db = await CreateContextAsync();
+        var actor = await CreateAdminUserAsync(db);
         var controller = CreateController(
             db,
             new StubLegalEntityEnrichmentService
@@ -69,7 +70,7 @@ public class LegalEntitiesControllerCoverageTests
                     ["+79270000000"] = new CleanedPhone("+79270000000", "Россия", "Самара", "МТС", 0),
                 },
             },
-            currentUserId: 1);
+            currentUserId: actor.Id);
 
         Assert.IsType<BadRequestObjectResult>((await controller.CleanAddress(new CleanAddressRequest(" "), CancellationToken.None)).Result);
         Assert.IsType<NotFoundResult>((await controller.CleanAddress(new CleanAddressRequest("Не найден"), CancellationToken.None)).Result);
@@ -103,6 +104,7 @@ public class LegalEntitiesControllerCoverageTests
     public async Task FindById_ValidatesQuery_AndMapsDetails()
     {
         await using var db = await CreateContextAsync();
+        var actor = await CreateAdminUserAsync(db);
         var controller = CreateController(
             db,
             new StubLegalEntityEnrichmentService
@@ -150,7 +152,7 @@ public class LegalEntitiesControllerCoverageTests
                         Emails: ["docs@example.com"]),
                 },
             },
-            currentUserId: 1);
+            currentUserId: actor.Id);
 
         Assert.IsType<BadRequestObjectResult>((await controller.FindById(new LegalEntityFindRequest(" ", null), CancellationToken.None)).Result);
         Assert.IsType<NotFoundResult>((await controller.FindById(new LegalEntityFindRequest("7700000000", null), CancellationToken.None)).Result);
@@ -1011,7 +1013,8 @@ public class LegalEntitiesControllerCoverageTests
     public async Task Suggest_RejectsEmptyInput()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: 1);
+        var actor = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: actor.Id);
 
         var action = await controller.Suggest(new LegalEntitySuggestionRequest(), CancellationToken.None);
         Assert.IsType<BadRequestObjectResult>(action.Result);
@@ -1556,7 +1559,7 @@ public class LegalEntitiesControllerCoverageTests
         await connection.OpenAsync();
 
         var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection);
+            .UseSqlite(connection, sqlite => sqlite.MigrationsAssembly(typeof(LegalEntitiesControllerCoverageTests).Assembly.FullName));
         if (interceptor is not null)
         {
             optionsBuilder.AddInterceptors(interceptor);

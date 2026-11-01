@@ -139,9 +139,10 @@ public class ClientsControllerCoverageTests
     public async Task CleanAddress_ValidatesInput_HandlesMissingMatch_AndMapsResponse()
     {
         await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "admin", "Enrichment actor");
         var controller = CreateController(
             db,
-            currentUserId: null,
+            currentUserId: actor.Id,
             enrichmentService: new StubEnrichmentService
             {
                 CleanedAddresses =
@@ -205,9 +206,10 @@ public class ClientsControllerCoverageTests
     public async Task CleanAddress_FallsBackToAddressSuggestion_WhenCleanerHasNoMatch()
     {
         await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "admin", "Enrichment actor");
         var controller = CreateController(
             db,
-            currentUserId: null,
+            currentUserId: actor.Id,
             enrichmentService: new StubEnrichmentService
             {
                 AddressSuggestions =
@@ -252,9 +254,10 @@ public class ClientsControllerCoverageTests
     public async Task SuggestAddress_ReturnsEmptyForBlankQuery_AndMapsSuggestions()
     {
         await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "admin", "Enrichment actor");
         var controller = CreateController(
             db,
-            currentUserId: null,
+            currentUserId: actor.Id,
             enrichmentService: new StubEnrichmentService
             {
                 AddressSuggestions =
@@ -799,7 +802,7 @@ public class ClientsControllerCoverageTests
         await connection.OpenAsync();
 
         var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
+            .UseSqlite(connection, sqlite => sqlite.MigrationsAssembly(typeof(ClientsControllerCoverageTests).Assembly.FullName))
             .Options;
 
         var db = new PaymentContext(options);

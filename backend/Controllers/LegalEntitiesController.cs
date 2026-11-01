@@ -909,6 +909,8 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     public async Task<ActionResult<CleanedAddressDto>> CleanAddress([FromBody] CleanAddressRequest request,
         CancellationToken ct)
     {
+        if (!await _db.CanUseLegalEntityEnrichmentAsync(User, ct)) return Forbid();
+
         if (string.IsNullOrWhiteSpace(request.Address))
             return BadRequest("Укажите Address");
 
@@ -941,6 +943,8 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     public async Task<ActionResult<CleanedEmailDto>> CleanEmail([FromBody] CleanEmailRequest request,
         CancellationToken ct)
     {
+        if (!await _db.CanUseLegalEntityEnrichmentAsync(User, ct)) return Forbid();
+
         if (string.IsNullOrWhiteSpace(request.Email))
             return BadRequest("Укажите Email");
 
@@ -962,6 +966,8 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     public async Task<ActionResult<CleanedPhoneDto>> CleanPhone([FromBody] CleanPhoneRequest request,
         CancellationToken ct)
     {
+        if (!await _db.CanUseLegalEntityEnrichmentAsync(User, ct)) return Forbid();
+
         if (string.IsNullOrWhiteSpace(request.Phone))
             return BadRequest("Укажите Phone");
 
@@ -1558,6 +1564,8 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     public async Task<ActionResult<LegalEntityDetailsDto>> FindById([FromBody] LegalEntityFindRequest request,
         CancellationToken ct)
     {
+        if (!await _db.CanUseLegalEntityEnrichmentAsync(User, ct)) return Forbid();
+
         if (string.IsNullOrWhiteSpace(request.Query))
             return BadRequest("Укажите ИНН или ОГРН в поле Query");
 
@@ -2206,6 +2214,8 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     public async Task<ActionResult<IEnumerable<LegalEntitySuggestionDto>>> Suggest([FromBody] LegalEntitySuggestionRequest request,
         CancellationToken ct)
     {
+        if (!await _db.CanUseLegalEntityEnrichmentAsync(User, ct)) return Forbid();
+
         if (string.IsNullOrWhiteSpace(request.Query) && string.IsNullOrWhiteSpace(request.Inn))
         {
             return BadRequest("Необходимо указать запрос или ИНН");

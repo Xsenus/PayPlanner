@@ -854,12 +854,14 @@ public class ClientsController : ControllerBase
     [HttpPost("dadata/clean-address")]
     public async Task<IActionResult> CleanAddress([FromBody] ClientCleanAddressRequest request, CancellationToken ct)
     {
+        if (!await _db.CanUseLegalEntityEnrichmentAsync(User, ct)) return Forbid();
         var rawAddress = request.Address?.Trim();
         if (string.IsNullOrWhiteSpace(rawAddress)) return BadRequest("Укажите адрес");
 
         var result = await _enrichment.CleanAddressAsync(rawAddress, ct);
         if (result is not null) return Ok(MapCleanedAddressResponse(result));
 
+        if (!await _db.CanUseLegalEntityEnrichmentAsync(User, ct)) return Forbid();
         var fallback = (await _enrichment.SuggestAddressesAsync(rawAddress, 1, ct)).FirstOrDefault();
         if (fallback is null)
         {
@@ -909,7 +911,7 @@ public class ClientsController : ControllerBase
         => new
         {
             source,
-            result = suggestion.UnrestrictedValue ?? suggestion.Value,
+            result = string.IsNullOrWhiteSpace(suggestion.UnrestrictedValue) ? suggestion.Value : suggestion.UnrestrictedValue,
             postalCode = suggestion.PostalCode,
             country = (string?)null,
             countryIsoCode = (string?)null,
@@ -942,6 +944,7 @@ public class ClientsController : ControllerBase
     [HttpPost("dadata/suggest-address")]
     public async Task<IActionResult> SuggestAddress([FromBody] ClientSuggestAddressRequest request, CancellationToken ct)
     {
+        if (!await _db.CanUseLegalEntityEnrichmentAsync(User, ct)) return Forbid();
         var query = request.Query?.Trim();
         if (string.IsNullOrWhiteSpace(query)) return Ok(Array.Empty<object>());
 
