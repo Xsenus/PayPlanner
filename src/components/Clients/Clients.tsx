@@ -1,5 +1,5 @@
 import { SystemSelect } from '../ui/SystemSelect';
-import { ReactNode, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   Users,
   Plus,
@@ -21,6 +21,9 @@ import {
   Filter,
 } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
+import { useDocumentDeliveryOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
+import { captureAuthSessionIdentity } from '../../services/authService';
+import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useTranslation } from '../../hooks/useTranslation';
 import { ClientModal } from './ClientModal';
@@ -36,7 +39,7 @@ import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings
 import { useTableSelection } from '../../hooks/useTableSelection';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { useToast } from '../../hooks/useToast';
-import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { extractDisplayErrorMessage, isHttpErrorStatus } from '../../utils/errorUtils';
 import { ClientStatusBadge } from './ClientStatusBadge';
 import { formatClientDate as formatDate } from './clientFormatters';
 import { FormPromptModal } from '../ui/FormPromptModal';
@@ -368,24 +371,38 @@ function saveFilterSettings(storageKey: string, settings: ClientTableFilterSetti
   }
 }
 
-export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPayment, onOpenTask }: ClientsProps = {}) {
-  const { t } = useTranslation();
+type ClientScreenContext = { user: ReturnType<typeof useAuth>['user']; permissions: ReturnType<typeof useRolePermissions>; scope: string };
+export function Clients(props: ClientsProps = {}) {
   const { user } = useAuth();
+  const permissions = useRolePermissions(user?.role?.id);
+  const scope = JSON.stringify([captureAuthSessionIdentity(), user?.id, user?.role?.id, permissions.clients, permissions.cases,
+    permissions.contracts, permissions.accounts, permissions.acts, permissions.payments, permissions.tasks, permissions.dictionaries,
+    permissions.legalEntities, permissions.companyProfile]);
+  return <ClientsScreen key={scope} {...props} context={{ user, permissions, scope }} />;
+}
+
+function ClientsScreen({ context, onOpenContract, onOpenInvoice, onOpenAct, onOpenPayment, onOpenTask }: ClientsProps & { context: ClientScreenContext }) {
+  const { user, permissions, scope: authorityScope } = context;
+  const { t } = useTranslation();
   const profileTimeZoneId = useUserTimeZone();
   const { confirm } = useDialog();
   const tableLayoutStorageKey = `${TABLE_SETTINGS_STORAGE_PREFIX}.${user?.id ?? 'guest'}.v1`;
   const filterSettingsStorageKey = `${FILTER_SETTINGS_STORAGE_PREFIX}.${user?.id ?? 'guest'}.v1`;
-  const permissions = useRolePermissions(user?.role?.id);
   const toast = useToast();
   const clientPermissions = permissions.clients;
   const canViewClients = clientPermissions.canView;
   const canCreateClients = clientPermissions.canCreate;
   const canEditClients = clientPermissions.canEdit;
   const canDeleteClients = clientPermissions.canDelete;
+  const canViewClientCases = permissions.cases.canView;
+  const canCreateClientCases = canCreateClients && canViewClientCases && permissions.cases.canCreate;
+  const canEditClientCases = canEditClients && canViewClientCases && permissions.cases.canEdit;
+  const canDeleteClientCases = canDeleteClients && canViewClientCases && permissions.cases.canDelete;
   const { statuses: clientStatuses } = useClientStatuses({ enabled: canViewClients,
     ownerScope: JSON.stringify([user?.id, user?.role?.id, clientPermissions, permissions.dictionaries]) });
   const isColumnAllowed = useCallback(
     (columnId: ColumnId) => {
+      if (columnId === 'casesCount') return canViewClientCases;
       if (columnId === 'invoicesCount') return permissions.accounts.canView;
       if (columnId === 'actsCount') return permissions.acts.canView;
       if (columnId === 'paymentsCount') return permissions.payments.canView;
@@ -393,6 +410,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
       return true;
     },
     [
+      canViewClientCases,
       permissions.accounts.canView,
       permissions.acts.canView,
       permissions.contracts.canView,
@@ -409,21 +427,28 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
   );
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [clientEditorSession, setClientEditorSession] = useState(0);
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
+  const [detailSession, setDetailSession] = useState(0);
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [tableMenuPosition, setTableMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
-  const [responsiblesLoading, setResponsiblesLoading] = useState(false);
+  const [responsiblesLoadingState, setResponsiblesLoading] = useState(false);
+  const responsibleRead = useRef<{ owner: DocumentDeliveryRead; controller: AbortController } | null>(null);
   const [changeResponsibleOpen, setChangeResponsibleOpen] = useState(false);
-  const [changeResponsibleSubmitting, setChangeResponsibleSubmitting] = useState(false);
-  const [changeResponsibleError, setChangeResponsibleError] = useState<string | null>(null);
+  const [responsibleSession, setResponsibleSession] = useState(0);
+  const [responsibleTargets, setResponsibleTargets] = useState('');
+  const [responsibleError, setResponsibleError] = useState<{ owner: DocumentDeliveryRead; message: string } | null>(null);
   const [nextResponsibleId, setNextResponsibleId] = useState('');
 
   const [caseModalOpen, setCaseModalOpen] = useState(false);
+  const [caseSession, setCaseSession] = useState(0);
   const [caseClientId, setCaseClientId] = useState<number | null>(null);
   const [editingCase, setEditingCase] = useState<ClientCase | null>(null);
   const [caseMode, setCaseMode] = useState<'create' | 'edit'>('edit');
+  const [blankClientCase, setBlankClientCase] = useState<ClientCase>(() => ({ id: 0, clientId: 0, title: '',
+    description: '', status: 'Open', createdAt: new Date().toISOString() }));
 
   const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set());
 
@@ -519,8 +544,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
     return filters;
   }, [activeFilterColumns, filterSettings.filters, filterParamMap]);
 
-  const clientOwnerScope = JSON.stringify([user?.id, user?.role?.id, clientPermissions, permissions.cases,
-    permissions.contracts, permissions.accounts, permissions.acts, permissions.payments]);
+  const clientOwnerScope = authorityScope;
   const clientsQueryOptions = useMemo(
     () => ({
       mode: 'paged' as const,
@@ -544,8 +568,12 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
     [debouncedQuery, activityFilter, page, pageSize, statusFilter, activeFilters, canViewClients, clientOwnerScope],
   );
 
-  const { clients, loading, refreshing, total, createClient, updateClient, setClients, refresh } =
+  const { clients, loading, refreshing, error: clientsError, total, createClient, updateClient, setClients, refresh } =
     useClients(clientsQueryOptions);
+  const directoryDenied = isHttpErrorStatus(clientsError, 401) || isHttpErrorStatus(clientsError, 403);
+  const screenOwner = useDocumentDeliveryOwner(JSON.stringify([authorityScope, directoryDenied]));
+  const { capture: captureScreenOwner } = screenOwner;
+  const captureScreen = useCallback(() => canViewClients && !directoryDenied ? captureScreenOwner() : null, [canViewClients, directoryDenied, captureScreenOwner]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filterSettingsLoaded, setFilterSettingsLoaded] = useState(false);
@@ -573,22 +601,58 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
     selectedTableClients.length === 1 ? selectedTableClients[0] : null;
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const selectionKey = [...selectedTableClientIds].sort((a, b) => a - b).join(',');
+  const responsiblePromptActive = changeResponsibleOpen && responsibleTargets === selectionKey;
+  const latestList = useRef({ setClients, refresh }); latestList.current = { setClients, refresh };
+  const clientEditorOwner = useDocumentDeliveryOwner(JSON.stringify([screenOwner.scope, selectedClientId, detailSession, isModalOpen, editingClient?.id, clientEditorSession]));
+  const caseOwner = useDocumentDeliveryOwner(JSON.stringify([screenOwner.scope, selectedClientId, detailSession, caseModalOpen, caseClientId, caseMode, editingCase?.id, caseSession]));
+  const detailOwner = useDocumentDeliveryOwner(JSON.stringify([screenOwner.scope, selectedClientId, detailSession]));
+  const bulkOwner = useDocumentDeliveryOwner(JSON.stringify([screenOwner.scope, selectionKey,
+    query, debouncedQuery, activityFilter, statusFilter, activeFilters, page, pageSize, viewMode, selectedClientId, isModalOpen, caseModalOpen]));
+  const responsibleOwner = useDocumentDeliveryOwner(JSON.stringify([bulkOwner.scope, responsiblePromptActive, responsibleTargets, nextResponsibleId, responsibleSession]));
+  const changeResponsibleSubmitting = responsibleOwner.busy;
+  const changeResponsibleError = responsibleError?.owner.isCurrent() ? responsibleError.message : null;
+  const responsiblesLoading = responsiblesLoadingState && Boolean(responsibleRead.current?.owner.isCurrent());
+  const setChangeResponsibleError = (message: string | null) => {
+    const owner = responsibleOwner.capture(); if (!owner) return;
+    setResponsibleError(message ? { owner, message } : null);
+  };
+  useEffect(() => () => { responsibleRead.current?.controller.abort(); responsibleRead.current = null; }, [bulkOwner.scope]);
+
+  const closeCaseModal = () => { if (!caseOwner.capture()) return; caseOwner.invalidate(); setCaseModalOpen(false); setEditingCase(null); };
+  const closeResponsiblePrompt = () => { if (!responsibleOwner.capture()) return; responsibleOwner.invalidate(); setChangeResponsibleOpen(false); setResponsibleError(null); };
+  const { invalidate: invalidateCase } = caseOwner;
+  const { invalidate: invalidateClientEditor } = clientEditorOwner;
+  const { invalidate: invalidateResponsible } = responsibleOwner;
+  const { invalidate: invalidateBulk } = bulkOwner;
+  const { invalidate: invalidateDetail } = detailOwner;
+  useLayoutEffect(() => {
+    if (!directoryDenied) return;
+    invalidateCase(); invalidateClientEditor(); invalidateResponsible(); invalidateBulk(); invalidateDetail();
+    responsibleRead.current?.controller.abort(); responsibleRead.current = null;
+    setCaseModalOpen(false); setEditingCase(null); setCaseClientId(null); setIsModalOpen(false); setEditingClient(null);
+    setChangeResponsibleOpen(false); setResponsibleError(null); setResponsibles([]); setTableMenuPosition(null);
+    setSelectedClientId(null); setInitialCaseId('all'); setExpandedCards(new Set()); clearTableClientSelection();
+  }, [directoryDenied, invalidateCase, invalidateClientEditor, invalidateResponsible, invalidateBulk, invalidateDetail, clearTableClientSelection]);
+  const handleOpenClient = useCallback((clientId: number, caseId: number | 'all' = 'all') => {
+    if (!canViewClients || !captureScreen() || !Number.isSafeInteger(clientId) || clientId <= 0) return;
+    invalidateCase(); invalidateClientEditor(); invalidateResponsible(); invalidateBulk(); invalidateDetail();
+    setCaseModalOpen(false); setEditingCase(null); setIsModalOpen(false); setEditingClient(null);
+    setChangeResponsibleOpen(false); setResponsibleError(null); setTableMenuPosition(null);
+    clearTableClientSelection(); setDetailSession(value => value + 1); setSelectedClientId(clientId);
+    setInitialCaseId(typeof caseId === 'number' && Number.isSafeInteger(caseId) && caseId > 0 ? caseId : 'all');
+  }, [canViewClients, captureScreen, invalidateCase, invalidateClientEditor, invalidateResponsible, invalidateBulk, invalidateDetail, clearTableClientSelection]);
 
   useEffect(() => {
     const handler = (e: Event) => {
       const { clientId, caseId } =
         (e as CustomEvent<{ clientId: number; caseId?: number }>).detail || {};
-      if (typeof clientId === 'number') {
-        setSelectedClientId(clientId);
-        if (caseId !== undefined) {
-          setInitialCaseId(caseId);
-        }
-      }
+      if (typeof clientId === 'number') handleOpenClient(clientId, caseId ?? 'all');
     };
 
     window.addEventListener('open-client-detail', handler as EventListener);
     return () => window.removeEventListener('open-client-detail', handler as EventListener);
-  }, []);
+  }, [handleOpenClient]);
 
   const toggleCases = (clientId: number) =>
     setExpandedCards((prev) => {
@@ -605,23 +669,25 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
     toast.error(message || 'Недостаточно прав для выполнения действия.', 'Недостаточно прав');
   };
 
-  const handleOpenClient = (clientId: number, caseId: number | 'all' = 'all') => {
-    clearTableClientSelection();
-    setSelectedClientId(clientId);
-    setInitialCaseId(caseId);
-  };
-
-  const ensureResponsiblesLoaded = async () => {
+  const ensureResponsiblesLoaded = async (owner: DocumentDeliveryRead) => {
+    if (!owner.isCurrent()) throw new StaleUiOperationError();
     if (responsibles.length > 0) {
       return responsibles;
     }
 
+    const controller = new AbortController();
+    responsibleRead.current?.controller.abort();
+    responsibleRead.current = { owner, controller };
     try {
       setResponsiblesLoading(true);
-      const response = await apiService.getActResponsibles();
-      setResponsibles(response ?? []);
-      return response ?? [];
+      const response = await awaitOwnedUiResult(() => apiService.getActResponsibles({ signal: controller.signal }), owner.isCurrent);
+      if (!Array.isArray(response) || !response.every(item => item && Number.isSafeInteger(item.id) && item.id > 0 && typeof item.fullName === 'string')
+        || new Set(response.map(item => item.id)).size !== response.length) throw new Error('Не удалось подтвердить список ответственных.');
+      setResponsibles(response);
+      return response;
     } catch (error) {
+      if (!owner.isCurrent()) throw new StaleUiOperationError();
+      setResponsibles([]);
       const message = extractDisplayErrorMessage(
         error,
         'Не удалось загрузить список ответственных.',
@@ -629,44 +695,50 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
       toast.error(message, 'Ошибка');
       throw error;
     } finally {
-      setResponsiblesLoading(false);
+      if (responsibleRead.current?.controller === controller) { responsibleRead.current = null; setResponsiblesLoading(false); }
     }
   };
 
   const handleRefreshClients = async () => {
-    await refresh();
-    toast.success('Список клиентов обновлен.', 'Обновление выполнено');
+    if (!canViewClients || !captureScreen()) return;
+    const operation = bulkOwner.begin('refresh'); if (!operation) return;
+    try { await awaitOwnedUiResult(() => latestList.current.refresh(), operation.isCurrent); toast.success('Список клиентов обновлен.', 'Обновление выполнено'); }
+    catch (error) { if (operation.isCurrent() && !(error instanceof StaleUiOperationError)) toast.error(extractDisplayErrorMessage(error, 'Не удалось обновить клиентов.'), 'Ошибка'); }
+    finally { operation.finish(); }
   };
 
   const handleDeleteSelectedClients = async (ids: number[]) => {
+    if (!captureScreen()) return;
     if (!canDeleteClients) {
       showPermissionWarning('Недостаточно прав для удаления клиентов.');
       return;
     }
 
-    const normalizedIds = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)));
+    const normalizedIds = Array.from(new Set(ids.filter((id) => Number.isSafeInteger(id) && id > 0)));
     if (!normalizedIds.length) return;
+    const visible = new Map(sortedClients.map(client => [client.id, client]));
+    if (!normalizedIds.every(id => visible.has(id))) return;
+    const operation = bulkOwner.begin('delete'); if (!operation) return;
 
-    const targetClients = sortedClients.filter((client) => normalizedIds.includes(client.id));
     const description =
       normalizedIds.length === 1
-        ? `Удалить клиента "${targetClients[0]?.name ?? `#${normalizedIds[0]}`}"?`
+        ? `Удалить клиента "${visible.get(normalizedIds[0])?.name ?? `#${normalizedIds[0]}`}"?`
         : `Удалить выбранные записи (${normalizedIds.length})?`;
 
-    const approved = await confirm({
+    try {
+    const approved = await awaitOwnedUiResult(() => confirm({
       title: normalizedIds.length === 1 ? 'Удаление клиента' : 'Массовое удаление клиентов',
       description,
       confirmLabel: 'Удалить',
       cancelLabel: 'Отмена',
       variant: 'danger',
-    });
+    }), operation.isCurrent);
 
     if (!approved) return;
 
-    try {
-      await apiService.deleteClients(normalizedIds);
+      await awaitOwnedUiResult(() => apiService.deleteClients(normalizedIds), operation.isCurrent);
       clearTableClientSelection();
-      await refresh();
+      void latestList.current.refresh();
       toast.success(
         normalizedIds.length === 1
           ? 'Клиент удален.'
@@ -674,24 +746,28 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
         'Удаление выполнено',
       );
     } catch (error) {
+      if (!operation.isCurrent() || error instanceof StaleUiOperationError) return;
       const message = extractDisplayErrorMessage(error, 'Не удалось удалить клиентов.');
       toast.error(message, 'Ошибка');
-      await refresh();
-    }
+      void latestList.current.refresh();
+    } finally { operation.finish(); }
   };
 
   const openChangeResponsiblePrompt = async () => {
+    if (!captureScreen()) return;
     if (!canEditClients) {
       showPermissionWarning('Недостаточно прав для смены ответственного.');
       return;
     }
 
     if (!selectedTableClientCount) return;
+    const operation = bulkOwner.begin('responsibles'); if (!operation) return;
 
     try {
-      const availableResponsibles = await ensureResponsiblesLoaded();
+      const availableResponsibles = await ensureResponsiblesLoaded(operation);
+      if (!operation.isCurrent()) return;
       if (!availableResponsibles.length) {
-        setChangeResponsibleError('Список ответственных пуст.');
+        toast.error('Список ответственных пуст.', 'Смена ответственного');
         return;
       }
 
@@ -701,21 +777,24 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
           : String(availableResponsibles[0].id);
 
       setNextResponsibleId(defaultResponsibleId);
-      setChangeResponsibleError(null);
+      setResponsibleError(null);
+      setResponsibleSession(value => value + 1);
+      setResponsibleTargets(selectionKey);
       setChangeResponsibleOpen(true);
     } catch {
       /** */
-    }
+    } finally { operation.finish(); }
   };
 
   const submitResponsibleChange = async () => {
+    if (!responsiblePromptActive || !captureScreen() || !responsibleOwner.capture()) return;
     if (!canEditClients) {
       showPermissionWarning('Недостаточно прав для смены ответственного.');
       return;
     }
 
     const responsibleUserId = Number(nextResponsibleId);
-    if (!Number.isFinite(responsibleUserId) || responsibleUserId <= 0) {
+    if (!Number.isSafeInteger(responsibleUserId) || responsibleUserId <= 0) {
       setChangeResponsibleError('Выберите ответственного.');
       return;
     }
@@ -729,7 +808,11 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
           : null
       )
       ?? 'выбранного ответственного';
-    const approved = await confirm({
+    const ids = [...selectedTableClientIds];
+    if (!ids.length) return;
+    const operation = responsibleOwner.begin('assign'); if (!operation) return;
+    try {
+    const approved = await awaitOwnedUiResult(() => confirm({
       title: 'Подтверждение сохранения',
       description:
         selectedTableClientIds.length === 1
@@ -737,25 +820,24 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
           : `Сохранить нового ответственного (${selectedResponsibleLabel}) для выбранных клиентов: ${selectedTableClientIds.length}?`,
       confirmLabel: 'Сохранить',
       cancelLabel: 'Отмена',
-    });
+    }), operation.isCurrent);
 
     if (!approved) {
       return;
     }
 
-    try {
-      setChangeResponsibleSubmitting(true);
       setChangeResponsibleError(null);
-      await apiService.changeClientsResponsible(selectedTableClientIds, responsibleUserId);
-      setChangeResponsibleOpen(false);
-      await refresh();
+      await awaitOwnedUiResult(() => apiService.changeClientsResponsible(ids, responsibleUserId), operation.isCurrent);
+      closeResponsiblePrompt();
+      void latestList.current.refresh();
       toast.success('Ответственный обновлен.', 'Изменения сохранены');
     } catch (error) {
+      if (!operation.isCurrent() || error instanceof StaleUiOperationError) return;
       setChangeResponsibleError(
         extractDisplayErrorMessage(error, 'Не удалось сменить ответственного.'),
       );
     } finally {
-      setChangeResponsibleSubmitting(false);
+      operation.finish();
     }
   };
 
@@ -781,11 +863,13 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
   };
 
   const handleAddClient = () => {
+    if (!captureScreen()) return;
     if (!canCreateClients) {
       showPermissionWarning('Недостаточно прав для добавления клиентов.');
       return;
     }
     setEditingClient(null);
+    setClientEditorSession(value => value + 1);
     setIsModalOpen(true);
   };
 
@@ -798,71 +882,90 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
   };
 
   const handleCloseModal = () => {
+    if (!clientEditorOwner.capture()) return;
+    clientEditorOwner.invalidate();
     setIsModalOpen(false);
     setEditingClient(null);
   };
 
   const handleSubmitClient = async (clientData: ClientInput) => {
+    if (!isModalOpen || !clientEditorOwner.capture()) throw new StaleUiOperationError();
+    const operation = clientEditorOwner.begin('save'); if (!operation) throw new Error('Сохранение клиента уже выполняется.');
+    try {
     if (editingClient) {
       if (!canEditClients) {
         showPermissionWarning('Недостаточно прав для редактирования клиентов.');
         return;
       }
-      await updateClient(editingClient.id, clientData);
+      await awaitOwnedUiResult(() => updateClient(editingClient.id, clientData), operation.isCurrent);
     } else {
       if (!canCreateClients) {
         showPermissionWarning('Недостаточно прав для добавления клиентов.');
         return;
       }
-      await createClient(clientData);
+      await awaitOwnedUiResult(() => createClient(clientData), operation.isCurrent);
     }
+    } finally { operation.finish(); }
   };
 
   const handleDeleteClient = async (id: number) => {
+    if (!isModalOpen || !editingClient || editingClient.id !== id || !clientEditorOwner.capture()) throw new StaleUiOperationError();
     if (!canDeleteClients) {
       showPermissionWarning('Недостаточно прав для удаления клиентов.');
       return;
     }
-    setEditingClient(null);
-    setIsModalOpen(false);
+    const operation = clientEditorOwner.begin('delete'); if (!operation) throw new Error('Удаление клиента уже выполняется.');
 
     try {
-      await apiService.deleteClients([id]);
+      await awaitOwnedUiResult(() => apiService.deleteClients([id]), operation.isCurrent);
+      handleCloseModal();
       clearTableClientSelection();
-      await refresh();
+      void latestList.current.refresh();
     } catch (error) {
+      if (!operation.isCurrent() || error instanceof StaleUiOperationError) throw new StaleUiOperationError();
       toast.error(
         extractDisplayErrorMessage(error, 'Не удалось удалить клиента.'),
         'Ошибка',
       );
-      await refresh();
-    }
+      void latestList.current.refresh();
+      throw error;
+    } finally { operation.finish(); }
   };
 
   const openAddCase = (clientId: number) => {
-    if (!canCreateClients) {
+    if (!captureScreen()) return;
+    if (!sortedClients.some(client => client.id === clientId)) return;
+    if (!canCreateClientCases) {
       showPermissionWarning('Недостаточно прав для добавления дел.');
       return;
     }
     setCaseClientId(clientId);
+    setBlankClientCase({ id: 0, clientId, title: '', description: '', status: 'Open', createdAt: new Date().toISOString() });
+    setCaseSession(value => value + 1);
     setEditingCase(null);
     setCaseMode('create');
     setCaseModalOpen(true);
   };
 
   const openEditCase = (clientId: number, clientCase: ClientCase) => {
-    if (!canEditClients) {
+    if (!captureScreen()) return;
+    if (!Number.isSafeInteger(clientCase.id) || clientCase.id <= 0) return;
+    if (!sortedClients.some(client => client.id === clientId && client.cases?.some(item => item.id === clientCase.id))) return;
+    if (!canEditClientCases) {
       showPermissionWarning('Недостаточно прав для редактирования дел.');
       return;
     }
     setCaseClientId(clientId);
+    setCaseSession(value => value + 1);
     setEditingCase(clientCase);
     setCaseMode('edit');
     setCaseModalOpen(true);
   };
 
   const saveCase = async (patch: Partial<ClientCase>): Promise<void> => {
-    if (!caseClientId) return;
+    if (!caseModalOpen || !caseClientId || (caseMode === 'edit' && !editingCase) || !caseOwner.capture()) throw new StaleUiOperationError();
+    if (caseMode === 'edit' ? !canEditClientCases : !canCreateClientCases) throw new StaleUiOperationError();
+    const operation = caseOwner.begin('save'); if (!operation) throw new Error('Сохранение дела уже выполняется.');
 
     type Status = ClientCase['status'];
     const DEFAULT_STATUS: Status = 'Open';
@@ -920,13 +1023,11 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
       strategy: patch.strategy ?? editingCase?.strategy ?? '',
     };
 
+    try {
     if (caseMode === 'edit' && editingCase) {
-      if (!canEditClients) {
-        showPermissionWarning('Недостаточно прав для редактирования дел.');
-        return;
-      }
-      const updated = await apiService.updateCase(editingCase.id, base);
-      setClients((prev) =>
+      const updated = await awaitOwnedUiResult(() => apiService.updateCase(editingCase.id, base), operation.isCurrent);
+      if (!updated || updated.id !== editingCase.id || updated.clientId !== caseClientId) throw new Error('Не удалось подтвердить сохранённое дело. Обновите карточку.');
+      latestList.current.setClients((prev) =>
         prev.map((c) =>
           c.id === caseClientId
             ? { ...c, cases: (c.cases ?? []).map((k) => (k.id === updated.id ? updated : k)) }
@@ -934,31 +1035,26 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
         ),
       );
     } else {
-      if (!canCreateClients) {
-        showPermissionWarning('Недостаточно прав для добавления дел.');
-        return;
-      }
-      const created = await apiService.createCase(base);
-      setClients((prev) =>
+      const created = await awaitOwnedUiResult(() => apiService.createCase(base), operation.isCurrent);
+      if (!created || !Number.isSafeInteger(created.id) || created.id <= 0 || created.clientId !== caseClientId) throw new Error('Не удалось подтвердить созданное дело. Обновите карточку.');
+      latestList.current.setClients((prev) =>
         prev.map((c) =>
           c.id === caseClientId ? { ...c, cases: [created, ...(c.cases ?? [])] } : c,
         ),
       );
     }
 
-    setCaseModalOpen(false);
-    setEditingCase(null);
+    closeCaseModal();
+    } finally { operation.finish(); }
   };
 
   const deleteCase = async (): Promise<void> => {
-    if (!editingCase || !caseClientId) return;
-    if (!canDeleteClients) {
-      showPermissionWarning('Недостаточно прав для удаления дел.');
-      return;
-    }
-    await apiService.deleteCase(editingCase.id);
+    if (!caseModalOpen || !editingCase || !caseClientId || !canDeleteClientCases || !caseOwner.capture()) throw new StaleUiOperationError();
+    const operation = caseOwner.begin('delete'); if (!operation) throw new Error('Действие с делом уже выполняется.');
+    try {
+    await awaitOwnedUiResult(() => apiService.deleteCase(editingCase.id), operation.isCurrent);
 
-    setClients((prev) =>
+    latestList.current.setClients((prev) =>
       prev.map((c) =>
         c.id === caseClientId
           ? { ...c, cases: (c.cases ?? []).filter((k) => k.id !== editingCase.id) }
@@ -966,8 +1062,8 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
       ),
     );
 
-    setCaseModalOpen(false);
-    setEditingCase(null);
+    closeCaseModal();
+    } finally { operation.finish(); }
   };
 
   const hasAnyClients = total > 0;
@@ -1095,12 +1191,21 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
     );
   }
 
+  if (directoryDenied) {
+    return <div role="alert" className="p-3 text-sm text-red-700">
+      Не удалось подтвердить доступ к списку клиентов.
+      <button type="button" className="ml-2 underline" onClick={() => { void refresh(); }}>Обновить список</button>
+    </div>;
+  }
+
   if (selectedClientId) {
     return (
       <ClientDetail
+        key={detailOwner.scope}
         clientId={selectedClientId}
         onClientUpdated={(updatedClient) => {
-          setClients((prev) =>
+          if (!detailOwner.capture() || updatedClient.id !== selectedClientId) return;
+          latestList.current.setClients((prev) =>
             prev.map((client) =>
               client.id === updatedClient.id
                 ? {
@@ -1115,7 +1220,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
             ),
           );
         }}
-        onBack={() => setSelectedClientId(null)}
+        onBack={() => { if (!detailOwner.capture()) return; detailOwner.invalidate(); setSelectedClientId(null); }}
         initialCaseId={initialCaseId}
         onOpenTask={onOpenTask}
       />
@@ -1752,7 +1857,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
                       ))}
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
-                          {canCreateClients && (
+                          {canCreateClientCases && (
                             <button
                               type="button"
                               onClick={() => openAddCase(client.id)}
@@ -1783,8 +1888,8 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 items-stretch min-h-0">
             {sortedClients.map((client) => {
-              const cases = (client.cases ?? []) as ClientCase[];
-              const totalCases = getClientCaseCount(client);
+              const cases = (canViewClientCases ? client.cases ?? [] : []) as ClientCase[];
+              const totalCases = canViewClientCases ? getClientCaseCount(client) : 0;
               const hasCasePreviews = cases.length > 0;
 
               const counts = cases.reduce<Record<string, number>>((acc, c) => {
@@ -1851,7 +1956,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
                       </div>
                     </div>
                     <div className="flex gap-1 self-end sm:self-auto shrink-0">
-                      {canCreateClients && (
+                      {canCreateClientCases && (
                         <button
                           type="button"
                           onClick={() => openAddCase(client.id)}
@@ -1901,7 +2006,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
                       </div>
                     )}
                   </div>
-                  <div className="mt-2">
+                  {canViewClientCases && <div className="mt-2">
                     <div className="flex items-center gap-2 mb-2">
                       <FolderKanban size={18} className="text-slate-600" />
                       <span className="font-medium text-slate-800">{t('cases') || 'Дела'}</span>
@@ -1963,7 +2068,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
                                 )}`}>
                                 {caseStatusLabel(c.status)}
                               </span>
-                              {canEditClients && (
+                              {canEditClientCases && (
                                 <button
                                   type="button"
                                   onClick={() => openEditCase(client.id, c)}
@@ -1994,6 +2099,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
                       </button>
                     )}
                   </div>
+                  }
                   {getDisplayNotes(client.notes) && (
                     <p className="mt-4 text-sm text-gray-500 line-clamp-2">{getDisplayNotes(client.notes)}</p>
                   )}
@@ -2030,7 +2136,8 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
         />
 
         <FormPromptModal
-          open={changeResponsibleOpen}
+          key={responsibleOwner.scope}
+          open={responsiblePromptActive}
           title="Смена ответственного"
           description={
             selectedTableClientCount === 1
@@ -2043,6 +2150,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
               label: 'Ответственный',
               value: nextResponsibleId,
               onChange: (value) => {
+                if (!responsiblePromptActive || !responsibleOwner.capture()) return;
                 setNextResponsibleId(value);
                 if (changeResponsibleError) {
                   setChangeResponsibleError(null);
@@ -2059,10 +2167,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
               disabled: responsiblesLoading,
             },
           ]}
-          onCancel={() => {
-            setChangeResponsibleOpen(false);
-            setChangeResponsibleError(null);
-          }}
+          onCancel={closeResponsiblePrompt}
           onConfirm={submitResponsibleChange}
           confirmLabel="Сохранить"
           cancelLabel="Отмена"
@@ -2071,6 +2176,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
         />
 
         <ClientModal
+          key={clientEditorOwner.scope}
           isOpen={isModalOpen}
           ownerScope={clientOwnerScope}
           onClose={handleCloseModal}
@@ -2081,29 +2187,24 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
 
         {caseModalOpen && (
           <CaseModal
+            key={caseOwner.scope}
             isOpen={caseModalOpen}
-            onClose={() => setCaseModalOpen(false)}
+            onClose={closeCaseModal}
             caseData={
               caseMode === 'edit' && editingCase
                 ? editingCase
-                : ({
-                    id: 0,
-                    clientId: caseClientId ?? 0,
-                    title: '',
-                    description: '',
-                    status: 'Open',
-                    createdAt: new Date().toISOString(),
-                  } as ClientCase)
+                : blankClientCase
             }
             onSave={saveCase}
             onNextHearingConfirmed={(confirmation) => {
+              if (!canEditClientCases || !editingCase || !caseOwner.capture()) return;
               setEditingCase((current) => current ? { ...current, ...confirmation } : current);
-              setClients((current) => current.map((client) => ({
+              latestList.current.setClients((current) => current.map((client) => ({
                 ...client,
-                cases: client.cases?.map((item) => item.id === editingCase?.id ? { ...item, ...confirmation } : item),
+                cases: client.id === caseClientId ? client.cases?.map((item) => item.id === editingCase.id ? { ...item, ...confirmation } : item) : client.cases,
               })));
             }}
-            onDelete={caseMode === 'edit' ? deleteCase : undefined}
+            onDelete={caseMode === 'edit' && canDeleteClientCases ? deleteCase : undefined}
             canViewFinance={permissions.payments.canView}
             onOpenTask={permissions.tasks.canView ? onOpenTask : undefined}
             canCreateTasks={permissions.tasks.canView && permissions.tasks.canCreate}
