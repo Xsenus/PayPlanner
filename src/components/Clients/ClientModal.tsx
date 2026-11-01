@@ -1,5 +1,5 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Loader2, Search, X } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -7,6 +7,9 @@ import { useDialog } from '../../hooks/useDialog';
 import type { Client, ClientInput, LegalEntityInput } from '../../types';
 import { apiService } from '../../services/api';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
+import { useDocumentDeliveryOwner, type DocumentReadOwner } from '../../hooks/useDocumentDeliveryOwner';
+import { captureAuthSessionIdentity } from '../../services/authService';
+import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import {
   applyLegalEntityDadataDetails,
   buildQuickClientPayload,
@@ -22,41 +25,72 @@ interface ClientModalProps {
   onDelete?: (id: number) => Promise<void>;
   client?: Client;
   ownerScope?: string;
+  editorOwner?: DocumentReadOwner;
 }
 
-export function ClientModal({
+export function ClientModal(props: ClientModalProps) {
+  const initial = useRef({ client: props.client, revision: 0 });
+  if (initial.current.client !== props.client) initial.current = { client: props.client, revision: initial.current.revision + 1 };
+  const scope = JSON.stringify([props.isOpen, props.ownerScope, props.editorOwner?.scope, initial.current.revision, captureAuthSessionIdentity()]);
+  return <ClientModalScreen key={scope} {...props} />;
+}
+
+function ClientModalScreen({
   isOpen,
   onClose,
   onSubmit,
   onDelete,
   client,
   ownerScope,
+  editorOwner,
 }: ClientModalProps) {
   const { t } = useTranslation();
   const { confirm } = useDialog();
-  const [loading, setLoading] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const mutationOwner = useDocumentDeliveryOwner(JSON.stringify([isOpen, ownerScope, editorOwner?.scope, client?.id]));
+  const { capture: captureMutation, invalidate: invalidateMutation } = mutationOwner;
+  const captureParent = editorOwner?.capture;
+  const loading = mutationOwner.busy && mutationOwner.kind === 'save';
+  const deleting = mutationOwner.busy && mutationOwner.kind === 'delete';
+  const pendingMutation = useRef<ReturnType<typeof mutationOwner.begin>>(null);
+  const createdCompanyId = useRef<number | null>(null);
+  const [companyCreated, setCompanyCreated] = useState(false);
+  const lookup = useRef<{ sequence: number; controller: AbortController | null }>({ sequence: 0, controller: null });
+  const deleteConfirmation = useRef<AbortController | null>(null);
   const [dadataLoading, setDadataLoading] = useState(false);
   const [dadataMessage, setDadataMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [formData, setFormData] = useState(() => parseQuickClientModalFormData(client));
   const requirementsSection = formData.kind === 'legal' ? 'clients-modal-legal' : 'clients-modal';
   const { isRequired } = useFormRequirements(requirementsSection, isOpen, { ownerScope: JSON.stringify([ownerScope, client?.id, formData.kind]) });
+  const capture = () => {
+    if (!isOpen) return null;
+    const local = mutationOwner.capture();
+    const parent = editorOwner?.capture();
+    if (!local || (editorOwner && !parent)) return null;
+    return { isCurrent: () => local.isCurrent() && (!parent || parent.isCurrent()) };
+  };
+  const invalidateLookup = useCallback(() => {
+    lookup.current.sequence++;
+    lookup.current.controller?.abort(); lookup.current.controller = null;
+    setDadataLoading(false); setDadataMessage(null);
+  }, []);
+  const handleClose = useCallback(() => {
+    if (!isOpen || !captureMutation() || (captureParent && !captureParent())) return;
+    invalidateMutation(); invalidateLookup(); deleteConfirmation.current?.abort(); onClose();
+  }, [isOpen, captureMutation, captureParent, invalidateMutation, invalidateLookup, onClose]);
+  useEffect(() => {
+    const active = lookup.current;
+    return () => { active.sequence++; active.controller?.abort(); active.controller = null; deleteConfirmation.current?.abort(); };
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') handleClose();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, onClose]);
-
-  useEffect(() => {
-    setFormData(parseQuickClientModalFormData(client));
-    setErrorMessage(null);
-    setDadataMessage(null);
-  }, [client, isOpen]);
+  }, [isOpen, handleClose]);
 
   const fieldLabels: Record<string, string> = {
     Name: 'ФИО',
@@ -130,22 +164,30 @@ export function ClientModal({
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    setLoading(true);
+    const captured = capture(); if (!captured) return;
+    const operation = mutationOwner.begin('save'); if (!operation) return;
+    pendingMutation.current = operation;
+    const isCurrent = () => captured.isCurrent() && operation.isCurrent();
+    invalidateLookup();
     setErrorMessage(null);
 
     try {
-      let legalEntityId = client?.legalEntityId ?? null;
+      let legalEntityId = client?.legalEntityId ?? (formData.kind === 'legal' ? createdCompanyId.current : null);
       if (formData.kind === 'legal' && !legalEntityId) {
-        const createdLegalEntity = await apiService.createLegalEntity(buildLegalEntityPayload());
+        const createdLegalEntity = await awaitOwnedUiResult(() => apiService.createLegalEntity(buildLegalEntityPayload()), isCurrent);
+        if (!createdLegalEntity || !Number.isSafeInteger(createdLegalEntity.id) || createdLegalEntity.id <= 0) throw new Error('Не удалось подтвердить созданную организацию. Обновите список организаций перед повтором.');
         legalEntityId = createdLegalEntity.id;
+        createdCompanyId.current = legalEntityId;
+        setCompanyCreated(true);
       }
 
-      await onSubmit(buildQuickClientPayload(formData, client, legalEntityId));
-      onClose();
+      await awaitOwnedUiResult(() => onSubmit(buildQuickClientPayload(formData, client, legalEntityId)), isCurrent);
+      handleClose();
     } catch (error) {
-      setErrorMessage(extractErrorMessage(error, 'Не удалось сохранить клиента'));
+      if (isCurrent() && !(error instanceof StaleUiOperationError)) setErrorMessage(extractErrorMessage(error, 'Не удалось сохранить клиента'));
     } finally {
-      setLoading(false);
+      if (pendingMutation.current === operation) pendingMutation.current = null;
+      operation.finish();
     }
   };
 
@@ -153,6 +195,8 @@ export function ClientModal({
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => {
     const { name, value, type } = e.target;
+    if (!capture() || pendingMutation.current?.isCurrent()) return;
+    if (name.startsWith('legal') || name === 'phone') invalidateLookup();
     setFormData((prev) => ({
       ...prev,
       [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value,
@@ -160,48 +204,67 @@ export function ClientModal({
   };
 
   const handleKindChange = (kind: QuickClientKind) => {
+    if (!capture() || pendingMutation.current?.isCurrent()) return;
+    invalidateLookup();
     setFormData((prev) => ({ ...prev, kind }));
     setDadataMessage(null);
   };
 
   const handleFindLegalEntity = async () => {
+    const captured = capture();
+    if (!captured || formData.kind !== 'legal' || pendingMutation.current?.isCurrent() || lookup.current.controller) return;
     const inn = formData.legalInn.trim();
     if (!inn) {
       setDadataMessage('Введите ИНН для поиска.');
       return;
     }
 
+    const sequence = ++lookup.current.sequence;
+    const controller = new AbortController(); lookup.current.controller = controller;
+    const isCurrent = () => captured.isCurrent() && lookup.current.sequence === sequence && !controller.signal.aborted;
     setDadataLoading(true);
     setDadataMessage(null);
     try {
-      const details = await apiService.findLegalEntityById({ query: inn });
-      setFormData((prev) => applyLegalEntityDadataDetails(prev, details));
+      const details = await awaitOwnedUiResult(() => apiService.findLegalEntityById({ query: inn }, { signal: controller.signal }), isCurrent);
+      if (!details || typeof details.shortName !== 'string'
+        || (details.phones != null && (!Array.isArray(details.phones) || !details.phones.every(value => typeof value === 'string')))
+        || (details.emails != null && (!Array.isArray(details.emails) || !details.emails.every(value => typeof value === 'string')))
+        || (/^\d{10}(\d{2})?$/.test(inn) && details.inn !== inn)) throw new Error('Не удалось подтвердить организацию по указанному ИНН.');
+      setFormData((prev) => isCurrent() ? applyLegalEntityDadataDetails(prev, details) : prev);
       setDadataMessage('Данные найдены и подставлены.');
     } catch (error) {
-      setDadataMessage(extractErrorMessage(error, 'Не удалось найти организацию по ИНН'));
+      if (isCurrent() && !(error instanceof StaleUiOperationError)) setDadataMessage(extractErrorMessage(error, 'Не удалось найти организацию по ИНН'));
     } finally {
-      setDadataLoading(false);
+      if (lookup.current.sequence === sequence) { lookup.current.controller = null; setDadataLoading(false); }
     }
   };
 
   const handleDelete = async () => {
     if (!client || !onDelete) return;
-    const ok = await confirm({
-      title: 'Подтверждение удаления',
-      description: t('confirmDeleteClient') || 'Удалить клиента? Это действие необратимо.',
-      confirmLabel: 'Удалить',
-      cancelLabel: 'Отмена',
-      variant: 'danger',
-    });
-    if (!ok) return;
-
+    const captured = capture(); if (!captured) return;
+    const operation = mutationOwner.begin('delete'); if (!operation) return;
+    pendingMutation.current = operation;
+    const controller = new AbortController(); deleteConfirmation.current = controller;
+    const isCurrent = () => captured.isCurrent() && operation.isCurrent();
+    invalidateLookup(); setErrorMessage(null);
     try {
-      setDeleting(true);
-      await onDelete(client.id);
+      const ok = await awaitOwnedUiResult(() => confirm({
+        signal: controller.signal,
+        title: 'Подтверждение удаления',
+        description: t('confirmDeleteClient') || 'Удалить клиента? Это действие необратимо.',
+        confirmLabel: 'Удалить',
+        cancelLabel: 'Отмена',
+        variant: 'danger',
+      }), isCurrent);
+      if (!ok) return;
+
+      await awaitOwnedUiResult(() => onDelete(client.id), isCurrent);
     } catch (error) {
-      console.error('Failed to delete client:', error);
+      if (isCurrent() && !(error instanceof StaleUiOperationError)) setErrorMessage(extractErrorMessage(error, 'Не удалось удалить клиента'));
     } finally {
-      setDeleting(false);
+      if (deleteConfirmation.current === controller) deleteConfirmation.current = null;
+      if (pendingMutation.current === operation) pendingMutation.current = null;
+      operation.finish();
     }
   };
 
@@ -231,7 +294,7 @@ export function ClientModal({
             </h2>
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               className="rounded-lg p-2 transition-colors hover:bg-gray-100"
               aria-label={t('cancel') || 'Закрыть'}
             >
@@ -245,7 +308,9 @@ export function ClientModal({
                 {errorMessage}
               </div>
             )}
+            {companyCreated && <div className="text-sm text-slate-600">Организация уже создана. Повторное сохранение клиента использует эту же организацию.</div>}
 
+            <fieldset disabled={loading || deleting} className="min-w-0 space-y-4 border-0 p-0">
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700">Тип клиента</label>
               <div className="grid grid-cols-2 gap-2">
@@ -419,6 +484,7 @@ export function ClientModal({
                 </span>
               </span>
             </label>
+            </fieldset>
 
             <div className="flex gap-3 pt-4">
               {client && onDelete && (
@@ -433,14 +499,14 @@ export function ClientModal({
               )}
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || deleting}
                 className="flex-1 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
               >
                 {loading ? t('saving') : client ? t('update') : t('addClient')}
               </button>
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleClose}
                 className="flex-1 rounded-lg bg-gray-200 px-4 py-2 font-medium text-gray-800 transition-colors hover:bg-gray-300"
               >
                 {t('cancel')}

@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Clients } from './Clients';
 import { apiService } from '../../services/api';
@@ -24,12 +24,19 @@ const row: Client = { id: 1, name: 'Разрешённый клиент', phone:
 
 describe('client list parent ownership', () => {
   let session: ReturnType<typeof documentCopyTestSession>;
-  beforeEach(() => { vi.clearAllMocks(); session = documentCopyTestSession(); permissions.clients.canView = true; permissions.clients.viewScope = 'all'; permissions.cases.viewScope = 'all';
+  beforeEach(() => { vi.clearAllMocks(); session = documentCopyTestSession(); permissions.clients.canView = true; permissions.clients.canCreate = false; permissions.clients.viewScope = 'all'; permissions.cases.viewScope = 'all';
     vi.mocked(apiService.getClientsV2).mockResolvedValue({ items: [row], total: 1, page: 1, pageSize: 25 }); vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'synthetic-client-setting', value: '' }); });
   afterEach(() => session.restore());
   it('requirements parent: client page passes current permission scope to its quick editor', async () => {
     const view = render(<Clients />); await screen.findByText('Разрешённый клиент'); const first = vi.mocked(ClientModal).mock.lastCall?.[0].ownerScope; expect(first).toBeTruthy();
     permissions.clients.viewScope = 'own'; view.rerender(<Clients />); await waitFor(() => expect(vi.mocked(ClientModal).mock.lastCall?.[0].ownerScope).not.toBe(first));
+  });
+  it('quick client parent: direct child requests receive the editor lifetime invalidated by close and permissions', async () => {
+    permissions.clients.canCreate = true; const view = render(<Clients />); await screen.findByText('Разрешённый клиент'); fireEvent.click(screen.getByRole('button', { name: 'addClient' }));
+    const first = vi.mocked(ClientModal).mock.lastCall![0]; expect(first.isOpen).toBe(true); const captured = first.editorOwner!.capture()!; expect(captured.isCurrent()).toBe(true);
+    act(() => first.onClose()); expect(captured.isCurrent()).toBe(false); expect(first.editorOwner!.capture()).toBeNull(); fireEvent.click(screen.getByRole('button', { name: 'addClient' }));
+    const second = vi.mocked(ClientModal).mock.lastCall![0]; expect(second.editorOwner!.scope).not.toBe(first.editorOwner!.scope); const next = second.editorOwner!.capture()!;
+    permissions.clients.viewScope = 'own'; view.rerender(<Clients />); expect(next.isCurrent()).toBe(false);
   });
   it('dictionary caller: client list scopes its statuses and disables them without view access', async () => {
     const view = render(<Clients />); await screen.findByText('Разрешённый клиент'); const first = vi.mocked(useClientStatuses).mock.lastCall?.[0]; expect(first?.enabled).toBe(true);

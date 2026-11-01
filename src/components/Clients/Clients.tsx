@@ -2179,6 +2179,7 @@ function ClientsScreen({ context, onOpenContract, onOpenInvoice, onOpenAct, onOp
           key={clientEditorOwner.scope}
           isOpen={isModalOpen}
           ownerScope={clientOwnerScope}
+          editorOwner={clientEditorOwner}
           onClose={handleCloseModal}
           onSubmit={handleSubmitClient}
           onDelete={handleDeleteClient}

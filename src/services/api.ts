@@ -6666,10 +6666,12 @@ export class ApiService {
     });
   }
 
-  async findLegalEntityById(payload: { query: string; kpp?: string }) {
+  async findLegalEntityById(payload: { query: string; kpp?: string }, options: { signal?: AbortSignal } = {}) {
     return this.request<LegalEntityDadataDetails>(`/legal-entities/find-by-id`, {
       method: 'POST',
       body: JSON.stringify(payload),
+      signal: options.signal,
+      cache: 'no-store',
     });
   }
 
