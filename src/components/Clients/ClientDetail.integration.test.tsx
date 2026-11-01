@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ClientDetail } from './ClientDetail';
-import type { Act, Client, Contract, Invoice, LegalEntityDetail, LegalEntityInput, Payment, PowerOfAttorney, CleanedAddress, DadataAddressSuggestion, PaymentPayload, ClientBalanceTransaction } from '../../types';
+import type { Act, Client, Contract, Invoice, LegalEntityDetail, LegalEntityInput, Payment, PowerOfAttorney, CleanedAddress, DadataAddressSuggestion, PaymentPayload, ClientBalanceTransaction, InvoiceInput } from '../../types';
 import { apiService } from '../../services/api';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
@@ -646,7 +646,235 @@ vi.mock('./ClientStatusBadge', () => ({
   ClientStatusBadge: () => null,
 }));
 
+type ClientInvoiceModalProps = Parameters<typeof import('../Accounts/InvoiceModal').InvoiceModal>[0];
+const currentClientInvoiceModal = () => invoiceLookupPropsSpy.mock.calls.at(-1)?.[0] as ClientInvoiceModalProps;
+const clientInvoiceRecord = (id = 91): Invoice => ({ id, number: `СЧ-${id}`, date: '2026-11-02', amount: 1250.75, clientId: 1,
+  type: 'Income', status: 'Pending', createdAt: '2026-11-02T00:00:00Z' } as Invoice);
+const clientInvoicePayload = (): InvoiceInput => ({ number: 'СЧ-проект', date: '2026-11-02', amount: 1250.75, clientId: 1, type: 'Income',
+  status: 'Pending', description: 'Ручной текст', contractId: 101, clientCaseIds: [19], replaceInstallmentPlan: false });
+async function setupInvoiceCaller(mode: 'create' | 'edit' | 'delete' = 'create') {
+  Object.assign(permissionsResult.accounts, { canView: true, canCreate: true, canEdit: true, canDelete: true });
+  for (const method of ['createInvoice', 'updateInvoice', 'deleteInvoice'] as const) emptyInvoicesResult[method].mockReset();
+  emptyInvoicesResult.createInvoice.mockResolvedValue(clientInvoiceRecord(92)); emptyInvoicesResult.updateInvoice.mockResolvedValue(clientInvoiceRecord());
+  emptyInvoicesResult.deleteInvoice.mockResolvedValue(undefined);
+  useInvoicesMock.mockReturnValue({ ...emptyInvoicesResult, invoices: [clientInvoiceRecord()], pagination: { total: 1, page: 1, pageSize: 10 } });
+  const props = { clientId: 1, onBack: vi.fn(), initialSection: 'accounts' as const }; const view = render(<ClientDetail {...props} />);
+  if (mode === 'create') fireEvent.click(await screen.findByRole('button', { name: 'Добавить счёт' }));
+  else {
+    const row = (await screen.findByRole('link', { name: '№СЧ-91' })).closest('tr')!;
+    fireEvent.click(within(row).getByRole('button', { name: mode === 'edit' ? 'Редактировать' : 'Удалить' }));
+  }
+  if (mode !== 'delete') await waitFor(() => expect(invoiceLookupPropsSpy).toHaveBeenCalled());
+  return { view, props, modal: currentClientInvoiceModal() };
+}
+
 describe('ClientDetail integration', () => {
+  it('invoice caller baseline: a retained closed submit cannot create another invoice', async () => {
+    const { modal } = await setupInvoiceCaller(); act(() => modal.onClose());
+    await act(async () => { await modal.onSubmit(clientInvoicePayload()).catch(() => undefined); });
+    expect(emptyInvoicesResult.createInvoice).not.toHaveBeenCalled();
+  });
+  it('invoice caller baseline: late success cannot toast or refresh another role', async () => {
+    const { view, props, modal } = await setupInvoiceCaller(); let finish!: (value: Invoice) => void;
+    emptyInvoicesResult.createInvoice.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    let result!: Promise<unknown>; act(() => { result = modal.onSubmit(clientInvoicePayload()).catch(error => error); });
+    await waitFor(() => expect(emptyInvoicesResult.createInvoice).toHaveBeenCalledOnce());
+    authState.roleId = 2; view.rerender(<ClientDetail {...props} />); const count = emptyPaymentsResult.refresh.mock.calls.length;
+    await act(async () => { finish(clientInvoiceRecord(92)); await result; });
+    expect(toastSuccessMock).not.toHaveBeenCalled(); expect(emptyPaymentsResult.refresh).toHaveBeenCalledTimes(count);
+  });
+  it('invoice caller baseline: revoked delete confirmation cannot dispatch', async () => {
+    let approve!: (value: boolean) => void; confirmMock.mockReturnValueOnce(new Promise(resolve => { approve = resolve; }));
+    const { view, props } = await setupInvoiceCaller('delete'); await waitFor(() => expect(confirmMock).toHaveBeenCalledOnce());
+    authState.roleId = 2; view.rerender(<ClientDetail {...props} />); await act(async () => approve(true));
+    expect(emptyInvoicesResult.deleteInvoice).not.toHaveBeenCalled(); expect(confirmMock.mock.calls[0][0].signal.aborted).toBe(true);
+  });
+  it('invoice caller baseline: duplicate submits dispatch only one creation', async () => {
+    const { modal } = await setupInvoiceCaller(); let finish!: (value: Invoice) => void;
+    emptyInvoicesResult.createInvoice.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    let first!: Promise<unknown>; let second!: Promise<unknown>;
+    act(() => { first = modal.onSubmit(clientInvoicePayload()).catch(error => error); second = modal.onSubmit(clientInvoicePayload()).catch(error => error); });
+    await act(async () => { finish(clientInvoiceRecord(92)); await Promise.all([first, second]); });
+    expect(emptyInvoicesResult.createInvoice).toHaveBeenCalledOnce();
+  });
+
+  it.each(['create', 'edit'] as const)('invoice caller matrix: current %s preserves payload and uses Accounts independently', async mode => {
+    const { modal } = await setupInvoiceCaller(mode); permissionsResult.clients.canCreate = false; permissionsResult.clients.canEdit = false;
+    const body = clientInvoicePayload(); await act(async () => modal.onSubmit(body));
+    const write = mode === 'create' ? emptyInvoicesResult.createInvoice : emptyInvoicesResult.updateInvoice;
+    expect(write).toHaveBeenCalledOnce(); expect(write.mock.calls[0][mode === 'create' ? 0 : 1]).toBe(body);
+    expect(write.mock.calls[0].at(-1)).toBeTypeOf('function'); expect(toastSuccessMock).toHaveBeenCalledOnce();
+    expect(emptyPaymentsResult.refresh).toHaveBeenCalledOnce();
+  });
+  it.each((['create', 'edit'] as const).flatMap(mode => ['operation', 'view', 'client', 'role', 'closed', 'login', 'actor', 'logout'].map(change => ({ mode, change }))))(
+    'invoice caller matrix: retained $mode cannot dispatch after $change', async ({ mode, change }) => {
+      const session = documentCopyTestSession();
+      try {
+        const { view, props, modal } = await setupInvoiceCaller(mode);
+        if (change === 'operation') permissionsResult.accounts[mode === 'create' ? 'canCreate' : 'canEdit'] = false;
+        if (change === 'view') permissionsResult.accounts.canView = false;
+        if (change === 'client') view.rerender(<ClientDetail {...props} clientId={2} />);
+        if (change === 'role') { authState.roleId = 2; view.rerender(<ClientDetail {...props} />); }
+        if (change === 'closed') act(() => modal.onClose());
+        if (change === 'login' || change === 'actor' || change === 'logout') session.replace(change);
+        await act(async () => { await expect(modal.onSubmit(clientInvoicePayload())).rejects.toBeInstanceOf(Error); });
+        expect(emptyInvoicesResult.createInvoice).not.toHaveBeenCalled(); expect(emptyInvoicesResult.updateInvoice).not.toHaveBeenCalled();
+      } finally { session.restore(); }
+    });
+  it.each((['create', 'edit'] as const).flatMap(mode => ['success', 'error'].flatMap(outcome => ['client', 'role', 'operation', 'view', 'login', 'unmount'].map(change => ({ mode, outcome, change })))))(
+    'invoice caller matrix: late $mode $outcome is ignored after $change', async ({ mode, outcome, change }) => {
+      const session = documentCopyTestSession();
+      try {
+        const { view, props, modal } = await setupInvoiceCaller(mode); let finish!: (value: Invoice) => void; let fail!: (error: Error) => void;
+        const write = mode === 'create' ? emptyInvoicesResult.createInvoice : emptyInvoicesResult.updateInvoice;
+        write.mockReturnValueOnce(new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
+        let result!: Promise<unknown>; act(() => { result = modal.onSubmit(clientInvoicePayload()).catch(error => error); });
+        await waitFor(() => expect(write).toHaveBeenCalledOnce());
+        const current = write.mock.calls[0].at(-1) as () => boolean; expect(current()).toBe(true);
+        if (change === 'client') view.rerender(<ClientDetail {...props} clientId={2} />);
+        if (change === 'role') { authState.roleId = 2; view.rerender(<ClientDetail {...props} />); }
+        if (change === 'operation') permissionsResult.accounts[mode === 'create' ? 'canCreate' : 'canEdit'] = false;
+        if (change === 'view') permissionsResult.accounts.canView = false;
+        if (change === 'login') session.replace();
+        if (change === 'unmount') view.unmount();
+        expect(current()).toBe(false); const refreshes = emptyPaymentsResult.refresh.mock.calls.length;
+        await act(async () => { if (outcome === 'success') finish(clientInvoiceRecord(mode === 'create' ? 92 : 91)); else fail(new Error('Старая ошибка')); expect(await result).toBeInstanceOf(StaleUiOperationError); });
+        expect(toastSuccessMock).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+        // Same-object permission revocation must not reconcile a now forbidden invoice list.
+        if (change !== 'operation') expect(emptyPaymentsResult.refresh).toHaveBeenCalledTimes(refreshes);
+      } finally { session.restore(); }
+    });
+  it.each(['create', 'edit'] as const)('invoice caller matrix: current %s error is visible and explicit retry succeeds', async mode => {
+    const { modal } = await setupInvoiceCaller(mode); const write = mode === 'create' ? emptyInvoicesResult.createInvoice : emptyInvoicesResult.updateInvoice;
+    write.mockRejectedValueOnce(new Error('Запись временно недоступна'));
+    await act(async () => { await expect(modal.onSubmit(clientInvoicePayload())).rejects.toThrow('Запись временно недоступна'); });
+    expect(currentClientInvoiceModal().errorMessage).toContain('Запись временно недоступна'); expect(currentClientInvoiceModal().submitting).toBe(false);
+    await act(async () => currentClientInvoiceModal().onSubmit(clientInvoicePayload())); expect(write).toHaveBeenCalledTimes(2); expect(toastSuccessMock).toHaveBeenCalledOnce();
+  });
+  it.each(['create', 'edit'] as const)('invoice caller matrix: closing pending %s keeps a single write and reconciles fresh screen', async mode => {
+    const { modal } = await setupInvoiceCaller(mode); const write = mode === 'create' ? emptyInvoicesResult.createInvoice : emptyInvoicesResult.updateInvoice;
+    let finish!: (value: Invoice) => void; write.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    let result!: Promise<unknown>; act(() => { result = modal.onSubmit(clientInvoicePayload()).catch(error => error); });
+    act(() => modal.onClose()); fireEvent.click(screen.getByRole('button', { name: 'Добавить счёт' })); expect(write).toHaveBeenCalledOnce();
+    await act(async () => { finish(clientInvoiceRecord(mode === 'create' ? 92 : 91)); expect(await result).toBeInstanceOf(StaleUiOperationError); });
+    await waitFor(() => expect(emptyInvoicesResult.refresh).toHaveBeenCalledOnce()); expect(emptyPaymentsResult.refresh).toHaveBeenCalledOnce(); expect(toastSuccessMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Добавить счёт' })); await act(async () => {}); const next = currentClientInvoiceModal();
+    act(() => modal.onClose()); expect(currentClientInvoiceModal()).toBe(next);
+    await act(async () => { await expect(modal.onSubmit(clientInvoicePayload())).rejects.toBeInstanceOf(StaleUiOperationError); }); expect(write).toHaveBeenCalledOnce();
+  });
+  it.each([0, -1, NaN, 93])('invoice caller matrix: mismatching saved edit ID %s cannot close or claim success', async id => {
+    const { modal } = await setupInvoiceCaller('edit'); emptyInvoicesResult.updateInvoice.mockResolvedValueOnce(clientInvoiceRecord(id));
+    await act(async () => { await expect(modal.onSubmit(clientInvoicePayload())).rejects.toThrow('Сервер вернул другой счёт'); });
+    expect(currentClientInvoiceModal().open).toBe(true); expect(currentClientInvoiceModal().errorMessage).toContain('Сервер вернул другой счёт'); expect(toastSuccessMock).not.toHaveBeenCalled();
+  });
+  it('invoice caller matrix: token refresh of the same session keeps the current save valid', async () => {
+    const session = documentCopyTestSession(); try {
+      const { modal } = await setupInvoiceCaller(); session.refresh(); await act(async () => modal.onSubmit(clientInvoicePayload()));
+      expect(emptyInvoicesResult.createInvoice).toHaveBeenCalledOnce(); expect(toastSuccessMock).toHaveBeenCalledOnce();
+    } finally { session.restore(); }
+  });
+  it('invoice caller matrix: save does not refresh payments without Payments view', async () => {
+    const { modal } = await setupInvoiceCaller(); permissionsResult.payments.canView = false;
+    await act(async () => modal.onSubmit(clientInvoicePayload())); expect(emptyPaymentsResult.refresh).not.toHaveBeenCalled(); expect(toastSuccessMock).toHaveBeenCalledOnce();
+  });
+  it('invoice caller matrix: query replacement stops the old hook refresh and reconciles the current list', async () => {
+    const { modal } = await setupInvoiceCaller(); let finish!: (value: Invoice) => void;
+    emptyInvoicesResult.createInvoice.mockReturnValueOnce(new Promise(resolve => { finish = resolve; })); let result!: Promise<unknown>;
+    act(() => { result = modal.onSubmit(clientInvoicePayload()).catch(error => error); });
+    fireEvent.change(screen.getByLabelText('Поиск счетов клиента'), { target: { value: 'другой отбор' } });
+    await waitFor(() => expect(useInvoicesMock.mock.lastCall?.[0].search).toBe('другой отбор'));
+    expect((emptyInvoicesResult.createInvoice.mock.calls[0][1] as () => boolean)()).toBe(true);
+    await act(async () => { finish(clientInvoiceRecord(92)); expect(await result).toBeUndefined(); });
+    expect(emptyInvoicesResult.refresh).toHaveBeenCalledOnce(); expect(toastSuccessMock).toHaveBeenCalledOnce(); expect(emptyInvoicesResult.createInvoice).toHaveBeenCalledOnce();
+  });
+  it('invoice caller matrix: confirmation is single-flight and ordinary cancellation permits retry', async () => {
+    let approve!: (value: boolean) => void; confirmMock.mockReturnValueOnce(new Promise(resolve => { approve = resolve; }));
+    await setupInvoiceCaller('delete'); const row = screen.getByRole('link', { name: '№СЧ-91' }).closest('tr')!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Удалить' })); expect(confirmMock).toHaveBeenCalledOnce();
+    await act(async () => approve(false)); expect(emptyInvoicesResult.deleteInvoice).not.toHaveBeenCalled();
+    fireEvent.click(within(row).getByRole('button', { name: 'Удалить' })); await waitFor(() => expect(emptyInvoicesResult.deleteInvoice).toHaveBeenCalledOnce());
+    expect(emptyInvoicesResult.deleteInvoice.mock.calls[0][0]).toBe(91); expect(emptyInvoicesResult.deleteInvoice.mock.calls[0][1]).toBeTypeOf('function');
+  });
+  it.each(['view', 'operation', 'login', 'query', 'section'] as const)('invoice caller matrix: confirmation cannot dispatch after %s', async change => {
+    const session = documentCopyTestSession(); try {
+      let approve!: (value: boolean) => void; confirmMock.mockReturnValueOnce(new Promise(resolve => { approve = resolve; })); await setupInvoiceCaller('delete');
+      if (change === 'view') permissionsResult.accounts.canView = false;
+      if (change === 'operation') permissionsResult.accounts.canDelete = false;
+      if (change === 'login') session.replace();
+      if (change === 'query') { fireEvent.change(screen.getByLabelText('Поиск счетов клиента'), { target: { value: 'новый' } }); await waitFor(() => expect(useInvoicesMock.mock.lastCall?.[0].search).toBe('новый')); }
+      if (change === 'section') fireEvent.click(screen.getByRole('button', { name: 'Личные данные' }));
+      await act(async () => approve(true)); expect(emptyInvoicesResult.deleteInvoice).not.toHaveBeenCalled();
+      if (change === 'query' || change === 'section') expect(confirmMock.mock.calls[0][0].signal.aborted).toBe(true);
+    } finally { session.restore(); }
+  });
+  it.each(['success', 'error'] as const)('invoice caller matrix: late delete %s cannot affect another role', async outcome => {
+    let finish!: () => void; let fail!: (error: Error) => void;
+    emptyInvoicesResult.deleteInvoice.mockReset();
+    // setup resets method behavior; dispatch remains pending after its ordinary confirmation.
+    const setup = await setupInvoiceCaller('edit'); act(() => setup.modal.onClose());
+    emptyInvoicesResult.deleteInvoice.mockReturnValueOnce(new Promise<void>((resolve, reject) => { finish = resolve; fail = reject; }));
+    const row = screen.getByRole('link', { name: '№СЧ-91' }).closest('tr')!; fireEvent.click(within(row).getByRole('button', { name: 'Удалить' }));
+    await waitFor(() => expect(emptyInvoicesResult.deleteInvoice).toHaveBeenCalledOnce()); authState.roleId = 2; setup.view.rerender(<ClientDetail {...setup.props} />);
+    const refreshes = emptyPaymentsResult.refresh.mock.calls.length;
+    await act(async () => { if (outcome === 'success') finish(); else fail(new Error('Старое удаление')); });
+    expect(emptyPaymentsResult.refresh).toHaveBeenCalledTimes(refreshes); expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+  it.each([0, -1, NaN])('invoice caller boundaries: invalid new ID %s leaves creation open with a clear error', async id => {
+    const { modal } = await setupInvoiceCaller(); emptyInvoicesResult.createInvoice.mockResolvedValueOnce(clientInvoiceRecord(id));
+    await act(async () => { await expect(modal.onSubmit(clientInvoicePayload())).rejects.toThrow('Сервер вернул другой счёт'); });
+    expect(currentClientInvoiceModal().errorMessage).toContain('Сервер вернул другой счёт'); expect(currentClientInvoiceModal().open).toBe(true); expect(toastSuccessMock).not.toHaveBeenCalled();
+  });
+  it('invoice caller boundaries: an accepted creation cannot be sent again through its old form', async () => {
+    const { modal } = await setupInvoiceCaller(); await act(async () => modal.onSubmit(clientInvoicePayload()));
+    await act(async () => { await expect(modal.onSubmit(clientInvoicePayload())).rejects.toBeInstanceOf(StaleUiOperationError); });
+    expect(emptyInvoicesResult.createInvoice).toHaveBeenCalledOnce();
+  });
+  it('invoice caller boundaries: editing cannot send two updates before the next render', async () => {
+    const { modal } = await setupInvoiceCaller('edit'); let finish!: (value: Invoice) => void;
+    emptyInvoicesResult.updateInvoice.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    let first!: Promise<unknown>; let second!: Promise<unknown>;
+    act(() => { first = modal.onSubmit(clientInvoicePayload()).catch(error => error); second = modal.onSubmit(clientInvoicePayload()).catch(error => error); });
+    await act(async () => { finish(clientInvoiceRecord()); await first; expect(await second).toBeInstanceOf(Error); });
+    expect(emptyInvoicesResult.updateInvoice).toHaveBeenCalledOnce(); expect(toastSuccessMock).toHaveBeenCalledOnce();
+  });
+  it('invoice caller boundaries: current delete failure releases the action for explicit retry', async () => {
+    const { modal } = await setupInvoiceCaller('edit'); act(() => modal.onClose());
+    emptyInvoicesResult.deleteInvoice.mockRejectedValueOnce(new Error('Удаление временно недоступно'));
+    const row = screen.getByRole('link', { name: '№СЧ-91' }).closest('tr')!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Удалить' })); await waitFor(() => expect(toastErrorMock).toHaveBeenCalledOnce());
+    expect(toastErrorMock.mock.calls[0][0]).toContain('Удаление временно недоступно');
+    fireEvent.click(within(row).getByRole('button', { name: 'Удалить' })); await waitFor(() => expect(emptyInvoicesResult.deleteInvoice).toHaveBeenCalledTimes(2));
+    expect(confirmMock).toHaveBeenCalledTimes(2);
+  });
+  it('invoice caller boundaries: the invoice hook receives the current screen owner', async () => {
+    const { view, props } = await setupInvoiceCaller(); const owner = useInvoicesMock.mock.lastCall?.[1]; expect(owner.capture()?.isCurrent()).toBe(true);
+    view.rerender(<ClientDetail {...props} clientId={2} />); expect(owner.capture()).toBeNull(); expect(useInvoicesMock.mock.lastCall?.[1].scope).not.toBe(owner.scope);
+  });
+  it.each([{ entity: 910, accepted: true }, { entity: 911, accepted: false }, { entity: undefined, accepted: false },
+    { entity: 0, accepted: false }, { entity: -1, accepted: false }, { entity: NaN, accepted: false }, { entity: '910', accepted: false },
+    { entity: Infinity, accepted: false }, { entity: 910.5, accepted: false }])(
+    'invoice caller identity: changed representative with entity $entity accepted=$accepted', async ({ entity, accepted }) => {
+      const { view, props, modal } = await setupInvoiceCaller(); act(() => modal.onClose());
+      useInvoicesMock.mockReturnValue({ ...emptyInvoicesResult, invoices: [{ ...clientInvoiceRecord(), invoiceEntityId: 910 }], pagination: { total: 1, page: 1, pageSize: 10 } });
+      view.rerender(<ClientDetail {...props} />); const row = screen.getByRole('link', { name: '№СЧ-91' }).closest('tr')!;
+      fireEvent.click(within(row).getByRole('button', { name: 'Редактировать' })); await act(async () => {});
+      emptyInvoicesResult.updateInvoice.mockResolvedValueOnce({ ...clientInvoiceRecord(93), invoiceEntityId: entity });
+      await act(async () => {
+        const result = currentClientInvoiceModal().onSubmit(clientInvoicePayload());
+        if (accepted) await result; else await expect(result).rejects.toThrow('Сервер вернул другой счёт');
+      });
+      expect(emptyInvoicesResult.updateInvoice.mock.calls[0][0]).toBe(91);
+      if (accepted) expect(toastSuccessMock).toHaveBeenCalledOnce(); else { expect(toastSuccessMock).not.toHaveBeenCalled(); expect(currentClientInvoiceModal().open).toBe(true); }
+    });
+  it('invoice caller reconciliation: a closed failed write never claims the invoice was saved', async () => {
+    const { modal } = await setupInvoiceCaller(); let fail!: (error: Error) => void;
+    emptyInvoicesResult.createInvoice.mockReturnValueOnce(new Promise<Invoice>((_, reject) => { fail = reject; }));
+    emptyInvoicesResult.refresh.mockRejectedValueOnce(new Error('Список недоступен'));
+    let result!: Promise<unknown>; act(() => { result = modal.onSubmit(clientInvoicePayload()).catch(error => error); });
+    act(() => modal.onClose()); await act(async () => { fail(new Error('Запись не удалась')); expect(await result).toBeInstanceOf(StaleUiOperationError); });
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledOnce()); expect(toastErrorMock.mock.calls[0][0]).toBe('Не удалось обновить связанные списки счетов. Обновите раздел.');
+    expect(toastSuccessMock).not.toHaveBeenCalled(); expect(emptyPaymentsResult.refresh).not.toHaveBeenCalled();
+  });
   it('payment caller: payments create permission works independently of client create', async () => {
     permissionsResult.payments.canCreate = true;
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="payments" />);
@@ -1266,7 +1494,8 @@ describe('ClientDetail integration', () => {
     expect(useClientCasesMock).toHaveBeenCalledWith(1, expect.objectContaining({ enabled: false }));
     expect(usePaymentsPagedMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }),
       expect.objectContaining({ scope: expect.any(String), capture: expect.any(Function) }));
-    expect(useInvoicesMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+    expect(useInvoicesMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }),
+      expect.objectContaining({ scope: expect.any(String), capture: expect.any(Function) }));
     expect(useActsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(useContractsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(apiService.getClients).not.toHaveBeenCalled();

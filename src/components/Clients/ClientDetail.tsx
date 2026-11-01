@@ -112,7 +112,7 @@ import { TableColumnSettings } from "../ui/TableColumnSettings";
 import { TablePagination } from "../ui/TablePagination";
 import { ObjectAuditModal } from "../ui/ObjectAuditModal";
 import { TaskJournal } from "../Tasks/TaskJournal";
-import { isInvoiceManagedPayment, isPartialRemainderSourcePayment, isTransferredRemainderPayment } from "../../utils/invoicePayments";
+import { getInvoiceEntityId, isInvoiceManagedPayment, isPartialRemainderSourcePayment, isTransferredRemainderPayment } from "../../utils/invoicePayments";
 import { useClientStatuses } from "../../hooks/useClientStatuses";
 import { assertDictionaryRows, useDictionarySnapshot } from "../../hooks/useDictionarySnapshot";
 import { ClientStatusBadge } from "./ClientStatusBadge";
@@ -2542,7 +2542,13 @@ function ClientDetailScreen({
     "create",
   );
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
-  const [invoiceSubmitting, setInvoiceSubmitting] = useState(false);
+  const invoiceFormOwner = useDocumentDeliveryOwner(JSON.stringify([screenOwner.scope, invoiceModalOpen, invoiceModalMode,
+    selectedInvoice?.id, activeSection, invoiceViewMode]));
+  const invoiceMutationOwner = useDocumentDeliveryOwner(screenOwner.scope);
+  const invoiceSubmitting = invoiceMutationOwner.busy;
+  const pendingInvoiceAction = useRef<DocumentDeliveryRead | null>(null);
+  const invoiceConfirmations = useRef(new Set<AbortController>());
+  const latestInvoiceRefresh = useRef<(current: () => boolean, includeInvoices: boolean) => Promise<void>>(async () => {});
   const [invoiceModalError, setInvoiceModalError] = useState<string | null>(
     null,
   );
@@ -2810,6 +2816,12 @@ function ClientDetailScreen({
     return { ...selected, type, clientRole } as const;
   }, [invoiceViewMode]);
 
+  const invoiceQueryScope = JSON.stringify([screenOwner.scope, activeSection, invoiceViewMode,
+    resolvedInvoicePeriod.from, resolvedInvoicePeriod.to, invoiceStatusFilter, relatedContractId, relatedActId, relatedPaymentId,
+    debouncedInvoiceSearch, invoiceSort, invoicePage, invoicePageSize]);
+  const invoiceListOwner = useDocumentDeliveryOwner(invoiceQueryScope);
+  const invoiceQueryRead = invoiceListOwner.capture();
+
   const {
     invoices: clientInvoices,
     loading: invoicesLoading,
@@ -2837,7 +2849,7 @@ function ClientDetailScreen({
     sortDir: invoiceSort.direction,
     page: invoicePage,
     pageSize: invoicePageSize,
-  });
+  }, invoiceListOwner);
 
   useEffect(() => {
     if (!invoicePageResetReadyRef.current) {
@@ -3009,8 +3021,27 @@ function ClientDetailScreen({
     Cancelled: "bg-rose-100 text-rose-700 border border-rose-200",
   };
 
+  useEffect(() => {
+    const pending = invoiceConfirmations.current;
+    return () => { pending.forEach(controller => controller.abort()); pending.clear(); };
+  }, [invoiceFormOwner.scope, invoiceQueryScope]);
+  const invoiceRefreshOwner = useAsyncOperationOwner(screenOwner.scope);
+  latestInvoiceRefresh.current = async (current, includeInvoices) => {
+    if (!current()) return;
+    invoiceRefreshOwner.invalidate(); const epoch = invoiceRefreshOwner.capture();
+    const ownsRefresh = () => current() && invoiceRefreshOwner.isCurrent(epoch);
+    try {
+      if (includeInvoices) await awaitOwnedUiResult(refreshInvoices, ownsRefresh);
+      if (paymentPermissions.canView) await awaitOwnedUiResult(refreshPayments, ownsRefresh);
+      if (ownsRefresh()) bumpStats();
+    } catch (error) {
+      if (ownsRefresh() && !(error instanceof StaleUiOperationError)) toast.error('Не удалось обновить связанные списки счетов. Обновите раздел.', 'Счета');
+    }
+  };
+
   const openInvoiceCreate = () => {
-    if (!accountPermissions.canCreate) {
+    if (!captureScreen() || pendingInvoiceAction.current?.isCurrent() || invoiceModalOpen) return;
+    if (!user?.id || !accountPermissions.canView || !accountPermissions.canCreate) {
       showPermissionWarning("Недостаточно прав для добавления счетов.");
       return;
     }
@@ -3021,7 +3052,9 @@ function ClientDetailScreen({
   };
 
   const openInvoiceEdit = (invoice: Invoice) => {
-    if (!accountPermissions.canEdit) {
+    if (!captureScreen() || pendingInvoiceAction.current?.isCurrent() || (invoiceModalOpen && selectedInvoice?.id === invoice.id)) return;
+    if (!Number.isSafeInteger(invoice.id) || invoice.id <= 0) return;
+    if (!user?.id || !accountPermissions.canView || !accountPermissions.canEdit) {
       showPermissionWarning("Недостаточно прав для редактирования счетов.");
       return;
     }
@@ -3055,6 +3088,8 @@ function ClientDetailScreen({
   );
 
   const closeInvoiceModal = () => {
+    if (!captureScreen() || !invoiceFormOwner.capture()) return;
+    invoiceFormOwner.invalidate();
     setInvoiceModalOpen(false);
     setSelectedInvoice(null);
     setInvoiceModalError(null);
@@ -3064,62 +3099,74 @@ function ClientDetailScreen({
 
 
 
+  const beginInvoiceAction = (allowed: () => boolean, requiresForm: boolean) => {
+    const screen = captureScreen(); const form = invoiceFormOwner.capture();
+    if (!screen || !form || (!requiresForm && !invoiceQueryRead?.isCurrent()) || (requiresForm && !invoiceModalOpen)) throw new StaleUiOperationError();
+    if (!user?.id || !accountPermissions.canView || !allowed()) throw new Error('Недостаточно прав для действия со счётом.');
+    const operation = invoiceMutationOwner.begin('invoice');
+    if (!operation) throw new Error('Дождитесь завершения текущего действия со счётом.');
+    pendingInvoiceAction.current = operation;
+    return { current: () => screen.isCurrent() && form.isCurrent() && operation.isCurrent() && (requiresForm || invoiceQueryRead?.isCurrent() === true) && accountPermissions.canView && allowed(),
+      listCurrent: () => invoiceQueryRead?.isCurrent() === true,
+      screenCurrent: () => screen.isCurrent() && accountPermissions.canView, finish: () => {
+        if (pendingInvoiceAction.current === operation) pendingInvoiceAction.current = null;
+        operation.finish();
+      } };
+  };
   const submitInvoice = async (payload: InvoiceInput) => {
-    const isEdit = invoiceModalMode === "edit" && selectedInvoice;
-    if (isEdit && !accountPermissions.canEdit) {
-      showPermissionWarning("Недостаточно прав для редактирования счетов.");
-      return;
-    }
-    if (!isEdit && !accountPermissions.canCreate) {
-      showPermissionWarning("Недостаточно прав для добавления счетов.");
-      return;
-    }
-    setInvoiceSubmitting(true);
+    const isEdit = invoiceModalMode === 'edit';
+    const action = beginInvoiceAction(() => isEdit ? accountPermissions.canEdit : accountPermissions.canCreate, true);
+    let dispatched = false; let accepted = false;
     setInvoiceModalError(null);
     try {
-      if (isEdit && selectedInvoice) {
-        await updateClientInvoice(selectedInvoice.id, payload);
-        toast.success("Изменения по счету сохранены.", "Счет обновлен");
-      } else {
-        await createClientInvoice(payload);
-        toast.success("Счет успешно создан.", "Счет сохранен");
-      }
-      await refreshPayments();
-      bumpStats();
-      closeInvoiceModal();
-    } catch (err) {
-      setInvoiceModalError(
-        extractDisplayErrorMessage(err, "Не удалось сохранить счет"),
-      );
+      const id = selectedInvoice?.id;
+      if (isEdit && (!Number.isSafeInteger(id) || !id || id <= 0)) throw new Error('Откройте счёт заново перед сохранением.');
+      const saved = await awaitOwnedUiResult(() => {
+        dispatched = true;
+        return isEdit ? updateClientInvoice(id!, payload, action.current) : createClientInvoice(payload, action.current);
+      }, action.current);
+      // Updating a protected representative can return another payment ID of the same invoice.
+      const entityId = getInvoiceEntityId(selectedInvoice);
+      const sameInvoice = entityId !== null && Number.isSafeInteger(entityId) && entityId === getInvoiceEntityId(saved);
+      if (!Number.isSafeInteger(saved?.id) || saved.id <= 0 || (isEdit && saved.id !== id && !sameInvoice))
+        throw new Error('Сервер вернул другой счёт. Обновите список перед продолжением.');
+      await awaitOwnedUiResult(() => latestInvoiceRefresh.current(action.screenCurrent, !action.listCurrent()), action.current);
+      toast.success(isEdit ? 'Изменения по счету сохранены.' : 'Счет успешно создан.', isEdit ? 'Счет обновлен' : 'Счет сохранен');
+      accepted = true; closeInvoiceModal();
+    } catch (error) {
+      if (!action.current()) throw new StaleUiOperationError();
+      setInvoiceModalError(extractDisplayErrorMessage(error, 'Не удалось сохранить счет'));
+      throw error;
     } finally {
-      setInvoiceSubmitting(false);
+      const stale = !action.current(); action.finish();
+      // A server write may complete after its editor closed. Reconcile only the original live screen.
+      if (dispatched && !accepted && stale && action.screenCurrent()) void latestInvoiceRefresh.current(action.screenCurrent, true);
     }
   };
 
   const removeInvoice = async (invoice: Invoice) => {
-    if (!accountPermissions.canDelete) {
-      showPermissionWarning("Недостаточно прав для удаления счетов.");
-      return;
+    if (!invoiceQueryRead?.isCurrent()) return;
+    if (!captureScreen() || !invoiceFormOwner.capture() || pendingInvoiceAction.current?.isCurrent()) return;
+    if (!user?.id || !accountPermissions.canView || !accountPermissions.canDelete) {
+      showPermissionWarning('Недостаточно прав для удаления счетов.'); return;
     }
-    if (
-      !(await confirm({
-        title: "Подтверждение удаления",
-        description: t("invoiceDeleteConfirm") ?? "Удалить счёт?",
-        confirmLabel: "Удалить",
-        cancelLabel: "Отмена",
-        variant: "danger",
-      }))
-    )
-      return;
+    if (!Number.isSafeInteger(invoice.id) || invoice.id <= 0) return;
+    const action = beginInvoiceAction(() => accountPermissions.canDelete, false);
+    const controller = new AbortController(); invoiceConfirmations.current.add(controller);
+    let dispatched = false;
     try {
-      await deleteClientInvoice(invoice.id);
-      await refreshPayments();
-      bumpStats();
-    } catch (err) {
-      toast.error(
-        extractDisplayErrorMessage(err, "Не удалось удалить счёт"),
-        "Ошибка удаления",
-      );
+      const approved = await awaitOwnedUiResult(() => confirm({
+        title: 'Подтверждение удаления', description: t('invoiceDeleteConfirm') ?? 'Удалить счёт?',
+        confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger', signal: controller.signal,
+      }), action.current);
+      if (!approved) return;
+      await awaitOwnedUiResult(() => { dispatched = true; return deleteClientInvoice(invoice.id, action.current); }, action.current);
+      await awaitOwnedUiResult(() => latestInvoiceRefresh.current(action.screenCurrent, false), action.current);
+    } catch (error) {
+      if (action.current() && !(error instanceof StaleUiOperationError)) toast.error(extractDisplayErrorMessage(error, 'Не удалось удалить счёт'), 'Ошибка удаления');
+    } finally {
+      const stale = !action.current(); invoiceConfirmations.current.delete(controller); controller.abort(); action.finish();
+      if (dispatched && stale && action.screenCurrent()) void latestInvoiceRefresh.current(action.screenCurrent, true);
     }
   };
 
@@ -6191,6 +6238,7 @@ function ClientDetailScreen({
                 <button
                   type="button"
                   onClick={openInvoiceCreate}
+                  disabled={invoiceSubmitting}
                   className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-teal-600 text-white shadow-sm transition-colors hover:bg-teal-700"
                   title={SECTION_META.accounts.actionLabel}
                   aria-label={SECTION_META.accounts.actionLabel}
@@ -9749,6 +9797,7 @@ function ClientDetailScreen({
                                     <button
                                       type="button"
                                       onClick={() => openInvoiceEdit(invoice)}
+                                      disabled={invoiceSubmitting}
                                       className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
                                       title={t("edit") ?? "Редактировать"}
                                       aria-label={t("edit") ?? "Редактировать"}
@@ -9760,6 +9809,7 @@ function ClientDetailScreen({
                                     <button
                                       type="button"
                                       onClick={() => removeInvoice(invoice)}
+                                      disabled={invoiceSubmitting}
                                       className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 hover:bg-red-50"
                                       title={t("delete") ?? "Удалить"}
                                       aria-label={t("delete") ?? "Удалить"}
@@ -11102,6 +11152,7 @@ function ClientDetailScreen({
 
         {invoiceModalOpen ? (
           <InvoiceModal
+          key={invoiceFormOwner.scope}
           open={invoiceModalOpen}
           mode={invoiceModalMode}
           invoice={selectedInvoice}
