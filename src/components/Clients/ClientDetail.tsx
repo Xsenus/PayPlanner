@@ -50,6 +50,7 @@ import { useActs, type ActsSortKey } from "../../hooks/useActs";
 import { useInvoices, type InvoicesSortKey } from "../../hooks/useInvoices";
 import { useContracts, type ContractsSortKey } from "../../hooks/useContracts";
 import { usePaymentsPaged } from "../../hooks/usePaymentsPaged";
+import { useClientBalanceReads } from "../../hooks/useClientBalanceReads";
 import { usePersistedTableSettings } from "../../hooks/usePersistedTableSettings";
 import { apiService } from "../../services/api";
 import { useTranslation } from "../../hooks/useTranslation";
@@ -89,7 +90,6 @@ import type {
   Payment,
   PaymentPayload,
   PaymentStatus,
-  ClientBalanceSummary,
   ClientBalanceTransaction,
   PowerOfAttorney,
 } from "../../types";
@@ -1575,66 +1575,16 @@ function ClientDetailScreen({
     },
     [clientData?.name, clientId, clientName],
   );
-  const [clientBalance, setClientBalance] = useState<ClientBalanceSummary | null>(null);
-  const [clientBalanceTransactions, setClientBalanceTransactions] = useState<ClientBalanceTransaction[]>([]);
-  const [clientBalanceLoading, setClientBalanceLoading] = useState(false);
   const [clientBalanceExpanded, setClientBalanceExpanded] = useState(false);
   const [clientAuditOpen, setClientAuditOpen] = useState(false);
   const [clientProfileEditing, setClientProfileEditing] = useState(false);
-  const [selectedCaseId, setSelectedCaseId] = useState<number | "all">(
-    initialCaseId ?? "all",
-  );
-  const refreshClientBalance = useCallback(async () => {
-    if (!clientId || !canViewClientFinancialSummary) {
-      setClientBalance(null);
-      setClientBalanceLoading(false);
-      return;
-    }
-
-    setClientBalanceLoading(true);
-    try {
-      const summary = await apiService.getClientBalance(clientId);
-      setClientBalance(summary);
-    } catch (error) {
-      console.error("Failed to load client balance", error);
-      setClientBalance(null);
-    } finally {
-      setClientBalanceLoading(false);
-    }
-  }, [canViewClientFinancialSummary, clientId]);
-
-  const refreshClientBalanceTransactions = useCallback(async () => {
-    if (!clientId || !canViewClientFinancialSummary) {
-      setClientBalanceTransactions([]);
-      return;
-    }
-
-    try {
-      const transactions = await apiService.getClientBalanceTransactions(clientId);
-      setClientBalanceTransactions(transactions);
-    } catch (error) {
-      console.error("Failed to load client balance transactions", error);
-      setClientBalanceTransactions([]);
-    }
-  }, [canViewClientFinancialSummary, clientId]);
-
-  useEffect(() => {
-    void refreshClientBalance();
-  }, [refreshClientBalance]);
-
-  useEffect(() => {
-    if (!clientBalanceExpanded || !canViewClientFinancialSummary) return;
-    void refreshClientBalanceTransactions();
-  }, [
-    canViewClientFinancialSummary,
-    clientBalanceExpanded,
-    refreshClientBalanceTransactions,
-  ]);
-  useEffect(() => {
-    if (canViewClientFinancialSummary) return;
-    setClientBalanceExpanded(false);
-    setClientBalanceTransactions([]);
-  }, [canViewClientFinancialSummary]);
+  const [selectedCaseId, setSelectedCaseId] = useState<number | "all">(initialCaseId ?? "all");
+  const balanceReads = useClientBalanceReads(clientId, { enabled: Boolean(user?.id) && canViewClientFinancialSummary,
+    ownerScope: screenOwner.scope, historyOpen: clientBalanceExpanded });
+  const { balance: clientBalance, balanceLoading: clientBalanceLoading, balanceError: clientBalanceError,
+    transactions: clientBalanceTransactions, transactionsLoading: clientBalanceTransactionsLoading, transactionsError: clientBalanceTransactionsError,
+    refreshBalance: refreshClientBalance, refreshTransactions: refreshClientBalanceTransactions } = balanceReads;
+  useEffect(() => { if (!canViewClientFinancialSummary) setClientBalanceExpanded(false); }, [canViewClientFinancialSummary]);
   // Временно закомментировано: будет возвращено при реинтеграции табов профиля.
   // const [activeProfileTab, setActiveProfileTab] = useState<ProfileTabKey>('phone');
   // const [profileDocuments, setProfileDocuments] = useState<ProfileDocumentsState>({
@@ -3760,7 +3710,7 @@ function ClientDetailScreen({
     : formatCurrencySmart(clientDebtAmount).full;
   const clientAdvanceLabel = clientBalanceLoading
     ? "..."
-    : formatCurrencySmart(clientAdvanceAmount).full;
+    : clientBalanceError || !clientBalance ? "Недоступно" : formatCurrencySmart(clientAdvanceAmount).full;
   const filteredSupplierCaseSummaries = useMemo(() => {
     const query = caseSearch.trim().toLowerCase();
     return supplierCaseSummaries.filter((item) => {
@@ -3879,6 +3829,7 @@ function ClientDetailScreen({
   const paymentFormOwner = useDocumentDeliveryOwner(JSON.stringify([screenOwner.scope, payModalOpen, editingPayment?.id,
     activeSection, paymentViewMode, caseIdForQuery, paymentModalDefaultExpenseClientId]));
   const paymentMutationOwner = useDocumentDeliveryOwner(screenOwner.scope);
+  const paymentRefreshOwner = useAsyncOperationOwner(screenOwner.scope);
   const pendingPaymentAction = useRef<DocumentDeliveryRead | null>(null);
   const paymentOpenRequest = useRef<AbortController | null>(null);
   const paymentConfirmations = useRef(new Set<AbortController>());
@@ -4955,13 +4906,16 @@ function ClientDetailScreen({
   });
 
   const refreshAfterPaymentSave = async (current: () => boolean, skipPayments = false) => {
+    if (!current()) return;
+    paymentRefreshOwner.invalidate(); const sequence = paymentRefreshOwner.capture();
+    const ownsRefresh = () => current() && paymentRefreshOwner.isCurrent(sequence);
     try {
-      if (!skipPayments) await awaitOwnedUiResult(refreshPayments, current);
-      await awaitOwnedUiResult(refreshClientBalance, current);
-      if (clientBalanceExpanded) await awaitOwnedUiResult(refreshClientBalanceTransactions, current);
-      if (current()) bumpStats();
+      if (!skipPayments) await awaitOwnedUiResult(refreshPayments, ownsRefresh);
+      await awaitOwnedUiResult(refreshClientBalance, ownsRefresh);
+      if (clientBalanceExpanded) await awaitOwnedUiResult(refreshClientBalanceTransactions, ownsRefresh);
+      if (ownsRefresh()) bumpStats();
     } catch (error) {
-      if (current() && !(error instanceof StaleUiOperationError)) toast.error('Платёж сохранён, но связанные списки пока не удалось обновить.', 'Платежи');
+      if (ownsRefresh() && !(error instanceof StaleUiOperationError)) toast.error('Платёж сохранён, но связанные списки пока не удалось обновить.', 'Платежи');
     }
   };
   latestPaymentRefresh.current = refreshAfterPaymentSave;
@@ -6127,7 +6081,7 @@ function ClientDetailScreen({
             {canViewClientFinancialSummary ? (
               <button
                 type="button"
-                onClick={() => setClientBalanceExpanded(true)}
+                onClick={() => { if (balanceReads.capture()) setClientBalanceExpanded(true); }}
                 className="inline-flex min-h-10 items-center gap-3 rounded-lg border border-blue-200 bg-white px-3 py-1 text-sm font-semibold text-blue-800 shadow-sm transition-colors hover:bg-blue-50"
                 title="История баланса"
                 aria-label="История баланса"
@@ -6150,6 +6104,13 @@ function ClientDetailScreen({
                   </span>
                 </span>
               </button>
+            ) : null}
+            {canViewClientFinancialSummary && clientBalanceError ? (
+              <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-red-700">
+                <span>{extractDisplayErrorMessage(clientBalanceError, 'Не удалось загрузить баланс клиента.')}</span>
+                <button type="button" disabled={clientBalanceLoading} onClick={() => { void refreshClientBalance(); }}
+                  className="rounded-lg border border-red-200 px-2 py-1 text-xs font-semibold disabled:opacity-60">Повторить загрузку баланса</button>
+              </div>
             ) : null}
             {canViewAudit ? (
               <button
@@ -11010,7 +10971,7 @@ function ClientDetailScreen({
           </div>
         ) : null}
 
-        {clientBalanceExpanded ? (
+        {clientBalanceExpanded && canViewClientFinancialSummary ? (
           <div className="fixed inset-0 z-[1400] flex items-center justify-center bg-slate-900/50 p-4">
             <div className="flex max-h-[82vh] w-full max-w-3xl flex-col rounded-2xl bg-white shadow-2xl">
               <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
@@ -11039,7 +11000,7 @@ function ClientDetailScreen({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setClientBalanceExpanded(false)}
+                  onClick={() => { if (balanceReads.captureHistory()) setClientBalanceExpanded(false); }}
                   className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50"
                   title="Закрыть"
                   aria-label="Закрыть"
@@ -11048,7 +11009,12 @@ function ClientDetailScreen({
                 </button>
               </div>
               <div className="overflow-y-auto p-5">
-                {clientBalanceTransactions.length === 0 ? (
+                {clientBalanceTransactionsLoading ? <p role="status" className="text-sm text-slate-600">Загружаем историю баланса…</p>
+                  : clientBalanceTransactionsError ? <div role="alert" className="space-y-2 text-sm text-red-700">
+                    <p>{extractDisplayErrorMessage(clientBalanceTransactionsError, 'Не удалось загрузить историю баланса.')}</p>
+                    <button type="button" onClick={() => { void balanceReads.retryTransactions(); }}
+                      className="rounded-lg border border-red-200 px-2 py-1 text-xs font-semibold">Повторить загрузку истории</button>
+                  </div> : clientBalanceTransactions.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
                     Движений по балансу пока нет.
                   </div>

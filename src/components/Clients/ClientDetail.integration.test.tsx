@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ClientDetail } from './ClientDetail';
-import type { Act, Client, Contract, Invoice, LegalEntityDetail, LegalEntityInput, Payment, PowerOfAttorney, CleanedAddress, DadataAddressSuggestion, PaymentPayload } from '../../types';
+import type { Act, Client, Contract, Invoice, LegalEntityDetail, LegalEntityInput, Payment, PowerOfAttorney, CleanedAddress, DadataAddressSuggestion, PaymentPayload, ClientBalanceTransaction } from '../../types';
 import { apiService } from '../../services/api';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
@@ -262,6 +262,9 @@ async function setupPaymentCaller(kind: PaymentCallerOperation) {
     await waitFor(() => expect(currentClientPaymentModal()?.payment?.id).toBe(502)); }
   return { view, props, modal: currentClientPaymentModal() };
 }
+
+const clientBalanceTransaction = (id: number, description: string): ClientBalanceTransaction => ({ id, clientId: 1, amount: 25,
+  type: 'Overpayment', direction: 'Credit', description, createdAt: '2026-11-02T00:00:00Z' });
 
 function createPowerOfAttorney(overrides: Partial<PowerOfAttorney> = {}): PowerOfAttorney {
   return {
@@ -891,6 +894,87 @@ describe('ClientDetail integration', () => {
     await waitFor(() => expect(usePaymentsPagedMock.mock.calls.at(-1)?.[0].page).toBe(1));
     expect(apiService.deletePayment).toHaveBeenCalledExactlyOnceWith(502); expect(emptyPaymentsResult.refresh).toHaveBeenCalledTimes(refreshes);
   });
+  it('balance read baseline: a late initial summary cannot replace a post-payment refresh', async () => {
+    let finish!: (value: { clientId: number; balance: number }) => void;
+    vi.mocked(apiService.getClientBalance).mockReturnValueOnce(new Promise(resolve => { finish = resolve; })).mockResolvedValue({ clientId: 1, balance: 400 });
+    const { modal } = await setupPaymentCaller('create');
+    await act(async () => { await modal.onSubmit(clientPaymentPayload()); });
+    const button = screen.getByRole('button', { name: 'История баланса' });
+    await waitFor(() => expect(button.textContent?.replace(/\s/g, '')).toContain('400'));
+    await act(async () => finish({ clientId: 1, balance: 100 }));
+    expect(button.textContent?.replace(/\s/g, '')).toContain('400');
+    expect(button.textContent?.replace(/\s/g, '')).not.toContain('100');
+  });
+  it('balance read baseline: a late history response cannot replace a reopened journal', async () => {
+    let finish!: (value: ClientBalanceTransaction[]) => void;
+    vi.mocked(apiService.getClientBalanceTransactions).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }))
+      .mockResolvedValue([clientBalanceTransaction(12, 'Текущая операция')]);
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'История баланса' }));
+    await waitFor(() => expect(apiService.getClientBalanceTransactions).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole('button', { name: 'Закрыть' }));
+    fireEvent.click(screen.getByRole('button', { name: 'История баланса' }));
+    await screen.findByText('Текущая операция'); await act(async () => finish([clientBalanceTransaction(11, 'Старая операция')]));
+    expect(screen.getByText('Текущая операция')).toBeTruthy(); expect(screen.queryByText('Старая операция')).toBeNull();
+  });
+  it('balance read baseline: an unavailable balance is shown as unknown with an explicit retry', async () => {
+    vi.mocked(apiService.getClientBalance).mockRejectedValueOnce(new Error('HTTP 403 - forbidden'));
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); await screen.findByRole('heading', { level: 1, name: 'Иванов Иван Иванович' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'История баланса' }).textContent).toContain('Недоступно'));
+    expect(screen.getByRole('button', { name: 'Повторить загрузку баланса' })).toBeTruthy(); expect(apiService.getClientBalance).toHaveBeenCalledOnce();
+  });
+  it('balance read UI: pending journal is loading and becomes empty only after a successful response', async () => {
+    let finish!: (rows: ClientBalanceTransaction[]) => void; vi.mocked(apiService.getClientBalanceTransactions).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'История баланса' }));
+    await screen.findByText('Загружаем историю баланса…'); expect(screen.queryByText('Движений по балансу пока нет.')).toBeNull();
+    await act(async () => finish([])); await screen.findByText('Движений по балансу пока нет.'); expect(screen.queryByText('Загружаем историю баланса…')).toBeNull();
+  });
+  it('balance read UI: a failed history keeps an error instead of an empty success and retries only that read', async () => {
+    vi.mocked(apiService.getClientBalanceTransactions).mockRejectedValueOnce(new Error('Временная ошибка истории')).mockResolvedValue([]);
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'История баланса' }));
+    await screen.findByText('Временная ошибка истории'); expect(screen.queryByText('Движений по балансу пока нет.')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку истории' })); await screen.findByText('Движений по балансу пока нет.');
+    expect(apiService.getClientBalanceTransactions).toHaveBeenCalledTimes(2); expect(apiService.getClientBalance).toHaveBeenCalledOnce();
+  });
+  it('balance read UI: summary retry replaces an unknown amount only after current confirmation', async () => {
+    vi.mocked(apiService.getClientBalance).mockRejectedValueOnce(new Error('Временная ошибка баланса')).mockResolvedValue({ clientId: 1, balance: 50 });
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    await screen.findByText('Временная ошибка баланса'); const button = screen.getByRole('button', { name: 'История баланса' });
+    expect(button.textContent).toContain('Недоступно'); expect(apiService.getClientBalance).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку баланса' }));
+    await waitFor(() => expect(within(button).getByText('Аванс').parentElement?.textContent?.replace(/\s/g, '')).toContain('50'));
+    expect(screen.queryByText('Временная ошибка баланса')).toBeNull(); expect(apiService.getClientBalance).toHaveBeenCalledTimes(2);
+  });
+  it.each([401, 403])('balance read UI: journal HTTP%s clears the delegated balance and stays unknown after closing', async status => {
+    vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 1, balance: 750 }); vi.mocked(apiService.getClientBalanceTransactions).mockRejectedValueOnce(new Error(`HTTP ${status} - denied`));
+    await setupPaymentCaller('create'); await waitFor(() => expect(currentClientPaymentModal().availableClientBalance).toBe(750));
+    fireEvent.click(screen.getByRole('button', { name: 'История баланса' })); const header = screen.getByRole('button', { name: 'История баланса' });
+    await waitFor(() => expect(header.textContent).toContain('Недоступно')); expect(currentClientPaymentModal().availableClientBalance).toBe(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Закрыть' })); expect(header.textContent).toContain('Недоступно'); expect(apiService.getClientBalance).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку баланса' })); await waitFor(() => expect(currentClientPaymentModal().availableClientBalance).toBe(750));
+    expect(apiService.getClientBalance).toHaveBeenCalledTimes(2); expect(apiService.getClientBalanceTransactions).toHaveBeenCalledOnce();
+  });
+  it('balance read UI: a foreign summary never supplies the payment form with another client balance', async () => {
+    vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 2, balance: 99999 }); await setupPaymentCaller('create');
+    await screen.findByRole('button', { name: 'Повторить загрузку баланса' }); expect(currentClientPaymentModal().availableClientBalance).toBe(0);
+    expect(screen.getByRole('button', { name: 'История баланса' }).textContent).toContain('Недоступно');
+  });
+  it('balance read chain: an obsolete post-payment refresh cannot continue after the newer one', async () => {
+    const { modal } = await setupPaymentCaller('create'); await waitFor(() => expect(apiService.getClientBalance).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole('button', { name: 'История баланса' })); await screen.findByText('Движений по балансу пока нет.');
+    let finish!: (value: { clientId: number; balance: number }) => void;
+    vi.mocked(apiService.getClientBalance).mockReturnValueOnce(new Promise(resolve => { finish = resolve; })).mockResolvedValue({ clientId: 1, balance: 200 });
+    await act(async () => { await modal.onSubmit(clientPaymentPayload()); }); await waitFor(() => expect(apiService.getClientBalance).toHaveBeenCalledTimes(2));
+    const oldSignal = vi.mocked(apiService.getClientBalance).mock.calls[1][1]?.signal;
+    vi.mocked(apiService.updatePayment).mockResolvedValueOnce(clientPaymentRecord(503));
+    await act(async () => { await modal.onSubmit({ ...clientPaymentPayload(), id: 503 }); });
+    const header = screen.getByRole('button', { name: 'История баланса' }); await waitFor(() => expect(header.textContent?.replace(/\s/g, '')).toContain('200'));
+    await screen.findByText('Движений по балансу пока нет.'); const historyCount = vi.mocked(apiService.getClientBalanceTransactions).mock.calls.length;
+    const summaries = vi.mocked(apiService.getClientCaseFinanceSummaries).mock.calls.length;
+    await act(async () => finish({ clientId: 1, balance: 100 })); expect(oldSignal?.aborted).toBe(true);
+    expect(header.textContent?.replace(/\s/g, '')).toContain('200'); expect(apiService.getClientBalanceTransactions).toHaveBeenCalledTimes(historyCount);
+    expect(apiService.getClientCaseFinanceSummaries).toHaveBeenCalledTimes(summaries); expect(apiService.createPayment).toHaveBeenCalledOnce(); expect(apiService.updatePayment).toHaveBeenCalledOnce();
+  });
   it('profile owner baseline: switching client hides the previous personal fields while the new read is pending', async () => {
     let finish!: (client: Client) => void;
     const next = new Promise<Client>(resolve => { finish = resolve; });
@@ -1060,7 +1144,7 @@ describe('ClientDetail integration', () => {
     useInvoicesMock.mockReset();
     useContractsMock.mockReset();
     usePaymentsPagedMock.mockReset();
-    vi.mocked(apiService.getClientBalance).mockReset().mockResolvedValue({ clientId: 1, balance: 0 });
+    vi.mocked(apiService.getClientBalance).mockReset().mockImplementation(async id => ({ clientId: id, balance: 0 }));
     vi.mocked(apiService.getClientBalanceTransactions).mockReset().mockResolvedValue([]);
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockClear();
     window.sessionStorage.clear();
@@ -1737,7 +1821,7 @@ describe('ClientDetail integration', () => {
     expect(await screen.findByText('Переплата по платежу')).toBeTruthy();
     expect(await screen.findByText('Источник #77')).toBeTruthy();
     expect(await screen.findByText('Счёт #33')).toBeTruthy();
-    expect(apiService.getClientBalanceTransactions).toHaveBeenCalledWith(1);
+    expect(apiService.getClientBalanceTransactions).toHaveBeenCalledWith(1, { signal: expect.any(AbortSignal) });
 
     await user.click(screen.getByRole('button', { name: 'История клиента' }));
     expect(await screen.findByTestId('object-audit-modal')).toBeTruthy();
