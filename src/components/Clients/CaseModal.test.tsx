@@ -2,8 +2,10 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CaseModal } from './CaseModal';
+import { downloadBlob } from '../../utils/downloadBlob';
+vi.mock('../../utils/downloadBlob', () => ({ downloadBlob: vi.fn() }));
 import { apiService } from '../../services/api';
-import type { ClientCase, ClientCaseDocument } from '../../types';
+import type { ClientCase, ClientCaseDocument, ClientCaseRelatedParty } from '../../types';
 import { toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { documentCopyTestSession } from '../../test/documentCopySession';
 
@@ -225,6 +227,7 @@ describe('CaseModal', () => {
     vi.mocked(apiService.getPendingCaseDocumentUploads).mockResolvedValue({ items: [], nextCursor: null });
     vi.mocked(apiService.getCaseDocumentUploadStates).mockReset();
     vi.mocked(apiService.getCaseDocumentUploadStates).mockResolvedValue([]);
+    vi.mocked(downloadBlob).mockClear();
     dialogMock.confirm.mockReset();
     dialogMock.confirm.mockResolvedValue(true);
     dialogMock.prompt.mockReset();
@@ -1186,6 +1189,102 @@ describe('CaseModal', () => {
   it('case command validation: malformed review does not notify the parent and permits retry', async () => {
     vi.mocked(apiService.reviewCasePosition).mockResolvedValue({ positionReviewedAt: 'invalid', positionReviewedByName: 'Чужой ответ' } as never); const onPositionReviewed = vi.fn(); render(<CaseModal isOpen caseData={commandCase()} onSave={vi.fn()} onClose={vi.fn()} onPositionReviewed={onPositionReviewed} />); await act(async () => {});
     fireEvent.click(screen.getByRole('button', { name: commandLabels.position })); await screen.findByText('Не удалось подтвердить сведения о проверке позиции.'); expect(onPositionReviewed).not.toHaveBeenCalled(); expect(screen.getByRole('button', { name: commandLabels.position })).toHaveProperty('disabled', false);
+  });
+
+  const actionFile = (): ClientCaseDocument => ({ id: 41, clientCaseId: 1, documentKey: 'file-41', version: 1, documentType: 'Документ', status: 'Подготовлен', originalFileName: 'Файл проверки.pdf', contentType: 'application/pdf', sizeBytes: 10, uploadedByName: '', uploadedAt: '2026-11-02T00:00:00Z', isLatestVersion: true });
+  it('case file baseline: edit revocation during confirmation prevents a file delete', async () => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([actionFile()]); const pending = deferred<boolean>(); dialogMock.confirm.mockReturnValueOnce(pending.promise); const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn() };const view=render(<CaseModal {...props} />); await screen.findByText('Файл проверки.pdf');
+    fireEvent.click(screen.getByRole('button', { name: 'Удалить Файл проверки.pdf' })); expect(dialogMock.confirm).toHaveBeenCalledOnce();view.rerender(<CaseModal {...props} allowEdit={false} />);await act(async()=>pending.resolve(true));expect(apiService.deleteCaseDocument).not.toHaveBeenCalled();
+  });
+  it('case file baseline: a late download cannot start after changing role', async () => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([actionFile()]);const pending=deferred<{blob:Blob;fileName:string}>();vi.mocked(apiService.downloadCaseDocument).mockReturnValueOnce(pending.promise);const props={isOpen:true,caseData:createCase(),onClose:vi.fn(),onSave:vi.fn()};const view=render(<CaseModal {...props}/>);await screen.findByText('Файл проверки.pdf');fireEvent.click(screen.getByRole('button',{name:'Скачать Файл проверки.pdf'}));caseAuth.roleId++;view.rerender(<CaseModal {...props}/>);await act(async()=>pending.resolve({blob:new Blob(['late']),fileName:'old.pdf'}));expect(downloadBlob).not.toHaveBeenCalled();
+  });
+  it('case party baseline: a forged choice outside the current catalogue cannot create a link', async () => {
+    render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={vi.fn()}/>);await act(async()=>{});const select=screen.getByLabelText('Связанное лицо');const option=document.createElement('option');option.value='client:999';option.textContent='Прежний клиент';select.append(option);fireEvent.change(select,{target:{value:'client:999'}});fireEvent.click(screen.getByRole('button',{name:'Добавить'}));await act(async()=>{});expect(apiService.addCaseRelatedParty).not.toHaveBeenCalled();
+  });
+
+  type FileCommand = 'upload' | 'generate' | 'download' | 'delete' | 'update';
+  const fileCommandMock = (kind: FileCommand) => kind === 'upload' ? vi.mocked(apiService.uploadCaseDocument) : kind === 'generate' ? vi.mocked(apiService.generateCaseDocumentTemplate) : kind === 'download' ? vi.mocked(apiService.downloadCaseDocument) : kind === 'delete' ? vi.mocked(apiService.deleteCaseDocument) : vi.mocked(apiService.updateCaseDocument);
+  const fileCommandReply = (kind: FileCommand) => kind === 'download' ? { blob: new Blob(['contents']), fileName: 'current.pdf' } : kind === 'delete' ? undefined : actionFile();
+  const startFileCommand = (kind: FileCommand) => {
+    if (kind === 'upload') fireEvent.change(screen.getByLabelText('Загрузить файл дела'), { target: { files: [new File(['x'], 'file.pdf', { type: 'application/pdf' })] } });
+    else if (kind === 'generate') fireEvent.click(screen.getByRole('button', { name: 'Сформировать' }));
+    else if (kind === 'update') fireEvent.change(screen.getByLabelText('Статус документа Файл проверки.pdf'), { target: { value: 'Отправлен' } });
+    else fireEvent.click(screen.getByRole('button', { name: kind === 'download' ? 'Скачать Файл проверки.pdf' : 'Удалить Файл проверки.pdf' }));
+  };
+  it.each((['upload', 'generate', 'download', 'delete', 'update'] as const).flatMap(kind => (['case', 'role', 'close', 'login'] as const).flatMap(change => ['success', 'error'].map(outcome => ({ kind, change, outcome })))))('case file boundary: $kind ignores $outcome after $change without old followups', async ({ kind, change, outcome }) => {
+    const pending = deferred<unknown>(); fileCommandMock(kind).mockReturnValueOnce(pending.promise as never); vi.mocked(apiService.getCaseDocuments).mockImplementation(async id => [{ ...actionFile(), clientCaseId: id }]);
+    const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn() }; const view = render(<CaseModal {...props} />); await screen.findByText('Файл проверки.pdf'); await act(async () => {}); startFileCommand(kind); await waitFor(() => expect(fileCommandMock(kind)).toHaveBeenCalledOnce());
+    const signal = kind === 'download' ? vi.mocked(apiService.downloadCaseDocument).mock.calls[0][2]?.signal : undefined;
+    if (change === 'case') view.rerender(<CaseModal {...props} caseData={createCase({ id: 2, title: 'Новое дело' })} />);
+    else if (change === 'role') { caseAuth.roleId++; view.rerender(<CaseModal {...props} />); }
+    else if (change === 'close') fireEvent.click(screen.getByRole('button', { name: 'Закрыть' })); else caseReadSession.replace();
+    await act(async () => {}); const reads = vi.mocked(apiService.getCaseDocuments).mock.calls.length;
+    if (signal && change !== 'login') expect(signal.aborted).toBe(true);
+    await act(async () => { if (outcome === 'error') pending.reject(new Error('ПРЕЖНЯЯ ФАЙЛОВАЯ ОШИБКА')); else pending.resolve(fileCommandReply(kind)); });
+    expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(reads); expect(downloadBlob).not.toHaveBeenCalled(); expect(document.body.textContent).not.toContain('ПРЕЖНЯЯ ФАЙЛОВАЯ ОШИБКА'); expect(props.onSave).not.toHaveBeenCalled();
+  });
+  it.each(['upload', 'generate', 'download', 'delete', 'update'] as const)('case file serialization: %s dispatches once and excludes save and activity', async kind => {
+    const pending = deferred<unknown>(); fileCommandMock(kind).mockReturnValue(pending.promise as never); vi.mocked(apiService.getCaseDocuments).mockResolvedValue([actionFile()]); const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn() }; render(<CaseModal {...props} />); await screen.findByText('Файл проверки.pdf'); await act(async () => {});
+    act(() => { startFileCommand(kind); startFileCommand(kind); fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true }); fireEvent.click(screen.getByRole('button', { name: 'Подтвердить активность' })); }); await waitFor(() => expect(fileCommandMock(kind)).toHaveBeenCalledOnce()); expect(props.onSave).not.toHaveBeenCalled(); expect(vi.mocked(apiService.markCaseActivity).mock.calls.some(([, payload]) => payload?.confirmed)).toBe(false);
+    const reads = vi.mocked(apiService.getCaseDocuments).mock.calls.length; await act(async () => pending.resolve(fileCommandReply(kind))); expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(reads + (kind === 'download' ? 0 : 1)); expect(downloadBlob).toHaveBeenCalledTimes(kind === 'download' ? 1 : 0); expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveProperty('disabled', false);
+  });
+  it.each(['upload', 'generate', 'download', 'delete', 'update'] as const)('case file failure: %s retains draft and permits one explicit retry', async kind => {
+    const pending = deferred<unknown>(); fileCommandMock(kind).mockReturnValueOnce(pending.promise as never); vi.mocked(apiService.getCaseDocuments).mockResolvedValue([actionFile()]); render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={vi.fn()} />); await screen.findByText('Файл проверки.pdf'); await act(async () => {});
+    fireEvent.change(screen.getByLabelText('Название дела'), { target: { value: 'Ручной черновик файла' } }); startFileCommand(kind); await waitFor(() => expect(fileCommandMock(kind)).toHaveBeenCalledOnce()); await act(async () => pending.reject(new Error('Файловая операция отклонена'))); await screen.findByText('Файловая операция отклонена'); expect(screen.getByLabelText('Название дела')).toHaveProperty('value', 'Ручной черновик файла');
+    fileCommandMock(kind).mockResolvedValueOnce(fileCommandReply(kind) as never); startFileCommand(kind); await waitFor(() => expect(fileCommandMock(kind)).toHaveBeenCalledTimes(2)); await act(async () => {}); expect(screen.queryByText('Файловая операция отклонена')).toBeNull();
+  });
+  it.each(['upload', 'generate', 'download', 'delete', 'update'] as const)('case file session: %s cannot start after a login change before render', async kind => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([actionFile()]); render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={vi.fn()} />); await screen.findByText('Файл проверки.pdf'); await act(async () => {}); caseReadSession.replace(); startFileCommand(kind); await act(async () => {}); expect(fileCommandMock(kind)).not.toHaveBeenCalled();
+  });
+  it.each(['case', 'rights', 'close', 'unmount'] as const)('case file confirmation: %s cancels deletion before dispatch', async change => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([actionFile()]); const pending = deferred<boolean>(); dialogMock.confirm.mockReturnValueOnce(pending.promise); const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn() }; const view = render(<CaseModal {...props} />); await screen.findByText('Файл проверки.pdf'); startFileCommand('delete'); const signal = dialogMock.confirm.mock.calls[0][0].signal as AbortSignal;
+    if (change === 'case') view.rerender(<CaseModal {...props} caseData={createCase({ id: 2 })} />); else if (change === 'rights') view.rerender(<CaseModal {...props} allowEdit={false} />); else if (change === 'close') fireEvent.click(screen.getByRole('button', { name: 'Закрыть' })); else view.unmount(); expect(signal.aborted).toBe(true); await act(async () => pending.resolve(true)); expect(apiService.deleteCaseDocument).not.toHaveBeenCalled();
+  });
+  it('case file permissions: read-only viewer can download but cannot mutate files', async () => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([actionFile()]); render(<CaseModal isOpen allowEdit={false} caseData={createCase()} onClose={vi.fn()} onSave={vi.fn()} />); await screen.findByText('Файл проверки.pdf'); expect(screen.getByLabelText('Статус документа Файл проверки.pdf')).toHaveProperty('disabled', true); expect(screen.getByLabelText('Удалить Файл проверки.pdf')).toHaveProperty('disabled', true); startFileCommand('download'); await waitFor(() => expect(downloadBlob).toHaveBeenCalledOnce()); expect(apiService.deleteCaseDocument).not.toHaveBeenCalled();
+  });
+  const actionContact = () => ({ sourceType: 'client', category: 'clients', sourceId: 10, contactType: 'Person', roles: ['Client'], hasFullProfile: true, fullName: 'Текущий участник', phones: [], emails: [], isActive: true, syncToPhonebook: true } as const);
+  const actionParty = (): ClientCaseRelatedParty => ({ id: 51, clientCaseId: 1, sourceType: 'client', sourceId: 10, displayName: 'Текущая связь', role: 'Свидетель', createdAt: '2026-11-02T00:00:00Z' });
+  const preparePartyAction = (kind: 'add' | 'delete') => { if (kind === 'add') vi.mocked(apiService.getContacts).mockResolvedValue([actionContact()] as never); else vi.mocked(apiService.getCaseRelatedParties).mockImplementation(async id => [{ ...actionParty(), clientCaseId: id }]); };
+  const partyCommandMock = (kind: 'add' | 'delete') => kind === 'add' ? vi.mocked(apiService.addCaseRelatedParty) : vi.mocked(apiService.deleteCaseRelatedParty);
+  const startPartyAction = async (kind: 'add' | 'delete') => {
+    if (kind === 'add') { await screen.findByText('Текущий участник', { selector: 'option' }); fireEvent.change(screen.getByLabelText('Связанное лицо'), { target: { value: 'client:10' } }); fireEvent.click(screen.getByRole('button', { name: 'Добавить' })); }
+    else { await screen.findByText('Текущая связь'); fireEvent.click(screen.getByRole('button', { name: 'Удалить' })); }
+  };
+  it.each((['add', 'delete'] as const).flatMap(kind => (['case', 'rights', 'close', 'login'] as const).flatMap(change => ['success', 'error'].map(outcome => ({ kind, change, outcome })))))('case party boundary: $kind ignores $outcome after $change', async ({ kind, change, outcome }) => {
+    preparePartyAction(kind); const pending = deferred<unknown>(); partyCommandMock(kind).mockReturnValueOnce(pending.promise as never); const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn() }; const view = render(<CaseModal {...props} />); await startPartyAction(kind); await waitFor(() => expect(partyCommandMock(kind)).toHaveBeenCalledOnce());
+    if (change === 'case') view.rerender(<CaseModal {...props} caseData={createCase({ id: 2 })} />); else if (change === 'rights') view.rerender(<CaseModal {...props} allowEdit={false} />); else if (change === 'close') fireEvent.click(screen.getByRole('button', { name: 'Закрыть' })); else caseReadSession.replace();
+    await act(async () => { if (outcome === 'error') pending.reject(new Error('ПРЕЖНЯЯ ОШИБКА СВЯЗИ')); else pending.resolve(kind === 'add' ? { ...actionParty(), displayName: 'ПРЕЖНЯЯ ДОБАВЛЕННАЯ СВЯЗЬ' } : undefined); }); expect(document.body.textContent).not.toMatch(/ПРЕЖНЯЯ ОШИБКА СВЯЗИ|ПРЕЖНЯЯ ДОБАВЛЕННАЯ СВЯЗЬ/); if (kind === 'delete' && change !== 'case' && change !== 'close') expect(screen.queryByText('Текущая связь')).not.toBeNull(); expect(props.onSave).not.toHaveBeenCalled();
+  });
+  it.each(['add', 'delete'] as const)('case party serialization: %s reserves before confirmation and excludes other writes', async kind => {
+    preparePartyAction(kind); const pending = deferred<unknown>(); partyCommandMock(kind).mockReturnValueOnce(pending.promise as never); const onSave = vi.fn(); render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={onSave} />); await startPartyAction(kind); await waitFor(() => expect(partyCommandMock(kind)).toHaveBeenCalledOnce()); fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', metaKey: true }); fireEvent.click(screen.getByRole('button', { name: 'Подтвердить активность' })); expect(onSave).not.toHaveBeenCalled(); expect(vi.mocked(apiService.markCaseActivity).mock.calls.some(([, p]) => p?.confirmed)).toBe(false);
+    await act(async () => pending.resolve(kind === 'add' ? actionParty() : undefined)); expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveProperty('disabled', false); expect(!!screen.queryByText('Текущая связь')).toBe(kind === 'add');
+  });
+  it.each(['rights', 'close', 'unmount'] as const)('case party confirmation: %s aborts pending deletion without a write', async change => {
+    preparePartyAction('delete'); const pending = deferred<boolean>(); dialogMock.confirm.mockReturnValueOnce(pending.promise); const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn() }; const view = render(<CaseModal {...props} />); await startPartyAction('delete'); const signal = dialogMock.confirm.mock.calls[0][0].signal as AbortSignal;
+    if (change === 'rights') view.rerender(<CaseModal {...props} allowEdit={false} />); else if (change === 'close') fireEvent.click(screen.getByRole('button', { name: 'Закрыть' })); else view.unmount(); expect(signal.aborted).toBe(true); await act(async () => pending.resolve(true)); expect(apiService.deleteCaseRelatedParty).not.toHaveBeenCalled();
+  });
+  it('case party catalogue: current failure has an explicit retry that preserves draft and chosen role', async () => {
+    vi.mocked(apiService.getContacts).mockRejectedValueOnce(new Error('Справочник временно недоступен')).mockResolvedValueOnce([actionContact()] as never); const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn() }; render(<CaseModal {...props} />); await screen.findByText('Справочник временно недоступен'); fireEvent.change(screen.getByLabelText('Название дела'), { target: { value: 'Ручной черновик связи' } }); fireEvent.change(screen.getByLabelText('Роль связанного участника'), { target: { value: 'Эксперт' } }); expect(screen.getByRole('button', { name: 'Добавить' })).toHaveProperty('disabled', true);
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку участников' })); await screen.findByText('Текущий участник', { selector: 'option' }); expect(apiService.getContacts).toHaveBeenCalledTimes(2); expect(screen.getByLabelText('Название дела')).toHaveProperty('value', 'Ручной черновик связи'); expect(screen.getByLabelText('Роль связанного участника')).toHaveProperty('value', 'Эксперт'); expect(props.onSave).not.toHaveBeenCalled(); expect(apiService.addCaseRelatedParty).not.toHaveBeenCalled();
+  });
+  it('case party validation: a response for another source or case is not adopted', async () => {
+    preparePartyAction('add'); vi.mocked(apiService.addCaseRelatedParty).mockResolvedValue({ ...actionParty(), clientCaseId: 2, sourceId: 999, displayName: 'ЧУЖАЯ СВЯЗЬ' }); render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={vi.fn()} />); await startPartyAction('add'); await screen.findByText('Не удалось подтвердить добавленную связь. Обновите список связей перед повторным действием.'); expect(screen.queryByText('ЧУЖАЯ СВЯЗЬ')).toBeNull(); expect(screen.getByLabelText('Связанное лицо')).toHaveProperty('value', 'client:10');
+  });
+
+  it.each([{ sourceType: 'legal', normalized: 'legalEntity' }, { sourceType: 'external', normalized: 'externalContact' }] as const)('case party source mapping: $sourceType retains its supported server alias and confirmed result', async ({ sourceType, normalized }) => {
+    vi.mocked(apiService.getContacts).mockResolvedValue([{ ...actionContact(), sourceType }] as never); vi.mocked(apiService.addCaseRelatedParty).mockResolvedValue({ ...actionParty(), sourceType: normalized }); const onSave = vi.fn(); render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={onSave} />); await screen.findByText('Текущий участник', { selector: 'option' }); fireEvent.change(screen.getByLabelText('Связанное лицо'), { target: { value: `${sourceType}:10` } }); fireEvent.click(screen.getByRole('button', { name: 'Добавить' })); await screen.findByText('Текущая связь'); expect(apiService.addCaseRelatedParty).toHaveBeenCalledExactlyOnceWith(1, { sourceType: normalized, sourceId: 10, role: 'Участник' }); expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('case party entity: an organization uses its current independent catalogue and confirmed identity', async () => {
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [{ id: 17, shortName: 'ООО Проверка' }], total: 1, page: 1, pageSize: 100 } as never); vi.mocked(apiService.addCaseRelatedParty).mockResolvedValue({ ...actionParty(), sourceType: 'legalEntity', sourceId: 17, displayName: 'Связанная организация' }); render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={vi.fn()} />); await act(async () => {}); fireEvent.change(screen.getByLabelText('Тип связанного участника'), { target: { value: 'legalEntity' } }); await screen.findByText('ООО Проверка', { selector: 'option' }); fireEvent.change(screen.getByLabelText('Связанная организация'), { target: { value: '17' } }); fireEvent.click(screen.getByRole('button', { name: 'Добавить' })); await screen.findByText('Связанная организация', { selector: 'span' }); expect(apiService.addCaseRelatedParty).toHaveBeenCalledExactlyOnceWith(1, { sourceType: 'legalEntity', sourceId: 17, role: 'Участник' });
+  });
+  it('case party entity: an injected organization ID cannot create a link', async () => {
+    render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={vi.fn()} />); await act(async () => {}); fireEvent.change(screen.getByLabelText('Тип связанного участника'), { target: { value: 'legalEntity' } }); const select = screen.getByLabelText('Связанная организация'); const option = document.createElement('option'); option.value = '999'; option.textContent = 'Прежняя организация'; select.append(option); fireEvent.change(select, { target: { value: '999' } }); fireEvent.click(screen.getByRole('button', { name: 'Добавить' })); await act(async () => {}); expect(apiService.addCaseRelatedParty).not.toHaveBeenCalled();
+  });
+  it('case party entity: retry reloads only the organization catalogue without clearing its role', async () => {
+    vi.mocked(apiService.getLegalEntitiesPaged).mockRejectedValueOnce(new Error('Организации временно недоступны')).mockResolvedValueOnce({ items: [{ id: 17, shortName: 'ООО Проверка' }], total: 1, page: 1, pageSize: 100 } as never); render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={vi.fn()} />); await act(async () => {}); fireEvent.change(screen.getByLabelText('Тип связанного участника'), { target: { value: 'legalEntity' } }); await screen.findByText('Организации временно недоступны'); fireEvent.change(screen.getByLabelText('Роль связанного участника'), { target: { value: 'Поручитель' } }); const contactReads = vi.mocked(apiService.getContacts).mock.calls.length; fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку участников' })); await screen.findByText('ООО Проверка', { selector: 'option' }); expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledTimes(2); expect(apiService.getContacts).toHaveBeenCalledTimes(contactReads); expect(screen.getByLabelText('Роль связанного участника')).toHaveProperty('value', 'Поручитель');
   });
 
 });

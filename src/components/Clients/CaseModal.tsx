@@ -294,15 +294,16 @@ export function CaseModal({
   const titleInputRef = useRef<HTMLInputElement>(null);
   const deleteConfirmation = useRef<AbortController | null>(null);
   const activityPrompt = useRef<AbortController | null>(null);
+  const fileDownload = useRef<AbortController | null>(null);
   const currentCourtState = useRef({ strategy: caseData.strategy, hearing: caseData.nextHearingAt, status: caseData.status });
   currentCourtState.current = { strategy: caseData.strategy, hearing: caseData.nextHearingAt, status: caseData.status };
   const handleClose = () => {
     if (!isOpen || !caseActionOwner.capture()) return;
-    caseActionOwner.invalidate(); setReadClosed(true); deleteConfirmation.current?.abort(); activityPrompt.current?.abort(); onClose();
+    caseActionOwner.invalidate(); setReadClosed(true); deleteConfirmation.current?.abort(); activityPrompt.current?.abort(); fileDownload.current?.abort(); onClose();
   };
   const trapFocus = useModalFocusTrap(modalRef, isOpen, handleClose, titleInputRef);
   useEffect(() => {
-    return () => { deleteConfirmation.current?.abort(); activityPrompt.current?.abort(); };
+    return () => { deleteConfirmation.current?.abort(); activityPrompt.current?.abort(); fileDownload.current?.abort(); };
   }, [caseActionOwner.scope]);
   const fallbackTimeZone = useMemo(() => normalizeUserTimeZoneId(), []);
   const [timeZoneState, setTimeZoneState] = useState({ scope: caseActionOwner.scope, value: fallbackTimeZone });
@@ -370,7 +371,7 @@ export function CaseModal({
     nextHearingConfirmedByName: caseData.nextHearingConfirmedByName ?? '',
   });
   const confirmingNextHearing = caseActionOwner.kind === 'confirm-hearing';
-  const [documentsSaving, setDocumentsSaving] = useState(false);
+  const documentsSaving = caseActionOwner.kind?.startsWith('document:') ?? false;
   const [uploadRevision, setUploadRevision] = useState(0);
   const [documentActionError, setDocumentActionError] = useState<{ owner: DocumentDeliveryRead; message: string } | null>(null);
   const setDocumentsError = useCallback((message: string | null) => {
@@ -398,7 +399,7 @@ export function CaseModal({
     eventHistory: caseData.eventHistory ?? '',
   });
   const activitySaving = caseActionOwner.kind === 'confirm-activity';
-  const [relatedPartiesSaving, setRelatedPartiesSaving] = useState(false);
+  const relatedPartiesSaving = caseActionOwner.kind?.startsWith('party:') ?? false;
   const [partyActionError, setPartyActionError] = useState<{ owner: DocumentDeliveryRead; message: string } | null>(null);
   const setRelatedPartiesError = useCallback((message: string | null) => {
     const owner = captureCaseOwner(); if (owner) setPartyActionError(message ? { owner, message } : null);
@@ -625,6 +626,11 @@ export function CaseModal({
   }), [readOwned]);
   const entityRead = useDictionarySnapshot(loadEntities, EMPTY_CASE_ENTITIES, { enabled: readEnabled && canUseLegalEntityRelatedParties, ownerScope: caseActionOwner.scope }, false);
   const legalEntityOptions = entityRead.value;
+  const actionSnapshots = useRef({ documents: documentRead, parties: partyRead, contacts: contactRead, entities: entityRead });
+  actionSnapshots.current = { documents: documentRead, parties: partyRead, contacts: contactRead, entities: entityRead };
+  const relatedDirectory = relatedPartyMode === 'legalEntity' ? entityRead : contactRead;
+  const relatedDirectoryError = relatedDirectory.error ? extractDisplayErrorMessage(relatedDirectory.error, 'Не удалось загрузить справочник участников.') : null;
+
 
   const loadTimeZone = useCallback((signal: AbortSignal) => readOwned(signal, async () => {
     const result = typeof apiService.getUserSetting === 'function' ? await apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY, { signal }) : null;
@@ -814,121 +820,88 @@ export function CaseModal({
     }
   };
 
+  const currentDocument = (row: ClientCaseDocument) => {
+    const snapshot = actionSnapshots.current.documents;
+    return !snapshot.loading && !snapshot.error && row.clientCaseId === caseData.id
+      ? snapshot.value.find(item => item.id === row.id && item.clientCaseId === caseData.id && item.documentKey === row.documentKey && item.version === row.version) : undefined;
+  };
+  const requireCurrentDocument = (row: ClientCaseDocument) => {
+    if (!currentDocument(row)) throw new Error('Список файлов изменился или недоступен. Обновите его и выберите файл заново.');
+  };
+  const runDocumentAction = async (kind: string, action: (isCurrent: () => boolean) => Promise<void>, uploadAttempt = false) => {
+    const operation = caseActionOwner.begin(`document:${kind}`); if (!operation) return;
+    setDocumentsError(null);
+    try { await action(operation.isCurrent); }
+    catch (error) {
+      if (operation.isCurrent() && !(error instanceof StaleUiOperationError)) setDocumentsError(extractDisplayErrorMessage(error, 'Не удалось выполнить действие с файлом дела.'));
+    } finally {
+      if (uploadAttempt && operation.isCurrent()) setUploadRevision(value => value + 1);
+      operation.finish();
+    }
+  };
+  const canStartFileAction = (edit = true) => {
+    if (!isOpen || !caseActionOwner.capture() || caseData.id <= 0) return false;
+    if (edit && !allowEdit) { setDocumentsError('Недостаточно прав для изменения файлов дела.'); return false; }
+    return true;
+  };
   const handleUploadDocument = async (fileList: FileList | null, documentKey?: string) => {
-    if (!allowEdit) {
-      setDocumentsError('Недостаточно прав для изменения файлов дела.');
-      return;
-    }
-
     const file = fileList?.[0];
-    if (!file || !caseData.id || caseData.id <= 0) return;
-
-    setDocumentsSaving(true);
-    setDocumentsError(null);
-    try {
-      await apiService.uploadCaseDocument(caseData.id, file, {
-        documentType,
-        status: documentStatus,
-        documentKey,
-      });
-      await refreshDocuments();
-    } catch (e: unknown) {
-      setDocumentsError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setDocumentsSaving(false);
-      setUploadRevision((value) => value + 1);
-    }
+    if (!file || !canStartFileAction()) return;
+    await runDocumentAction('upload', async isCurrent => {
+      if (documentKey) {
+        const snapshot = actionSnapshots.current.documents;
+        if (snapshot.loading || snapshot.error || !snapshot.value.some(row => row.clientCaseId === caseData.id && row.documentKey === documentKey)) throw new Error('Список файлов изменился или недоступен. Обновите его и выберите файл заново.');
+      }
+      await awaitOwnedUiResult(() => apiService.uploadCaseDocument(caseData.id, file, { documentType, status: documentStatus, documentKey }), isCurrent);
+      await awaitOwnedUiResult(refreshDocuments, isCurrent);
+    }, true);
   };
-
   const handleGenerateDocumentTemplate = async () => {
-    if (!allowEdit) {
-      setDocumentsError('Недостаточно прав для изменения файлов дела.');
-      return;
-    }
-
-    if (!caseData.id || caseData.id <= 0) return;
-
-    const template = availableDocumentTemplates.find((item) => item.key === documentTemplateKey)
-      ?? availableDocumentTemplates[0];
-    if (!template) {
-      setDocumentsError('Нет доступных шаблонов документов для типа этого дела.');
-      return;
-    }
-
-    setDocumentsSaving(true);
-    setDocumentsError(null);
-    try {
-      await apiService.generateCaseDocumentTemplate(caseData.id, {
-        templateKey: template.key,
-        documentType: template.documentType,
-        status: documentStatus,
-      });
-      await refreshDocuments();
-    } catch (e: unknown) {
-      setDocumentsError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setDocumentsSaving(false);
-      setUploadRevision((value) => value + 1);
-    }
+    if (!canStartFileAction()) return;
+    await runDocumentAction('generate', async isCurrent => {
+      const template = availableDocumentTemplates.find(item => item.key === documentTemplateKey);
+      if (!template) throw new Error('Выберите доступный шаблон документа для типа этого дела.');
+      await awaitOwnedUiResult(() => apiService.generateCaseDocumentTemplate(caseData.id, { templateKey: template.key, documentType: template.documentType, status: documentStatus }), isCurrent);
+      await awaitOwnedUiResult(refreshDocuments, isCurrent);
+    }, true);
   };
-
   const handleDownloadDocument = async (document: ClientCaseDocument) => {
-    if (!caseData.id || caseData.id <= 0) return;
-    setDocumentsError(null);
-    try {
-      const result = await apiService.downloadCaseDocument(caseData.id, document.id);
-      downloadBlob(result.blob, result.fileName || document.originalFileName);
-    } catch (e: unknown) {
-      setDocumentsError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const handleDeleteDocument = async (document: ClientCaseDocument) => {
-    if (!allowEdit) {
-      setDocumentsError('Недостаточно прав для удаления файлов дела.');
-      return;
-    }
-
-    if (!caseData.id || caseData.id <= 0) return;
-    const ok = await confirm({
-      title: 'Удаление файла',
-      description: `Удалить файл «${document.originalFileName}»?`,
-      confirmLabel: 'Удалить',
-      cancelLabel: 'Отмена',
-      variant: 'danger',
+    if (!canStartFileAction(false)) return;
+    await runDocumentAction('download', async isCurrent => {
+      requireCurrentDocument(document);
+      const controller = new AbortController(); fileDownload.current = controller;
+      try {
+        const result = await awaitOwnedUiResult(() => apiService.downloadCaseDocument(caseData.id, document.id, { signal: controller.signal }), isCurrent);
+        requireCurrentDocument(document);
+        downloadBlob(result.blob, result.fileName || document.originalFileName);
+      } finally {
+        if (fileDownload.current === controller) fileDownload.current = null;
+      }
     });
-    if (!ok) return;
-
-    setDocumentsSaving(true);
-    setDocumentsError(null);
-    try {
-      await apiService.deleteCaseDocument(caseData.id, document.id);
-      await refreshDocuments();
-    } catch (e: unknown) {
-      setDocumentsError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setDocumentsSaving(false);
-    }
   };
-
+  const handleDeleteDocument = async (document: ClientCaseDocument) => {
+    if (!canStartFileAction()) return;
+    await runDocumentAction('delete', async isCurrent => {
+      requireCurrentDocument(document);
+      const controller = new AbortController(); deleteConfirmation.current = controller;
+      try {
+        const ok = await awaitOwnedUiResult(() => confirm({ signal: controller.signal, title: 'Удаление файла', description: `Удалить файл «${document.originalFileName}»?`, confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }), isCurrent);
+        if (!ok) return;
+        requireCurrentDocument(document);
+        await awaitOwnedUiResult(() => apiService.deleteCaseDocument(caseData.id, document.id), isCurrent);
+        await awaitOwnedUiResult(refreshDocuments, isCurrent);
+      } finally {
+        if (deleteConfirmation.current === controller) deleteConfirmation.current = null;
+      }
+    });
+  };
   const handleUpdateDocument = async (document: ClientCaseDocument, patch: { documentType?: string; status?: string }) => {
-    if (!allowEdit) {
-      setDocumentsError('Недостаточно прав для изменения файлов дела.');
-      return;
-    }
-
-    if (!caseData.id || caseData.id <= 0) return;
-
-    setDocumentsSaving(true);
-    setDocumentsError(null);
-    try {
-      await apiService.updateCaseDocument(caseData.id, document.id, patch);
-      await refreshDocuments();
-    } catch (e: unknown) {
-      setDocumentsError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setDocumentsSaving(false);
-    }
+    if (!canStartFileAction()) return;
+    await runDocumentAction('update', async isCurrent => {
+      requireCurrentDocument(document);
+      await awaitOwnedUiResult(() => apiService.updateCaseDocument(caseData.id, document.id, patch), isCurrent);
+      await awaitOwnedUiResult(refreshDocuments, isCurrent);
+    });
   };
 
   const handleConfirmActivity = async () => {
@@ -983,90 +956,50 @@ export function CaseModal({
     }
   };
 
-  const handleAddRelatedParty = async () => {
-    if (!allowEdit) {
-      setRelatedPartiesError('Недостаточно прав для изменения связей дела.');
-      return;
-    }
-
-    if (!canUseContactRelatedParties && !canUseLegalEntityRelatedParties) {
-      setRelatedPartiesError('У роли нет доступа к справочникам клиентов и организаций.');
-      return;
-    }
-
-    if (relatedPartyMode === 'contact' && !canUseContactRelatedParties) {
-      setRelatedPartiesError('У роли нет доступа к справочнику клиентов и контактов.');
-      return;
-    }
-
-    if (relatedPartyMode === 'legalEntity' && !canUseLegalEntityRelatedParties) {
-      setRelatedPartiesError('У роли нет доступа к справочнику юридических лиц.');
-      return;
-    }
-
-    if (!caseData.id || caseData.id <= 0) return;
-
-    const source =
-      relatedPartyMode === 'legalEntity'
-        ? { sourceType: 'legalEntity', sourceId: Number(relatedPartyLegalEntityId) }
-        : (() => {
-            const [sourceType, sourceId] = relatedPartySourceKey.split(':');
-            return {
-              sourceType: sourceType === 'external' ? 'externalContact' : sourceType,
-              sourceId: Number(sourceId),
-            };
-          })();
-
-    if (!source.sourceType || !Number.isFinite(source.sourceId) || source.sourceId <= 0) {
-      setRelatedPartiesError('Выберите связанное лицо или организацию из справочника.');
-      return;
-    }
-
-    setRelatedPartiesSaving(true);
+  const runPartyAction = async (kind: string, action: (isCurrent: () => boolean) => Promise<void>) => {
+    if (!isOpen || !caseActionOwner.capture() || caseData.id <= 0) return;
+    if (!allowEdit) { setRelatedPartiesError('Недостаточно прав для изменения связей дела.'); return; }
+    const operation = caseActionOwner.begin(`party:${kind}`); if (!operation) return;
     setRelatedPartiesError(null);
-    try {
-      const created = await apiService.addCaseRelatedParty(caseData.id, {
-        sourceType: source.sourceType,
-        sourceId: source.sourceId,
-        role: relatedPartyRole.trim() || 'Участник',
-      });
-      setRelatedParties((items) => [...items, created].sort((a, b) => a.displayName.localeCompare(b.displayName, 'ru')));
-      setRelatedPartySourceKey('');
-      setRelatedPartyLegalEntityId('');
-    } catch (e: unknown) {
-      setRelatedPartiesError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setRelatedPartiesSaving(false);
-    }
+    try { await action(operation.isCurrent); }
+    catch (error) {
+      if (operation.isCurrent() && !(error instanceof StaleUiOperationError)) setRelatedPartiesError(extractDisplayErrorMessage(error, 'Не удалось изменить связи дела.'));
+    } finally { operation.finish(); }
   };
-
-  const handleDeleteRelatedParty = async (party: ClientCaseRelatedParty) => {
-    if (!allowEdit) {
-      setRelatedPartiesError('Недостаточно прав для изменения связей дела.');
-      return;
-    }
-
-    if (!caseData.id || caseData.id <= 0) return;
-    const ok = await confirm({
-      title: 'Удаление связи',
-      description: `Удалить связь «${party.displayName}» из дела?`,
-      confirmLabel: 'Удалить',
-      cancelLabel: 'Отмена',
-      variant: 'danger',
-    });
-    if (!ok) return;
-
-    setRelatedPartiesSaving(true);
-    setRelatedPartiesError(null);
-    try {
-      await apiService.deleteCaseRelatedParty(caseData.id, party.id);
-      setRelatedParties((items) => items.filter((item) => item.id !== party.id));
-    } catch (e: unknown) {
-      setRelatedPartiesError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setRelatedPartiesSaving(false);
-    }
+  const handleRetryRelatedDirectory = () => runPartyAction('directory', async isCurrent => {
+    if (relatedPartyMode === 'legalEntity' ? !canUseLegalEntityRelatedParties : !canUseContactRelatedParties) return;
+    await awaitOwnedUiResult(relatedPartyMode === 'legalEntity' ? entityRead.refresh : contactRead.refresh, isCurrent);
+  });
+  const handleAddRelatedParty = () => runPartyAction('add', async isCurrent => {
+    const snapshot = relatedPartyMode === 'legalEntity' ? actionSnapshots.current.entities : actionSnapshots.current.contacts;
+    if (relatedPartyMode === 'legalEntity' ? !canUseLegalEntityRelatedParties : !canUseContactRelatedParties) throw new Error('У роли нет доступа к выбранному справочнику участников.');
+    if (snapshot.loading || snapshot.error) throw new Error('Справочник участников ещё не подтверждён. Дождитесь загрузки или повторите её.');
+    const contact = actionSnapshots.current.contacts.value.find(item => getContactOptionKey(item) === relatedPartySourceKey);
+    const entity = actionSnapshots.current.entities.value.find(item => String(item.id) === relatedPartyLegalEntityId);
+    const source = relatedPartyMode === 'legalEntity' ? entity && { sourceType: 'legalEntity', sourceId: entity.id }
+      : contact && { sourceType: contact.sourceType === 'external' ? 'externalContact' : contact.sourceType === 'legal' ? 'legalEntity' : contact.sourceType, sourceId: contact.sourceId };
+    if (!source) throw new Error('Выберите связанное лицо или организацию из текущего справочника.');
+    const created = await awaitOwnedUiResult(() => apiService.addCaseRelatedParty(caseData.id, { ...source, role: relatedPartyRole.trim() || 'Участник' }), isCurrent);
+    if (!created || !Number.isSafeInteger(created.id) || created.id <= 0 || created.clientCaseId !== caseData.id || created.sourceType !== source.sourceType || created.sourceId !== source.sourceId || typeof created.displayName !== 'string') throw new Error('Не удалось подтвердить добавленную связь. Обновите список связей перед повторным действием.');
+    setRelatedParties(items => [...items.filter(item => item.id !== created.id), created].sort((a, b) => a.displayName.localeCompare(b.displayName, 'ru')));
+    setRelatedPartySourceKey(''); setRelatedPartyLegalEntityId('');
+  });
+  const currentParty = (party: ClientCaseRelatedParty) => {
+    const snapshot = actionSnapshots.current.parties;
+    return !snapshot.loading && !snapshot.error && party.clientCaseId === caseData.id
+      && snapshot.value.some(item => item.id === party.id && item.sourceType === party.sourceType && item.sourceId === party.sourceId);
   };
+  const handleDeleteRelatedParty = (party: ClientCaseRelatedParty) => runPartyAction('delete', async isCurrent => {
+    if (!currentParty(party)) throw new Error('Список связей изменился или недоступен. Обновите его и выберите участника заново.');
+    const controller = new AbortController(); deleteConfirmation.current = controller;
+    try {
+      const ok = await awaitOwnedUiResult(() => confirm({ signal: controller.signal, title: 'Удаление связи', description: `Удалить связь «${party.displayName}» из дела?`, confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }), isCurrent);
+      if (!ok) return;
+      if (!currentParty(party)) throw new Error('Список связей изменился или недоступен. Обновите его и выберите участника заново.');
+      await awaitOwnedUiResult(() => apiService.deleteCaseRelatedParty(caseData.id, party.id), isCurrent);
+      setRelatedParties(items => items.filter(item => item.id !== party.id));
+    } finally { if (deleteConfirmation.current === controller) deleteConfirmation.current = null; }
+  });
 
   const normalizedCourtUrl = normalizeExternalUrl(courtUrl);
   const enteredFee = Number(feeAmount.replace(',', '.'));
@@ -1513,7 +1446,7 @@ export function CaseModal({
                     aria-label="Связанная организация"
                     className="rounded-lg border px-3 py-2 text-sm bg-white"
                     value={relatedPartyLegalEntityId}
-                    onChange={(e) => setRelatedPartyLegalEntityId(e.target.value)}
+                    onChange={(e) => { const value = e.target.value; if (!value || (!entityRead.loading && !entityRead.error && legalEntityOptions.some(item => String(item.id) === value))) setRelatedPartyLegalEntityId(value); else setRelatedPartiesError('Выберите организацию из текущего справочника.'); }}
                     disabled={relatedPartiesSaving || saving || !allowEdit || !canUseLegalEntityRelatedParties}>
                     <option value="">Выберите организацию</option>
                     {legalEntityOptions.map((item) => (
@@ -1527,7 +1460,7 @@ export function CaseModal({
                     aria-label="Связанное лицо"
                     className="rounded-lg border px-3 py-2 text-sm bg-white"
                     value={relatedPartySourceKey}
-                    onChange={(e) => setRelatedPartySourceKey(e.target.value)}
+                    onChange={(e) => { const value = e.target.value; if (!value || (!contactRead.loading && !contactRead.error && contactOptions.some(item => getContactOptionKey(item) === value))) setRelatedPartySourceKey(value); else setRelatedPartiesError('Выберите лицо или контакт из текущего справочника.'); }}
                     disabled={relatedPartiesSaving || saving || !allowEdit || !canUseContactRelatedParties}>
                     <option value="">Выберите лицо или контакт</option>
                     {contactOptions.map((item) => (
@@ -1550,7 +1483,7 @@ export function CaseModal({
                   type="button"
                   className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
                   onClick={() => void handleAddRelatedParty()}
-                  disabled={relatedPartiesSaving || saving || !allowEdit || (!canUseContactRelatedParties && !canUseLegalEntityRelatedParties)}>
+                  disabled={relatedPartiesSaving || saving || relatedDirectory.loading || !!relatedDirectory.error || !allowEdit || (!canUseContactRelatedParties && !canUseLegalEntityRelatedParties)}>
                   <Plus size={15} /> Добавить
                 </button>
               </div>
@@ -1559,6 +1492,13 @@ export function CaseModal({
                 Связи можно будет добавить после сохранения дела.
               </div>
             )}
+
+            {caseData.id > 0 && allowEdit && (relatedPartyMode === 'legalEntity' ? canUseLegalEntityRelatedParties : canUseContactRelatedParties) && relatedDirectoryError ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <span>{relatedDirectoryError}</span>
+                <button type="button" className="max-w-full shrink-0 rounded border border-amber-300 px-2 py-1" disabled={saving || relatedDirectory.loading} onClick={() => void handleRetryRelatedDirectory()}>Повторить загрузку участников</button>
+              </div>
+            ) : null}
 
             {relatedPartiesLoading ? (
               <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-white px-3 py-4 text-sm text-slate-500">

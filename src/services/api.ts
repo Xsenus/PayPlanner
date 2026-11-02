@@ -8349,10 +8349,11 @@ export class ApiService {
     return saved;
   }
 
-  async downloadCaseDocument(caseId: number, documentId: number) {
+  async downloadCaseDocument(caseId: number, documentId: number, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
     const token = getAuthToken();
     const response = await fetch(`${API_BASE_URL}/v2/cases/${caseId}/documents/${documentId}/download`, {
-      method: 'GET',
+      method: 'GET', signal: options?.signal, cache: 'no-store',
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
 
