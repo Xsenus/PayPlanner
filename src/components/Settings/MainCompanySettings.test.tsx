@@ -23,6 +23,7 @@ describe('MainCompanySettings snapshot timing', () => {
   let session: ReturnType<typeof documentCopyTestSession>;
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(useLegalEntities).mockReturnValue({ legalEntities: [], loading: false, error: null, refresh: mocks.refresh } as unknown as ReturnType<typeof useLegalEntities>);
     session = documentCopyTestSession();
     Object.assign(mocks, { userId: 3, roleId: 4, admin: true });
     mocks.get.mockReset().mockResolvedValue({ companies: [], defaultCompanyId: null, settingsVersion: 'A'.repeat(64) });
@@ -168,4 +169,53 @@ describe('MainCompanySettings snapshot timing', () => {
     expect(mocks.get).not.toHaveBeenCalled(); expect(mocks.put).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull();
   });
+  it.each([
+    ['HTTP 401 at https://example.test/api/legal-entities - private payload', 'Сессия истекла. Войдите снова.'],
+    ['HTTP 403 at https://example.test/api/legal-entities - private payload', 'Недостаточно прав для выполнения действия.'],
+    ['HTTP 500 at https://example.test/api/legal-entities - Список временно недоступен', 'Список временно недоступен'],
+    ['Failed to fetch', 'Не удалось загрузить список компаний.'],
+  ])('catalogue retry: explains %s without a technical endpoint', async (error, expected) => {
+    vi.mocked(useLegalEntities).mockReturnValue({ legalEntities: [], loading: false, error, refresh: mocks.refresh } as unknown as ReturnType<typeof useLegalEntities>);
+    render(<MainCompanySettings />); await screen.findByText(expected);
+    expect(screen.queryByText(error)).toBeNull(); expect(screen.getByRole('button', { name: 'Не удалось загрузить список компаний' })).toBeTruthy();
+    expect(mocks.refresh).not.toHaveBeenCalled(); expect(mocks.put).not.toHaveBeenCalled();
+  });
+  it('catalogue retry: preserves the settings draft and only reloads the catalogue once', async () => {
+    let resolve!: () => void; mocks.refresh.mockReturnValueOnce(new Promise<void>(yes => { resolve = yes; }));
+    const company = { id: 15, shortName: 'Своя компания', clientsCount: 0, createdAt: '2026-11-02' };
+    mocks.get.mockResolvedValue({ companies: [company], defaultCompanyId: 15, settingsVersion: 'A'.repeat(64) });
+    vi.mocked(useLegalEntities).mockReturnValue({ legalEntities: [], loading: false, error: 'HTTP 403 at https://example.test/api/legal-entities - denied', refresh: mocks.refresh } as unknown as ReturnType<typeof useLegalEntities>);
+    render(<MainCompanySettings />); const select = await screen.findByLabelText('Когда фиксировать реквизиты и изображения компании в новом документе');
+    await waitFor(() => expect(select.matches(':disabled')).toBe(false)); fireEvent.change(select, { target: { value: 'on-create' } });
+    const retry = screen.getByRole('button', { name: 'Повторить загрузку компаний' });
+    act(() => { fireEvent.click(retry); fireEvent.click(retry); });
+    expect(mocks.refresh).toHaveBeenCalledOnce(); expect(mocks.get).toHaveBeenCalledOnce(); expect(mocks.put).not.toHaveBeenCalled();
+    await act(async () => resolve()); expect((select as HTMLSelectElement).value).toBe('on-create'); expect(screen.getByText('Своя компания')).toBeTruthy(); expect(mocks.success).not.toHaveBeenCalled();
+  });
+
+  it('catalogue retry: does not dispatch after session replacement before rerender', async () => {
+    vi.mocked(useLegalEntities).mockReturnValue({ legalEntities: [], loading: false, error: 'HTTP 403 denied', refresh: mocks.refresh } as unknown as ReturnType<typeof useLegalEntities>);
+    render(<MainCompanySettings />); const retry = await screen.findByRole('button', { name: 'Повторить загрузку компаний' }); session.replace(); fireEvent.click(retry);
+    expect(mocks.refresh).not.toHaveBeenCalled(); expect(mocks.put).not.toHaveBeenCalled();
+  });
+  it('catalogue retry: disables another retry while the directory is loading', async () => {
+    vi.mocked(useLegalEntities).mockReturnValue({ legalEntities: [], loading: true, error: 'HTTP 403 denied', refresh: mocks.refresh } as unknown as ReturnType<typeof useLegalEntities>);
+    render(<MainCompanySettings />); const retry = await screen.findByRole('button', { name: 'Повторить загрузку компаний' });
+    expect(retry.matches(':disabled')).toBe(true); fireEvent.click(retry); expect(mocks.refresh).not.toHaveBeenCalled(); expect(screen.getByRole('button', { name: 'Загружаем список компаний…' })).toBeTruthy();
+  });
+  it('catalogue retry: reports an unexpected current refresh failure without repeating it', async () => {
+    mocks.refresh.mockRejectedValueOnce(new Error('HTTP 500 at https://example.test/api/legal-entities - Сервис недоступен'));
+    vi.mocked(useLegalEntities).mockReturnValue({ legalEntities: [], loading: false, error: 'HTTP 403 denied', refresh: mocks.refresh } as unknown as ReturnType<typeof useLegalEntities>);
+    render(<MainCompanySettings />); fireEvent.click(await screen.findByRole('button', { name: 'Повторить загрузку компаний' }));
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith('Сервис недоступен', 'Компании')); expect(mocks.refresh).toHaveBeenCalledOnce(); expect(mocks.put).not.toHaveBeenCalled();
+  });
+  it.each(['user', 'admin', 'login', 'unmount'])('catalogue retry: ignores a late retry failure after %s change', async kind => {
+    let reject!: (error: Error) => void; mocks.refresh.mockReturnValueOnce(new Promise<void>((_, no) => { reject = no; }));
+    vi.mocked(useLegalEntities).mockReturnValue({ legalEntities: [], loading: false, error: 'HTTP 403 denied', refresh: mocks.refresh } as unknown as ReturnType<typeof useLegalEntities>);
+    const view = render(<MainCompanySettings />); fireEvent.click(await screen.findByRole('button', { name: 'Повторить загрузку компаний' }));
+    if (kind === 'user') mocks.userId++; else if (kind === 'admin') mocks.admin = false; else if (kind === 'login') session.replace();
+    if (kind === 'unmount') view.unmount(); else view.rerender(<MainCompanySettings />);
+    await act(async () => reject(new Error('HTTP 500 late old retry'))); expect(mocks.error).not.toHaveBeenCalled(); expect(mocks.refresh).toHaveBeenCalledOnce(); expect(mocks.put).not.toHaveBeenCalled();
+  });
+
 });

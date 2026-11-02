@@ -61,6 +61,7 @@ function MainCompanySettingsScreen({ session }: { session: AuthSessionIdentity }
   const {
     legalEntities,
     error: legalEntitiesError,
+    loading: legalEntitiesLoading,
     refresh: refreshLegalEntities,
   } = useLegalEntities({ ownerScope: 'main-company-settings' });
 
@@ -74,6 +75,7 @@ function MainCompanySettingsScreen({ session }: { session: AuthSessionIdentity }
   const mounted = useRef(true);
   const loadSequence = useRef(0);
   const savingRef = useRef(false);
+  const directoryRetrying = useRef(false);
   const { capture, isCurrent } = useAsyncOperationOwner('main-company-settings');
   const renderedOwner = capture();
 
@@ -108,6 +110,16 @@ function MainCompanySettingsScreen({ session }: { session: AuthSessionIdentity }
   useEffect(() => {
     void loadSettings();
   }, [loadSettings]);
+
+  const handleRetryDirectory = useCallback(async () => {
+    const current = () => mounted.current && isCurrent(renderedOwner) && isAuthSessionIdentityCurrent(session);
+    if (!current() || savingRef.current || directoryRetrying.current) return;
+    directoryRetrying.current = true;
+    try { await refreshLegalEntities(); }
+    catch (retryError) {
+      if (current()) toast.error(extractDisplayErrorMessage(retryError, 'Не удалось загрузить список компаний.'), 'Компании');
+    } finally { directoryRetrying.current = false; }
+  }, [isCurrent, refreshLegalEntities, renderedOwner, session, toast]);
 
   const selectedCompanies = useMemo(
     () => settings?.companies ?? [],
@@ -296,7 +308,7 @@ function MainCompanySettingsScreen({ session }: { session: AuthSessionIdentity }
                 value={selectedCompanyToAddId}
                 options={addableOptions}
                 onChange={setSelectedCompanyToAddId}
-                placeholder={addableOptions.length > 0 ? 'Выберите юридическое лицо' : 'Все доступные компании уже добавлены'}
+                placeholder={legalEntitiesLoading ? 'Загружаем список компаний…' : legalEntitiesError ? 'Не удалось загрузить список компаний' : addableOptions.length > 0 ? 'Выберите юридическое лицо' : 'Все доступные компании уже добавлены'}
                 title="Добавление основной компании"
                 searchPlaceholder="Поиск по названию, ИНН, КПП или адресу"
                 noOptionsText="Нет доступных компаний для добавления"
@@ -406,7 +418,11 @@ function MainCompanySettingsScreen({ session }: { session: AuthSessionIdentity }
               ) : null}
               {legalEntitiesError ? (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  {legalEntitiesError}
+                  <p>{extractDisplayErrorMessage(legalEntitiesError, 'Не удалось загрузить список компаний.')}</p>
+                  <button type="button" onClick={() => void handleRetryDirectory()} disabled={legalEntitiesLoading || saving}
+                    className="mt-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-medium disabled:opacity-60">
+                    Повторить загрузку компаний
+                  </button>
                 </div>
               ) : null}
               {message ? (
