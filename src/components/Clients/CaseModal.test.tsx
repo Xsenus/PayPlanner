@@ -1,10 +1,16 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CaseModal } from './CaseModal';
 import { apiService } from '../../services/api';
 import type { ClientCase, ClientCaseDocument } from '../../types';
+import { toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { documentCopyTestSession } from '../../test/documentCopySession';
+
+const caseAuth = vi.hoisted(() => ({ userId: 7, roleId: 4 }));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: caseAuth.userId, role: { id: caseAuth.roleId } } }) }));
+let caseReadSession: ReturnType<typeof documentCopyTestSession>;
+afterEach(() => caseReadSession?.restore());
 
 const dialogMock = vi.hoisted(() => ({
   confirm: vi.fn(),
@@ -213,6 +219,7 @@ describe('CaseModal', () => {
     expect(apiService.uploadCaseDocument).not.toHaveBeenCalled();
   });
   beforeEach(() => {
+    caseReadSession = documentCopyTestSession(); Object.assign(caseAuth, { userId: 7, roleId: 4 });
     vi.mocked(apiService.retireCaseDocumentUpload).mockReset();
     vi.mocked(apiService.getPendingCaseDocumentUploads).mockReset();
     vi.mocked(apiService.getPendingCaseDocumentUploads).mockResolvedValue({ items: [], nextCursor: null });
@@ -865,7 +872,7 @@ describe('CaseModal', () => {
         status: 'Подготовлен',
       });
     });
-    expect(apiService.getCaseDocuments).toHaveBeenCalledWith(1);
+    expect(apiService.getCaseDocuments).toHaveBeenCalledWith(1, expect.any(AbortSignal));
   });
 
   it('shows finance summary for the current case', async () => {
@@ -901,7 +908,7 @@ describe('CaseModal', () => {
     );
 
     expect(await screen.findByText('Финансы по делу')).toBeTruthy();
-    expect(apiService.getClientCaseFinanceSummaries).toHaveBeenCalledWith(10);
+    expect(apiService.getClientCaseFinanceSummaries).toHaveBeenCalledWith(10, undefined, { signal: expect.any(AbortSignal) });
     expect(screen.getByText('Счета по делу')).toBeTruthy();
     expect(screen.getByText((text) => text.includes('25') && text.includes('000'))).toBeTruthy();
     expect(screen.getByText((text) => text.includes('10') && text.includes('000'))).toBeTruthy();
@@ -976,6 +983,102 @@ describe('CaseModal', () => {
       clientCaseId: 1,
       page: 1,
       pageSize: 25,
-    });
+    }, { signal: expect.any(AbortSignal) });
   });
+  it('case read baseline: a late profile timezone cannot replace a manually entered hearing', async () => {
+    const original = Intl.DateTimeFormat.prototype.resolvedOptions;
+    const spy = vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockImplementation(function (this: Intl.DateTimeFormat) { return { ...original.call(this), timeZone: 'UTC' }; });
+    try {
+      const pending = deferred<{ key: string; value: string }>(); vi.mocked(apiService.getUserSetting).mockReturnValueOnce(pending.promise);
+      const save = vi.fn(); render(<CaseModal isOpen caseData={createCase({ nextHearingAt: '2026-12-01T10:00:00Z' })} onClose={vi.fn()} onSave={save} />);
+      fireEvent.change(screen.getByLabelText('Следующее заседание'), { target: { value: '2026-12-03T12:34' } });
+      await act(async () => pending.resolve({ key: 'profile.timeZoneId', value: 'Europe/Samara' }));
+      expect((screen.getByLabelText('Следующее заседание') as HTMLInputElement).value).toBe('2026-12-03T12:34');
+      fireEvent.click(screen.getByRole('button', { name: 'Сохранить' })); await waitFor(() => expect(save).toHaveBeenCalledOnce());
+      expect(Date.parse(save.mock.calls[0][0].nextHearingAt)).toBe(Date.UTC(2026, 11, 3, 12, 34));
+    } finally { spy.mockRestore(); }
+  });
+  it('case read baseline: another case window cannot change the first windows timezone conversion', async () => {
+    vi.mocked(apiService.getUserSetting).mockResolvedValueOnce({ key: 'profile.timeZoneId', value: 'UTC' }).mockResolvedValueOnce({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
+    const first = { isOpen: true, caseData: createCase({ nextHearingAt: '2026-12-01T10:00:00Z' }), onClose: vi.fn(), onSave: vi.fn() };
+    const second = { isOpen: true, caseData: createCase({ id: 2, nextHearingAt: '2026-12-02T10:00:00Z' }), onClose: vi.fn(), onSave: vi.fn() };
+    const view = render(<><CaseModal {...first} /><CaseModal {...second} /></>); await act(async () => {});
+    view.rerender(<><CaseModal {...first} /></>);
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(first.onSave).toHaveBeenCalledOnce()); expect(Date.parse(first.onSave.mock.calls[0][0].nextHearingAt)).toBe(Date.UTC(2026, 11, 1, 10));
+  });
+
+  const ownedReadMethods = {
+    documents: 'getCaseDocuments', tasks: 'getTaskJournalItems', finance: 'getClientCaseFinanceSummaries',
+    parties: 'getCaseRelatedParties', contacts: 'getContacts', entities: 'getLegalEntitiesPaged', templates: 'getCaseDocumentTemplates',
+    activity: 'markCaseActivity', timezone: 'getUserSetting',
+  } as const;
+  function oldReadValue(kind: keyof typeof ownedReadMethods) {
+    const marker = 'ПРЕЖНИЕ ДАННЫЕ ЧТЕНИЯ';
+    if (kind === 'documents') return [{ id: 91, clientCaseId: 1, originalFileName: marker, documentKey: 'old', version: 1, isLatestVersion: true }];
+    if (kind === 'tasks') return { items: [{ id: 91, title: marker, status: 'new', priority: 'normal' }], total: 1, page: 1, pageSize: 25 };
+    if (kind === 'finance') return [{ caseId: 1, incomeTotal: 987654321.23, incomePaid: 0 }];
+    if (kind === 'parties') return [{ id: 91, clientCaseId: 1, displayName: marker, sourceType: 'client', sourceId: 1 }];
+    if (kind === 'contacts') return [{ sourceType: 'client', sourceId: 91, fullName: marker, isActive: true }];
+    if (kind === 'entities') return { items: [{ id: 91, shortName: marker, clientsCount: 0 }], total: 1, page: 1, pageSize: 100 };
+    if (kind === 'templates') return [{ key: 'old-template', label: marker, heading: marker, documentType: 'Документ' }];
+    if (kind === 'activity') return { lastViewedAt: null, eventHistory: marker, inactivityRemindersEnabled: true };
+    return { key: 'profile.timeZoneId', value: Intl.DateTimeFormat().resolvedOptions().timeZone === 'Europe/Samara' ? 'UTC' : 'Europe/Samara' };
+  }
+  it.each(Object.keys(ownedReadMethods) as Array<keyof typeof ownedReadMethods>)('case read boundary: discards an old %s response after case replacement', async kind => {
+    const pending = deferred<unknown>(); vi.mocked(apiService[ownedReadMethods[kind]]).mockReturnValueOnce(pending.promise as never);
+    const props = { isOpen: true, caseData: createCase({ nextHearingAt: '2026-12-01T10:00:00Z' }), onClose: vi.fn(), onSave: vi.fn() };
+    const view = render(<CaseModal {...props} />); await act(async () => {});
+    view.rerender(<CaseModal {...props} caseData={createCase({ id: 2, title: 'Текущее дело', nextHearingAt: '2026-12-01T10:00:00Z' })} />);
+    await act(async () => pending.resolve(oldReadValue(kind)));
+    if (kind === 'entities') fireEvent.change(screen.getByLabelText('Тип связанного участника'), { target: { value: 'legalEntity' } });
+    expect(document.body.textContent).not.toContain('ПРЕЖНИЕ ДАННЫЕ ЧТЕНИЯ'); expect(document.body.textContent?.replace(/\s/g, '')).not.toContain('987654321');
+    expect((screen.getByLabelText('История событий') as HTMLTextAreaElement).value).not.toContain('ПРЕЖНИЕ');
+    if (kind === 'timezone') expect((screen.getByLabelText('Следующее заседание') as HTMLInputElement).value).toBe(toTimeZoneDateTimeInput('2026-12-01T10:00:00Z', Intl.DateTimeFormat().resolvedOptions().timeZone));
+  });
+  it.each(['documents', 'tasks', 'finance'] as const)('case read boundary: discards an old %s error after role replacement', async kind => {
+    const pending = deferred<unknown>(); vi.mocked(apiService[ownedReadMethods[kind]]).mockReturnValueOnce(pending.promise as never);
+    const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn() }; const view = render(<CaseModal {...props} />); await act(async () => {});
+    caseAuth.roleId++; view.rerender(<CaseModal {...props} />); await act(async () => pending.reject(new Error('HTTP 403 - Прежняя ошибка роли')));
+    expect(screen.queryByText(/Прежняя ошибка роли/)).toBeNull();
+  });
+  it.each(['success', 'error'])('case read boundary: closing before parent unmount ignores pending document %s', async outcome => {
+    const pending = deferred<unknown>(); vi.mocked(apiService.getCaseDocuments).mockReturnValueOnce(pending.promise as never);
+    const close = vi.fn(); render(<CaseModal isOpen caseData={createCase()} onClose={close} onSave={vi.fn()} />); await act(async () => {});
+    const signal = vi.mocked(apiService.getCaseDocuments).mock.calls[0][1]; fireEvent.click(screen.getByRole('button', { name: 'Закрыть' }));
+    await act(async () => { if (outcome === 'error') pending.reject(new Error('HTTP 403 - Прежняя ошибка файла')); else pending.resolve(oldReadValue('documents')); });
+    expect(close).toHaveBeenCalledOnce(); expect(signal?.aborted).toBe(true); expect(document.body.textContent).not.toMatch(/ПРЕЖНИЕ ДАННЫЕ|Прежняя ошибка файла/);
+  });
+  it('case read boundary: finance permission removal cancels the read and hides prior values', async () => {
+    const pending = deferred<unknown>(); vi.mocked(apiService.getClientCaseFinanceSummaries).mockReturnValueOnce(pending.promise as never);
+    const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn() }; const view = render(<CaseModal {...props} />); await act(async () => {});
+    const signal = vi.mocked(apiService.getClientCaseFinanceSummaries).mock.calls[0][2]?.signal;
+    view.rerender(<CaseModal {...props} canViewFinance={false} />); await act(async () => pending.resolve(oldReadValue('finance')));
+    expect(signal?.aborted).toBe(true); expect(screen.queryByText('Финансы по делу')).toBeNull(); expect(document.body.textContent?.replace(/\s/g, '')).not.toContain('987654321');
+  });
+  it('case read boundary: a late activity read keeps manually edited history and reminder settings', async () => {
+    const pending = deferred<unknown>(); vi.mocked(apiService.markCaseActivity).mockReturnValueOnce(pending.promise as never); dialogMock.prompt.mockResolvedValueOnce('Мой контроль');
+    const save = vi.fn(); render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={save} />); await act(async () => {});
+    fireEvent.change(screen.getByLabelText('История событий'), { target: { value: 'Моя история' } }); fireEvent.click(screen.getByLabelText('Автоконтроль дела')); await screen.findByText('Причина: Мой контроль');
+    await act(async () => pending.resolve({ ...oldReadValue('activity') as object, inactivityRemindersEnabled: true, inactivityRemindersDisabledReason: '' }));
+    expect((screen.getByLabelText('История событий') as HTMLTextAreaElement).value).toBe('Моя история'); expect(screen.getByText('Причина: Мой контроль')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' })); await waitFor(() => expect(save).toHaveBeenCalledOnce()); expect(save.mock.calls[0][0]).toMatchObject({ eventHistory: 'Моя история', inactivityRemindersEnabled: false, inactivityRemindersDisabledReason: 'Мой контроль' });
+  });
+  it('case read boundary: a guest never loads private case collections or marks activity', async () => {
+    caseReadSession.replace('logout'); render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={vi.fn()} />); await act(async () => {});
+    for (const method of Object.values(ownedReadMethods)) expect(apiService[method]).not.toHaveBeenCalled();
+  });
+  it('case read boundary: token refresh and the same parent render do not repeat reads', async () => {
+    const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn() }; const view = render(<CaseModal {...props} />); await act(async () => {});
+    const before = Object.fromEntries(Object.entries(ownedReadMethods).map(([kind, method]) => [kind, vi.mocked(apiService[method]).mock.calls.length])); caseReadSession.refresh(); view.rerender(<CaseModal {...props} />); await act(async () => {});
+    for (const [kind, method] of Object.entries(ownedReadMethods)) expect(vi.mocked(apiService[method]).mock.calls.length).toBe(before[kind]);
+  });
+
+  it.each(['success', 'error'])('case read session: a previous login document %s is ignored before context rerender', async outcome => {
+    const pending = deferred<unknown>(); vi.mocked(apiService.getCaseDocuments).mockReturnValueOnce(pending.promise as never);
+    render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={vi.fn()} />); await act(async () => {}); caseReadSession.replace();
+    await act(async () => { if (outcome === 'error') pending.reject(new Error('HTTP 403 - Прежний вход')); else pending.resolve(oldReadValue('documents')); });
+    expect(document.body.textContent).not.toMatch(/ПРЕЖНИЕ ДАННЫЕ|Прежний вход/);
+  });
+
 });

@@ -12,6 +12,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { createPortal } from 'react-dom';
 import { Download, ExternalLink, FileText, Link2, Plus, RotateCw, Trash2, Upload, X } from 'lucide-react';
 import type { ActResponsible, ClientCase, ClientCaseActivity, ClientCaseDocument, ClientCaseDocumentTemplate, ClientCaseFinanceSummary, ClientCaseRelatedParty, LegalEntitySummary } from '../../types';
+import { useAuth } from '../../contexts/AuthContext';
+import { captureAuthSessionIdentity } from '../../services/authService';
+import { useDictionarySnapshot } from '../../hooks/useDictionarySnapshot';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { useDialog } from '../../hooks/useDialog';
 import { useModalFocusTrap } from '../../hooks/useModalFocusTrap';
 import { useDocumentDeliveryOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
@@ -21,7 +25,7 @@ import { formatCurrencySmart } from '../../utils/formatters';
 import { downloadBlob } from '../../utils/downloadBlob';
 import { courtAmountToInput, hasInvalidCourtAmounts, parseCourtAmountInput } from '../../utils/courtAmounts';
 import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
-import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
+import { normalizeUserTimeZoneId, USER_TIME_ZONE_OPTIONS, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import type { TaskJournalItem, TaskJournalPriority, TaskJournalStatus } from '../../utils/taskJournalStore';
 
 interface CaseModalProps {
@@ -90,6 +94,12 @@ const FALLBACK_CASE_DOCUMENT_TEMPLATE_OPTIONS: ClientCaseDocumentTemplate[] = [
   { key: 'court-letter', label: 'Письмо в суд', documentType: 'Переписка' },
 ].map((template) => ({ ...template, heading: template.label }));
 
+const EMPTY_CASE_DOCUMENTS: ClientCaseDocument[] = [];
+const EMPTY_CASE_TASKS: TaskJournalItem[] = [];
+const EMPTY_CASE_PARTIES: ClientCaseRelatedParty[] = [];
+const EMPTY_CASE_CONTACTS: ContactDirectoryItemDto[] = [];
+const EMPTY_CASE_ENTITIES: LegalEntitySummary[] = [];
+
 function filterCaseDocumentTemplatesByCaseType(
   templates: ClientCaseDocumentTemplate[],
   caseType: string | null | undefined,
@@ -143,31 +153,25 @@ function caseTaskStatusClassName(status: TaskJournalStatus) {
   }
 }
 
-function formatTaskDateTime(value?: string | null) {
+function formatTaskDateTime(value: string | null | undefined, timeZoneId: string) {
   if (!value) return '';
-  return formatDateTimeInTimeZone(value, activeCaseModalTimeZoneId);
+  return formatDateTimeInTimeZone(value, timeZoneId);
 }
 
 function toDateInput(value?: string | null) {
   return value ? String(value).slice(0, 10) : '';
 }
 
-function toDateTimeInput(value?: string | null) {
-  return toTimeZoneDateTimeInput(value, activeCaseModalTimeZoneId);
+function toDateTimeInput(value: string | null | undefined, timeZoneId: string) {
+  return toTimeZoneDateTimeInput(value, timeZoneId);
 }
 
 function fromDateInput(value: string) {
   return value || null;
 }
 
-function fromDateTimeInput(value: string) {
-  return value ? fromTimeZoneDateTimeInput(value, activeCaseModalTimeZoneId) : null;
-}
-
-let activeCaseModalTimeZoneId = normalizeUserTimeZoneId();
-
-function setActiveCaseModalTimeZoneId(value?: string | null) {
-  activeCaseModalTimeZoneId = normalizeUserTimeZoneId(value);
+function fromDateTimeInput(value: string, timeZoneId: string) {
+  return value ? fromTimeZoneDateTimeInput(value, timeZoneId) : null;
 }
 
 function formatDateInput(year: number, monthIndex: number, day: number) {
@@ -222,9 +226,9 @@ function formatBytes(value: number) {
   return `${mb.toFixed(mb >= 10 ? 0 : 1)} МБ`;
 }
 
-function formatDocumentDate(value?: string | null) {
+function formatDocumentDate(value: string | null | undefined, timeZoneId: string) {
   if (!value) return '';
-  return formatDateTimeInTimeZone(value, activeCaseModalTimeZoneId);
+  return formatDateTimeInTimeZone(value, timeZoneId);
 }
 
 function formatMoney(value?: number | null) {
@@ -281,20 +285,31 @@ export function CaseModal({
   onOpenTask,
   canCreateTasks = false,
 }: CaseModalProps) {
+  const { user } = useAuth();
   const { confirm, prompt } = useDialog();
-  const caseActionOwner = useDocumentDeliveryOwner(JSON.stringify([isOpen, caseData.id, caseData.clientId, caseData.legalEntityId, allowEdit, canViewFinance]));
+  const caseActionOwner = useDocumentDeliveryOwner(JSON.stringify([isOpen, caseData.id, caseData.clientId, caseData.legalEntityId, allowEdit, canViewFinance, canUseContactRelatedParties, canUseLegalEntityRelatedParties, canCreateTasks, user?.id, user?.role?.id]));
+  const { capture: captureCaseOwner } = caseActionOwner;
+  const [readClosed, setReadClosed] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const deleteConfirmation = useRef<AbortController | null>(null);
   const handleClose = () => {
     if (!isOpen || !caseActionOwner.capture()) return;
-    caseActionOwner.invalidate(); deleteConfirmation.current?.abort(); onClose();
+    caseActionOwner.invalidate(); setReadClosed(true); deleteConfirmation.current?.abort(); onClose();
   };
   const trapFocus = useModalFocusTrap(modalRef, isOpen, handleClose, titleInputRef);
   useEffect(() => {
     return () => { deleteConfirmation.current?.abort(); };
   }, [caseActionOwner.scope]);
-  const [timeZoneId, setTimeZoneId] = useState(() => normalizeUserTimeZoneId());
+  const fallbackTimeZone = useMemo(() => normalizeUserTimeZoneId(), []);
+  const [timeZoneState, setTimeZoneState] = useState({ scope: caseActionOwner.scope, value: fallbackTimeZone });
+  const timeZoneId = timeZoneState.scope === caseActionOwner.scope ? timeZoneState.value : fallbackTimeZone;
+  const hearingEdited = useRef(false);
+  const historyEdited = useRef(false);
+  const activityEdited = useRef(false);
+  const activityReadSequence = useRef(0);
+  const documentReadSequence = useRef(0);
+  const currentTimeZone = useRef(timeZoneId); currentTimeZone.current = timeZoneId;
   const [title, setTitle] = useState(caseData.title ?? '');
   const [description, setDescription] = useState(caseData.description ?? '');
   const [status, setStatus] = useState<StatusValue>((caseData.status as StatusValue) ?? 'Open');
@@ -312,7 +327,7 @@ export function CaseModal({
   const [courtName, setCourtName] = useState(caseData.courtName ?? '');
   const [courtCaseNumber, setCourtCaseNumber] = useState(caseData.courtCaseNumber ?? '');
   const [courtUrl, setCourtUrl] = useState(caseData.courtUrl ?? '');
-  const [nextHearingAt, setNextHearingAt] = useState(toDateTimeInput(caseData.nextHearingAt));
+  const [nextHearingAt, setNextHearingAt] = useState(toDateTimeInput(caseData.nextHearingAt, timeZoneId));
   const [claimant, setClaimant] = useState(caseData.claimant ?? '');
   const [claimantInn, setClaimantInn] = useState(caseData.claimantInn ?? '');
   const [claimantOgrn, setClaimantOgrn] = useState(caseData.claimantOgrn ?? '');
@@ -352,25 +367,15 @@ export function CaseModal({
     nextHearingConfirmedByName: caseData.nextHearingConfirmedByName ?? '',
   });
   const [confirmingNextHearing, setConfirmingNextHearing] = useState(false);
-  const [caseDocuments, setCaseDocuments] = useState<ClientCaseDocument[]>([]);
-  const [documentsLoading, setDocumentsLoading] = useState(false);
   const [documentsSaving, setDocumentsSaving] = useState(false);
   const [uploadRevision, setUploadRevision] = useState(0);
-  const [documentsError, setDocumentsError] = useState<string | null>(null);
-  const [caseTasks, setCaseTasks] = useState<TaskJournalItem[]>([]);
-  const [caseTasksLoading, setCaseTasksLoading] = useState(false);
-  const [caseTasksError, setCaseTasksError] = useState<string | null>(null);
-  const [financeSummary, setFinanceSummary] = useState<ClientCaseFinanceSummary | null>(null);
-  const [financeLoading, setFinanceLoading] = useState(false);
-  const [financeError, setFinanceError] = useState<string | null>(null);
+  const [documentActionError, setDocumentActionError] = useState<{ owner: DocumentDeliveryRead; message: string } | null>(null);
+  const setDocumentsError = useCallback((message: string | null) => {
+    const owner = captureCaseOwner(); if (owner) setDocumentActionError(message ? { owner, message } : null);
+  }, [captureCaseOwner]);
   const [documentType, setDocumentType] = useState(DOCUMENT_TYPE_OPTIONS[0]);
   const [documentStatus, setDocumentStatus] = useState(DOCUMENT_STATUS_OPTIONS[0]);
-  const [documentTemplates, setDocumentTemplates] = useState<ClientCaseDocumentTemplate[]>(FALLBACK_CASE_DOCUMENT_TEMPLATE_OPTIONS);
   const [documentTemplateKey, setDocumentTemplateKey] = useState(FALLBACK_CASE_DOCUMENT_TEMPLATE_OPTIONS[0].key);
-  const availableDocumentTemplates = useMemo(
-    () => filterCaseDocumentTemplatesByCaseType(documentTemplates, caseType),
-    [documentTemplates, caseType],
-  );
   const saving = caseActionOwner.busy;
   const [errorState, setErrorState] = useState<{ owner: DocumentDeliveryRead; message: string } | null>(null);
   const error = errorState?.owner.isCurrent() ? errorState.message : null;
@@ -390,12 +395,11 @@ export function CaseModal({
     eventHistory: caseData.eventHistory ?? '',
   });
   const [activitySaving, setActivitySaving] = useState(false);
-  const [relatedParties, setRelatedParties] = useState<ClientCaseRelatedParty[]>([]);
-  const [relatedPartiesLoading, setRelatedPartiesLoading] = useState(false);
   const [relatedPartiesSaving, setRelatedPartiesSaving] = useState(false);
-  const [relatedPartiesError, setRelatedPartiesError] = useState<string | null>(null);
-  const [contactOptions, setContactOptions] = useState<ContactDirectoryItemDto[]>([]);
-  const [legalEntityOptions, setLegalEntityOptions] = useState<LegalEntitySummary[]>([]);
+  const [partyActionError, setPartyActionError] = useState<{ owner: DocumentDeliveryRead; message: string } | null>(null);
+  const setRelatedPartiesError = useCallback((message: string | null) => {
+    const owner = captureCaseOwner(); if (owner) setPartyActionError(message ? { owner, message } : null);
+  }, [captureCaseOwner]);
   const [relatedPartyMode, setRelatedPartyMode] = useState<'contact' | 'legalEntity'>('contact');
   const [relatedPartySourceKey, setRelatedPartySourceKey] = useState('');
   const [relatedPartyLegalEntityId, setRelatedPartyLegalEntityId] = useState('');
@@ -419,30 +423,7 @@ export function CaseModal({
   }, [canUseContactRelatedParties, canUseLegalEntityRelatedParties, relatedPartyMode]);
 
   useEffect(() => {
-    setActiveCaseModalTimeZoneId(timeZoneId);
-  }, [timeZoneId]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    let cancelled = false;
-    const timeZoneRequest = typeof apiService.getUserSetting === 'function'
-      ? apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY)
-      : Promise.resolve(null);
-    timeZoneRequest
-      .then((response) => {
-        if (cancelled) return;
-        const nextTimeZoneId = normalizeUserTimeZoneId(response?.value);
-        setActiveCaseModalTimeZoneId(nextTimeZoneId);
-        setTimeZoneId(nextTimeZoneId);
-        setNextHearingAt(toDateTimeInput(caseData.nextHearingAt));
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [caseData.nextHearingAt, isOpen]);
-
-  useEffect(() => {
+    setReadClosed(false); hearingEdited.current = false; historyEdited.current = false; activityEdited.current = false;
     setTitle(caseData.title ?? '');
     setDescription(caseData.description ?? '');
     setStatus((caseData.status as StatusValue) ?? 'Open');
@@ -460,7 +441,7 @@ export function CaseModal({
     setCourtName(caseData.courtName ?? '');
     setCourtCaseNumber(caseData.courtCaseNumber ?? '');
     setCourtUrl(caseData.courtUrl ?? '');
-    setNextHearingAt(toDateTimeInput(caseData.nextHearingAt));
+    setNextHearingAt(toDateTimeInput(caseData.nextHearingAt, currentTimeZone.current));
     setClaimant(caseData.claimant ?? '');
     setClaimantInn(caseData.claimantInn ?? '');
     setClaimantOgrn(caseData.claimantOgrn ?? '');
@@ -499,8 +480,6 @@ export function CaseModal({
       nextHearingConfirmedByName: caseData.nextHearingConfirmedByName ?? '',
     });
     setDocumentsError(null);
-    setCaseTasksError(null);
-    setFinanceError(null);
     setDocumentType(DOCUMENT_TYPE_OPTIONS[0]);
     setDocumentStatus(DOCUMENT_STATUS_OPTIONS[0]);
     setDocumentTemplateKey(FALLBACK_CASE_DOCUMENT_TEMPLATE_OPTIONS[0].key);
@@ -522,192 +501,140 @@ export function CaseModal({
     setRelatedPartyLegalEntityId('');
     setRelatedPartyRole('Участник');
     setErrorState(null);
-  }, [caseData, isOpen]);
+  }, [caseData, isOpen, caseActionOwner.scope, setDocumentsError, setRelatedPartiesError]);
 
-  const refreshDocuments = useCallback(async () => {
-    if (!isOpen || !caseData.id || caseData.id <= 0) {
-      setCaseDocuments([]);
-      setDocumentsLoading(false);
-      return;
-    }
+  const readEnabled = isOpen && !readClosed && caseData.id > 0 && captureAuthSessionIdentity().authenticated;
+  const readOwned = useCallback(<T,>(signal: AbortSignal, operation: () => Promise<T>) => {
+    const owner = captureCaseOwner();
+    if (!owner) return Promise.reject<T>(new StaleUiOperationError());
+    return awaitOwnedUiResult(operation, () => owner.isCurrent() && !signal.aborted);
+  }, [captureCaseOwner]);
+  const validateDocumentRows = useCallback((rows: ClientCaseDocument[]) => {
+    if (!Array.isArray(rows) || !rows.every(row => row && Number.isSafeInteger(row.id) && row.id > 0 && row.clientCaseId === caseData.id)
+      || new Set(rows.map(row => row.id)).size !== rows.length) throw new Error('Не удалось подтвердить список файлов дела.');
+    return rows;
+  }, [caseData.id]);
+  const loadDocuments = useCallback((signal: AbortSignal) => {
+    const sequence = ++documentReadSequence.current;
+    return readOwned(signal, async () => {
+      const rows = await apiService.getCaseDocuments(caseData.id, signal);
+      if (sequence !== documentReadSequence.current) throw new StaleUiOperationError();
+      return validateDocumentRows(rows);
+    });
+  }, [caseData.id, readOwned, validateDocumentRows]);
+  const documentRead = useDictionarySnapshot(loadDocuments, EMPTY_CASE_DOCUMENTS, { enabled: readEnabled, ownerScope: caseActionOwner.scope }, false);
+  const caseDocuments = documentRead.value;
+  const documentsLoading = documentRead.loading;
+  const documentFailure = documentActionError?.owner.isCurrent() ? documentActionError.message : documentRead.error;
+  const documentsError = documentFailure ? extractDisplayErrorMessage(documentFailure, 'Не удалось загрузить файлы дела.') : null;
+  const refreshDocuments = documentRead.refresh;
+  const updateDocuments = documentRead.updateValue;
+  const setCaseDocuments = useCallback((rows: ClientCaseDocument[]) => {
+    if (captureCaseOwner()) updateDocuments(() => rows);
+  }, [captureCaseOwner, updateDocuments]);
 
-    setDocumentsLoading(true);
-    setDocumentsError(null);
-    try {
-      const documents = await apiService.getCaseDocuments(caseData.id);
-      setCaseDocuments(documents);
-    } catch (e: unknown) {
-      setDocumentsError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setDocumentsLoading(false);
-    }
-  }, [caseData.id, isOpen]);
+  const publishDocumentRead = useCallback(async (signal: AbortSignal) => {
+    const owner = captureCaseOwner(); if (!owner) throw new StaleUiOperationError();
+    const sequence = ++documentReadSequence.current;
+    const rows = await awaitOwnedUiResult(() => apiService.getCaseDocuments(caseData.id, signal),
+      () => owner.isCurrent() && !signal.aborted && documentReadSequence.current === sequence);
+    setCaseDocuments(validateDocumentRows(rows));
+  }, [captureCaseOwner, caseData.id, setCaseDocuments, validateDocumentRows]);
+
+  const loadTemplates = useCallback((signal: AbortSignal) => readOwned(signal, async () => {
+    const rows = await apiService.getCaseDocumentTemplates({ signal });
+    if (!Array.isArray(rows)) throw new Error('Не удалось загрузить шаблоны документов дела.');
+    const templates = rows.filter(item => item && typeof item.key === 'string' && typeof item.label === 'string' && typeof item.documentType === 'string'
+      && item.key && item.label && item.documentType);
+    return templates.length ? templates : FALLBACK_CASE_DOCUMENT_TEMPLATE_OPTIONS;
+  }), [readOwned]);
+  const templateRead = useDictionarySnapshot(loadTemplates, FALLBACK_CASE_DOCUMENT_TEMPLATE_OPTIONS, { enabled: isOpen && !readClosed && captureAuthSessionIdentity().authenticated, ownerScope: caseActionOwner.scope }, false);
+  const documentTemplates = templateRead.value;
+  const availableDocumentTemplates = useMemo(
+    () => filterCaseDocumentTemplatesByCaseType(documentTemplates, caseType),
+    [documentTemplates, caseType],
+  );
 
   useEffect(() => {
-    void refreshDocuments();
-  }, [refreshDocuments]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    let cancelled = false;
-    apiService.getCaseDocumentTemplates()
-      .then((items) => {
-        if (cancelled) return;
-
-        const templates = (items ?? []).filter((item) => item.key && item.label && item.documentType);
-        const nextTemplates = templates.length > 0 ? templates : FALLBACK_CASE_DOCUMENT_TEMPLATE_OPTIONS;
-        setDocumentTemplates(nextTemplates);
-        setDocumentTemplateKey((current) => nextTemplates.some((item) => item.key === current) ? current : nextTemplates[0].key);
-      })
-      .catch(() => {
-        if (cancelled) return;
-
-        setDocumentTemplates(FALLBACK_CASE_DOCUMENT_TEMPLATE_OPTIONS);
-        setDocumentTemplateKey((current) => FALLBACK_CASE_DOCUMENT_TEMPLATE_OPTIONS.some((item) => item.key === current)
-          ? current
-          : FALLBACK_CASE_DOCUMENT_TEMPLATE_OPTIONS[0].key);
-      })
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen]);
-
-  useEffect(() => {
-    setDocumentTemplateKey((current) => (
-      current && availableDocumentTemplates.some((item) => item.key === current)
-        ? current
-        : availableDocumentTemplates[0]?.key ?? ''
-    ));
+    setDocumentTemplateKey(current => current && availableDocumentTemplates.some(item => item.key === current) ? current : availableDocumentTemplates[0]?.key ?? '');
   }, [availableDocumentTemplates]);
+  const loadTasks = useCallback((signal: AbortSignal) => readOwned(signal, async () => {
+    const result = await apiService.getTaskJournalItems({ clientCaseId: caseData.id, page: 1, pageSize: 25 }, { signal });
+    if (!result || !Array.isArray(result.items) || !result.items.every(row => row && Number.isSafeInteger(row.id) && row.id > 0)) throw new Error('Не удалось подтвердить список задач дела.');
+    return result.items;
+  }), [caseData.id, readOwned]);
+  const taskRead = useDictionarySnapshot(loadTasks, EMPTY_CASE_TASKS, { enabled: readEnabled, ownerScope: caseActionOwner.scope }, false);
+  const caseTasks = taskRead.value; const caseTasksLoading = taskRead.loading; const caseTasksError = taskRead.error ? extractDisplayErrorMessage(taskRead.error, 'Не удалось загрузить задачи дела.') : null;
+  const refreshCaseTasks = taskRead.refresh;
 
-  const refreshCaseTasks = useCallback(async () => {
-    if (!isOpen || !caseData.id || caseData.id <= 0) {
-      setCaseTasks([]);
-      setCaseTasksLoading(false);
-      return;
-    }
+  const loadFinance = useCallback((signal: AbortSignal) => readOwned(signal, async () => {
+    const rows = caseData.legalEntityId ? await apiService.getLegalEntityCaseFinanceSummaries(caseData.legalEntityId, { signal })
+      : caseData.clientId ? await apiService.getClientCaseFinanceSummaries(caseData.clientId, undefined, { signal }) : [];
+    if (!Array.isArray(rows) || !rows.every(row => row && Number.isSafeInteger(row.caseId) && row.caseId > 0)) throw new Error('Не удалось подтвердить финансовые данные дела.');
+    return rows.find(row => row.caseId === caseData.id) ?? null;
+  }), [caseData.clientId, caseData.id, caseData.legalEntityId, readOwned]);
+  const financeRead = useDictionarySnapshot<ClientCaseFinanceSummary | null>(loadFinance, null, { enabled: readEnabled && canViewFinance, ownerScope: caseActionOwner.scope }, false);
+  const financeSummary = financeRead.value; const financeLoading = financeRead.loading; const financeError = financeRead.error ? extractDisplayErrorMessage(financeRead.error, 'Не удалось загрузить финансовые данные дела.') : null;
 
-    setCaseTasksLoading(true);
-    setCaseTasksError(null);
-    try {
-      const result = await apiService.getTaskJournalItems({
-        clientCaseId: caseData.id,
-        page: 1,
-        pageSize: 25,
-      });
-      setCaseTasks(result.items ?? []);
-    } catch (e: unknown) {
-      setCaseTasksError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setCaseTasksLoading(false);
-    }
-  }, [caseData.id, isOpen]);
-
-  useEffect(() => {
-    void refreshCaseTasks();
-  }, [refreshCaseTasks]);
-
-  const refreshFinanceSummary = useCallback(async () => {
-    if (!canViewFinance || !isOpen || !caseData.id || caseData.id <= 0) {
-      setFinanceSummary(null);
-      setFinanceLoading(false);
-      return;
-    }
-
-    setFinanceLoading(true);
-    setFinanceError(null);
-    try {
-      const summaries = caseData.legalEntityId
-        ? await apiService.getLegalEntityCaseFinanceSummaries(caseData.legalEntityId)
-        : caseData.clientId
-          ? await apiService.getClientCaseFinanceSummaries(caseData.clientId)
-          : [];
-      setFinanceSummary(summaries.find((item) => item.caseId === caseData.id) ?? null);
-    } catch (e: unknown) {
-      setFinanceSummary(null);
-      setFinanceError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setFinanceLoading(false);
-    }
-  }, [canViewFinance, caseData.clientId, caseData.id, caseData.legalEntityId, isOpen]);
+  const applyActivity = useCallback((next: ClientCaseActivity) => {
+    if (!captureCaseOwner()) return;
+    if (!next || typeof next !== 'object' || Array.isArray(next)) throw new Error('Не удалось подтвердить сведения об активности.');
+    setActivity(previous => activityEdited.current ? { ...next,
+      inactivityRemindersEnabled: previous.inactivityRemindersEnabled,
+      inactivityRemindersDisabledReason: previous.inactivityRemindersDisabledReason } : next);
+    if (!historyEdited.current && typeof next.eventHistory === 'string') setEventHistory(next.eventHistory);
+  }, [captureCaseOwner]);
 
   useEffect(() => {
-    void refreshFinanceSummary();
-  }, [refreshFinanceSummary]);
+    if (!readEnabled) return;
+    const owner = captureCaseOwner(); if (!owner) return;
+    const tracker = activityReadSequence; const sequence = ++tracker.current;
+    void awaitOwnedUiResult(() => apiService.markCaseActivity(caseData.id, { confirmed: false }), () => owner.isCurrent() && tracker.current === sequence)
+      .then(applyActivity)
+      .catch(() => undefined);
+    return () => { tracker.current++; };
+  }, [applyActivity, caseData.id, captureCaseOwner, readEnabled]);
 
+  const loadParties = useCallback((signal: AbortSignal) => readOwned(signal, async () => {
+    const rows = await apiService.getCaseRelatedParties(caseData.id, false, { signal });
+    if (!Array.isArray(rows) || !rows.every(row => row && row.clientCaseId === caseData.id && Number.isSafeInteger(row.id) && row.id > 0)) throw new Error('Не удалось подтвердить связи дела.');
+    return rows;
+  }), [caseData.id, readOwned]);
+  const partyRead = useDictionarySnapshot(loadParties, EMPTY_CASE_PARTIES, { enabled: readEnabled, ownerScope: caseActionOwner.scope }, false);
+  const relatedParties = partyRead.value; const relatedPartiesLoading = partyRead.loading;
+  const partyFailure = partyActionError?.owner.isCurrent() ? partyActionError.message : partyRead.error;
+  const relatedPartiesError = partyFailure ? extractDisplayErrorMessage(partyFailure, 'Не удалось загрузить связи дела.') : null;
+  const updateParties = partyRead.updateValue;
+  const setRelatedParties = useCallback((update: (previous: ClientCaseRelatedParty[]) => ClientCaseRelatedParty[]) => {
+    if (captureCaseOwner()) updateParties(update);
+  }, [captureCaseOwner, updateParties]);
+
+  const loadContacts = useCallback((signal: AbortSignal) => readOwned(signal, async () => {
+    const rows = await apiService.getContacts({ scope: 'all' }, { signal });
+    if (!Array.isArray(rows) || !rows.every(row => row && Number.isSafeInteger(row.sourceId) && row.sourceId > 0 && typeof row.fullName === 'string')) throw new Error('Не удалось загрузить участников дела.');
+    return rows.filter(item => item.isActive).slice(0, 200);
+  }), [readOwned]);
+  const contactRead = useDictionarySnapshot(loadContacts, EMPTY_CASE_CONTACTS, { enabled: readEnabled && canUseContactRelatedParties, ownerScope: caseActionOwner.scope }, false);
+  const contactOptions = contactRead.value;
+  const loadEntities = useCallback((signal: AbortSignal) => readOwned(signal, async () => {
+    const result = await apiService.getLegalEntitiesPaged({ page: 1, pageSize: 100 }, { signal });
+    if (!result || !Array.isArray(result.items) || !result.items.every(row => row && Number.isSafeInteger(row.id) && row.id > 0 && typeof row.shortName === 'string')) throw new Error('Не удалось загрузить организации дела.');
+    return result.items;
+  }), [readOwned]);
+  const entityRead = useDictionarySnapshot(loadEntities, EMPTY_CASE_ENTITIES, { enabled: readEnabled && canUseLegalEntityRelatedParties, ownerScope: caseActionOwner.scope }, false);
+  const legalEntityOptions = entityRead.value;
+
+  const loadTimeZone = useCallback((signal: AbortSignal) => readOwned(signal, async () => {
+    const result = typeof apiService.getUserSetting === 'function' ? await apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY, { signal }) : null;
+    if (result !== null && (!result || result.key !== USER_TIME_ZONE_SETTING_KEY || typeof result.value !== 'string')) throw new Error('Не удалось подтвердить часовой пояс.');
+    return normalizeUserTimeZoneId(result?.value);
+  }), [readOwned]);
+  const timeZoneRead = useDictionarySnapshot<string | null>(loadTimeZone, null, { enabled: isOpen && !readClosed && captureAuthSessionIdentity().authenticated, ownerScope: caseActionOwner.scope }, false);
   useEffect(() => {
-    if (!isOpen || !caseData.id || caseData.id <= 0) return;
-
-    let cancelled = false;
-    apiService.markCaseActivity(caseData.id, { confirmed: false })
-      .then((nextActivity) => {
-        if (cancelled) return;
-        setActivity(nextActivity);
-        if (typeof nextActivity.eventHistory === 'string') {
-          setEventHistory(nextActivity.eventHistory);
-        }
-      })
-      .catch(() => {
-        // Просмотр дела не должен блокировать работу с карточкой.
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [caseData.id, isOpen]);
-
-  const refreshRelatedParties = useCallback(async () => {
-    if (!isOpen || !caseData.id || caseData.id <= 0) {
-      setRelatedParties([]);
-      setRelatedPartiesLoading(false);
-      return;
-    }
-
-    setRelatedPartiesLoading(true);
-    setRelatedPartiesError(null);
-    try {
-      const items = await apiService.getCaseRelatedParties(caseData.id);
-      setRelatedParties(items);
-    } catch (e: unknown) {
-      setRelatedPartiesError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setRelatedPartiesLoading(false);
-    }
-  }, [caseData.id, isOpen]);
-
-  useEffect(() => {
-    void refreshRelatedParties();
-  }, [refreshRelatedParties]);
-
-  useEffect(() => {
-    if (!isOpen || !caseData.id || caseData.id <= 0) {
-      setContactOptions([]);
-      setLegalEntityOptions([]);
-      return;
-    }
-
-    let cancelled = false;
-    Promise.all([
-      canUseContactRelatedParties ? apiService.getContacts({ scope: 'all' }) : Promise.resolve([]),
-      canUseLegalEntityRelatedParties ? apiService.getLegalEntitiesPaged({ page: 1, pageSize: 100 }) : Promise.resolve({ items: [] }),
-    ])
-      .then(([contacts, legalEntities]) => {
-        if (cancelled) return;
-        setContactOptions(contacts.filter((item) => item.isActive).slice(0, 200));
-        setLegalEntityOptions(legalEntities.items ?? []);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setContactOptions([]);
-        setLegalEntityOptions([]);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [canUseContactRelatedParties, canUseLegalEntityRelatedParties, caseData.id, isOpen]);
+    if (!timeZoneRead.value || hearingEdited.current) return;
+    setTimeZoneState({ scope: caseActionOwner.scope, value: timeZoneRead.value });
+    setNextHearingAt(toDateTimeInput(caseData.nextHearingAt, timeZoneRead.value));
+  }, [caseActionOwner.scope, caseData.nextHearingAt, timeZoneRead.value]);
 
   const applyCalculatedProceduralDeadlines = (decisionDate = courtDecisionAt) => {
     if (!decisionDate) return;
@@ -763,7 +690,7 @@ export function CaseModal({
 
   const handleConfirmNextHearing = async () => {
     if (!allowEdit || !caseData.id || !caseData.nextHearingAt) return;
-    if (nextHearingAt !== toDateTimeInput(caseData.nextHearingAt)) {
+    if (nextHearingAt !== toDateTimeInput(caseData.nextHearingAt, timeZoneId)) {
       setError('Сначала сохраните изменённую дату следующего заседания.');
       return;
     }
@@ -816,7 +743,7 @@ export function CaseModal({
         clearCourtStateFeeAmount: !courtStateFeeAmount.trim(),
         courtCaseNumber: courtCaseNumber.trim(),
         courtUrl: courtUrl.trim(),
-        nextHearingAt: fromDateTimeInput(nextHearingAt),
+        nextHearingAt: fromDateTimeInput(nextHearingAt, timeZoneId),
         claimant: claimant.trim(),
         claimantInn: claimantInn.trim(),
         claimantOgrn: claimantOgrn.trim(),
@@ -1000,14 +927,12 @@ export function CaseModal({
   const handleConfirmActivity = async () => {
     if (!caseData.id || caseData.id <= 0) return;
 
+    activityReadSequence.current++;
     setActivitySaving(true);
     setError(null);
     try {
       const nextActivity = await apiService.markCaseActivity(caseData.id, { confirmed: true });
-      setActivity(nextActivity);
-      if (typeof nextActivity.eventHistory === 'string') {
-        setEventHistory(nextActivity.eventHistory);
-      }
+      applyActivity(nextActivity);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -1017,6 +942,7 @@ export function CaseModal({
 
   const handleInactivityRemindersChange = async (enabled: boolean) => {
     if (enabled) {
+      activityEdited.current = true;
       setActivity((current) => ({
         ...current,
         inactivityRemindersEnabled: true,
@@ -1039,6 +965,7 @@ export function CaseModal({
       return;
     }
 
+    activityEdited.current = true;
     setError(null);
     setActivity((current) => ({
       ...current,
@@ -1187,12 +1114,12 @@ export function CaseModal({
                   {daysSinceActivity !== null ? ` · ${daysSinceActivity} дн.` : ''}
                 </div>
                 <div className="mt-1 text-xs text-slate-500">
-                  Последний просмотр: {formatDocumentDate(activity.lastViewedAt ?? caseData.lastViewedAt) || 'не фиксировался'}
+                  Последний просмотр: {formatDocumentDate(activity.lastViewedAt ?? caseData.lastViewedAt, timeZoneId) || 'не фиксировался'}
                   {activity.lastViewedByUserName ? ` · ${activity.lastViewedByUserName}` : ''}
                 </div>
                 {activity.activityConfirmedAt ? (
                   <div className="mt-1 text-xs text-emerald-700">
-                    Подтверждено: {formatDocumentDate(activity.activityConfirmedAt)}
+                    Подтверждено: {formatDocumentDate(activity.activityConfirmedAt, timeZoneId)}
                     {activity.activityConfirmedByUserName ? ` · ${activity.activityConfirmedByUserName}` : ''}
                   </div>
                 ) : null}
@@ -1732,20 +1659,23 @@ export function CaseModal({
               type="datetime-local"
               className="mt-1 w-full border rounded-lg px-3 py-2"
               value={nextHearingAt}
-              onChange={(e) => setNextHearingAt(e.target.value)}
+              onChange={(e) => { hearingEdited.current = true; setNextHearingAt(e.target.value); }}
               disabled={saving}
             />
+            <p className="mt-1 text-xs text-slate-500">Часовой пояс даты: {USER_TIME_ZONE_OPTIONS.find(option => option.value === timeZoneId)?.label ?? timeZoneId}.
+              {hearingEdited.current && timeZoneRead.value && timeZoneRead.value !== timeZoneId ? ' Введённое время остаётся в этом часовом поясе.' : ''}
+            </p>
             <p className="mt-1 text-xs text-gray-600">
               {!nextHearingAt
                 ? 'Дата пока не назначена — ожидайте сведения суда или укажите её вручную.'
-                : nextHearingAt !== toDateTimeInput(caseData.nextHearingAt)
+                : nextHearingAt !== toDateTimeInput(caseData.nextHearingAt, timeZoneId)
                   ? 'Дата изменена: сначала сохраните дело, затем подтвердите её.'
                   : hearingConfirmation.nextHearingConfirmedAt && hearingConfirmation.nextHearingConfirmedForAt && Date.parse(hearingConfirmation.nextHearingConfirmedForAt) === Date.parse(caseData.nextHearingAt ?? '')
-                    ? `Дата подтверждена ${formatDocumentDate(hearingConfirmation.nextHearingConfirmedAt)}${hearingConfirmation.nextHearingConfirmedByName ? ` · ${hearingConfirmation.nextHearingConfirmedByName}` : ''}. При переносе отметка сбросится.`
+                    ? `Дата подтверждена ${formatDocumentDate(hearingConfirmation.nextHearingConfirmedAt, timeZoneId)}${hearingConfirmation.nextHearingConfirmedByName ? ` · ${hearingConfirmation.nextHearingConfirmedByName}` : ''}. При переносе отметка сбросится.`
                     : 'Дата ещё не подтверждена сотрудником.'}
             </p>
             {caseData.id > 0 && allowEdit && caseData.status !== 'Closed' && caseData.status !== 'Lost' && caseData.nextHearingAt && Date.parse(caseData.nextHearingAt) > Date.now() && (!hearingConfirmation.nextHearingConfirmedAt || !hearingConfirmation.nextHearingConfirmedForAt || Date.parse(hearingConfirmation.nextHearingConfirmedForAt) !== Date.parse(caseData.nextHearingAt)) ? (
-              <button type="button" onClick={() => void handleConfirmNextHearing()} disabled={saving || confirmingNextHearing || nextHearingAt !== toDateTimeInput(caseData.nextHearingAt)} className="mt-1 rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-semibold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+              <button type="button" onClick={() => void handleConfirmNextHearing()} disabled={saving || confirmingNextHearing || nextHearingAt !== toDateTimeInput(caseData.nextHearingAt, timeZoneId)} className="mt-1 rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-semibold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
                 {confirmingNextHearing ? 'Сохраняем…' : 'Подтвердить дату заседания'}
               </button>
             ) : null}
@@ -1756,7 +1686,7 @@ export function CaseModal({
               caseItem={caseData}
               timeZoneId={timeZoneId}
               canCreateTask={canCreateTasks}
-              datesSaved={nextHearingAt === toDateTimeInput(caseData.nextHearingAt) && responsibleUserId === String(caseData.responsibleUserId ?? '')}
+              datesSaved={nextHearingAt === toDateTimeInput(caseData.nextHearingAt, timeZoneId) && responsibleUserId === String(caseData.responsibleUserId ?? '')}
               onTaskCreated={() => void refreshCaseTasks()}
               onOpenTask={onOpenTask}
             />
@@ -1767,7 +1697,7 @@ export function CaseModal({
               caseItem={caseData}
               timeZoneId={timeZoneId}
               canEdit={allowEdit}
-              datesSaved={nextHearingAt === toDateTimeInput(caseData.nextHearingAt)}
+              datesSaved={nextHearingAt === toDateTimeInput(caseData.nextHearingAt, timeZoneId)}
               initialDocuments={caseDocuments}
             />
           </div>
@@ -1865,7 +1795,7 @@ export function CaseModal({
               onChange={(e) => setExecutiveWritReceivedAt(e.target.value)}
               disabled={saving}
             />
-            <div className="mt-2"><ExecutiveWritDocumentUpload caseId={caseData.id} canUpload={allowEdit} documents={caseDocuments} onUploaded={refreshDocuments} onAttemptSettled={() => setUploadRevision((value) => value + 1)} /></div>
+            <div className="mt-2"><ExecutiveWritDocumentUpload caseId={caseData.id} canUpload={allowEdit} documents={caseDocuments} onUploaded={refreshDocuments} onAttemptSettled={() => { if (captureCaseOwner()) setUploadRevision((value) => value + 1); }} /></div>
           </div>
 
           <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
@@ -1943,11 +1873,8 @@ export function CaseModal({
           </div>
 
           <div className="md:col-span-2 rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
-            {allowEdit && caseData.id > 0 ? <CaseDocumentUploadStatusPanel key={caseData.id} caseId={caseData.id} revision={uploadRevision}
-              onPublished={async (signal) => {
-                const documents = await apiService.getCaseDocuments(caseData.id, signal);
-                if (!signal.aborted) setCaseDocuments(documents);
-              }} /> : null}
+            {allowEdit && !readClosed && caseData.id > 0 ? <CaseDocumentUploadStatusPanel key={caseActionOwner.scope} caseId={caseData.id} revision={uploadRevision}
+              onPublished={publishDocumentRead} /> : null}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-gray-800">Файлы дела</div>
@@ -2038,7 +1965,7 @@ export function CaseModal({
                       </div>
                       <div className="text-xs text-gray-500">
                         {document.documentType} · {formatBytes(document.sizeBytes)}
-                        {document.uploadedAt ? ` · ${formatDocumentDate(document.uploadedAt)}` : ''}
+                        {document.uploadedAt ? ` · ${formatDocumentDate(document.uploadedAt, timeZoneId)}` : ''}
                         {document.uploadedByName ? ` · ${document.uploadedByName}` : ''}
                       </div>
                     </div>
@@ -2140,7 +2067,7 @@ export function CaseModal({
                             </span>
                           </div>
                           <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
-                            <span>Срок: {formatTaskDateTime(task.dueAt) || '—'}</span>
+                            <span>Срок: {formatTaskDateTime(task.dueAt, timeZoneId) || '—'}</span>
                             <span>Исполнитель: {task.assigneeName || '—'}</span>
                           </div>
                         </div>
@@ -2175,7 +2102,7 @@ export function CaseModal({
               className="mt-1 w-full border rounded-lg px-3 py-2"
               rows={4}
               value={eventHistory}
-              onChange={(e) => setEventHistory(e.target.value)}
+              onChange={(e) => { historyEdited.current = true; setEventHistory(e.target.value); }}
               placeholder="Ключевые события и процессуальные действия"
               disabled={saving}
             />
@@ -2197,7 +2124,7 @@ export function CaseModal({
               {strategy.trim() !== (caseData.strategy ?? '').trim()
                 ? 'Позиция изменена: сохраните дело, прежняя отметка проверки будет сброшена.'
                 : positionReview.positionReviewedAt
-                  ? `Позиция проверена ${formatDocumentDate(positionReview.positionReviewedAt)}${positionReview.positionReviewedByName ? ` · ${positionReview.positionReviewedByName}` : ''}`
+                  ? `Позиция проверена ${formatDocumentDate(positionReview.positionReviewedAt, timeZoneId)}${positionReview.positionReviewedByName ? ` · ${positionReview.positionReviewedByName}` : ''}`
                   : 'Позиция ещё не подтверждена.'}
             </p>
             {caseData.id > 0 && allowEdit && caseData.status !== 'Closed' && caseData.status !== 'Lost' && !positionReview.positionReviewedAt ? (

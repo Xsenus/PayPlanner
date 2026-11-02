@@ -6080,13 +6080,15 @@ export class ApiService {
     return this.request<ClientStats>(`/clients/${id}/stats${q}`, { signal: options?.signal, cache: 'no-store' });
   }
 
-  async getClientCaseFinanceSummaries(id: number, params?: { clientRole?: ClientRole }) {
+  async getClientCaseFinanceSummaries(id: number, params?: { clientRole?: ClientRole }, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
     const q = buildQuery(params ?? {});
-    return this.request<ClientCaseFinanceSummary[]>(`/clients/${id}/case-finance-summaries${q}`);
+    return this.request<ClientCaseFinanceSummary[]>(`/clients/${id}/case-finance-summaries${q}`, { signal: options?.signal, cache: 'no-store' });
   }
 
-  async getLegalEntityCaseFinanceSummaries(id: number) {
-    return this.request<ClientCaseFinanceSummary[]>(`/legal-entities/${id}/case-finance-summaries`);
+  async getLegalEntityCaseFinanceSummaries(id: number, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
+    return this.request<ClientCaseFinanceSummary[]>(`/legal-entities/${id}/case-finance-summaries`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async getClientBalance(id: number, options?: { signal?: AbortSignal }) {
@@ -7730,9 +7732,10 @@ export class ApiService {
     return this.request<void>(`/v2/cases/${caseId}/court-parties/${courtPartyId}`, { method: 'DELETE' });
   }
 
-  async getCaseRelatedParties(caseId: number, includeArchived = false) {
+  async getCaseRelatedParties(caseId: number, includeArchived = false, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
     const query = includeArchived ? '?includeArchived=true' : '';
-    return this.request<ClientCaseRelatedParty[]>(`/v2/cases/${caseId}/related-parties${query}`);
+    return this.request<ClientCaseRelatedParty[]>(`/v2/cases/${caseId}/related-parties${query}`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async addCaseRelatedParty(caseId: number, payload: { sourceType: string; sourceId: number; role?: string; notes?: string }) {
@@ -7781,8 +7784,9 @@ export class ApiService {
     return this.request<PagedResult<ClientCaseDocument>>(`/case-documents${q}`);
   }
 
-  async getCaseDocumentTemplates() {
-    return this.request<ClientCaseDocumentTemplate[]>('/v2/cases/document-templates');
+  async getCaseDocumentTemplates(options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
+    return this.request<ClientCaseDocumentTemplate[]>('/v2/cases/document-templates', { signal: options?.signal, cache: 'no-store' });
   }
 
   async getCaseDocumentTemplateTokens() {
