@@ -301,7 +301,8 @@ describe('parallel deploy workflow release contract', () => {
 
   it.each(allJobs)(
     'bounds runner time for %s', id => {
-      for (const timeout of ['0', '360', '${{ vars.UNBOUNDED_TIMEOUT }}']) {
+      const invalidTimeouts = ['0', '360', '${{ vars.UNBOUNDED_TIMEOUT }}', ...(id === 'frontend' ? ['30'] : [])];
+      for (const timeout of invalidTimeouts) {
         const changed = replaceInJob(id, job => job.replace(/timeout-minutes: \d+/, `timeout-minutes: ${timeout}`));
         expect(() => validateDeployWorkflow(changed)).toThrow(/time budget/);
       }

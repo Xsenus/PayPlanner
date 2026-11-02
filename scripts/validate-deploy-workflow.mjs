@@ -164,7 +164,7 @@ export function validateDeployWorkflow(source) {
   }
   requireValue(jobs['backend-build'].env?.CompilerResponseFile === '${{ github.workspace }}/scripts/compiler-serial.rsp',
     'Use the reviewed serial compiler response file for the fresh build graph');
-  const timeouts = { frontend: 30, 'backend-format': 45, 'backend-build': 30, ...Object.fromEntries(shardJobs.map(id => [id, 150])), 'backend-test': 5, 'backend-browser': 15, backend: 10, deploy: 30 };
+  const timeouts = { frontend: 45, 'backend-format': 45, 'backend-build': 30, ...Object.fromEntries(shardJobs.map(id => [id, 150])), 'backend-test': 5, 'backend-browser': 15, backend: 10, deploy: 30 };
   for (const [id, job] of Object.entries(jobs)) {
     requireValue(String(job['timeout-minutes']) === String(timeouts[id]), `${id}: keep the explicit runner time budget`);
     const deployCondition = "${{ success() && github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.release_to_vps == true)) }}";
