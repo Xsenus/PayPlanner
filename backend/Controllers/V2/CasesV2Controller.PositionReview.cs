@@ -1,7 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Extensions;
-using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Controllers.V2;
 
@@ -15,26 +13,9 @@ public partial class CasesV2Controller
     }
 
     [HttpPost("{id:int}/position-review")]
-    public async Task<ActionResult<CasePositionReviewDto>> ReviewCasePosition(int id, CancellationToken ct)
+    public Task<ActionResult<CasePositionReviewDto>> ReviewCasePosition(int id, CancellationToken ct)
+        => RunCaseConfirmationAsync<CasePositionReviewDto>(id, async clientCase =>
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return MissingCasesVisibilityResult();
-        }
-
-        var clientCase = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
         if (IsFinishedCaseStatus(clientCase.Status))
         {
             return Conflict(new { message = "Позицию закрытого дела нельзя отмечать как проверенную." });
@@ -60,5 +41,5 @@ public partial class CasesV2Controller
             PositionReviewedByUserId = clientCase.PositionReviewedByUserId,
             PositionReviewedByName = clientCase.PositionReviewedByName,
         });
-    }
+    }, ct);
 }

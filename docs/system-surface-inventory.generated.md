@@ -6,7 +6,7 @@
 ## Сводка
 
 - Разделов frontend: 55.
-- Backend-контроллеров: 97.
+- Backend-контроллеров: 98.
 - HTTP endpoints: 964; с прямой тестовой связью: 680.
 - HTTP endpoints с точной ссылкой из документации: 269; критичных без такой ссылки: 529.
 - Критичных endpoints без прямой тестовой связи: 236.
@@ -245,6 +245,7 @@
 | ClientsV1Controller | backend/Controllers/V1/ClientsV1Controller.cs | 5 | [Authorize] | да |
 | PaymentsV1Controller | backend/Controllers/V1/PaymentsV1Controller.cs | 5 | [Authorize] | да |
 | CasesV2Controller | backend/Controllers/V2/CasesV2Controller.Appeal.cs | 4 | не задано | да |
+| CasesV2Controller | backend/Controllers/V2/CasesV2Controller.ConfirmationTransaction.cs | 0 | не задано | да |
 | CasesV2Controller | backend/Controllers/V2/CasesV2Controller.CourtRecoveries.cs | 3 | не задано | да |
 | CasesV2Controller | backend/Controllers/V2/CasesV2Controller.cs | 115 | [Authorize] | да |
 | CasesV2Controller | backend/Controllers/V2/CasesV2Controller.FinancialCapture.cs | 0 | не задано | да |
@@ -629,7 +630,7 @@
 | GET | api/cash-orders/{id:int}/pdf | CashOrdersController | DownloadPdf | backend/Controllers/CashOrdersController.cs:1347 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
 | GET | api/cash-orders/{id:int}/word | CashOrdersController | DownloadWord | backend/Controllers/CashOrdersController.cs:1385 | [Authorize] | да | нет |
 | GET |  | ClientBalancesController | GetSummary | backend/Controllers/ClientBalancesController.cs:56 | не задано | да | нет |
-| GET | transactions | ClientBalancesController | GetTransactions | backend/Controllers/ClientBalancesController.cs:77 | не задано | да | docs/bank-integrations-api-verification-2026-10-09.md, docs/delete-behavior-contract-2026-06-10.md |
+| GET | transactions | ClientBalancesController | GetTransactions | backend/Controllers/ClientBalancesController.cs:77 | не задано | да | docs/bank-integrations-api-verification-2026-10-09.md, docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/delete-behavior-contract-2026-06-10.md |
 | GET | applications/{requestId:guid} | ClientBalancesController | GetApplication | backend/Controllers/ClientBalancesController.cs:115 | не задано | да | docs/balance-application-cancel-fence-checkpoint-2026-10-31.md, docs/balance-application-managed-route-checkpoint-2026-10-31.md, docs/balance-application-recovery-checkpoint-2026-10-31.md |
 | POST | applications/{requestId:guid}/cancel | ClientBalancesController | CancelApplication | backend/Controllers/ClientBalancesController.cs:126 | не задано | да | docs/balance-application-cancel-fence-checkpoint-2026-10-31.md |
 | POST | applications/{requestId:guid}/apply | ClientBalancesController | ApplyManaged | backend/Controllers/ClientBalancesController.cs:137 | не задано | да | docs/balance-application-managed-route-checkpoint-2026-10-31.md |
@@ -938,7 +939,7 @@
 | PUT | api/legal-entities/{id:int} | LegalEntitiesController | Update | backend/Controllers/LegalEntitiesController.cs:2241 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
 | POST | api/legal-entities/migrate-legacy-addresses | LegalEntitiesController | MigrateLegacyAddresses | backend/Controllers/LegalEntitiesController.cs:2481 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
 | GET |  | LegalEntityBalancesController | GetSummary | backend/Controllers/LegalEntityBalancesController.cs:56 | не задано | да | нет |
-| GET | transactions | LegalEntityBalancesController | GetTransactions | backend/Controllers/LegalEntityBalancesController.cs:77 | не задано | да | docs/bank-integrations-api-verification-2026-10-09.md, docs/delete-behavior-contract-2026-06-10.md |
+| GET | transactions | LegalEntityBalancesController | GetTransactions | backend/Controllers/LegalEntityBalancesController.cs:77 | не задано | да | docs/bank-integrations-api-verification-2026-10-09.md, docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/delete-behavior-contract-2026-06-10.md |
 | GET | applications/{requestId:guid} | LegalEntityBalancesController | GetApplication | backend/Controllers/LegalEntityBalancesController.cs:115 | не задано | да | docs/balance-application-cancel-fence-checkpoint-2026-10-31.md, docs/balance-application-managed-route-checkpoint-2026-10-31.md, docs/balance-application-recovery-checkpoint-2026-10-31.md |
 | POST | applications/{requestId:guid}/cancel | LegalEntityBalancesController | CancelApplication | backend/Controllers/LegalEntityBalancesController.cs:126 | не задано | да | docs/balance-application-cancel-fence-checkpoint-2026-10-31.md |
 | POST | applications/{requestId:guid}/apply | LegalEntityBalancesController | ApplyManaged | backend/Controllers/LegalEntityBalancesController.cs:137 | не задано | да | docs/balance-application-managed-route-checkpoint-2026-10-31.md |
@@ -1428,8 +1429,8 @@
 | PUT | {id:int}/court-events/{courtEventId:int}/hearing-outcome | CasesV2Controller | RecordHearingOutcome | backend/Controllers/V2/CasesV2Controller.HearingOutcome.cs:18 | не задано | да | нет |
 | GET | {id:int}/hearing-preparation | CasesV2Controller | GetHearingPreparation | backend/Controllers/V2/CasesV2Controller.HearingPreparation.cs:32 | не задано | да | нет |
 | PUT | {id:int}/hearing-preparation | CasesV2Controller | UpdateHearingPreparation | backend/Controllers/V2/CasesV2Controller.HearingPreparation.cs:57 | не задано | да | нет |
-| POST | {id:int}/next-hearing-confirmation | CasesV2Controller | ConfirmNextHearing | backend/Controllers/V2/CasesV2Controller.NextHearingConfirmation.cs:18 | не задано | да | нет |
-| POST | {id:int}/position-review | CasesV2Controller | ReviewCasePosition | backend/Controllers/V2/CasesV2Controller.PositionReview.cs:17 | не задано | да | нет |
+| POST | {id:int}/next-hearing-confirmation | CasesV2Controller | ConfirmNextHearing | backend/Controllers/V2/CasesV2Controller.NextHearingConfirmation.cs:17 | не задано | да | нет |
+| POST | {id:int}/position-review | CasesV2Controller | ReviewCasePosition | backend/Controllers/V2/CasesV2Controller.PositionReview.cs:15 | не задано | да | нет |
 | GET | position-templates | CasesV2Controller | GetPositionTemplates | backend/Controllers/V2/CasesV2Controller.PositionTemplates.cs:26 | не задано | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
 | POST | position-templates | CasesV2Controller | CreatePositionTemplate | backend/Controllers/V2/CasesV2Controller.PositionTemplates.cs:53 | не задано | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
 | PUT | position-templates/{templateId:int} | CasesV2Controller | UpdatePositionTemplate | backend/Controllers/V2/CasesV2Controller.PositionTemplates.cs:96 | не задано | да | нет |

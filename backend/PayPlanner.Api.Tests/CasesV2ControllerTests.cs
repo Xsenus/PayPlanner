@@ -3965,6 +3965,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
 
         var lawyerController = CreateController(db, lawyer);
         Assert.IsType<ConflictObjectResult>((await lawyerController.ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result);
+        clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         clientCase.Strategy = "Проверить доказательства и подготовить отзыв";
         await db.SaveChangesAsync();
         Assert.IsType<ForbidResult>((await CreateController(db, viewer).ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result);
@@ -3977,6 +3978,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Equal(first.PositionReviewedAt, repeated.PositionReviewedAt);
         Assert.Equal(lawyer.Id, first.PositionReviewedByUserId);
         Assert.Equal(lawyer.FullName, first.PositionReviewedByName);
+        clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         Assert.Equal(1, clientCase.EventHistory.Split("Позиция по делу проверена", StringSplitOptions.None).Length - 1);
 
         var update = await lawyerController.Update(clientCase.Id, new ClientCase
@@ -4019,9 +4021,11 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
 
         var controller = CreateController(db, lawyer);
         Assert.IsType<ConflictObjectResult>((await controller.ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result);
+        clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         clientCase.NextHearingAt = DateTime.UtcNow.AddDays(-1);
         await db.SaveChangesAsync();
         Assert.IsType<ConflictObjectResult>((await controller.ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result);
+        clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         clientCase.NextHearingAt = nextHearing;
         await db.SaveChangesAsync();
         Assert.IsType<ForbidResult>((await CreateController(db, viewer).ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result);
@@ -4034,6 +4038,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Equal(nextHearing, first.NextHearingConfirmedForAt);
         Assert.Equal(first.NextHearingConfirmedAt, repeated.NextHearingConfirmedAt);
         Assert.Equal(lawyer.Id, first.NextHearingConfirmedByUserId);
+        clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         Assert.Equal(1, clientCase.EventHistory.Split("Дата следующего заседания проверена", StringSplitOptions.None).Length - 1);
 
         var sameDateUpdate = await controller.Update(clientCase.Id, new ClientCase

@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 
@@ -16,26 +15,9 @@ public partial class CasesV2Controller
     }
 
     [HttpPost("{id:int}/next-hearing-confirmation")]
-    public async Task<ActionResult<NextHearingConfirmationDto>> ConfirmNextHearing(int id, CancellationToken ct)
+    public Task<ActionResult<NextHearingConfirmationDto>> ConfirmNextHearing(int id, CancellationToken ct)
+        => RunCaseConfirmationAsync<NextHearingConfirmationDto>(id, async clientCase =>
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return MissingCasesVisibilityResult();
-        }
-
-        var clientCase = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
         if (IsFinishedCaseStatus(clientCase.Status))
         {
             return Conflict(new { message = "Дату заседания закрытого дела нельзя подтвердить." });
@@ -63,7 +45,7 @@ public partial class CasesV2Controller
             NextHearingConfirmedByUserId = clientCase.NextHearingConfirmedByUserId,
             NextHearingConfirmedByName = clientCase.NextHearingConfirmedByName,
         });
-    }
+    }, ct);
 
     private static void ResetNextHearingConfirmation(ClientCase clientCase)
     {
