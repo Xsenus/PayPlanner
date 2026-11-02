@@ -99,7 +99,7 @@ export function parseProbeOutput(stdout) {
 
 export function executeProbe({ app, image, runId, docker }) {
   const engine = JSON.parse(docker(['info', '--format', '{{json .}}']).stdout);
-  if (!engine.MemoryLimit || !engine.SwapLimit || !engine.CPUCfsQuota || !engine.PidsLimit
+  if (!engine.MemoryLimit || !engine.SwapLimit || !engine.CpuCfsQuota || !engine.PidsLimit
     || !engine.SecurityOptions?.some(value => value.startsWith('name=seccomp')))
     throw new Error('Existing Docker daemon must support memory/swap/CPU/PID limits and normal seccomp isolation.');
   const imageInfo = JSON.parse(docker(['image', 'inspect', image]).stdout)[0];
