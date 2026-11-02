@@ -398,6 +398,36 @@ function normalizeInvoiceClientCaseIds(invoice: Invoice | null, defaultClientCas
   return Array.from(new Set(rawIds.filter((value): value is number => typeof value === 'number' && value > 0)));
 }
 
+type InvoiceEditorContent = Pick<InvoiceEditorDraftState,
+  'form' | 'lineItems' | 'selectedActs' | 'selectedClientCaseIds' | 'sellerSelection'>;
+
+// Compare saved values, not temporary row IDs or money input formatting.
+function invoiceEditorContentKey(content: InvoiceEditorContent): string {
+  return JSON.stringify({
+    form: { ...content.form, amount: parseMoneyInput(content.form.amount) },
+    lineItems: content.lineItems.map(row => ({
+      name: row.name, quantity: parseMoneyInput(row.quantity), unit: row.unit, price: parseMoneyInput(row.price),
+      vatRate: row.vatRate ?? '', serviceId: row.serviceId,
+    })),
+    acts: content.selectedActs.map(row => row.id),
+    cases: content.selectedClientCaseIds,
+    seller: content.sellerSelection ?? { companyId: null, branchId: null },
+  });
+}
+
+const INVOICE_DRAFT_CONFLICT = 'Счёт изменился после начала редактирования. Ваши правки сохранены в форме.';
+
+function invoiceEditorPlanKey(plan: InstallmentPlanInput | null): string {
+  return JSON.stringify(plan && {
+    total: plan.total, downPayment: plan.downPayment, annualRate: plan.annualRate, months: plan.months,
+    startDate: plan.startDate, roundingMode: plan.roundingMode ?? 'none', roundingStep: plan.roundingStep ?? null,
+    toPay: plan.toPay, overpay: plan.overpay, loanAmount: plan.loanAmount ?? null,
+    baseMonthlyPayment: plan.baseMonthlyPayment ?? null, roundedMonthlyPayment: plan.roundedMonthlyPayment ?? null,
+    items: plan.items.map(row => ({ sequence: row.sequence, date: row.date, principal: row.principal,
+      interest: row.interest, payment: row.payment, balance: row.balance })),
+  });
+}
+
 function normalizeInvoiceClientCases(invoice: Invoice | null): ClientCaseOption[] {
   if (invoice?.clientCases?.length) {
     return invoice.clientCases.map((item) => ({
@@ -1374,14 +1404,6 @@ export function InvoiceModal({
   const [actDropdownOpen, setActDropdownOpen] = useState(false);
 
   useEffect(() => {
-    if (presentation === 'page' && mode === 'edit') {
-      setPageViewMode(true);
-      return;
-    }
-    setPageViewMode(false);
-  }, [mode, presentation, invoice?.id]);
-
-  useEffect(() => {
     if (presentation !== 'page' || !pageViewMode || !invoice?.id) {
       setDocumentPreviewHtml('');
       setDocumentPreviewError(null);
@@ -1457,6 +1479,7 @@ export function InvoiceModal({
     invoice?.clientId, invoice?.expenseClientId, selectedClient?.email, isAdmin, canSendToDisk, permissions.yandexDisk.viewScope]);
   const delivery = useDocumentDeliveryOwner(deliveryScope);
   const leaveInvoiceCard = (leave: () => void) => {
+    editorDraftOwner.invalidate();
     printOwner.invalidate();
     delivery.invalidate();
     caseCreation.invalidate();
@@ -1631,6 +1654,67 @@ export function InvoiceModal({
     () => cloneInstallmentPlan(deriveInstallmentPlanFromPayments(visibleRelatedPayments)),
     [visibleRelatedPayments],
   );
+  const editorDraftOwner = useDocumentDeliveryOwner(JSON.stringify([open, mode, presentation,
+    invoice?.invoiceEntityId ?? invoice?.id ?? null, currentUser?.id, currentUser?.role?.id, currentUser?.role?.name,
+    permissions.accounts, permissions.payments, defaultClientId, defaultLegalEntityId,
+    defaultExpenseClientId, defaultExpenseLegalEntityId, defaultClientCaseId]));
+  const editorSource = useMemo<InvoiceEditorContent>(() => ({
+    form: normalizeInvoiceToForm(invoice, defaultClientId, defaultLegalEntityId, defaultResponsibleId, defaultType,
+      defaultExpenseClientId, defaultExpenseLegalEntityId, profileTimeZoneIdRef.current),
+    lineItems: normalizeLineItems(invoice?.lineItems, invoice?.amount),
+    selectedActs: normalizeInvoiceActs(invoice),
+    selectedClientCaseIds: normalizeInvoiceClientCaseIds(invoice, defaultClientCaseId),
+    sellerSelection: { companyId: null, branchId: null },
+  }), [invoice, defaultClientId, defaultLegalEntityId, defaultResponsibleId, defaultType,
+    defaultExpenseClientId, defaultExpenseLegalEntityId, defaultClientCaseId]);
+  const editorSourceKey = useMemo(() => invoiceEditorContentKey(editorSource), [editorSource]);
+  const editorContentKey = useMemo(() => invoiceEditorContentKey({ form, lineItems, selectedActs, selectedClientCaseIds, sellerSelection }),
+    [form, lineItems, selectedActs, selectedClientCaseIds, sellerSelection]);
+  const serverPlanKey = useMemo(() => invoiceEditorPlanKey(relatedInstallmentPlan), [relatedInstallmentPlan]);
+  const localPlanKey = useMemo(() => invoiceEditorPlanKey(installmentPlan), [installmentPlan]);
+  const planConfirmed = canViewPayments && !paymentsLoading && !paymentsError;
+  const hydratedEditor = useRef<{ scope: string; source: string; plan: string } | null>(null);
+  const resumeDraftConsumed = useRef(false);
+  const activeResumeDraft = useRef<InvoiceEditorDraftState | null>(null);
+  const sameDraftOwner = hydratedEditor.current?.scope === editorDraftOwner.scope;
+  const metadataConflict = sameDraftOwner && mode === 'edit' && hydratedEditor.current!.source !== editorSourceKey
+    && editorContentKey !== hydratedEditor.current!.source && editorContentKey !== editorSourceKey;
+  const planConflict = sameDraftOwner && mode === 'edit' && planConfirmed && installmentPlanTouched
+    && hydratedEditor.current!.plan !== serverPlanKey && localPlanKey !== serverPlanKey;
+  const editorConflict = Boolean(metadataConflict || planConflict);
+  const editorReadsReady = !canViewPayments || planConfirmed;
+  const latestEditorDraft = useRef({ source: editorSourceKey, plan: serverPlanKey, conflict: editorConflict, ready: editorReadsReady });
+  latestEditorDraft.current = { source: editorSourceKey, plan: serverPlanKey, conflict: editorConflict, ready: editorReadsReady };
+  const captureEditorDraft = editorDraftOwner.capture;
+
+  const applyEditorContent = useCallback((content: InvoiceEditorContent) => {
+    setForm(content.form);
+    setSellerSelection(content.sellerSelection ?? { companyId: null, branchId: null });
+    setLineItems(content.lineItems);
+    setSelectedActs(content.selectedActs);
+    setSelectedClientCaseIds(content.selectedClientCaseIds);
+    lastAutoContractClientIdRef.current = content.form.contractId ? content.form.clientId : '';
+  }, []);
+  const reloadCurrentEditor = async () => {
+    if (!open || !canReadPrint || submitting || !latestEditorDraft.current.ready) return;
+    const operation = editorDraftOwner.begin('reload-draft');
+    if (!operation) return;
+    const source = editorSourceKey; const plan = serverPlanKey;
+    try {
+      const accepted = await confirm({ title: 'Загрузить актуальный счёт?',
+        description: 'Несохранённые правки будут заменены данными счёта, полученными с сервера.',
+        confirmLabel: 'Загрузить', cancelLabel: 'Оставить мои правки' });
+      if (!accepted || !operation.isCurrent() || !latestEditorDraft.current.ready
+        || latestEditorDraft.current.source !== source || latestEditorDraft.current.plan !== plan) return;
+      hydratedEditor.current = { scope: editorDraftOwner.scope, source, plan };
+      applyEditorContent(editorSource);
+      setInstallmentPlan(cloneInstallmentPlan(relatedInstallmentPlan));
+      setInstallmentPlanTouched(false);
+      setLocalError(null);
+    } catch (error) {
+      if (operation.isCurrent()) toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить актуальный счёт.'));
+    } finally { operation.finish(); }
+  };
   const selectedResponsibleId = form.responsibleIds[0] ?? '';
   const selectedContract = useMemo(
     () => contractOptions.find((contract) => String(contract.id) === form.contractId) ?? null,
@@ -1947,48 +2031,51 @@ export function InvoiceModal({
     open,
   ]);
 
-  useEffect(() => {
-    if (open) {
-      const nextForm: FormState = resumeDraft?.form
-        ? { ...resumeDraft.form, workflowStatus: resumeDraft.form.workflowStatus ?? 'Draft' }
-        : normalizeInvoiceToForm(
-        invoice,
-        defaultClientId,
-        defaultLegalEntityId,
-        defaultResponsibleId,
-        defaultType,
-        defaultExpenseClientId,
-        defaultExpenseLegalEntityId,
-        profileTimeZoneIdRef.current,
-      );
-      setForm(nextForm);
-      setSellerSelection(resumeDraft?.sellerSelection ?? { companyId: null, branchId: null });
-      setLineItems(resumeDraft?.lineItems ?? normalizeLineItems(invoice?.lineItems, invoice?.amount));
-      setSelectedActs(resumeDraft?.selectedActs ?? normalizeInvoiceActs(invoice));
-      setActOptions(normalizeInvoiceActs(invoice));
-      setClientCaseOptions(normalizeInvoiceClientCases(invoice));
-      setSelectedClientCaseIds(resumeDraft?.selectedClientCaseIds ?? normalizeInvoiceClientCaseIds(invoice, defaultClientCaseId));
-      setClientCasesLoadedOwnerKey('');
-      setCaseDropdownOpen(false);
-      setCreateCaseOpen(false);
-      setActDropdownOpen(false);
-      setActsError(null);
-      setClientCasesError(null);
-      setCreateActError(null);
-      setLocalError(null);
-      setInstallmentPlan(cloneInstallmentPlan(resumeDraft?.installmentPlan ?? relatedInstallmentPlan));
-      setInstallmentModalOpen(false);
-      setInstallmentPlanTouched(Boolean(resumeDraft?.installmentPlan));
-      setNumberEditedManually(Boolean(resumeDraft?.form?.number));
-      if (presentation === 'page') {
-        setPageViewMode(resumeDraft?.pageViewMode ?? true);
-      }
-      lastAutoContractClientIdRef.current = nextForm.contractId ? nextForm.clientId : '';
+  useLayoutEffect(() => {
+    if (!open) {
+      hydratedEditor.current = null;
+      activeResumeDraft.current = null;
+      return;
     }
-  }, [defaultClientId, defaultLegalEntityId, defaultExpenseClientId, defaultExpenseLegalEntityId, defaultClientCaseId, defaultResponsibleId, defaultType, invoice, open, presentation, relatedInstallmentPlan, resumeDraft]);
+    const previous = hydratedEditor.current;
+    const newOwner = previous?.scope !== editorDraftOwner.scope;
+    if (!newOwner) {
+      if (previous.source === editorSourceKey) return;
+      // Keep the entire draft when server values differ; never merge financial links by guesswork.
+      if (editorContentKey !== previous.source && editorContentKey !== editorSourceKey) return;
+      hydratedEditor.current = { ...previous, source: editorSourceKey };
+      if (editorContentKey === editorSourceKey) return;
+      applyEditorContent(editorSource);
+      return;
+    }
+    hydratedEditor.current = { scope: editorDraftOwner.scope, source: editorSourceKey, plan: serverPlanKey };
+    const restoredDraft = !resumeDraftConsumed.current && resumeDraft?.mode === mode
+      && (resumeDraft.invoiceId ?? null) === (invoice?.id ?? null) ? resumeDraft : null;
+    resumeDraftConsumed.current = true;
+    activeResumeDraft.current = restoredDraft;
+    applyEditorContent(restoredDraft ? { ...restoredDraft,
+      form: { ...restoredDraft.form, workflowStatus: restoredDraft.form.workflowStatus ?? 'Draft' },
+    } : editorSource);
+    setActOptions(normalizeInvoiceActs(invoice));
+    setClientCaseOptions(normalizeInvoiceClientCases(invoice));
+    setClientCasesLoadedOwnerKey('');
+    setCaseDropdownOpen(false);
+    setCreateCaseOpen(false);
+    setActDropdownOpen(false);
+    setActsError(null);
+    setClientCasesError(null);
+    setCreateActError(null);
+    setLocalError(null);
+    setInstallmentPlan(cloneInstallmentPlan(restoredDraft?.installmentPlan ?? relatedInstallmentPlan));
+    setInstallmentModalOpen(false);
+    setInstallmentPlanTouched(Boolean(restoredDraft?.installmentPlan));
+    setNumberEditedManually(Boolean(restoredDraft?.form?.number));
+    setPageViewMode(presentation === 'page' && mode === 'edit' ? restoredDraft?.pageViewMode ?? true : false);
+  }, [open, editorDraftOwner.scope, editorSource, editorSourceKey, editorContentKey, serverPlanKey,
+    applyEditorContent, resumeDraft, invoice, relatedInstallmentPlan, presentation, mode]);
 
   useEffect(() => {
-    if (!open || invoice || resumeDraft) {
+    if (!open || invoice || activeResumeDraft.current) {
       defaultDateRef.current = defaultDate;
       return;
     }
@@ -2003,15 +2090,17 @@ export function InvoiceModal({
       current === defaultDateRef.current ? defaultDate : current
     ));
     defaultDateRef.current = defaultDate;
-  }, [defaultDate, invoice, open, resumeDraft]);
+  }, [defaultDate, invoice, open, editorDraftOwner.scope]);
 
   useEffect(() => {
-    if (!open || resumeDraft?.installmentPlan || installmentPlanTouched) {
+    if (!open || !planConfirmed || hydratedEditor.current?.scope !== editorDraftOwner.scope) return;
+    if (installmentPlanTouched) {
+      if (localPlanKey === serverPlanKey) hydratedEditor.current.plan = serverPlanKey;
       return;
     }
-
+    hydratedEditor.current.plan = serverPlanKey;
     setInstallmentPlan(cloneInstallmentPlan(relatedInstallmentPlan));
-  }, [open, relatedInstallmentPlan, installmentPlanTouched, resumeDraft?.installmentPlan]);
+  }, [open, planConfirmed, editorDraftOwner.scope, relatedInstallmentPlan, installmentPlanTouched, localPlanKey, serverPlanKey]);
 
   useEffect(() => {
     setDisplayPayments((prev) => (
@@ -2833,6 +2922,8 @@ export function InvoiceModal({
   const buildInvoicePayload = useCallback((
     options: BuildInvoicePayloadOptions = {},
   ): InvoiceInput => {
+    if (!open || !captureEditorDraft()) throw new StaleUiOperationError();
+    if (latestEditorDraft.current.conflict) throw new Error(INVOICE_DRAFT_CONFLICT);
     const { statusOverride, planOverride, dueDateOverride, replaceInstallmentPlan, includeActLinks = true } = options;
     const safeAmount = parseMoneyInput(form.amount);
     const clientCaseIds = filterClientCaseIdsForOwner(
@@ -2869,7 +2960,7 @@ export function InvoiceModal({
       contractId: form.contractId ? Number(form.contractId) : undefined,
       clientCaseId: clientCaseIds[0] ?? null,
       clientCaseIds,
-      billingTaskIds: resumeDraft?.billingTaskIds,
+      billingTaskIds: activeResumeDraft.current?.billingTaskIds,
       clientCaseReference: form.clientCaseReference.trim() ? form.clientCaseReference.trim() : undefined,
       description: form.description.trim() ? form.description.trim() : undefined,
       isNotForAccounting: form.isNotForAccounting,
@@ -2894,6 +2985,8 @@ export function InvoiceModal({
         : undefined,
     };
   }, [
+    open,
+    captureEditorDraft,
     caseOwnerClientIdNumber,
     caseOwnerLegalEntityIdNumber,
     clientCaseOptions,
@@ -2906,12 +2999,13 @@ export function InvoiceModal({
     selectedActs,
     selectedClientCaseIds,
     sellerSelection,
-    resumeDraft?.billingTaskIds,
   ]);
 
   const resolveInstallmentDueDateForSave = useCallback(async (
     planOverride?: InstallmentPlanInput | null,
   ): Promise<{ cancelled: boolean; dueDateOverride?: string }> => {
+    const owner = captureEditorDraft();
+    const source = editorSourceKey; const remotePlan = serverPlanKey;
     const effectivePlan = planOverride === undefined ? installmentPlan : planOverride;
     const expectedDueDate = getInstallmentPlanLastDate(effectivePlan);
 
@@ -2935,13 +3029,14 @@ export function InvoiceModal({
       cancelLabel: 'Отмена',
     });
 
-    if (!accepted) {
+    if (!accepted || !owner?.isCurrent() || latestEditorDraft.current.conflict || !latestEditorDraft.current.ready
+      || latestEditorDraft.current.source !== source || latestEditorDraft.current.plan !== remotePlan) {
       return { cancelled: true };
     }
 
     setForm((prev) => (prev.dueDate === expectedDueDate ? prev : { ...prev, dueDate: expectedDueDate }));
     return { cancelled: false, dueDateOverride: expectedDueDate };
-  }, [confirm, form.dueDate, installmentPlan]);
+  }, [confirm, form.dueDate, installmentPlan, captureEditorDraft, editorSourceKey, serverPlanKey]);
 
   const buildInvoiceEditorDraft = useCallback((): InvoiceEditorDraftState => ({
     sellerSelection,
@@ -2953,9 +3048,9 @@ export function InvoiceModal({
     lineItems,
     selectedActs,
     selectedClientCaseIds,
-    billingTaskIds: resumeDraft?.billingTaskIds,
+    billingTaskIds: activeResumeDraft.current?.billingTaskIds,
     installmentPlan,
-  }), [form, installmentPlan, invoice?.id, isPageMode, lineItems, mode, pageViewMode, resumeDraft?.billingTaskIds, selectedActs, selectedClientCaseIds, sellerSelection]);
+  }), [form, installmentPlan, invoice?.id, isPageMode, lineItems, mode, pageViewMode, selectedActs, selectedClientCaseIds, sellerSelection]);
 
   const openActCreatePage = useCallback(() => {
     if (!onCreateActPage) {
@@ -3049,6 +3144,15 @@ export function InvoiceModal({
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setLocalError(null);
+    if (!open || !captureEditorDraft()) return;
+    if (latestEditorDraft.current.conflict) {
+      setLocalError(INVOICE_DRAFT_CONFLICT);
+      return;
+    }
+    const draftOwner = captureEditorDraft();
+    const sourceAtSubmit = editorSourceKey; const planAtSubmit = serverPlanKey;
+    const stillCurrentDraft = () => draftOwner?.isCurrent() && latestEditorDraft.current.ready && !latestEditorDraft.current.conflict
+      && latestEditorDraft.current.source === sourceAtSubmit && latestEditorDraft.current.plan === planAtSubmit;
     if (paymentsReadBlocked) {
       setLocalError('Сначала дождитесь загрузки платежей по счёту или повторите её после ошибки.');
       return;
@@ -3097,6 +3201,7 @@ export function InvoiceModal({
     const amountReconciliation = buildInvoiceAmountReconciliation(relatedPayments, invoice?.amount, parsedAmount);
     if (amountReconciliation) {
       const decision = await requestAmountReconciliationDecision(amountReconciliation);
+      if (!stillCurrentDraft()) return;
       if (decision === 'cancel') {
         return;
       }
@@ -3133,37 +3238,39 @@ export function InvoiceModal({
         cancelLabel: 'Отмена',
       });
 
-      if (!accepted) {
+      if (!accepted || !stillCurrentDraft()) {
         return;
       }
     }
 
     const dueDateResolution = await resolveInstallmentDueDateForSave();
-    if (dueDateResolution.cancelled) {
+    if (dueDateResolution.cancelled || !stillCurrentDraft()) {
       return;
     }
 
-    const payload = buildInvoicePayload({ dueDateOverride: dueDateResolution.dueDateOverride });
-    payload.number = number;
-
-    if (
-      mode === 'edit'
-      && invoice
-      && (
-        payload.status !== invoice.status
-        || payload.workflowStatus !== (invoice.workflowStatus ?? form.workflowStatus)
-      )
-    ) {
-      const reason = await requestFinancialActionReason('изменения статуса счета');
-      if (reason === undefined) {
-        return;
-      }
-      payload.actionReason = reason;
-    }
-
     try {
+      const payload = buildInvoicePayload({ dueDateOverride: dueDateResolution.dueDateOverride });
+      payload.number = number;
+
+      if (
+        mode === 'edit'
+        && invoice
+        && (
+          payload.status !== invoice.status
+          || payload.workflowStatus !== (invoice.workflowStatus ?? form.workflowStatus)
+        )
+      ) {
+        const reason = await requestFinancialActionReason('изменения статуса счета');
+        if (reason === undefined) {
+          return;
+        }
+        payload.actionReason = reason;
+      }
+
+      if (!stillCurrentDraft()) return;
       await onSubmit(payload);
     } catch (err) {
+      if (!stillCurrentDraft() || err instanceof StaleUiOperationError) return;
       if (!errorMessage) {
         setLocalError(
           extractDisplayErrorMessage(
@@ -4104,7 +4211,7 @@ export function InvoiceModal({
                 <button
                   type="submit"
                   form="invoice-edit-form"
-                  disabled={submitting || paymentsReadBlocked}
+                  disabled={submitting || paymentsReadBlocked || editorConflict}
                   className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -4132,6 +4239,14 @@ export function InvoiceModal({
           </button>
         )}
       </div>
+
+      {editorConflict && <div role="alert" className="mx-3 my-2 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+        <p>{INVOICE_DRAFT_CONFLICT}</p>
+        <p>Чтобы не перезаписать чужие изменения, сохранение приостановлено. Скопируйте нужные правки и загрузите актуальный счёт.</p>
+        <button type="button" disabled={submitting || editorDraftOwner.busy || !editorReadsReady}
+          onClick={() => { void reloadCurrentEditor(); }}
+          className="rounded-lg border border-amber-300 bg-white px-2 py-1 text-xs font-semibold disabled:opacity-60">Загрузить актуальный счёт</button>
+      </div>}
 
       {isPageMode && pageViewMode ? (
         <div className="space-y-4 bg-slate-100 px-4 py-4">
@@ -5313,7 +5428,7 @@ export function InvoiceModal({
             <div className="flex items-center justify-end gap-3 pt-2">
               <button
                 type="submit"
-                disabled={submitting || paymentsReadBlocked}
+                disabled={submitting || paymentsReadBlocked || editorConflict}
                 className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
               >
                 {submitting && <Loader2 className="h-4 w-4 animate-spin" />}

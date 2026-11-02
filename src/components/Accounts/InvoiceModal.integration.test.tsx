@@ -11,6 +11,7 @@ import type {
   ContractInput,
   InstallmentPlanInput,
   Invoice,
+  InvoiceInput,
   LegalEntitySummary,
   MoneyOperation,
   MoneyOperationsSummary,
@@ -20,7 +21,7 @@ import type {
 } from '../../types';
 import type { BaseDictItem } from '../../types/dictionaries';
 import { apiService, type PagedResult } from '../../services/api';
-import { storeInvoiceEditorDraft } from '../../utils/invoiceEditorBridge';
+import { storeInvoiceEditorDraft, type InvoiceEditorDraftState } from '../../utils/invoiceEditorBridge';
 import { defaultRolePermissions, type RolePermissions } from '../../types/permissions';
 import { configureDocumentDeliveryTestApi } from '../../test/documentDeliveryFixtures';
 import { documentCopyTestSession } from '../../test/documentCopySession';
@@ -55,6 +56,7 @@ type CaseModalMockProps = {
 };
 
 type InstallmentPlannerMockProps = {
+  initialPlan?: InstallmentPlanInput | null;
   onApplyPlan: (plan: InstallmentPlanInput | null) => void;
 };
 
@@ -356,6 +358,185 @@ describe('InvoiceModal integration', () => {
       date: '2026-11-02', plannedDate: '2026-11-02', paidAmount: 98765.43, isPaid: true, documentKind: 'Payment', systemNotes: '', notes: '' } as Payment;
     render(<InvoiceModal {...props} relatedPayments={[hidden]} />); await screen.findByLabelText('Номер счёта');
     expect(screen.queryByText('Скрытая оплата')).toBeNull(); expect(screen.getByText('Недостаточно прав для просмотра платежей.')).toBeTruthy(); expect(screen.queryByText('Связанные платежи пока не добавлены.')).toBeNull(); expect(apiService.getMoneyOperationsPaged).not.toHaveBeenCalled();
+  });
+  describe('invoice draft hydration', () => {
+    const props = () => ({ ...paymentReadProps(), invoice: { ...paymentReadProps().invoice,
+      description: 'Исходное описание', lineItems: [{ name: 'Услуга', quantity: 1, unit: 'шт', price: 1000 }] } });
+    const changedInvoice = (current: ReturnType<typeof props>) => ({ ...current.invoice, description: 'Изменено на сервере', auditUpdatedAt: '2026-11-02T02:00:00Z' });
+    it('preserves manual fields and line items after an equivalent metadata refresh', async () => {
+      const current = props(); const view = render(<InvoiceModal {...current} />);
+      fireEvent.change(await screen.findByLabelText('Номер счёта'), { target: { value: 'РУЧНОЙ-91' } });
+      fireEvent.change(screen.getByLabelText('Цена'), { target: { value: '1250,50' } });
+      view.rerender(<InvoiceModal {...current} invoice={{ ...current.invoice, lineItems: current.invoice.lineItems.map(row => ({ ...row })), auditUpdatedAt: '2026-11-02T02:00:00Z' }} />);
+      expect(screen.getByLabelText('Номер счёта')).toHaveProperty('value', 'РУЧНОЙ-91');
+      fireEvent.submit(document.getElementById('invoice-edit-form')!);
+      await waitFor(() => expect(current.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ number: 'РУЧНОЙ-91', amount: 1250.5,
+        lineItems: [expect.objectContaining({ name: 'Услуга', price: 1250.5 })] })));
+    });
+    it('keeps page edit mode and manual input when installment rows arrive late', async () => {
+      const current = props(); const view = render(<InvoiceModal {...current} presentation="page" paymentsLoading />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Редактировать счёт' }));
+      fireEvent.change(await screen.findByLabelText('Номер счёта'), { target: { value: 'РУЧНОЙ-91' } });
+      const row = { id: 701, invoiceId: 910, amount: 1000, date: '2026-11-05', type: 'Expense', status: 'Pending', isPaid: false,
+        description: 'Рассрочка', systemNotes: '[pp:installment-payment] {"sequence":1,"total":1000,"item":{"sequence":1}}' } as Payment;
+      view.rerender(<InvoiceModal {...current} presentation="page" relatedPayments={[row]} />);
+      expect(screen.getByLabelText('Номер счёта')).toHaveProperty('value', 'РУЧНОЙ-91');
+      expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveProperty('disabled', false);
+    });
+    it('adopts changed server metadata when the editor is untouched', async () => {
+      const current = props(); const view = render(<InvoiceModal {...current} />); await screen.findByLabelText('Номер счёта');
+      view.rerender(<InvoiceModal {...current} invoice={{ ...changedInvoice(current), number: 'НОВЫЙ-91', amount: 2000,
+        lineItems: [{ name: 'Другая услуга', quantity: 1, unit: 'шт', price: 2000 }] }} />);
+      expect(screen.getByLabelText('Номер счёта')).toHaveProperty('value', 'НОВЫЙ-91');
+      expect(screen.queryByText('Счёт изменился после начала редактирования. Ваши правки сохранены в форме.')).toBeNull();
+      fireEvent.submit(document.getElementById('invoice-edit-form')!);
+      await waitFor(() => expect(current.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ number: 'НОВЫЙ-91', amount: 2000, description: 'Изменено на сервере' })));
+    });
+    it('retains a dirty draft and blocks overwriting concurrently changed metadata', async () => {
+      const current = props(); const view = render(<InvoiceModal {...current} />);
+      fireEvent.change(await screen.findByLabelText('Номер счёта'), { target: { value: 'РУЧНОЙ-91' } });
+      view.rerender(<InvoiceModal {...current} invoice={changedInvoice(current)} />);
+      expect(screen.getByLabelText('Номер счёта')).toHaveProperty('value', 'РУЧНОЙ-91');
+      expect(screen.getByText('Счёт изменился после начала редактирования. Ваши правки сохранены в форме.')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveProperty('disabled', true);
+      fireEvent.submit(document.getElementById('invoice-edit-form')!); await act(async () => {});
+      expect(current.onSubmit).not.toHaveBeenCalled(); expect(apiService.updateInvoice).not.toHaveBeenCalled();
+    });
+    it.each([false, true])('reloads concurrent metadata only with explicit confirmation %s', async accepted => {
+      const current = props(); const view = render(<InvoiceModal {...current} />);
+      fireEvent.change(await screen.findByLabelText('Номер счёта'), { target: { value: 'РУЧНОЙ-91' } });
+      view.rerender(<InvoiceModal {...current} invoice={changedInvoice(current)} />);
+      confirmMock.mockResolvedValueOnce(accepted); fireEvent.click(screen.getByRole('button', { name: 'Загрузить актуальный счёт' }));
+      await waitFor(() => expect(confirmMock).toHaveBeenCalledOnce()); await act(async () => {});
+      expect(screen.getByLabelText('Номер счёта')).toHaveProperty('value', accepted ? 'СЧ-91' : 'РУЧНОЙ-91');
+      expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveProperty('disabled', !accepted);
+      expect(current.onSubmit).not.toHaveBeenCalled(); expect(apiService.updateInvoice).not.toHaveBeenCalled();
+    });
+    it.each(['document', 'reopen', 'login', 'role'] as const)('isolates a manual draft across %s', async change => {
+      const current = props(); const view = render(<InvoiceModal {...current} />);
+      fireEvent.change(await screen.findByLabelText('Номер счёта'), { target: { value: 'РУЧНОЙ-91' } });
+      if (change === 'reopen') view.rerender(<InvoiceModal {...current} open={false} />);
+      if (change === 'login') baseAuthSession.replace();
+      if (change === 'role') printAuthState.user = { id: 7, role: { id: 8 } };
+      view.rerender(<InvoiceModal {...current} invoice={change === 'document' ? { ...current.invoice, id: 92, invoiceEntityId: 920, number: 'СЧ-92' } : current.invoice} />);
+      expect(screen.getByLabelText('Номер счёта')).toHaveProperty('value', change === 'document' ? 'СЧ-92' : 'СЧ-91');
+    });
+    it('keeps the same user draft through token refresh and new default responsible props', async () => {
+      const current = props(); const view = render(<InvoiceModal {...current} defaultResponsibleId={7} />);
+      fireEvent.change(await screen.findByLabelText('Номер счёта'), { target: { value: 'РУЧНОЙ-91' } });
+      baseAuthSession.refresh(); view.rerender(<InvoiceModal {...current} defaultResponsibleId={8} />);
+      expect(screen.getByLabelText('Номер счёта')).toHaveProperty('value', 'РУЧНОЙ-91');
+    });
+    it('keeps editing when a refreshed canonical invoice uses another representative payment ID', async () => {
+      const current = props(); const view = render(<InvoiceModal {...current} presentation="page" />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Редактировать счёт' }));
+      fireEvent.change(await screen.findByLabelText('Номер счёта'), { target: { value: 'РУЧНОЙ-91' } });
+      view.rerender(<InvoiceModal {...current} presentation="page" invoice={{ ...current.invoice, id: 92 }} />);
+      expect(screen.getByLabelText('Номер счёта')).toHaveProperty('value', 'РУЧНОЙ-91');
+    });
+    it('does not resurrect a manually removed case after equivalent metadata refresh', async () => {
+      const current = props(); current.invoice = { ...current.invoice, expenseClientId: 1, clientCaseId: 441, clientCaseIds: [441],
+        clientCases: [{ id: 441, clientId: 1, title: 'Связанное дело', status: 'Open', createdAt: '2026-11-02' }] };
+      const view = render(<InvoiceModal {...current} />); await screen.findByLabelText('Номер счёта');
+      fireEvent.click(screen.getAllByRole('button', { name: 'Очистить' })[0]);
+      view.rerender(<InvoiceModal {...current} invoice={{ ...current.invoice }} />);
+      fireEvent.submit(document.getElementById('invoice-edit-form')!);
+      await waitFor(() => expect(current.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ clientCaseId: null, clientCaseIds: [] })));
+    });
+    it.each(['document', 'login', 'metadata', 'cancel'] as const)('ignores a deferred reload confirmation after %s', async change => {
+      const current = props(); const view = render(<InvoiceModal {...current} />);
+      fireEvent.change(await screen.findByLabelText('Номер счёта'), { target: { value: 'РУЧНОЙ-91' } });
+      const latest = changedInvoice(current); view.rerender(<InvoiceModal {...current} invoice={latest} />);
+      const pending = createDeferred<boolean>(); confirmMock.mockReturnValueOnce(pending.promise);
+      fireEvent.click(screen.getByRole('button', { name: 'Загрузить актуальный счёт' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Загрузить актуальный счёт' })); expect(confirmMock).toHaveBeenCalledOnce();
+      if (change === 'document') view.rerender(<InvoiceModal {...current} invoice={{ ...current.invoice, id: 92, invoiceEntityId: 920, number: 'СЧ-92' }} />);
+      if (change === 'login') { baseAuthSession.replace(); view.rerender(<InvoiceModal {...current} invoice={latest} />); }
+      if (change === 'metadata') view.rerender(<InvoiceModal {...current} invoice={{ ...latest, description: 'Ещё одно изменение' }} />);
+      await act(async () => pending.resolve(change !== 'cancel'));
+      expect(screen.getByLabelText('Номер счёта')).toHaveProperty('value', change === 'document' ? 'СЧ-92' : change === 'login' ? 'СЧ-91' : 'РУЧНОЙ-91');
+      expect(current.onSubmit).not.toHaveBeenCalled(); expect(apiService.updateInvoice).not.toHaveBeenCalled();
+    });
+    it('accepts an own successful save response without replacing manual formatting or edit mode', async () => {
+      const current = props(); const view = render(<InvoiceModal {...current} presentation="page" />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Редактировать счёт' }));
+      fireEvent.change(await screen.findByLabelText('Номер счёта'), { target: { value: 'РУЧНОЙ-91' } });
+      fireEvent.submit(document.getElementById('invoice-edit-form')!); await waitFor(() => expect(current.onSubmit).toHaveBeenCalledOnce());
+      view.rerender(<InvoiceModal {...current} presentation="page" invoice={{ ...current.invoice, number: 'РУЧНОЙ-91' }} />);
+      expect(screen.getByLabelText('Номер счёта')).toHaveProperty('value', 'РУЧНОЙ-91');
+      expect(screen.queryByText('Счёт изменился после начала редактирования. Ваши правки сохранены в форме.')).toBeNull();
+    });
+    it('does not treat a picker-only service category absent from the saved response as a concurrent edit', async () => {
+      seedReferenceServices(); const current = props(); const view = render(<InvoiceModal {...current} />); await screen.findByLabelText('Номер счёта');
+      fireEvent.click(screen.getByRole('button', { name: 'Наименование услуги' }));
+      act(() => referenceLookupSpy.mock.lastCall![0].onSelect('1'));
+      fireEvent.submit(document.getElementById('invoice-edit-form')!); await waitFor(() => expect(current.onSubmit).toHaveBeenCalledOnce());
+      const saved = current.onSubmit.mock.lastCall![0] as InvoiceInput;
+      view.rerender(<InvoiceModal {...current} invoice={{ ...current.invoice, ...saved } as Invoice} />);
+      expect(screen.queryByText('Счёт изменился после начала редактирования. Ваши правки сохранены в форме.')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveProperty('disabled', false);
+      expect(screen.getByLabelText('Цена')).toHaveProperty('value', '9 999,00');
+    });
+    it('restores a matching bridge draft once and does not carry it into another login', async () => {
+      const current = props(); const resumeDraft: InvoiceEditorDraftState = { mode: 'edit', presentation: 'modal', invoiceId: 91, pageViewMode: false,
+        form: { number: 'ВОССТАНОВЛЕН-91', date: '2026-11-02', dueDate: '2026-11-05', amount: '1000', type: 'Expense', status: 'Pending', workflowStatus: 'Draft',
+          clientId: '1', legalEntityId: '', expenseClientId: '', expenseLegalEntityId: '', contractId: '', clientCaseReference: '', description: 'Мои правки',
+          isNotForAccounting: false, actReference: '', paidDate: '', responsibleIds: [] },
+        lineItems: [{ id: 'draft-row', name: 'Услуга', quantity: '1', unit: 'шт', price: '1000', serviceCategoryId: '', serviceId: '' }], selectedActs: [], selectedClientCaseIds: [], billingTaskIds: [77] };
+      const view = render(<InvoiceModal {...current} resumeDraft={resumeDraft} />);
+      expect(await screen.findByLabelText('Номер счёта')).toHaveProperty('value', 'ВОССТАНОВЛЕН-91');
+      fireEvent.submit(document.getElementById('invoice-edit-form')!);
+      await waitFor(() => expect(current.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ billingTaskIds: [77] })));
+      current.onSubmit.mockClear();
+      baseAuthSession.replace(); view.rerender(<InvoiceModal {...current} resumeDraft={resumeDraft} />);
+      expect(screen.getByLabelText('Номер счёта')).toHaveProperty('value', 'СЧ-91');
+      fireEvent.submit(document.getElementById('invoice-edit-form')!);
+      await waitFor(() => expect(current.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ billingTaskIds: undefined })));
+    });
+    it('preserves draft under StrictMode replay and repeated equivalent responses without new financial reads', async () => {
+      const current = props(); const view = render(<StrictMode><InvoiceModal {...current} /></StrictMode>);
+      fireEvent.change(await screen.findByLabelText('Номер счёта'), { target: { value: 'РУЧНОЙ-91' } });
+      const reads = vi.mocked(apiService.getMoneyOperationsPaged).mock.calls.length;
+      for (let i = 0; i < 4; i++) view.rerender(<StrictMode><InvoiceModal {...current} invoice={{ ...current.invoice }} /></StrictMode>);
+      expect(screen.getByLabelText('Номер счёта')).toHaveProperty('value', 'РУЧНОЙ-91'); expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledTimes(reads);
+    });
+    it.each(['same-plan', 'different-plan', 'unconfirmed'] as const)('reconciles a locally changed installment plan with %s without silently replacing it', async mode => {
+      const current = props(); const plan: InstallmentPlanInput = { total: 1000, downPayment: 0, annualRate: 0, months: 1, startDate: '2026-11-05', toPay: 1000, overpay: 0,
+        items: [{ sequence: 1, date: '2026-11-05', principal: 1000, interest: 0, payment: 1000, balance: 0 }] };
+      installmentPlannerPlanRef.current = plan; const view = render(<InvoiceModal {...current} />); await screen.findByLabelText('Номер счёта');
+      fireEvent.click(screen.getAllByRole('button').find(button => button.textContent === 'Рассрочка')!); fireEvent.click(await screen.findByRole('button', { name: 'apply-installment-plan' }));
+      await waitFor(() => expect(apiService.updateInvoice).toHaveBeenCalledOnce()); await act(async () => {});
+      const remote = { ...plan, item: { ...plan.items[0], payment: mode === 'same-plan' ? 1000 : 999 }, sequence: 1 };
+      const row = { id: 701, invoiceId: 910, amount: 1000, date: '2026-11-05', type: 'Expense', status: 'Pending', isPaid: false,
+        description: 'Рассрочка', systemNotes: '[pp:installment-payment] ' + JSON.stringify(remote) } as Payment;
+      view.rerender(<InvoiceModal {...current} relatedPayments={[row]} paymentsLoading={mode === 'unconfirmed'} />);
+      expect(Boolean(screen.queryByText('Счёт изменился после начала редактирования. Ваши правки сохранены в форме.'))).toBe(mode === 'different-plan');
+      expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveProperty('disabled', mode !== 'same-plan');
+      fireEvent.click(screen.getAllByRole('button').find(button => button.textContent === 'Изменить рассрочку')!);
+      expect(installmentPlannerPropsSpy.mock.lastCall![0].initialPlan).toEqual(plan);
+      expect(apiService.updateInvoice).toHaveBeenCalledOnce();
+    });
+    it.each(['document', 'metadata', 'loading'] as const)('stops a pending due-date confirmation before mutating or submitting after %s', async change => {
+      const current = props(); const row = { id: 701, invoiceId: 910, amount: 1000, date: '2026-11-10', type: 'Expense', status: 'Pending', isPaid: false,
+        description: 'Рассрочка', systemNotes: '[pp:installment-payment] {"sequence":1,"total":1000,"item":{"sequence":1,"date":"2026-11-10"}}' } as Payment;
+      const view = render(<InvoiceModal {...current} relatedPayments={[row]} />);
+      fireEvent.change(await screen.findByLabelText('Номер счёта'), { target: { value: 'РУЧНОЙ-91' } });
+      const pending = createDeferred<boolean>(); confirmMock.mockReturnValueOnce(pending.promise);
+      fireEvent.submit(document.getElementById('invoice-edit-form')!); await waitFor(() => expect(confirmMock).toHaveBeenCalledOnce());
+      view.rerender(<InvoiceModal {...current} relatedPayments={change === 'document' ? [] : [row]} paymentsLoading={change === 'loading'} invoice={change === 'document'
+        ? { ...current.invoice, id: 92, invoiceEntityId: 920, number: 'СЧ-92' } : change === 'metadata' ? changedInvoice(current) : current.invoice} />);
+      await act(async () => pending.resolve(true));
+      const dates = document.querySelectorAll('input[type="date"]') as NodeListOf<HTMLInputElement>;
+      expect(dates[1].value).toBe('2026-11-05'); expect(current.onSubmit).not.toHaveBeenCalled();
+    });
+    it.each(['back', 'close', 'cancel'] as const)('revokes draft callbacks synchronously on %s even before the parent rerenders', async exit => {
+      const current = props(); const view = render(<InvoiceModal {...current} presentation={exit === 'back' ? 'page' : 'modal'} />);
+      if (exit === 'back') fireEvent.click(await screen.findByRole('button', { name: 'Редактировать счёт' }));
+      const form = document.getElementById('invoice-edit-form')!;
+      fireEvent.click(screen.getByRole('button', { name: exit === 'back' ? 'Назад' : exit === 'close' ? 'Закрыть' : 'Отмена' }));
+      expect(current.onClose).toHaveBeenCalledOnce(); fireEvent.submit(form); await act(async () => {});
+      expect(current.onSubmit).not.toHaveBeenCalled(); view.unmount();
+    });
   });
   it('reference caller scope: closed and forbidden callers are disabled and permission changes close the open picker', async () => {
     seedReferenceServices(); const props = referenceProps(); const view = render(<InvoiceModal {...props} open={false} />);
