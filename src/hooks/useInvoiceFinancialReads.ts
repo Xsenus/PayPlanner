@@ -98,6 +98,14 @@ export function useInvoiceFinancialReads(options: Options) {
     void attempt.promise.finally(() => { if (pending.current.money === attempt) delete pending.current.money; });
     return attempt.promise;
   }, [movementsEnabled, captureForm, captureMoney, refreshMoney, moneyKey]);
+  const refreshAfterWrite = useCallback(async () => {
+    if (!captureForm()) return;
+    // A read begun before the committed write cannot satisfy its refresh.
+    // Snapshot.refresh aborts/supersedes the old generation; its finally must
+    // not release the replacement request stored by the two owned retries.
+    pending.current = {};
+    await Promise.all([retryBalance(), retryMovements()]);
+  }, [captureForm, retryBalance, retryMovements]);
   const cancel = useCallback(() => {
     if (!captureForm()) return;
     updateBalance(() => null); updateMoney(() => null);
@@ -116,6 +124,6 @@ export function useInvoiceFinancialReads(options: Options) {
     movementsEnabled, movements: readyMoney?.items ?? EMPTY_OPERATIONS, movementsLoading: movementsEnabled && money.loading,
     movementsError: movementsEnabled && money.error ? extractDisplayErrorMessage(money.error, 'Не удалось загрузить движения денег по счёту. Повторите загрузку.') : null,
     total: readyMoney?.total ?? null, page, pageSize: PAGE_SIZE,
-    hasNext: Boolean(readyMoney && page * PAGE_SIZE < readyMoney.total), retryMovements, movePage, cancel,
+    hasNext: Boolean(readyMoney && page * PAGE_SIZE < readyMoney.total), retryMovements, movePage, cancel, refreshAfterWrite,
   };
 }

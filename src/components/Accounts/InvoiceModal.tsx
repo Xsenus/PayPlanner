@@ -1482,6 +1482,7 @@ export function InvoiceModal({
     printOwner.invalidate();
     delivery.invalidate();
     caseCreation.invalidate();
+    invoiceWriteOwner.invalidate();
     leave();
   };
   const yandexDiskUploading = delivery.kind === 'disk';
@@ -1654,6 +1655,41 @@ export function InvoiceModal({
   const latestEditorDraft = useRef({ source: editorSourceKey, plan: serverPlanKey, conflict: editorConflict, ready: editorReadsReady });
   latestEditorDraft.current = { source: editorSourceKey, plan: serverPlanKey, conflict: editorConflict, ready: editorReadsReady };
   const captureEditorDraft = editorDraftOwner.capture;
+  const canCreateInvoice = isAdmin || permissions.accounts.canCreate;
+  const canEditInvoice = isAdmin || permissions.accounts.canEdit;
+  const canDeleteInvoice = isAdmin || permissions.accounts.canDelete;
+  const invoiceWriteOwner = useDocumentDeliveryOwner(JSON.stringify([editorDraftOwner.scope, invoice?.id, invoice?.invoiceEntityId,
+    currentUser?.requiresFinancialActionReason]));
+  const invoiceWrites = useRef(new Map<string, { operation: NonNullable<ReturnType<typeof invoiceWriteOwner.begin>> }>());
+  const [, renderInvoiceWrites] = useState(0);
+  const invoiceWriteMounted = useRef(true);
+  useEffect(() => { invoiceWriteMounted.current = true; return () => { invoiceWriteMounted.current = false; }; }, []);
+  const currentWriteKey = String(invoice?.id ?? 'new');
+  const invoiceWriteBusy = invoiceWrites.current.has(currentWriteKey);
+  const beginInvoiceWrite = (kind: string, allowed: boolean) => {
+    if (!open || !allowed || submitting || invoiceWrites.current.has(currentWriteKey)) return null;
+    const operation = invoiceWriteOwner.begin(kind);
+    if (!operation) return null;
+    const entry = { operation };
+    invoiceWrites.current.set(currentWriteKey, entry); renderInvoiceWrites(value => value + 1);
+    return { ...operation, finish: () => {
+      if (invoiceWrites.current.get(currentWriteKey) !== entry) return;
+      invoiceWrites.current.delete(currentWriteKey); operation.finish();
+      if (invoiceWriteMounted.current) renderInvoiceWrites(value => value + 1);
+    } };
+  };
+  useLayoutEffect(() => {
+    setCancelDialogOpen(false); setCancelError(null); setCancelSubmitting(false);
+    setInstallmentModalOpen(false);
+  }, [invoiceWriteOwner.scope]);
+  const refreshAfterInvoiceWrite = async (operation: { isCurrent: () => boolean }) => {
+    if (!operation.isCurrent()) throw new StaleUiOperationError();
+    await awaitOwnedUiResult(async () => {
+      await onRefreshRequested?.();
+      if (!operation.isCurrent()) throw new StaleUiOperationError();
+      await financialReads.refreshAfterWrite();
+    }, operation.isCurrent);
+  };
 
   const applyEditorContent = useCallback((content: InvoiceEditorContent) => {
     setForm(content.form);
@@ -2791,6 +2827,8 @@ export function InvoiceModal({
   const requiresFinancialActionReason = Boolean(currentUser?.requiresFinancialActionReason);
 
   const requestFinancialActionReason = useCallback(async (actionName: string): Promise<string | null | undefined> => {
+    const owner = captureEditorDraft();
+    if (!owner) return undefined;
     if (!requiresFinancialActionReason) {
       return null;
     }
@@ -2803,7 +2841,7 @@ export function InvoiceModal({
       confirmLabel: 'Продолжить',
       cancelLabel: 'Отмена',
     });
-    if (reason === null) {
+    if (!owner.isCurrent() || reason === null) {
       return undefined;
     }
 
@@ -2814,7 +2852,7 @@ export function InvoiceModal({
     }
 
     return normalizedReason;
-  }, [prompt, requiresFinancialActionReason]);
+  }, [prompt, requiresFinancialActionReason, captureEditorDraft]);
 
   const requestAmountReconciliationDecision = useCallback((
     details: InvoiceAmountReconciliation,
@@ -3076,194 +3114,180 @@ export function InvoiceModal({
   </div>;
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setLocalError(null);
-    if (!open || !captureEditorDraft()) return;
-    if (latestEditorDraft.current.conflict) {
-      setLocalError(INVOICE_DRAFT_CONFLICT);
-      return;
-    }
-    const draftOwner = captureEditorDraft();
-    const sourceAtSubmit = editorSourceKey; const planAtSubmit = serverPlanKey;
-    const stillCurrentDraft = () => draftOwner?.isCurrent() && latestEditorDraft.current.ready && !latestEditorDraft.current.conflict
-      && latestEditorDraft.current.source === sourceAtSubmit && latestEditorDraft.current.plan === planAtSubmit;
-    if (paymentsReadBlocked) {
-      setLocalError('Сначала дождитесь загрузки платежей по счёту или повторите её после ошибки.');
-      return;
-    }
-
-    const number = form.number.trim();
-    if (!number) {
-      setLocalError(t('invoiceNumber') ?? 'Номер счёта обязателен');
-      return;
-    }
-    if (!form.date) {
-      setLocalError(t('invoiceDate') ?? 'Дата обязательна');
-      return;
-    }
-    if (!form.clientId && !form.legalEntityId) {
-      setLocalError(`Выберите ${counterpartyObjectLabel}`);
-      return;
-    }
-
-    const parsedAmount = parseMoneyInput(form.amount);
-    if (Number.isNaN(parsedAmount) || parsedAmount < 0) {
-      setLocalError(t('invoiceAmount') ?? 'Введите корректную сумму');
-      return;
-    }
-
-    if (lineItems.some((item) => item.name.trim() && !hasStorableLineItemPrecision(parseMoneyInput(item.quantity), parseMoneyInput(item.price)))) {
-      setLocalError(lineItemPrecisionError);
-      return;
-    }
-
-    if (installmentPlanAmountMismatch) {
-      setLocalError('Сумма счета изменилась после настройки рассрочки. Пересчитайте график.');
-      return;
-    }
-
-    if (selectedClientCaseIds.length > invoiceRules.maxClientCasesPerInvoice) {
-      setLocalError(`В счёте можно указать не более ${invoiceRules.maxClientCasesPerInvoice} дела(дел).`);
-      return;
-    }
-
-    if (selectedActs.length > invoiceRules.maxActsPerInvoice) {
-      setLocalError(`В счёте можно указать не более ${invoiceRules.maxActsPerInvoice} акта(ов).`);
-      return;
-    }
-
-    const amountReconciliation = buildInvoiceAmountReconciliation(relatedPayments, invoice?.amount, parsedAmount);
-    if (amountReconciliation) {
-      const decision = await requestAmountReconciliationDecision(amountReconciliation);
-      if (!stillCurrentDraft()) return;
-      if (decision === 'cancel') {
-        return;
-      }
-
-      if (decision === 'manage') {
-        focusRelatedPaymentsAfterAmountMismatch(amountReconciliation);
-        return;
-      }
-    }
-
-    const currentOwnerKey = form.clientId
-      ? `client:${form.clientId}`
-      : form.legalEntityId
-        ? `legal:${form.legalEntityId}`
-        : '';
-    const originalOwnerKey = invoice?.clientId
-      ? `client:${invoice.clientId}`
-      : invoice?.legalEntityId
-        ? `legal:${invoice.legalEntityId}`
-        : '';
-    if (
-      mode === 'edit'
-      && invoice
-      && currentOwnerKey
-      && originalOwnerKey
-      && currentOwnerKey !== originalOwnerKey
-      && hasGeneratedRelatedPayments
-    ) {
-      const accepted = await confirm({
-        title: 'Смена контрагента счета',
-        description:
-          'У счета есть сформированные платежи. При смене контрагента они тоже будут перепривязаны. Продолжить?',
-        confirmLabel: 'Да, изменить',
-        cancelLabel: 'Отмена',
-      });
-
-      if (!accepted || !stillCurrentDraft()) {
-        return;
-      }
-    }
-
-    const dueDateResolution = await resolveInstallmentDueDateForSave();
-    if (dueDateResolution.cancelled || !stillCurrentDraft()) {
-      return;
-    }
-
+    const write = beginInvoiceWrite('save', mode === 'edit' ? canReadPrint && canEditInvoice : canCreateInvoice);
+    if (!write) return;
     try {
-      const payload = buildInvoicePayload({ dueDateOverride: dueDateResolution.dueDateOverride });
-      payload.number = number;
+      setLocalError(null);
+      if (!open || !captureEditorDraft()) return;
+      if (latestEditorDraft.current.conflict) {
+        setLocalError(INVOICE_DRAFT_CONFLICT);
+        return;
+      }
+      const draftOwner = captureEditorDraft();
+      const sourceAtSubmit = editorSourceKey; const planAtSubmit = serverPlanKey;
+      const stillCurrentDraft = () => write.isCurrent() && draftOwner?.isCurrent() && latestEditorDraft.current.ready && !latestEditorDraft.current.conflict
+        && latestEditorDraft.current.source === sourceAtSubmit && latestEditorDraft.current.plan === planAtSubmit;
+      if (paymentsReadBlocked) {
+        setLocalError('Сначала дождитесь загрузки платежей по счёту или повторите её после ошибки.');
+        return;
+      }
 
+      const number = form.number.trim();
+      if (!number) {
+        setLocalError(t('invoiceNumber') ?? 'Номер счёта обязателен');
+        return;
+      }
+      if (!form.date) {
+        setLocalError(t('invoiceDate') ?? 'Дата обязательна');
+        return;
+      }
+      if (!form.clientId && !form.legalEntityId) {
+        setLocalError(`Выберите ${counterpartyObjectLabel}`);
+        return;
+      }
+
+      const parsedAmount = parseMoneyInput(form.amount);
+      if (Number.isNaN(parsedAmount) || parsedAmount < 0) {
+        setLocalError(t('invoiceAmount') ?? 'Введите корректную сумму');
+        return;
+      }
+
+      if (lineItems.some((item) => item.name.trim() && !hasStorableLineItemPrecision(parseMoneyInput(item.quantity), parseMoneyInput(item.price)))) {
+        setLocalError(lineItemPrecisionError);
+        return;
+      }
+
+      if (installmentPlanAmountMismatch) {
+        setLocalError('Сумма счета изменилась после настройки рассрочки. Пересчитайте график.');
+        return;
+      }
+
+      if (selectedClientCaseIds.length > invoiceRules.maxClientCasesPerInvoice) {
+        setLocalError(`В счёте можно указать не более ${invoiceRules.maxClientCasesPerInvoice} дела(дел).`);
+        return;
+      }
+
+      if (selectedActs.length > invoiceRules.maxActsPerInvoice) {
+        setLocalError(`В счёте можно указать не более ${invoiceRules.maxActsPerInvoice} акта(ов).`);
+        return;
+      }
+
+      const amountReconciliation = buildInvoiceAmountReconciliation(relatedPayments, invoice?.amount, parsedAmount);
+      if (amountReconciliation) {
+        const decision = await requestAmountReconciliationDecision(amountReconciliation);
+        if (!stillCurrentDraft()) return;
+        if (decision === 'cancel') {
+          return;
+        }
+
+        if (decision === 'manage') {
+          focusRelatedPaymentsAfterAmountMismatch(amountReconciliation);
+          return;
+        }
+      }
+
+      const currentOwnerKey = form.clientId
+        ? `client:${form.clientId}`
+        : form.legalEntityId
+          ? `legal:${form.legalEntityId}`
+          : '';
+      const originalOwnerKey = invoice?.clientId
+        ? `client:${invoice.clientId}`
+        : invoice?.legalEntityId
+          ? `legal:${invoice.legalEntityId}`
+          : '';
       if (
         mode === 'edit'
         && invoice
-        && (
-          payload.status !== invoice.status
-          || payload.workflowStatus !== (invoice.workflowStatus ?? form.workflowStatus)
-        )
+        && currentOwnerKey
+        && originalOwnerKey
+        && currentOwnerKey !== originalOwnerKey
+        && hasGeneratedRelatedPayments
       ) {
-        const reason = await requestFinancialActionReason('изменения статуса счета');
-        if (reason === undefined) {
+        const accepted = await confirm({
+          title: 'Смена контрагента счета',
+          description:
+            'У счета есть сформированные платежи. При смене контрагента они тоже будут перепривязаны. Продолжить?',
+          confirmLabel: 'Да, изменить',
+          cancelLabel: 'Отмена',
+        });
+
+        if (!accepted || !stillCurrentDraft()) {
           return;
         }
-        payload.actionReason = reason;
       }
 
-      if (!stillCurrentDraft()) return;
-      await onSubmit(payload);
-    } catch (err) {
-      if (!stillCurrentDraft() || err instanceof StaleUiOperationError) return;
-      if (!errorMessage) {
-        setLocalError(
-          extractDisplayErrorMessage(
-            err,
-            mode === 'edit' ? 'Не удалось сохранить счет' : 'Не удалось создать счет',
-          ),
-        );
+      const dueDateResolution = await resolveInstallmentDueDateForSave();
+      if (dueDateResolution.cancelled || !stillCurrentDraft()) {
+        return;
       }
-    }
+
+      try {
+        const payload = buildInvoicePayload({ dueDateOverride: dueDateResolution.dueDateOverride });
+        payload.number = number;
+
+        if (
+          mode === 'edit'
+          && invoice
+          && (
+            payload.status !== invoice.status
+            || payload.workflowStatus !== (invoice.workflowStatus ?? form.workflowStatus)
+          )
+        ) {
+          const reason = await requestFinancialActionReason('изменения статуса счета');
+          if (reason === undefined) {
+            return;
+          }
+          payload.actionReason = reason;
+        }
+
+        if (!stillCurrentDraft()) return;
+        await onSubmit(payload);
+      } catch (err) {
+        if (!stillCurrentDraft() || err instanceof StaleUiOperationError) return;
+        if (!errorMessage) {
+          setLocalError(
+            extractDisplayErrorMessage(
+              err,
+              mode === 'edit' ? 'Не удалось сохранить счет' : 'Не удалось создать счет',
+            ),
+          );
+        }
+      }
+    } finally { write.finish(); }
   };
 
   const handleOpenInstallmentCalculator = () => {
+    if (!open || invoiceWriteBusy || submitting || !invoiceWriteOwner.capture() || !(mode === 'edit' ? canReadPrint && canEditInvoice : canCreateInvoice)) return;
     setInstallmentModalOpen(true);
   };
 
   const handleApplyInstallmentPlan = async (plan: InstallmentPlanInput | null) => {
+    const operation = beginInvoiceWrite('installment', mode === 'edit' ? canReadPrint && canEditInvoice : canCreateInvoice);
+    if (!operation) return;
     const nextPlan = cloneInstallmentPlan(plan);
     const nextDueDate = getInstallmentPlanLastDate(nextPlan);
-
-    setInstallmentPlan(nextPlan);
-    setInstallmentPlanTouched(true);
-    setLocalError(null);
-    if (nextDueDate) {
-      setForm((prev) => (prev.dueDate === nextDueDate ? prev : { ...prev, dueDate: nextDueDate }));
-    }
-
-    if (mode === 'edit' && invoice?.id) {
-      try {
-        const payload = buildInvoicePayload({
-          planOverride: nextPlan,
-          dueDateOverride: nextDueDate || undefined,
-          replaceInstallmentPlan: true,
-        });
-        await apiService.updateInvoice(invoice.id, payload);
-        await onRefreshRequested?.();
-        setInstallmentModalOpen(false);
-        if (nextPlan) {
-          toast.success(`График рассрочки сохранен: ${nextPlan.items.length} платежей.`);
-        } else {
-          toast.success('График рассрочки удален.');
-        }
-      } catch (error) {
-        const message = extractDisplayErrorMessage(error, 'Не удалось сохранить график рассрочки.');
-        setLocalError(message);
-        toast.error(message);
+    try {
+      if (mode === 'edit' && invoice?.id) {
+        if (!latestEditorDraft.current.ready || latestEditorDraft.current.conflict) return;
+        const payload = buildInvoicePayload({ planOverride: nextPlan, dueDateOverride: nextDueDate || undefined, replaceInstallmentPlan: true });
+        await awaitOwnedUiResult(() => apiService.updateInvoice(invoice.id, payload), operation.isCurrent);
+        await refreshAfterInvoiceWrite(operation);
       }
-      return;
-    }
-
-    setInstallmentModalOpen(false);
-
-    if (nextPlan) {
-      toast.success(
-        mode === 'create'
+      if (!operation.isCurrent()) return;
+      setInstallmentPlan(nextPlan); setInstallmentPlanTouched(true); setLocalError(null);
+      if (nextDueDate) setForm(prev => prev.dueDate === nextDueDate ? prev : { ...prev, dueDate: nextDueDate });
+      setInstallmentModalOpen(false);
+      toast.success(nextPlan
+        ? mode === 'create'
           ? `График сохранен в форме счета: ${nextPlan.items.length} платежей. Чтобы создать платежи, сохраните счет.`
-          : `График рассрочки сохранен в счете: ${nextPlan.items.length} платежей.`,
-      );
-    } else {
-      toast.success(mode === 'create' ? 'График удален из формы счета.' : 'График рассрочки обновлен.');
-    }
+          : `График рассрочки сохранен: ${nextPlan.items.length} платежей.`
+        : mode === 'create' ? 'График удален из формы счета.' : 'График рассрочки удален.');
+    } catch (error) {
+      if (!operation.isCurrent() || error instanceof StaleUiOperationError) return;
+      const message = extractDisplayErrorMessage(error, 'Не удалось сохранить график рассрочки.');
+      setLocalError(message); toast.error(message);
+    } finally { operation.finish(); }
   };
 
   const invoiceLink = useMemo(() => {
@@ -3428,6 +3452,7 @@ export function InvoiceModal({
   };
 
   const handleCancelInvoiceSubmit = async () => {
+    if (!open || !canReadPrint || !canEditInvoice || submitting || invoiceWriteBusy || !invoiceWriteOwner.capture()) return;
     if (!invoice?.id) {
       setCancelError('Сначала сохраните счёт, затем можно аннулировать его.');
       return;
@@ -3462,10 +3487,12 @@ export function InvoiceModal({
       }
     }
 
+    const operation = beginInvoiceWrite('cancel', canReadPrint && canEditInvoice);
+    if (!operation) return;
     setCancelSubmitting(true);
     setCancelError(null);
     try {
-      const updated = await apiService.cancelInvoice(
+      const updated = await awaitOwnedUiResult(() => apiService.cancelInvoice(
         invoice.id,
         reason,
         receivedMoneyAction,
@@ -3473,13 +3500,13 @@ export function InvoiceModal({
         refundSource,
         refundDate,
         cancelScope,
-      );
+      ), operation.isCurrent);
       setForm((prev) => ({
         ...prev,
         status: updated.status,
         workflowStatus: updated.workflowStatus ?? prev.workflowStatus,
       }));
-      await onRefreshRequested?.();
+      await refreshAfterInvoiceWrite(operation);
       setCancelDialogOpen(false);
       toast.success(
         isUnpaidOnly
@@ -3488,11 +3515,13 @@ export function InvoiceModal({
         'Счёт обновлён',
       );
     } catch (err) {
+      if (!operation.isCurrent() || err instanceof StaleUiOperationError) return;
       const message = extractDisplayErrorMessage(err, 'Не удалось отменить счёт.');
       setCancelError(message);
       toast.error(message);
     } finally {
-      setCancelSubmitting(false);
+      if (operation.isCurrent()) setCancelSubmitting(false);
+      operation.finish();
     }
   };
 
@@ -3512,30 +3541,37 @@ export function InvoiceModal({
       return;
     }
     if (action === 'cancel') {
+      if (!open || !canReadPrint || !canEditInvoice || submitting || invoiceWriteBusy || !invoiceWriteOwner.capture()) return;
       openCancelInvoiceDialog();
       return;
     }
 
-    const actionMeta = {
-      send: { title: 'Отправить счёт', message: 'Сформировать документ WORD и отправить на email клиента?', confirmLabel: 'Отправить' },
-      copy: { title: 'Копия счёта', message: 'Создать копию текущего счёта?', confirmLabel: 'Копировать' },
-      paid: { title: 'Отметить оплаченным', message: 'Отметить счёт как оплаченный?', confirmLabel: 'Оплачен' },
-      delete: { title: 'Удалить счёт', message: 'Удалить счёт без возможности восстановления?', confirmLabel: 'Удалить' },
-      markNotSigned: { title: 'Отметить неподписанным', message: 'Перевести счёт в статус “не подписан”?', confirmLabel: 'Не подписан' },
-      sendToSigning: { title: 'Отправить на подписание', message: 'Перевести счёт в статус “на подписании”?', confirmLabel: 'На подписание' },
-      markSigned: { title: 'Отметить подписанным', message: 'Отметить счёт как подписанный клиентом?', confirmLabel: 'Подписан' },
-    }[action];
-
-    const accepted = await confirm({
-      title: actionMeta.title,
-      description: actionMeta.message,
-      confirmLabel: actionMeta.confirmLabel,
-      cancelLabel: 'Отмена',
-      variant: action === 'delete' ? 'danger' : 'primary',
-    });
-    if (!accepted) return;
-
+    const operation = beginInvoiceWrite(action, canReadPrint && (action === 'copy' ? canCreateInvoice : action === 'delete' ? canDeleteInvoice : canEditInvoice));
+    if (!operation) return;
+    const sourceAtAction = editorSourceKey;
+    const planAtAction = serverPlanKey;
+    const currentPayload = () => operation.isCurrent() && latestEditorDraft.current.ready && !latestEditorDraft.current.conflict
+      && latestEditorDraft.current.source === sourceAtAction && latestEditorDraft.current.plan === planAtAction;
     try {
+      const actionMeta = {
+        send: { title: 'Отправить счёт', message: 'Сформировать документ WORD и отправить на email клиента?', confirmLabel: 'Отправить' },
+        copy: { title: 'Копия счёта', message: 'Создать копию текущего счёта?', confirmLabel: 'Копировать' },
+        paid: { title: 'Отметить оплаченным', message: 'Отметить счёт как оплаченный?', confirmLabel: 'Оплачен' },
+        delete: { title: 'Удалить счёт', message: 'Удалить счёт без возможности восстановления?', confirmLabel: 'Удалить' },
+        markNotSigned: { title: 'Отметить неподписанным', message: 'Перевести счёт в статус “не подписан”?', confirmLabel: 'Не подписан' },
+        sendToSigning: { title: 'Отправить на подписание', message: 'Перевести счёт в статус “на подписании”?', confirmLabel: 'На подписание' },
+        markSigned: { title: 'Отметить подписанным', message: 'Отметить счёт как подписанный клиентом?', confirmLabel: 'Подписан' },
+      }[action];
+
+      const accepted = await confirm({
+        title: actionMeta.title,
+        description: actionMeta.message,
+        confirmLabel: actionMeta.confirmLabel,
+        cancelLabel: 'Отмена',
+        variant: action === 'delete' ? 'danger' : 'primary',
+      });
+      if (!accepted || !operation.isCurrent() || (action === 'copy' || action === 'paid') && !currentPayload()) return;
+
       if (action === 'markNotSigned' || action === 'sendToSigning' || action === 'markSigned') {
         if (!invoice?.id) {
           throw new Error('Сначала сохраните счёт, затем можно менять статус подписания.');
@@ -3548,19 +3584,19 @@ export function InvoiceModal({
               ? 'SignedByClient'
               : 'NotSigned';
         const reason = await requestFinancialActionReason('смены статуса документа');
-        if (reason === undefined) return;
+        if (reason === undefined || !operation.isCurrent()) return;
 
-        const updated = await apiService.updateInvoiceWorkflowStatus(
+        const updated = await awaitOwnedUiResult(() => apiService.updateInvoiceWorkflowStatus(
           invoice.id,
           workflowStatus,
           reason,
-        );
+        ), operation.isCurrent);
 
         setForm((prev) => ({
           ...prev,
           workflowStatus: updated.workflowStatus ?? prev.workflowStatus,
         }));
-        await onRefreshRequested?.();
+        await refreshAfterInvoiceWrite(operation);
         toast.success(
           action === 'sendToSigning'
             ? 'Счёт отправлен на подписание.'
@@ -3578,8 +3614,9 @@ export function InvoiceModal({
           includeActLinks: false,
         });
         payload.number = `${form.number || 'Счёт'} (копия)`;
-        await apiService.createInvoice(payload);
-        await onRefreshRequested?.();
+        if (!operation.isCurrent()) return;
+        await awaitOwnedUiResult(() => apiService.createInvoice(payload), operation.isCurrent);
+        await refreshAfterInvoiceWrite(operation);
         toast.success('Создана копия текущего счета.', 'Копия создана');
         return;
       }
@@ -3588,11 +3625,11 @@ export function InvoiceModal({
         const nextStatus: PaymentStatus = 'Completed';
         const payload = buildInvoicePayload({ statusOverride: nextStatus });
         const reason = await requestFinancialActionReason('изменения статуса оплаты');
-        if (reason === undefined) {
+        if (reason === undefined || !currentPayload()) {
           return;
         }
         payload.actionReason = reason;
-        await apiService.updateInvoice(invoice.id, payload);
+        await awaitOwnedUiResult(() => apiService.updateInvoice(invoice.id, payload), operation.isCurrent);
         setForm((prev) => ({ ...prev, status: nextStatus }));
         setDisplayPayments((prev) => prev.map((payment) => (
           payment.documentKind === 'Invoice'
@@ -3605,21 +3642,23 @@ export function InvoiceModal({
               }
             : payment
         )));
-        await onRefreshRequested?.();
+        await refreshAfterInvoiceWrite(operation);
         toast.success('Статус счета обновлен: оплачен.', 'Счет обновлен');
         return;
       }
 
       if (action === 'delete' && invoice?.id) {
-        await apiService.deleteInvoice(invoice.id);
-        await onRefreshRequested?.();
+        await awaitOwnedUiResult(() => apiService.deleteInvoice(invoice.id), operation.isCurrent);
+        await refreshAfterInvoiceWrite(operation);
         toast.success('Счет удален.');
-        deferClose(onClose);
+        const closeOwner = invoiceWriteOwner.capture();
+        deferClose(() => { if (closeOwner?.isCurrent()) leaveInvoiceCard(onClose); });
         return;
       }
     } catch (err) {
+      if (!operation.isCurrent() || err instanceof StaleUiOperationError) return;
       toast.error(err instanceof Error ? err.message : 'Не удалось выполнить действие по счету.');
-    }
+    } finally { operation.finish(); }
   };
 
   const amountValue = parseMoneyInput(form.amount);
@@ -4561,20 +4600,21 @@ export function InvoiceModal({
             </div>
             </div>
             <div className="flex flex-wrap gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
-              <button type="button" onClick={() => void handlePageAction('markNotSigned')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Ban className="h-4 w-4" />Не подписан</button>
-              <button type="button" onClick={() => void handlePageAction('sendToSigning')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Send className="h-4 w-4" />На подписание</button>
-              <button type="button" onClick={() => void handlePageAction('markSigned')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Check className="h-4 w-4" />Подписан</button>
+              <button type="button" onClick={() => void handlePageAction('markNotSigned')} disabled={submitting || invoiceWriteBusy || !canReadPrint || !canEditInvoice} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Ban className="h-4 w-4" />Не подписан</button>
+              <button type="button" onClick={() => void handlePageAction('sendToSigning')} disabled={submitting || invoiceWriteBusy || !canReadPrint || !canEditInvoice} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Send className="h-4 w-4" />На подписание</button>
+              <button type="button" onClick={() => void handlePageAction('markSigned')} disabled={submitting || invoiceWriteBusy || !canReadPrint || !canEditInvoice} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Check className="h-4 w-4" />Подписан</button>
             </div>
             <div className="flex flex-wrap gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
-              <button type="button" onClick={() => void handlePageAction('copy')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Copy className="h-4 w-4" />Копировать</button>
-              <button type="button" onClick={() => void handlePageAction('paid')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Check className="h-4 w-4" />Оплачен</button>
-              <button type="button" onClick={() => void handlePageAction('cancel')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Ban className="h-4 w-4" />Отменен</button>
-              <button type="button" onClick={() => void handlePageAction('delete')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Trash2 className="h-4 w-4" />Удалить</button>
+              <button type="button" onClick={() => void handlePageAction('copy')} disabled={submitting || invoiceWriteBusy || !canReadPrint || !canCreateInvoice} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Copy className="h-4 w-4" />Копировать</button>
+              <button type="button" onClick={() => void handlePageAction('paid')} disabled={submitting || invoiceWriteBusy || !canReadPrint || !canEditInvoice} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Check className="h-4 w-4" />Оплачен</button>
+              <button type="button" onClick={() => void handlePageAction('cancel')} disabled={submitting || invoiceWriteBusy || !canReadPrint || !canEditInvoice} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Ban className="h-4 w-4" />Отменен</button>
+              <button type="button" onClick={() => void handlePageAction('delete')} disabled={submitting || invoiceWriteBusy || !canReadPrint || !canDeleteInvoice} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Trash2 className="h-4 w-4" />Удалить</button>
             </div>
           </div>
         </div>
       ) : (
       <form id="invoice-edit-form" onSubmit={handleSubmit} className={`${isPageMode ? 'px-6 py-5' : 'max-h-[75vh] overflow-y-auto px-6 py-5'} space-y-6`}>
+        <fieldset disabled={submitting || invoiceWriteBusy} className="contents">
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px] xl:items-start">
             <div className="space-y-6">
               <section className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 sm:p-5">
@@ -5405,6 +5445,7 @@ export function InvoiceModal({
               </button>
             </div>
           )}
+        </fieldset>
       </form>
       )}
 
@@ -5982,7 +6023,7 @@ export function InvoiceModal({
               <button
                 type="button"
                 onClick={() => void handleCancelInvoiceSubmit()}
-                disabled={cancelSubmitting}
+                disabled={cancelSubmitting || invoiceWriteBusy || submitting || !canReadPrint || !canEditInvoice}
                 data-testid="invoice-cancel-submit"
                 className="inline-flex items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
               >

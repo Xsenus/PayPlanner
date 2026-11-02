@@ -65,6 +65,7 @@ const {
   caseModalSubmitPayloadRef,
   caseModalPropsSpy,
   confirmMock,
+  promptMock,
   installmentPlannerPlanRef,
   installmentPlannerPropsSpy,
   contractModalSubmitPayloadRef,
@@ -83,6 +84,7 @@ const {
   },
   caseModalPropsSpy: vi.fn(),
   confirmMock: vi.fn(),
+  promptMock: vi.fn(),
   installmentPlannerPlanRef: { current: null as InstallmentPlanInput | null },
   installmentPlannerPropsSpy: vi.fn(),
   contractModalSubmitPayloadRef: {
@@ -129,7 +131,7 @@ vi.mock('../../hooks/useInvoiceReferenceDictionaries', () => ({
 }));
 
 vi.mock('../../hooks/useDialog', () => ({
-  useDialog: () => ({ confirm: confirmMock }),
+  useDialog: () => ({ confirm: confirmMock, prompt: promptMock }),
 }));
 
 vi.mock('../../hooks/useToast', () => ({
@@ -174,6 +176,7 @@ vi.mock('../../services/api', () => ({
     createCase: vi.fn(),
     createAct: vi.fn(),
     updateInvoice: vi.fn(),
+    updateInvoiceWorkflowStatus: vi.fn(),
     createInvoice: vi.fn(),
     cancelInvoice: vi.fn(),
     createClient: vi.fn(),
@@ -326,6 +329,155 @@ describe('InvoiceModal integration', () => {
   }
   const paymentReadProps = () => ({ ...referenceProps(), mode: 'edit' as const, invoice: { id: 91, invoiceEntityId: 910, number: 'СЧ-91', date: '2026-11-02', dueDate: '2026-11-05', amount: 1000,
     clientId: 1, type: 'Expense', status: 'Pending', workflowStatus: 'Draft', isPaid: false, createdAt: '2026-11-02' } as Invoice, clients: [createTestClient(1, 'Клиент счёта')] });
+  describe('invoice direct writes lifecycle', () => {
+    const pageProps = () => ({ ...paymentReadProps(), presentation: 'page' as const, onRefreshRequested: vi.fn() });
+    beforeEach(() => {
+      vi.mocked(apiService.updateInvoice).mockReset();
+      vi.mocked(apiService.deleteInvoice).mockReset();
+      vi.mocked(apiService.updateInvoiceWorkflowStatus).mockReset();
+    });
+    it('does not dispatch a copy after its confirmation belongs to a former invoice', async () => {
+      const confirmation = createDeferred<boolean>(); confirmMock.mockReturnValueOnce(confirmation.promise);
+      const props = pageProps(); const view = render(<InvoiceModal {...props} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Копировать' }));
+      expect(confirmMock).toHaveBeenCalledOnce();
+      view.rerender(<InvoiceModal {...props} invoice={{ ...props.invoice, id: 92, invoiceEntityId: 920, number: 'СЧ-92' }} />);
+      await act(async () => confirmation.resolve(true));
+      expect(apiService.createInvoice).not.toHaveBeenCalled();
+      expect(props.onRefreshRequested).not.toHaveBeenCalled();
+      expect(toastSuccessMock).not.toHaveBeenCalled();
+    });
+    it('does not accept a paid response or refresh from a former invoice', async () => {
+      const response = createDeferred<Invoice>(); vi.mocked(apiService.updateInvoice).mockReturnValueOnce(response.promise);
+      const props = pageProps(); const view = render(<InvoiceModal {...props} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Оплачен' }));
+      await waitFor(() => expect(apiService.updateInvoice).toHaveBeenCalledOnce());
+      view.rerender(<InvoiceModal {...props} invoice={{ ...props.invoice, id: 92, invoiceEntityId: 920, number: 'СЧ-92' }} />);
+      await act(async () => response.resolve({ ...props.invoice, status: 'Completed' }));
+      expect(props.onRefreshRequested).not.toHaveBeenCalled();
+      expect(toastSuccessMock).not.toHaveBeenCalled();
+      expect(screen.getByTestId('invoice-page-status-badge').textContent).not.toContain('Оплачен');
+    });
+
+
+    it.each(['copy', 'paid'])('refuses %s payload when server fields change during confirmation', async action => {
+      const confirmation = createDeferred<boolean>(); confirmMock.mockReturnValueOnce(confirmation.promise);
+      const props = pageProps(); const view = render(<InvoiceModal {...props} />);
+      fireEvent.click(await screen.findByRole('button', { name: action === 'copy' ? 'Копировать' : 'Оплачен' })); expect(confirmMock).toHaveBeenCalledOnce();
+      view.rerender(<InvoiceModal {...props} invoice={{ ...props.invoice, amount: 2500 }} />);
+      await act(async () => confirmation.resolve(true)); expect(apiService.createInvoice).not.toHaveBeenCalled(); expect(apiService.updateInvoice).not.toHaveBeenCalled();
+    });
+    it('does not close a new card after the previous invoice was deleted', async () => {
+      vi.mocked(apiService.deleteInvoice).mockResolvedValueOnce(undefined);
+      const props = pageProps(); const view = render(<InvoiceModal {...props} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Удалить' })); await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledOnce());
+      view.rerender(<InvoiceModal {...props} invoice={{ ...props.invoice, id: 92, invoiceEntityId: 920 }} />);
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 180)); }); expect(props.onClose).not.toHaveBeenCalled();
+    });
+    it('closes the same card after confirmed deletion', async () => {
+      vi.mocked(apiService.deleteInvoice).mockResolvedValueOnce(undefined);
+      const props = pageProps(); render(<InvoiceModal {...props} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Удалить' })); await waitFor(() => expect(props.onClose).toHaveBeenCalledOnce());
+    });
+    it.each(['success', 'error'])('does not accept a late installment %s in a reopened card', async outcome => {
+      const pending = createDeferred<Invoice>(); vi.mocked(apiService.updateInvoice).mockReturnValueOnce(pending.promise);
+      const props = { ...paymentReadProps(), onRefreshRequested: vi.fn() };
+      installmentPlannerPlanRef.current = { total: 1000, downPayment: 0, annualRate: 0, months: 1, startDate: '2026-11-05', toPay: 1000, overpay: 0,
+        items: [{ sequence: 1, date: '2026-11-05', principal: 1000, interest: 0, payment: 1000, balance: 0 }] };
+      const view = render(<InvoiceModal {...props} />);
+      fireEvent.click((await screen.findAllByRole('button')).find(button => button.textContent === 'Рассрочка')!);
+      fireEvent.click(await screen.findByRole('button', { name: 'apply-installment-plan' })); await waitFor(() => expect(apiService.updateInvoice).toHaveBeenCalledOnce());
+      view.rerender(<InvoiceModal {...props} open={false} />); view.rerender(<InvoiceModal {...props} />);
+      await act(async () => { if (outcome === 'error') pending.reject(new Error('Прежняя рассрочка')); else pending.resolve(props.invoice); });
+      expect(props.onRefreshRequested).not.toHaveBeenCalled(); expect(toastSuccessMock).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+      expect(screen.queryByRole('button', { name: 'apply-installment-plan' })).toBeNull();
+    });
+    it('does not dispatch any direct action without its permission', async () => {
+      permissionState.value = { ...defaultRolePermissions, accounts: { ...defaultRolePermissions.accounts, canCreate: false, canEdit: false, canDelete: false } };
+      render(<InvoiceModal {...pageProps()} />);
+      for (const name of ['Копировать', 'Оплачен', 'Удалить', 'Подписан', 'Отменен']) {
+        const button = await screen.findByRole('button', { name }); expect(button).toHaveProperty('disabled', true); fireEvent.click(button);
+      }
+      expect(confirmMock).not.toHaveBeenCalled(); expect(apiService.cancelInvoice).not.toHaveBeenCalled(); expect(apiService.updateInvoice).not.toHaveBeenCalled();
+    });
+    const writeCases = [
+      { label: 'Копировать', method: 'createInvoice' as const },
+      { label: 'Оплачен', method: 'updateInvoice' as const },
+      { label: 'Удалить', method: 'deleteInvoice' as const },
+      { label: 'Подписан', method: 'updateInvoiceWorkflowStatus' as const },
+    ];
+    it.each(writeCases.flatMap(action => ['card', 'closed', 'permissions', 'login'].map(change => ({ ...action, change }))))(
+      'refuses $label after its confirmation outlives $change', async ({ label, method, change }) => {
+        const confirmation = createDeferred<boolean>(); confirmMock.mockReturnValueOnce(confirmation.promise);
+        const props = pageProps(); const view = render(<InvoiceModal {...props} />);
+        fireEvent.click(await screen.findByRole('button', { name: label })); expect(confirmMock).toHaveBeenCalledOnce();
+        if (change === 'card') view.rerender(<InvoiceModal {...props} invoice={{ ...props.invoice, id: 92, invoiceEntityId: 920 }} />);
+        if (change === 'closed') view.rerender(<InvoiceModal {...props} open={false} />);
+        if (change === 'permissions') { permissionState.value = { ...defaultRolePermissions, accounts: { ...defaultRolePermissions.accounts, canCreate: false, canEdit: false, canDelete: false } }; view.rerender(<InvoiceModal {...props} />); }
+        if (change === 'login') baseAuthSession.replace();
+        await act(async () => confirmation.resolve(true));
+        expect(apiService[method]).not.toHaveBeenCalled(); expect(props.onRefreshRequested).not.toHaveBeenCalled();
+        expect(toastSuccessMock).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+      });
+    it.each(writeCases.flatMap(action => ['card', 'permissions', 'login', 'unmount'].flatMap(change => ['success', 'error'].map(outcome => ({ ...action, change, outcome })))))(
+      'does not accept $label late $outcome after $change', async ({ label, method, change, outcome }) => {
+        const pending = createDeferred<Invoice>(); vi.mocked(apiService[method]).mockReturnValueOnce(pending.promise as never);
+        const props = pageProps(); const view = render(<InvoiceModal {...props} />);
+        fireEvent.click(await screen.findByRole('button', { name: label })); await waitFor(() => expect(apiService[method]).toHaveBeenCalledOnce());
+        if (change === 'card') view.rerender(<InvoiceModal {...props} invoice={{ ...props.invoice, id: 92, invoiceEntityId: 920 }} />);
+        if (change === 'permissions') { permissionState.value = { ...defaultRolePermissions, accounts: { ...defaultRolePermissions.accounts, canView: false, canCreate: false, canEdit: false, canDelete: false } }; view.rerender(<InvoiceModal {...props} />); }
+        if (change === 'login') baseAuthSession.replace('actor');
+        if (change === 'unmount') view.unmount();
+        await act(async () => { if (outcome === 'error') pending.reject(new Error('Ошибка прежнего счета')); else pending.resolve({ ...props.invoice, status: 'Completed', workflowStatus: 'SignedByClient' }); });
+        expect(apiService[method]).toHaveBeenCalledOnce(); expect(props.onRefreshRequested).not.toHaveBeenCalled(); expect(props.onClose).not.toHaveBeenCalled();
+        expect(toastSuccessMock).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+      });
+    it.each(writeCases)('dispatches $label only once and refreshes the current card', async ({ label, method }) => {
+      const pending = createDeferred<Invoice>(); vi.mocked(apiService[method]).mockReturnValueOnce(pending.promise as never);
+      const props = pageProps(); render(<InvoiceModal {...props} />);
+      const button = await screen.findByRole('button', { name: label }); fireEvent.click(button); fireEvent.click(button);
+      await waitFor(() => expect(apiService[method]).toHaveBeenCalledOnce());
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+      await act(async () => pending.resolve({ ...props.invoice, status: 'Completed', workflowStatus: 'SignedByClient' }));
+      expect(props.onRefreshRequested).toHaveBeenCalledOnce(); expect(toastSuccessMock).toHaveBeenCalledOnce();
+    });
+    it('keeps a dispatched target locked through close and reopen until its own response settles', async () => {
+      const pending = createDeferred<Invoice>(); vi.mocked(apiService.updateInvoice).mockReturnValueOnce(pending.promise);
+      const props = pageProps(); const view = render(<InvoiceModal {...props} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Оплачен' })); await waitFor(() => expect(apiService.updateInvoice).toHaveBeenCalledOnce());
+      view.rerender(<InvoiceModal {...props} open={false} />); view.rerender(<InvoiceModal {...props} />);
+      expect((await screen.findByRole('button', { name: 'Оплачен' }) as HTMLButtonElement).disabled).toBe(true);
+      await act(async () => pending.resolve(props.invoice)); expect(props.onRefreshRequested).not.toHaveBeenCalled();
+      await waitFor(() => expect((screen.getByRole('button', { name: 'Оплачен' }) as HTMLButtonElement).disabled).toBe(false));
+    });
+    it('cannot release the new card write when a former card response settles', async () => {
+      const first = createDeferred<Invoice>(); const second = createDeferred<Invoice>();
+      vi.mocked(apiService.updateInvoice).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+      const props = pageProps(); const view = render(<InvoiceModal {...props} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Оплачен' })); await waitFor(() => expect(apiService.updateInvoice).toHaveBeenCalledTimes(1));
+      const next = { ...props.invoice, id: 92, invoiceEntityId: 920 }; view.rerender(<InvoiceModal {...props} invoice={next} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Оплачен' })); await waitFor(() => expect(apiService.updateInvoice).toHaveBeenCalledTimes(2));
+      await act(async () => first.resolve(props.invoice)); expect((screen.getByRole('button', { name: 'Оплачен' }) as HTMLButtonElement).disabled).toBe(true);
+      await act(async () => second.resolve(next)); expect(props.onRefreshRequested).toHaveBeenCalledOnce();
+    });
+    it('does not dispatch a paid update after its reason belongs to a previous login', async () => {
+      Object.assign(printAuthState.user, { requiresFinancialActionReason: true });
+      const reason = createDeferred<string>(); promptMock.mockReturnValueOnce(reason.promise);
+      render(<InvoiceModal {...pageProps()} />); fireEvent.click(await screen.findByRole('button', { name: 'Оплачен' }));
+      await waitFor(() => expect(promptMock).toHaveBeenCalledOnce()); baseAuthSession.replace();
+      await act(async () => reason.resolve('')); expect(apiService.updateInvoice).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+    });
+    it.each(['success', 'error'])('does not accept cancellation late %s in another card', async outcome => {
+      const pending = createDeferred<Invoice>(); vi.mocked(apiService.cancelInvoice).mockReturnValueOnce(pending.promise);
+      const props = pageProps(); const view = render(<InvoiceModal {...props} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Отменен' }));
+      fireEvent.change(await screen.findByTestId('invoice-cancel-reason'), { target: { value: 'Отмена услуги' } });
+      fireEvent.click(screen.getByTestId('invoice-cancel-submit')); await waitFor(() => expect(apiService.cancelInvoice).toHaveBeenCalledOnce());
+      view.rerender(<InvoiceModal {...props} invoice={{ ...props.invoice, id: 92, invoiceEntityId: 920 }} />);
+      await act(async () => { if (outcome === 'error') pending.reject(new Error('Старая отмена')); else pending.resolve({ ...props.invoice, status: 'Cancelled' }); });
+      expect(props.onRefreshRequested).not.toHaveBeenCalled(); expect(screen.queryByTestId('invoice-cancel-dialog')).toBeNull(); expect(toastErrorMock).not.toHaveBeenCalled(); expect(toastSuccessMock).not.toHaveBeenCalled();
+    });
+  });
   describe('invoice financial reads', () => {
     const currentProps = () => ({ ...paymentReadProps(), invoice: { ...paymentReadProps().invoice, type: 'Income' as const } });
     const operation = (id = 701, linkedInvoiceId = 910): MoneyOperation => ({ id, linkedInvoiceId, amount: 25, currency: 'RUB', source: 'Bank', direction: 'Income', accountingType: 'Fact',
@@ -720,8 +872,10 @@ describe('InvoiceModal integration', () => {
       status: 'Open',
     };
     caseModalPropsSpy.mockReset();
+    vi.mocked(apiService.sendInvoiceByEmail).mockReset().mockResolvedValue({ sent: true, recipient: 'client@example.test', fileName: 'invoice.docx', format: 'word' });
     confirmMock.mockReset();
     confirmMock.mockResolvedValue(true);
+    promptMock.mockReset().mockResolvedValue('Причина изменения');
     installmentPlannerPlanRef.current = null;
     installmentPlannerPropsSpy.mockReset();
     contractModalSubmitPayloadRef.current = {

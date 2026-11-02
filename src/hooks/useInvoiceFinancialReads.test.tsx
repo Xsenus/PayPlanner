@@ -82,6 +82,35 @@ describe('invoice financial owned reads', () => {
     expect(view.result.current.balance).toBeNull(); expect(view.result.current.movements).toEqual([]); expect(view.result.current.balanceError).toBe('Недостаточно прав для выполнения действия.'); expect(view.result.current.movementsError).toBeTruthy();
     expect(apiService.getClientBalance).toHaveBeenCalledTimes(2); expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledTimes(2);
   });
+
+  it.each(['success', 'error'])('supersedes pending pre-write reads and ignores their late %s', async outcome => {
+    const view = setup(); await waitFor(() => expect(view.result.current.movements).toHaveLength(1));
+    const oldBalance = deferred<ClientBalanceSummary>(); const oldMoney = deferred<ReturnType<typeof page>>();
+    const newBalance = deferred<ClientBalanceSummary>(); const newMoney = deferred<ReturnType<typeof page>>();
+    vi.mocked(apiService.getClientBalance).mockReturnValueOnce(oldBalance.promise).mockReturnValueOnce(newBalance.promise);
+    vi.mocked(apiService.getMoneyOperationsPaged).mockReturnValueOnce(oldMoney.promise).mockReturnValueOnce(newMoney.promise);
+    let oldReads!: Promise<void[]>; let refresh!: Promise<void>;
+    act(() => { oldReads = Promise.all([view.result.current.retryBalance(), view.result.current.retryMovements()]); });
+    const oldSignal = vi.mocked(apiService.getMoneyOperationsPaged).mock.lastCall![1]?.signal;
+    act(() => { refresh = view.result.current.refreshAfterWrite(); });
+    expect(apiService.getClientBalance).toHaveBeenCalledTimes(3); expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledTimes(3); expect(oldSignal?.aborted).toBe(true);
+    await act(async () => { if (outcome === 'success') { oldBalance.resolve({ clientId: 1, balance: 999 }); oldMoney.resolve(page([operation(999)])); }
+      else { oldBalance.reject(new Error('Старый баланс')); oldMoney.reject(new Error('Старые движения')); } await oldReads; });
+    expect(view.result.current.balance).toBeNull(); expect(view.result.current.movements).toEqual([]);
+    act(() => { void view.result.current.retryBalance(); void view.result.current.retryMovements(); });
+    expect(apiService.getClientBalance).toHaveBeenCalledTimes(3); expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledTimes(3);
+    await act(async () => { newBalance.resolve({ clientId: 1, balance: 25 }); newMoney.resolve(page([operation(703)])); await refresh; });
+    expect(view.result.current.balance?.balance).toBe(25); expect(view.result.current.movements[0]?.id).toBe(703);
+    expect(view.result.current.balanceError).toBeNull(); expect(view.result.current.movementsError).toBeNull();
+  });
+  it('keeps post-write reads lazy and refuses a former owner refresh', async () => {
+    const view = setup({ balanceEnabled: false, movementsEnabled: false }); await act(async () => view.result.current.refreshAfterWrite());
+    expect(apiService.getClientBalance).not.toHaveBeenCalled(); expect(apiService.getMoneyOperationsPaged).not.toHaveBeenCalled();
+    view.rerender(defaults); await waitFor(() => expect(view.result.current.movements).toHaveLength(1)); const old = view.result.current;
+    view.rerender({ ...defaults, context: 'new-owner', invoiceId: 920 }); await waitFor(() => expect(view.result.current.movements[0]?.linkedInvoiceId).toBe(920));
+    const calls = vi.mocked(apiService.getMoneyOperationsPaged).mock.calls.length;
+    await act(async () => old.refreshAfterWrite()); expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledTimes(calls);
+  });
   it('cancels both reads before the parent closes and refuses old cancellation after a new window opens', async () => {
     const summary = deferred<ClientBalanceSummary>(); const movements = deferred<ReturnType<typeof page>>();
     vi.mocked(apiService.getClientBalance).mockReturnValueOnce(summary.promise); vi.mocked(apiService.getMoneyOperationsPaged).mockReturnValueOnce(movements.promise);
