@@ -10,6 +10,8 @@ import { useFormRequirements } from '../../hooks/useFormRequirements';
 import * as timeZoneHook from '../../hooks/useUserTimeZone';
 import { PaymentCreateAdoptedError } from '../../services/paymentCreateAttempts';
 import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
+import { loadClientInvoiceRelatedPayments } from '../../utils/clientInvoiceRelatedPayments';
+import { refreshClientInvoiceModalData } from '../../utils/clientInvoiceModalData';
 import { documentCopyTestSession } from '../../test/documentCopySession';
 
 const CLIENT_PROFILE_NOTES_PREFIX = '__PP_CLIENT_PROFILE_V2__:';
@@ -652,7 +654,7 @@ const clientInvoiceRecord = (id = 91): Invoice => ({ id, number: `СЧ-${id}`, d
   type: 'Income', status: 'Pending', createdAt: '2026-11-02T00:00:00Z' } as Invoice);
 const clientInvoicePayload = (): InvoiceInput => ({ number: 'СЧ-проект', date: '2026-11-02', amount: 1250.75, clientId: 1, type: 'Income',
   status: 'Pending', description: 'Ручной текст', contractId: 101, clientCaseIds: [19], replaceInstallmentPlan: false });
-async function setupInvoiceCaller(mode: 'create' | 'edit' | 'delete' = 'create') {
+async function setupInvoiceCaller(mode: 'create' | 'edit' | 'delete' = 'create', waitReady = true) {
   Object.assign(permissionsResult.accounts, { canView: true, canCreate: true, canEdit: true, canDelete: true });
   for (const method of ['createInvoice', 'updateInvoice', 'deleteInvoice'] as const) emptyInvoicesResult[method].mockReset();
   emptyInvoicesResult.createInvoice.mockResolvedValue(clientInvoiceRecord(92)); emptyInvoicesResult.updateInvoice.mockResolvedValue(clientInvoiceRecord());
@@ -664,7 +666,7 @@ async function setupInvoiceCaller(mode: 'create' | 'edit' | 'delete' = 'create')
     const row = (await screen.findByRole('link', { name: '№СЧ-91' })).closest('tr')!;
     fireEvent.click(within(row).getByRole('button', { name: mode === 'edit' ? 'Редактировать' : 'Удалить' }));
   }
-  if (mode !== 'delete') await waitFor(() => expect(invoiceLookupPropsSpy).toHaveBeenCalled());
+  if (mode !== 'delete') { await waitFor(() => expect(invoiceLookupPropsSpy).toHaveBeenCalled()); if (waitReady) await waitFor(() => expect(currentClientInvoiceModal().paymentsLoading).toBe(false)); }
   return { view, props, modal: currentClientInvoiceModal() };
 }
 
@@ -874,6 +876,62 @@ describe('ClientDetail integration', () => {
     act(() => modal.onClose()); await act(async () => { fail(new Error('Запись не удалась')); expect(await result).toBeInstanceOf(StaleUiOperationError); });
     await waitFor(() => expect(toastErrorMock).toHaveBeenCalledOnce()); expect(toastErrorMock.mock.calls[0][0]).toBe('Не удалось обновить связанные списки счетов. Обновите раздел.');
     expect(toastSuccessMock).not.toHaveBeenCalled(); expect(emptyPaymentsResult.refresh).not.toHaveBeenCalled();
+  });
+  it('invoice reads caller: closed callbacks cannot restart or refresh an invoice', async () => {
+    const { modal } = await setupInvoiceCaller('edit'); act(() => modal.onClose()); const count = vi.mocked(loadClientInvoiceRelatedPayments).mock.calls.length;
+    await act(async () => { await expect(modal.onRefreshRequested?.()).rejects.toBeInstanceOf(StaleUiOperationError); await Promise.resolve(modal.onRetryPayments?.()).catch(() => undefined); });
+    expect(loadClientInvoiceRelatedPayments).toHaveBeenCalledTimes(count); expect(refreshClientInvoiceModalData).not.toHaveBeenCalled();
+  });
+  it('invoice reads caller: a late refresh cannot populate a newly opened creation form', async () => {
+    const { modal } = await setupInvoiceCaller('edit'); let finish!: (value: { invoice: Invoice; relatedPayments: Payment[] }) => void;
+    vi.mocked(refreshClientInvoiceModalData).mockReturnValueOnce(new Promise(resolve => { finish = resolve; })); let result!: Promise<unknown>;
+    act(() => { result = Promise.resolve(modal.onRefreshRequested?.()).catch(error => error); });
+    const signal = vi.mocked(refreshClientInvoiceModalData).mock.lastCall?.[0].read?.signal;
+    act(() => modal.onClose()); fireEvent.click(screen.getByRole('button', { name: 'Добавить счёт' })); await act(async () => {});
+    await act(async () => { finish({ invoice: clientInvoiceRecord(93), relatedPayments: [clientPaymentRecord()] }); expect(await result).toBeInstanceOf(StaleUiOperationError); });
+    expect(signal?.aborted).toBe(true); expect(currentClientInvoiceModal()).toMatchObject({ mode: 'create', invoice: null, relatedPayments: [], paymentsLoading: false });
+  });
+  it('invoice reads caller: loading and denial are not an empty success, and a retained submit uses current readiness', async () => {
+    let finish!: (rows: Payment[]) => void; vi.mocked(loadClientInvoiceRelatedPayments).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const { modal } = await setupInvoiceCaller('edit', false); expect(modal.paymentsLoading).toBe(true); expect(modal.relatedPayments).toEqual([]);
+    await act(async () => { await expect(modal.onSubmit(clientInvoicePayload())).rejects.toThrow('Сначала дождитесь'); }); expect(emptyInvoicesResult.updateInvoice).not.toHaveBeenCalled();
+    await act(async () => finish([clientPaymentRecord()])); await waitFor(() => expect(currentClientInvoiceModal().paymentsLoading).toBe(false)); const confirmed = currentClientInvoiceModal();
+    vi.mocked(loadClientInvoiceRelatedPayments).mockRejectedValueOnce(new Error('HTTP 403 - Доступ закрыт'));
+    await act(async () => { await Promise.resolve(confirmed.onRetryPayments?.()).catch(() => undefined); });
+    expect(currentClientInvoiceModal().paymentsError).toContain('Недостаточно прав'); expect(currentClientInvoiceModal().relatedPayments).toEqual([]);
+    await act(async () => { await expect(confirmed.onSubmit(clientInvoicePayload())).rejects.toThrow('Сначала дождитесь'); }); expect(emptyInvoicesResult.updateInvoice).not.toHaveBeenCalled();
+    await act(async () => currentClientInvoiceModal().onRetryPayments?.()); await act(async () => currentClientInvoiceModal().onSubmit(clientInvoicePayload())); expect(emptyInvoicesResult.updateInvoice).toHaveBeenCalledOnce();
+  });
+  it('invoice reads caller: Accounts edit remains independent of Payments view and never requests its rows', async () => {
+    permissionsResult.payments.canView = false; const { modal } = await setupInvoiceCaller('edit');
+    expect(loadClientInvoiceRelatedPayments).not.toHaveBeenCalled(); expect(modal.relatedPayments).toEqual([]); expect(modal.paymentsError).toContain('Недостаточно прав');
+    await act(async () => modal.onSubmit(clientInvoicePayload())); expect(emptyInvoicesResult.updateInvoice).toHaveBeenCalledOnce();
+  });
+  it('invoice reads caller: malformed fresh document cannot replace the opened invoice', async () => {
+    const { modal } = await setupInvoiceCaller('edit'); vi.mocked(refreshClientInvoiceModalData).mockResolvedValueOnce({ invoice: clientInvoiceRecord(93), relatedPayments: [] });
+    await act(async () => { await expect(modal.onRefreshRequested?.()).rejects.toThrow('другому счёту'); });
+    expect(currentClientInvoiceModal().invoice?.id).toBe(91); expect(currentClientInvoiceModal().paymentsError).toContain('другому счёту');
+  });
+  it('invoice reads caller: explicit refresh supersedes an earlier automatic payment reply', async () => {
+    let finish!: (rows: Payment[]) => void; vi.mocked(loadClientInvoiceRelatedPayments).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const { modal } = await setupInvoiceCaller('edit', false); const signal = vi.mocked(loadClientInvoiceRelatedPayments).mock.lastCall?.[0].read?.signal;
+    vi.mocked(refreshClientInvoiceModalData).mockResolvedValueOnce({ invoice: clientInvoiceRecord(), relatedPayments: [clientPaymentRecord(504)] });
+    await act(async () => modal.onRefreshRequested?.()); await act(async () => finish([clientPaymentRecord(502)]));
+    expect(signal?.aborted).toBe(true); expect(currentClientInvoiceModal().relatedPayments?.map(row => row.id)).toEqual([504]);
+  });
+  it.each(['login', 'actor', 'logout'] as const)('invoice reads caller: %s invalidates retained refresh before another render', async change => {
+    const session = documentCopyTestSession(); try { const { modal } = await setupInvoiceCaller('edit'); session.replace(change);
+      await act(async () => { await expect(modal.onRefreshRequested?.()).rejects.toBeInstanceOf(StaleUiOperationError); }); expect(refreshClientInvoiceModalData).not.toHaveBeenCalled();
+    } finally { session.restore(); }
+  });
+  it('invoice reads caller: a refresh blocks a held submit before any render', async () => {
+    const { modal } = await setupInvoiceCaller('edit'); let finish!: (value: { invoice: Invoice; relatedPayments: Payment[] }) => void;
+    vi.mocked(refreshClientInvoiceModalData).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    let refreshed!: Promise<unknown>; let submitted!: Promise<unknown>;
+    act(() => { refreshed = Promise.resolve(modal.onRefreshRequested?.()).catch(error => error); submitted = modal.onSubmit(clientInvoicePayload()).catch(error => error); });
+    await act(async () => { expect(await submitted).toBeInstanceOf(Error); finish({ invoice: clientInvoiceRecord(), relatedPayments: [] }); await refreshed; });
+    expect(emptyInvoicesResult.updateInvoice).not.toHaveBeenCalled();
+    await act(async () => currentClientInvoiceModal().onSubmit(clientInvoicePayload())); expect(emptyInvoicesResult.updateInvoice).toHaveBeenCalledOnce();
   });
   it('payment caller: payments create permission works independently of client create', async () => {
     permissionsResult.payments.canCreate = true;
@@ -1346,6 +1404,8 @@ describe('ClientDetail integration', () => {
     addressFormPropsSpy.mockClear(); poaPromptPropsSpy.mockClear(); tablePaginationPropsSpy.mockClear();
     legalModalOwnerSpy.mockClear(); authState.userId = 7; authState.roleId = 1;
     invoiceLookupPropsSpy.mockClear(); caseLookupPropsSpy.mockClear();
+    vi.mocked(loadClientInvoiceRelatedPayments).mockReset().mockResolvedValue([]);
+    vi.mocked(refreshClientInvoiceModalData).mockReset().mockImplementation(async options => ({ invoice: options.selectedInvoice, relatedPayments: [] }));
     Object.assign(permissionsResult.legalEntities, createPermissions().legalEntities);
     Object.assign(permissionsResult.companyProfile, createPermissions().companyProfile);
     vi.mocked(apiService.getLegalEntity).mockReset(); vi.mocked(apiService.createLegalEntity).mockReset(); vi.mocked(apiService.updateLegalEntity).mockReset();

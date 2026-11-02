@@ -132,7 +132,7 @@ describe('bindClientInvoiceModalApi', () => {
           throw new Error('lost payments v2 context');
         }
 
-        return Promise.resolve({ items: [{ ...payment, invoiceId: params.invoiceId }] });
+        return Promise.resolve({ items: [{ ...payment, invoiceId: params.invoiceId }], total: 1 });
       }),
     };
 
@@ -145,4 +145,45 @@ describe('bindClientInvoiceModalApi', () => {
     expect(service.getPayments).not.toHaveBeenCalled();
     expect(service.getPaymentsV2).toHaveBeenCalledWith({ invoiceId: 528 });
   });
+  it('owned adapter: loads every current invoice page with one signal and no cached data', async () => {
+    const controller = new AbortController(); const getPaymentsV2 = vi.fn().mockResolvedValueOnce({ items: [createPayment()], total: 2, page: 1 }).mockResolvedValueOnce({ items: [{ ...createPayment(), id: 902 }], total: 2, page: 2 });
+    const service = { getInvoice: vi.fn(), getPayments: vi.fn(), getPaymentsV2 }; const bound = bindClientInvoiceModalApi(service);
+    expect((await bound.fetchPayments({ invoiceId: 528, page: 1, pageSize: 1 }, { signal: controller.signal })).map(row => row.id)).toEqual([901, 902]);
+    expect(getPaymentsV2).toHaveBeenNthCalledWith(2, { invoiceId: 528, page: 2, pageSize: 1 }, { signal: controller.signal, cache: 'no-store' });
+    expect(service.getPayments).not.toHaveBeenCalled();
+  });
+  it.each(['abort', 'owner', 'permission'])('owned adapter: %s prevents another page', async change => {
+    const controller = new AbortController(); let current = true; let allowed = true;
+    const service = { getInvoice: vi.fn(), getPayments: vi.fn(), getPaymentsV2: vi.fn().mockImplementation(async () => {
+      if (change === 'abort') controller.abort(); if (change === 'owner') current = false; if (change === 'permission') allowed = false;
+      return { items: [createPayment()], total: 2, page: 1 };
+    }) };
+    await expect(bindClientInvoiceModalApi(service).fetchPayments({ invoiceId: 528, page: 1, pageSize: 1 }, { signal: controller.signal, isCurrent: () => current, canReadPayments: () => allowed })).rejects.toBeInstanceOf(Error);
+    expect(service.getPaymentsV2).toHaveBeenCalledOnce(); expect(service.getPayments).not.toHaveBeenCalled();
+  });
+  it.each([
+    { items: [], total: 2, page: 1 }, { items: [createPayment()], total: -1, page: 1 },
+    { items: [createPayment()], total: NaN, page: 1 }, { items: [createPayment()], total: Infinity, page: 1 },
+    { items: [createPayment()], total: 0.5, page: 1 }, { items: [createPayment()], total: 1, page: 2 },
+    { items: null, total: 1, page: 1 }, { items: [createPayment()], page: 1 },
+  ])('owned adapter: malformed page %# cannot look complete', async response => {
+    const service = { getInvoice: vi.fn(), getPayments: vi.fn(), getPaymentsV2: vi.fn().mockResolvedValue(response) };
+    await expect(bindClientInvoiceModalApi(service).fetchPayments({ invoiceId: 528, page: 1, pageSize: 1 })).rejects.toThrow('Не удалось подтвердить');
+    expect(service.getPaymentsV2).toHaveBeenCalledOnce();
+  });
+  it.each(['duplicate', 'changedTotal'])('owned adapter: %s across pages stops partial acceptance', async change => {
+    const service = { getInvoice: vi.fn(), getPayments: vi.fn(), getPaymentsV2: vi.fn().mockResolvedValueOnce({ items: [createPayment()], total: 2, page: 1 })
+      .mockResolvedValueOnce({ items: [{ ...createPayment(), id: change === 'duplicate' ? 901 : 902 }], total: change === 'changedTotal' ? 3 : 2, page: 2 }) };
+    await expect(bindClientInvoiceModalApi(service).fetchPayments({ invoiceId: 528, page: 1, pageSize: 1 })).rejects.toThrow('Не удалось подтвердить');
+    expect(service.getPaymentsV2).toHaveBeenCalledTimes(2);
+  });
+  it('owned adapter: unavailable direct API cannot become an unscoped legacy query', async () => {
+    const service = { getInvoice: vi.fn(), getPayments: vi.fn() };
+    await expect(bindClientInvoiceModalApi(service).fetchPayments({ invoiceId: 528 })).rejects.toThrow('HTTP 501'); expect(service.getPayments).not.toHaveBeenCalled();
+  });
+  it.each([0, -1, NaN, Infinity, 1.5])('owned adapter: invalid client ID %s cannot load the whole catalogue', async clientId => {
+    const service = { getInvoice: vi.fn(), getPayments: vi.fn() };
+    await expect(bindClientInvoiceModalApi(service).fetchPayments({ clientId })).rejects.toThrow('Не удалось подтвердить'); expect(service.getPayments).not.toHaveBeenCalled();
+  });
+
 });

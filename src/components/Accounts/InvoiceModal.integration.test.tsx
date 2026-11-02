@@ -321,6 +321,42 @@ describe('InvoiceModal integration', () => {
     serviceCategoriesMock.push({ id: 1, name: 'Текущая категория', description: '', colorHex: '', createdAt: '', isActive: true });
     servicesMock.push({ id: 1, name: 'Услуга из каталога', description: '', colorHex: '', createdAt: '', isActive: true, categoryId: 1, unit: 'усл.', defaultPrice: 9999 });
   }
+  const paymentReadProps = () => ({ ...referenceProps(), mode: 'edit' as const, invoice: { id: 91, invoiceEntityId: 910, number: 'СЧ-91', date: '2026-11-02', dueDate: '2026-11-05', amount: 1000,
+    clientId: 1, type: 'Expense', status: 'Pending', workflowStatus: 'Draft', isPaid: false, createdAt: '2026-11-02' } as Invoice, clients: [createTestClient(1, 'Клиент счёта')] });
+  it.each(['loading', 'error'] as const)('invoice payments read: %s cannot submit unconfirmed financial rows through the form', async state => {
+    const props = paymentReadProps(); render(<InvoiceModal {...props} paymentsLoading={state === 'loading'} paymentsError={state === 'error' ? 'Ошибка загрузки платежей' : null} />);
+    await screen.findByLabelText('Номер счёта'); expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveProperty('disabled', true);
+    fireEvent.submit(document.getElementById('invoice-edit-form')!); await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith('Сначала дождитесь загрузки платежей по счёту или повторите её после ошибки.', 'Проверьте данные счета'));
+    expect(props.onSubmit).not.toHaveBeenCalled(); expect(screen.queryByText('Связанные платежи пока не добавлены.')).toBeNull();
+  });
+  it('invoice payments read: retry keeps the manual draft and a confirmed empty result permits saving', async () => {
+    const props = paymentReadProps(); const retry = vi.fn().mockResolvedValue(undefined);
+    const view = render(<InvoiceModal {...props} paymentsError="Ошибка загрузки платежей" onRetryPayments={retry} />);
+    fireEvent.change(await screen.findByLabelText('Номер счёта'), { target: { value: 'СЧ-РУЧНОЙ' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Повторить загрузку платежей' })[0]); await waitFor(() => expect(retry).toHaveBeenCalledOnce());
+    view.rerender(<InvoiceModal {...props} paymentsError={null} onRetryPayments={retry} />);
+    expect(screen.getByLabelText('Номер счёта')).toHaveProperty('value', 'СЧ-РУЧНОЙ'); expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveProperty('disabled', false);
+    fireEvent.submit(document.getElementById('invoice-edit-form')!); await waitFor(() => expect(props.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ number: 'СЧ-РУЧНОЙ', amount: 1000 })));
+  });
+  it('invoice payments read: Accounts edit without Payments view remains available without exposing rows', async () => {
+    permissionState.value = { ...defaultRolePermissions, payments: { ...defaultRolePermissions.payments, canView: false } };
+    const props = paymentReadProps(); render(<InvoiceModal {...props} paymentsError="Недостаточно прав для просмотра платежей." />);
+    await screen.findByLabelText('Номер счёта'); expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveProperty('disabled', false);
+    fireEvent.submit(document.getElementById('invoice-edit-form')!); await waitFor(() => expect(props.onSubmit).toHaveBeenCalledOnce());
+    expect(apiService.getMoneyOperationsPaged).not.toHaveBeenCalled();
+  });
+  it('invoice payments read: the page summary displays denial instead of claiming there are no payments', async () => {
+    const props = paymentReadProps(); render(<InvoiceModal {...props} presentation="page" paymentsError="Платежи недоступны" onRetryPayments={vi.fn()} />);
+    expect(await screen.findByText('Платежи недоступны')).toBeTruthy(); expect(screen.queryByText('Связанные оплаты пока не добавлены.')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Повторить загрузку платежей' })).toBeTruthy();
+  });
+  it('invoice payments permission baseline: stale supplied rows remain hidden without Payments view', async () => {
+    permissionState.value = { ...defaultRolePermissions, payments: { ...defaultRolePermissions.payments, canView: false } };
+    const props = paymentReadProps(); const hidden = { id: 987, invoiceId: 910, amount: 98765.43, type: 'Income', status: 'Completed', description: 'Скрытая оплата',
+      date: '2026-11-02', plannedDate: '2026-11-02', paidAmount: 98765.43, isPaid: true, documentKind: 'Payment', systemNotes: '', notes: '' } as Payment;
+    render(<InvoiceModal {...props} relatedPayments={[hidden]} />); await screen.findByLabelText('Номер счёта');
+    expect(screen.queryByText('Скрытая оплата')).toBeNull(); expect(screen.getByText('Недостаточно прав для просмотра платежей.')).toBeTruthy(); expect(screen.queryByText('Связанные платежи пока не добавлены.')).toBeNull(); expect(apiService.getMoneyOperationsPaged).not.toHaveBeenCalled();
+  });
   it('reference caller scope: closed and forbidden callers are disabled and permission changes close the open picker', async () => {
     seedReferenceServices(); const props = referenceProps(); const view = render(<InvoiceModal {...props} open={false} />);
     expect(referenceHookSpy.mock.lastCall![0].enabled).toBe(false); view.rerender(<InvoiceModal {...props} />); await act(async () => {});

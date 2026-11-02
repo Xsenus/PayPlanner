@@ -4552,8 +4552,8 @@ export class ApiService {
     return this.request<PagedResult<Invoice>>(`/invoices${q}`, { signal: options?.signal });
   }
 
-  async getInvoice(id: number) {
-    return this.request<Invoice>(`/invoices/${id}`);
+  async getInvoice(id: number, options?: { signal?: AbortSignal }) {
+    return this.request<Invoice>(`/invoices/${id}`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async getInvoicesSummary(params?: {
@@ -5757,7 +5757,7 @@ export class ApiService {
     excludeInstallmentParents?: boolean;
     sortBy?: PaymentSortKey;
     sortDir?: SortDir;
-  }, options?: { signal?: AbortSignal }): Promise<Payment[]>;
+  }, options?: { signal?: AbortSignal; cache?: RequestCache }): Promise<Payment[]>;
   async getPayments(
     a?: string | {
       from?: string;
@@ -5770,11 +5770,12 @@ export class ApiService {
       sortBy?: PaymentSortKey;
       sortDir?: SortDir;
     },
-    b?: string | { signal?: AbortSignal },
+    b?: string | { signal?: AbortSignal; cache?: RequestCache },
     c?: number,
   ): Promise<Payment[]> {
     let q = '';
     let signal: AbortSignal | undefined;
+    let cache: RequestCache | undefined;
     if (typeof a === 'object') {
       q = buildQuery({
         from: a?.from,
@@ -5788,11 +5789,12 @@ export class ApiService {
         sortDir: a?.sortDir,
       });
       signal = typeof b === 'object' ? b.signal : undefined;
+      cache = typeof b === 'object' ? b.cache : undefined;
     } else {
       // старый сигнатурный стиль: (from?, to?, clientId?)
       q = buildQuery({ from: a, to: typeof b === 'string' ? b : undefined, clientId: c });
     }
-    return this.request<Payment[]>(`/payments${q}`, { signal });
+    return this.request<Payment[]>(`/payments${q}`, { signal, cache });
   }
 
   async getPayment(id: number, signal?: AbortSignal) {
@@ -5988,7 +5990,7 @@ export class ApiService {
       page?: number;
       pageSize?: number;
     },
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; cache?: RequestCache },
   ) {
     const q = buildQuery({
       ...(params ?? {}),
@@ -5997,7 +5999,7 @@ export class ApiService {
     });
     return this.request<PagedResult<Payment> & { summary: PaymentsListSummary }>(
       `/v2/payments${q}`,
-      { signal: options?.signal },
+      { signal: options?.signal, cache: options?.cache },
     );
   }
 

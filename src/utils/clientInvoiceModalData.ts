@@ -1,5 +1,8 @@
 import type { Invoice, Payment } from '../types';
 import { loadClientInvoiceRelatedPayments } from './clientInvoiceRelatedPayments';
+import { assertFreshClientInvoice, readClientInvoice, isClientInvoiceReadCurrent, type ClientInvoiceReadContext } from './clientInvoiceRead';
+import { StaleUiOperationError } from './StaleUiOperationError';
+import type { ClientInvoiceModalPaymentsParams } from './clientInvoiceModalApi';
 
 interface RefreshClientInvoiceModalDataOptions {
   selectedInvoice: Invoice | null;
@@ -7,19 +10,9 @@ interface RefreshClientInvoiceModalDataOptions {
   visiblePayments: Payment[];
   refreshInvoices: () => Promise<unknown>;
   refreshPayments: () => Promise<unknown>;
-  fetchInvoice: (invoiceId: number) => Promise<Invoice>;
-  fetchPayments: (params: {
-    from?: string;
-    to?: string;
-    clientId?: number;
-    caseId?: number;
-    invoiceId?: number;
-    excludeInvoiceDocuments?: boolean;
-    page?: number;
-    pageSize?: number;
-    sortBy?: 'date' | 'amount' | 'createdAt';
-    sortDir?: 'asc' | 'desc';
-  }) => Promise<Payment[]>;
+  fetchInvoice: (invoiceId: number, read?: ClientInvoiceReadContext) => Promise<Invoice>;
+  fetchPayments: (params: ClientInvoiceModalPaymentsParams, read?: ClientInvoiceReadContext) => Promise<Payment[]>;
+  read?: ClientInvoiceReadContext;
 }
 
 interface RefreshedClientInvoiceModalData {
@@ -35,40 +28,31 @@ export async function refreshClientInvoiceModalData({
   refreshPayments,
   fetchInvoice,
   fetchPayments,
+  read,
 }: RefreshClientInvoiceModalDataOptions): Promise<RefreshedClientInvoiceModalData> {
-  await Promise.all([refreshInvoices(), refreshPayments()]);
-
+  if (selectedInvoice) assertFreshClientInvoice(selectedInvoice, selectedInvoice, clientId);
+  await readClientInvoice(refreshInvoices, read);
   if (!selectedInvoice?.id) {
+    if (read?.canReadPayments?.() !== false) await readClientInvoice(refreshPayments, read);
     return {
       invoice: null,
       relatedPayments: [],
     };
   }
 
-  try {
-    const freshInvoice = await fetchInvoice(selectedInvoice.id);
-    const relatedPayments = await loadClientInvoiceRelatedPayments({
-      invoice: freshInvoice,
-      clientId,
-      visiblePayments,
-      fetchPayments,
-    });
-
-    return {
-      invoice: freshInvoice,
-      relatedPayments,
-    };
-  } catch {
-    const relatedPayments = await loadClientInvoiceRelatedPayments({
-      invoice: selectedInvoice,
-      clientId,
-      visiblePayments,
-      fetchPayments,
-    });
-
-    return {
-      invoice: selectedInvoice,
-      relatedPayments,
-    };
-  }
+  const freshInvoice = await readClientInvoice(() => read ? fetchInvoice(selectedInvoice.id, read) : fetchInvoice(selectedInvoice.id), read);
+  assertFreshClientInvoice(selectedInvoice, freshInvoice, clientId);
+  const relatedPayments = read?.canReadPayments?.() === false ? [] : await loadClientInvoiceRelatedPayments({
+    invoice: freshInvoice,
+    clientId,
+    visiblePayments,
+    fetchPayments,
+    read,
+  });
+  if (read?.canReadPayments?.() !== false) await readClientInvoice(refreshPayments, read);
+  if (!isClientInvoiceReadCurrent(read)) throw new StaleUiOperationError();
+  return {
+    invoice: freshInvoice,
+    relatedPayments,
+  };
 }

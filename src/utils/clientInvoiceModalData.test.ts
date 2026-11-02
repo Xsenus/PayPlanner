@@ -44,6 +44,14 @@ function createPayment(overrides: Partial<Payment> = {}): Payment {
 }
 
 describe('refreshClientInvoiceModalData', () => {
+  it.each([401, 403, 404])('invoice refresh baseline: HTTP %s cannot use the expired invoice as fallback', async status => {
+    const fetchInvoice = vi.fn().mockRejectedValue(new Error(`HTTP ${status} - Доступ закрыт`)); const fetchPayments = vi.fn().mockResolvedValue([]);
+    await expect(refreshClientInvoiceModalData({ selectedInvoice: createInvoice(), clientId: 42, visiblePayments: [], refreshInvoices: vi.fn(), refreshPayments: vi.fn(), fetchInvoice, fetchPayments })).rejects.toThrow(`HTTP ${status}`);
+    expect(fetchPayments).not.toHaveBeenCalled();
+  });
+  it('invoice refresh baseline: a different document response cannot replace the current invoice', async () => {
+    await expect(refreshClientInvoiceModalData({ selectedInvoice: createInvoice(), clientId: 42, visiblePayments: [], refreshInvoices: vi.fn(), refreshPayments: vi.fn(), fetchInvoice: vi.fn().mockResolvedValue(createInvoice({ id: 999, invoiceEntityId: 999 })), fetchPayments: vi.fn().mockResolvedValue([]) })).rejects.toThrow();
+  });
   it('refreshes invoice data and reloads related payments using the fresh invoice snapshot', async () => {
     const selectedInvoice = createInvoice({
       id: 528,
@@ -110,7 +118,7 @@ describe('refreshClientInvoiceModalData', () => {
     expect(result.relatedPayments.map((item) => item.id)).toEqual([528, 529]);
   });
 
-  it('falls back to the selected invoice when fetching the fresh invoice fails', async () => {
+  it('reports a failed invoice read without loading payments for the expired snapshot', async () => {
     const selectedInvoice = createInvoice({
       id: 529,
       invoiceEntityId: 25,
@@ -143,7 +151,7 @@ describe('refreshClientInvoiceModalData', () => {
     const fetchInvoice = vi.fn().mockRejectedValue(new Error('invoice fetch failed'));
     const fetchPayments = vi.fn().mockResolvedValue([siblingPayment, representativePayment]);
 
-    const result = await refreshClientInvoiceModalData({
+    await expect(refreshClientInvoiceModalData({
       selectedInvoice,
       clientId: 43,
       visiblePayments: [],
@@ -151,21 +159,13 @@ describe('refreshClientInvoiceModalData', () => {
       refreshPayments,
       fetchInvoice,
       fetchPayments,
-    });
+    })).rejects.toThrow('invoice fetch failed');
 
     expect(refreshInvoices).toHaveBeenCalledTimes(1);
-    expect(refreshPayments).toHaveBeenCalledTimes(1);
+    expect(refreshPayments).not.toHaveBeenCalled();
     expect(fetchInvoice).toHaveBeenCalledWith(529);
-    expect(fetchPayments).toHaveBeenCalledWith({
-      invoiceId: 529,
-      excludeInvoiceDocuments: false,
-      page: 1,
-      pageSize: CLIENT_INVOICE_RELATED_PAYMENTS_PAGE_SIZE,
-      sortBy: 'date',
-      sortDir: 'asc',
-    });
-    expect(result.invoice).toBe(selectedInvoice);
-    expect(result.relatedPayments.map((item) => item.id)).toEqual([529, 530]);
+    expect(fetchPayments).not.toHaveBeenCalled();
+    expect(selectedInvoice.id).toBe(529);
   });
 
   it('returns an empty state when the modal has no selected invoice', async () => {
@@ -193,4 +193,25 @@ describe('refreshClientInvoiceModalData', () => {
       relatedPayments: [],
     });
   });
+  it('owned refresh helper: revocation after list refresh prevents every later step', async () => {
+    let current = true; const refreshPayments = vi.fn(), fetchInvoice = vi.fn(), fetchPayments = vi.fn();
+    await expect(refreshClientInvoiceModalData({ selectedInvoice: createInvoice(), clientId: 42, visiblePayments: [], refreshInvoices: vi.fn().mockImplementation(async () => { current = false; }),
+      refreshPayments, fetchInvoice, fetchPayments, read: { isCurrent: () => current } })).rejects.toBeInstanceOf(Error);
+    expect(refreshPayments).not.toHaveBeenCalled(); expect(fetchInvoice).not.toHaveBeenCalled(); expect(fetchPayments).not.toHaveBeenCalled();
+  });
+  it('owned refresh helper: Accounts-only view refreshes the document without any payment request', async () => {
+    const refreshPayments = vi.fn(), fetchPayments = vi.fn(); const fresh = createInvoice();
+    const result = await refreshClientInvoiceModalData({ selectedInvoice: fresh, clientId: 42, visiblePayments: [createPayment()], refreshInvoices: vi.fn(), refreshPayments,
+      fetchInvoice: vi.fn().mockResolvedValue(fresh), fetchPayments, read: { canReadPayments: () => false } });
+    expect(result).toEqual({ invoice: fresh, relatedPayments: [] }); expect(refreshPayments).not.toHaveBeenCalled(); expect(fetchPayments).not.toHaveBeenCalled();
+  });
+  it('owned refresh helper: a new representative of the same canonical invoice remains valid', async () => {
+    const fresh = createInvoice({ id: 999 }); const result = await refreshClientInvoiceModalData({ selectedInvoice: createInvoice(), clientId: 42, visiblePayments: [], refreshInvoices: vi.fn(), refreshPayments: vi.fn(),
+      fetchInvoice: vi.fn().mockResolvedValue(fresh), fetchPayments: vi.fn().mockResolvedValue([]) }); expect(result.invoice).toBe(fresh);
+  });
+  it.each([{ id: 0 }, { amount: NaN }, { clientId: 99 }, { clientId: '42' as unknown as number }])('owned refresh helper: malformed or foreign fresh metadata %# cannot trigger payments', async overrides => {
+    const fetchPayments = vi.fn(); await expect(refreshClientInvoiceModalData({ selectedInvoice: createInvoice(), clientId: 42, visiblePayments: [], refreshInvoices: vi.fn(), refreshPayments: vi.fn(),
+      fetchInvoice: vi.fn().mockResolvedValue(createInvoice(overrides)), fetchPayments })).rejects.toThrow('Ответ относится'); expect(fetchPayments).not.toHaveBeenCalled();
+  });
+
 });

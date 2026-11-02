@@ -51,6 +51,7 @@ import { useInvoices, type InvoicesSortKey } from "../../hooks/useInvoices";
 import { useContracts, type ContractsSortKey } from "../../hooks/useContracts";
 import { usePaymentsPaged } from "../../hooks/usePaymentsPaged";
 import { useClientBalanceReads } from "../../hooks/useClientBalanceReads";
+import { useClientInvoiceModalReads } from "../../hooks/useClientInvoiceModalReads";
 import { usePersistedTableSettings } from "../../hooks/usePersistedTableSettings";
 import { apiService } from "../../services/api";
 import { useTranslation } from "../../hooks/useTranslation";
@@ -120,9 +121,6 @@ import { ClientReconciliationAct } from "./ClientReconciliationAct";
 import { useCompanyAddressAutofill } from '../LegalEntities/useCompanyAddressAutofill';
 import { createClientRequestId } from '../../utils/clientRequestId';
 import { DatePeriodPicker } from "../DateRange/DatePeriodPicker";
-import { loadClientInvoiceRelatedPayments } from "../../utils/clientInvoiceRelatedPayments";
-import { refreshClientInvoiceModalData as refreshClientInvoiceModalDataHelper } from "../../utils/clientInvoiceModalData";
-import { bindClientInvoiceModalApi } from "../../utils/clientInvoiceModalApi";
 import { parseInstallmentPaymentMetadata } from "../../utils/installmentPlan";
 import {
   getVisibleNotes,
@@ -2547,16 +2545,12 @@ function ClientDetailScreen({
   const invoiceMutationOwner = useDocumentDeliveryOwner(screenOwner.scope);
   const invoiceSubmitting = invoiceMutationOwner.busy;
   const pendingInvoiceAction = useRef<DocumentDeliveryRead | null>(null);
+  const latestInvoiceReadReady = useRef<() => boolean>(() => false);
   const invoiceConfirmations = useRef(new Set<AbortController>());
   const latestInvoiceRefresh = useRef<(current: () => boolean, includeInvoices: boolean) => Promise<void>>(async () => {});
   const [invoiceModalError, setInvoiceModalError] = useState<string | null>(
     null,
   );
-  const [invoiceModalRelatedPayments, setInvoiceModalRelatedPayments] =
-    useState<Payment[]>([]);
-  const [invoiceModalPaymentsLoading, setInvoiceModalPaymentsLoading] =
-    useState(false);
-
   const [contractModalOpen, setContractModalOpen] = useState(false);
   const [contractModalMode, setContractModalMode] = useState<"create" | "edit">(
     "create",
@@ -3089,12 +3083,10 @@ function ClientDetailScreen({
 
   const closeInvoiceModal = () => {
     if (!captureScreen() || !invoiceFormOwner.capture()) return;
-    invoiceFormOwner.invalidate();
+    invoiceModalReads.cancel(); invoiceFormOwner.invalidate();
     setInvoiceModalOpen(false);
     setSelectedInvoice(null);
     setInvoiceModalError(null);
-    setInvoiceModalRelatedPayments([]);
-    setInvoiceModalPaymentsLoading(false);
   };
 
 
@@ -3120,6 +3112,7 @@ function ClientDetailScreen({
     setInvoiceModalError(null);
     try {
       const id = selectedInvoice?.id;
+      if (isEdit && paymentPermissions.canView && !latestInvoiceReadReady.current()) throw new Error('Сначала дождитесь загрузки платежей по счёту или повторите её после ошибки.');
       if (isEdit && (!Number.isSafeInteger(id) || !id || id <= 0)) throw new Error('Откройте счёт заново перед сохранением.');
       const saved = await awaitOwnedUiResult(() => {
         dispatched = true;
@@ -4213,75 +4206,13 @@ function ClientDetailScreen({
     );
   }
 
-  const {
-    fetchInvoice: fetchInvoiceById,
-    fetchPayments: fetchInvoicePayments,
-  } = useMemo(() => bindClientInvoiceModalApi(apiService), []);
-  const loadInvoiceRelatedPayments = useCallback(
-    async (invoiceSnapshot: Invoice | null) => {
-      if (!invoiceSnapshot) {
-        setInvoiceModalRelatedPayments([]);
-        setInvoiceModalPaymentsLoading(false);
-        return;
-      }
-
-      setInvoiceModalPaymentsLoading(true);
-      try {
-        const relatedPayments = await loadClientInvoiceRelatedPayments({
-          invoice: invoiceSnapshot,
-          clientId,
-          visiblePayments,
-          fetchPayments: fetchInvoicePayments,
-        });
-        setInvoiceModalRelatedPayments(relatedPayments);
-      } catch {
-        setInvoiceModalRelatedPayments([]);
-      } finally {
-        setInvoiceModalPaymentsLoading(false);
-      }
-    },
-    [clientId, fetchInvoicePayments, visiblePayments],
-  );
-  const refreshInvoiceModalData = useCallback(async () => {
-    setInvoiceModalPaymentsLoading(true);
-    try {
-      const refreshed = await refreshClientInvoiceModalDataHelper({
-        selectedInvoice,
-        clientId,
-        visiblePayments,
-        refreshInvoices,
-        refreshPayments,
-        fetchInvoice: fetchInvoiceById,
-        fetchPayments: fetchInvoicePayments,
-      });
-      setSelectedInvoice(refreshed.invoice);
-      setInvoiceModalRelatedPayments(refreshed.relatedPayments);
-    } finally {
-      setInvoiceModalPaymentsLoading(false);
-    }
-  }, [
-    clientId,
-    fetchInvoiceById,
-    fetchInvoicePayments,
-    refreshInvoices,
-    refreshPayments,
-    selectedInvoice,
-    visiblePayments,
-  ]);
-  useEffect(() => {
-    if (!invoiceModalOpen || invoiceModalMode !== "edit") {
-      setInvoiceModalRelatedPayments([]);
-      setInvoiceModalPaymentsLoading(false);
-      return;
-    }
-
-    void loadInvoiceRelatedPayments(selectedInvoice);
-  }, [
-    invoiceModalMode,
-    invoiceModalOpen,
-    loadInvoiceRelatedPayments,
-    selectedInvoice,
-  ]);
+  const invoiceModalReads = useClientInvoiceModalReads(clientId, selectedInvoice, {
+    enabled: invoiceModalOpen && invoiceModalMode === 'edit', owner: invoiceFormOwner,
+    canReadInvoice: () => Boolean(user?.id) && accountPermissions.canView,
+    canReadPayments: () => Boolean(user?.id) && paymentPermissions.canView,
+    refreshInvoices, refreshPayments, onInvoiceRefreshed: setSelectedInvoice,
+  });
+  latestInvoiceReadReady.current = invoiceModalReads.isReady;
   const visiblePaymentTableColumns = useMemo(() => {
     const columnMap = new Map(
       PAYMENT_TABLE_COLUMNS.map((column) => [column.key, column]),
@@ -11173,9 +11104,11 @@ function ClientDetailScreen({
           }
           defaultType={invoiceViewConfig.type}
           defaultResponsibleId={clientData?.responsibleUserId ?? user?.id}
-          relatedPayments={invoiceModalRelatedPayments}
-          paymentsLoading={invoiceModalPaymentsLoading}
-          onRefreshRequested={refreshInvoiceModalData}
+          relatedPayments={invoiceModalReads.rows}
+          paymentsLoading={invoiceModalReads.loading}
+          paymentsError={invoiceModalReads.error}
+          onRetryPayments={invoiceModalReads.retry}
+          onRefreshRequested={invoiceModalReads.refresh}
           onClientCaseCreated={handleInvoiceCaseCreated}
           onCreateActPage={
             onCreateActPage

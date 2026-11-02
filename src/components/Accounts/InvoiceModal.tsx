@@ -310,6 +310,8 @@ interface InvoiceModalProps {
   presentation?: 'modal' | 'page';
   relatedPayments?: Payment[];
   paymentsLoading?: boolean;
+  paymentsError?: string | null;
+  onRetryPayments?: () => Promise<void> | void;
   onRefreshRequested?: () => Promise<void> | void;
   onAddRelatedPayment?: () => void;
   onEditRelatedPayment?: (payment: Payment) => void;
@@ -934,8 +936,10 @@ export function InvoiceModal({
   defaultType,
   lockType = false,
   presentation = 'modal',
-  relatedPayments = EMPTY_RELATED_PAYMENTS,
+  relatedPayments: suppliedRelatedPayments = EMPTY_RELATED_PAYMENTS,
   paymentsLoading = false,
+  paymentsError = null,
+  onRetryPayments,
   onRefreshRequested,
   onAddRelatedPayment,
   onEditRelatedPayment,
@@ -947,6 +951,7 @@ export function InvoiceModal({
   const isAdmin = (currentUser?.role?.name ?? '').toLowerCase() === 'admin';
   const permissions = useRolePermissions(currentUser?.role?.id);
   const canViewPayments = isAdmin || permissions.payments.canView;
+  const relatedPayments = canViewPayments ? suppliedRelatedPayments : EMPTY_RELATED_PAYMENTS;
   const canExport = isAdmin || permissions.accounts.canExport;
   const { t } = useTranslation();
   const { confirm, prompt } = useDialog();
@@ -1022,7 +1027,8 @@ export function InvoiceModal({
     () => filterRepresentativeInvoiceWhenInstallmentsExist(relatedPayments),
     [relatedPayments],
   );
-  const [displayPayments, setDisplayPayments] = useState<Payment[]>(visibleRelatedPayments);
+  const [storedDisplayPayments, setDisplayPayments] = useState<Payment[]>(visibleRelatedPayments);
+  const displayPayments = canViewPayments ? storedDisplayPayments : EMPTY_RELATED_PAYMENTS;
   const [amountReconciliationDialog, setAmountReconciliationDialog] = useState<InvoiceAmountReconciliation | null>(null);
   const [linkedMoneyOperations, setLinkedMoneyOperations] = useState<MoneyOperation[]>([]);
   const [linkedMoneyOperationsLoading, setLinkedMoneyOperationsLoading] = useState(false);
@@ -3032,9 +3038,21 @@ export function InvoiceModal({
     });
   }, [buildInvoiceEditorDraft, invoice?.id, onOpenActPage]);
 
+  const paymentsReadError = paymentsError || (mode === 'edit' && !canViewPayments ? 'Недостаточно прав для просмотра платежей.' : null);
+  const paymentsReadBlocked = mode === 'edit' && canViewPayments && (paymentsLoading || Boolean(paymentsError));
+  const renderPaymentsError = () => <div role="alert" className="space-y-2 text-sm text-red-700">
+    <p>{paymentsReadError}</p>
+    {onRetryPayments ? <button type="button" disabled={paymentsLoading}
+      onClick={() => { void Promise.resolve(onRetryPayments()).catch(() => undefined); }}
+      className="rounded-lg border border-red-200 px-2 py-1 text-xs font-semibold disabled:opacity-60">Повторить загрузку платежей</button> : null}
+  </div>;
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setLocalError(null);
+    if (paymentsReadBlocked) {
+      setLocalError('Сначала дождитесь загрузки платежей по счёту или повторите её после ошибки.');
+      return;
+    }
 
     const number = form.number.trim();
     if (!number) {
@@ -4086,7 +4104,7 @@ export function InvoiceModal({
                 <button
                   type="submit"
                   form="invoice-edit-form"
-                  disabled={submitting}
+                  disabled={submitting || paymentsReadBlocked}
                   className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -4219,7 +4237,7 @@ export function InvoiceModal({
 
                   <div>
                     <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Оплаты</div>
-                    {paymentsLoading ? (
+                    {paymentsReadError ? renderPaymentsError() : paymentsLoading ? (
                       <div className="inline-flex items-center gap-2 text-sm text-slate-500">
                         <Loader2 className="h-4 w-4 animate-spin" />
                         Загружаем оплаты...
@@ -4876,7 +4894,7 @@ export function InvoiceModal({
                   <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
                     Сначала сохраните счёт, после этого здесь можно будет создавать и редактировать связанные платежи.
                   </div>
-                ) : paymentsLoading ? (
+                ) : paymentsReadError ? renderPaymentsError() : paymentsLoading ? (
                   <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     {t('loading') ?? 'Загрузка...'}
@@ -4987,7 +5005,7 @@ export function InvoiceModal({
                 )}
               </section>
 
-              {!linkedMoneyOperationsError && (linkedMoneyOperationsLoading || linkedMoneyOperations.length > 0) && (
+              {canViewPayments && !linkedMoneyOperationsError && (linkedMoneyOperationsLoading || linkedMoneyOperations.length > 0) && (
               <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
                 <header className="mb-3 flex flex-col gap-1">
                   <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -5295,7 +5313,7 @@ export function InvoiceModal({
             <div className="flex items-center justify-end gap-3 pt-2">
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || paymentsReadBlocked}
                 className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
               >
                 {submitting && <Loader2 className="h-4 w-4 animate-spin" />}

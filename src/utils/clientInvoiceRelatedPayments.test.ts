@@ -48,11 +48,23 @@ function createPayment(overrides: Partial<Payment> = {}): Payment {
 }
 
 describe('clientInvoiceRelatedPayments', () => {
+  it.each([401, 403, 404])('invoice read baseline: HTTP %s never falls back to broader or cached payments', async status => {
+    const fetchPayments = vi.fn().mockRejectedValue(new Error(`HTTP ${status} - Доступ закрыт`));
+    await expect(loadClientInvoiceRelatedPayments({ invoice: createInvoice(), clientId: 42, visiblePayments: [createPayment()], fetchPayments })).rejects.toThrow(`HTTP ${status}`);
+    expect(fetchPayments).toHaveBeenCalledOnce();
+  });
+  it('invoice read baseline: failed remote lookups cannot masquerade as a confirmed empty result', async () => {
+    const fetchPayments = vi.fn().mockRejectedValue(new Error('network'));
+    await expect(loadClientInvoiceRelatedPayments({ invoice: createInvoice(), clientId: 42, visiblePayments: [], fetchPayments })).rejects.toThrow('network');
+  });
+  it('invoice read baseline: an explicitly foreign canonical invoice never matches by the same number', () => {
+    expect(collectClientInvoiceRelatedPayments(createInvoice(), [createPayment({ invoiceId: 31 })])).toEqual([]);
+  });
   it('uses the only client case id from clientCaseIds for invoice payment lookup', () => {
     expect(resolveClientInvoiceCaseId(createInvoice({ clientCaseIds: [123], clientCaseId: undefined }))).toBe(123);
   });
 
-  it('falls back to clientCaseId when invoice has no single case in clientCaseIds', () => {
+  it('does not narrow a multi-case invoice to the legacy first case', () => {
     expect(
       resolveClientInvoiceCaseId(
         createInvoice({
@@ -60,7 +72,7 @@ describe('clientInvoiceRelatedPayments', () => {
           clientCaseId: 333,
         }),
       ),
-    ).toBe(333);
+    ).toBeUndefined();
   });
 
   it('returns undefined when invoice has no usable client case id', () => {
@@ -235,7 +247,7 @@ describe('clientInvoiceRelatedPayments', () => {
     });
   });
 
-  it('falls back to currently visible payments when the remote lookup fails', async () => {
+  it('reports remote failure instead of treating a visible partial cache as complete', async () => {
     const invoice = createInvoice({ id: 530, invoiceEntityId: 25, number: '25', clientCaseIds: [702] });
     const representativePayment = createPayment({
       id: 530,
@@ -251,15 +263,15 @@ describe('clientInvoiceRelatedPayments', () => {
     });
     const fetchPayments = vi.fn().mockRejectedValue(new Error('network'));
 
-    const result = await loadClientInvoiceRelatedPayments({
+    await expect(loadClientInvoiceRelatedPayments({
       invoice,
       clientId: 42,
       visiblePayments: [siblingPayment, representativePayment],
       fetchPayments,
-    });
+    })).rejects.toThrow('network');
 
     expect(fetchPayments).toHaveBeenCalledTimes(2);
-    expect(result.map((item) => item.id)).toEqual([530, 531]);
+    expect([siblingPayment.id, representativePayment.id]).toEqual([531, 530]);
   });
 
   it('hides the representative invoice row after remote lookup when installment payments exist', async () => {
@@ -290,4 +302,29 @@ describe('clientInvoiceRelatedPayments', () => {
 
     expect(result.map((item) => item.id)).toEqual([552]);
   });
+  it.each(['owner', 'abort', 'permission'])('owned helper: %s after direct dispatch cannot enter a broader fallback', async change => {
+    const controller = new AbortController(); let current = true; let allowed = true;
+    const fetchPayments = vi.fn().mockImplementation(async () => { if (change === 'owner') current = false; if (change === 'abort') controller.abort(); if (change === 'permission') allowed = false; return []; });
+    await expect(loadClientInvoiceRelatedPayments({ invoice: createInvoice(), clientId: 42, fetchPayments, read: { signal: controller.signal, isCurrent: () => current, canReadPayments: () => allowed } })).rejects.toBeInstanceOf(Error);
+    expect(fetchPayments).toHaveBeenCalledOnce();
+  });
+  it.each([
+    [createPayment({ amount: NaN })], [createPayment({ amount: Infinity })], [createPayment({ id: 0 })], [createPayment({ date: 'bad-date' })],
+    [createPayment({ isPaid: 'false' as unknown as boolean })], [createPayment({ paidAmount: '1' as unknown as number })], [createPayment(), createPayment()],
+  ].map(rows => ({ rows })))('owned helper: invalid financial rows %# cannot enter a cache or another lookup', async ({ rows }) => {
+    const fetchPayments = vi.fn().mockResolvedValue(rows);
+    await expect(loadClientInvoiceRelatedPayments({ invoice: createInvoice(), clientId: 42, visiblePayments: [createPayment()], fetchPayments })).rejects.toThrow('Не удалось подтвердить');
+    expect(fetchPayments).toHaveBeenCalledOnce();
+  });
+  it('owned helper: transient direct failure may use a current client lookup without narrowing several cases', async () => {
+    const row = createPayment({ amount: -250, type: 'Expense' }); const fetchPayments = vi.fn().mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce([row]);
+    const result = await loadClientInvoiceRelatedPayments({ invoice: createInvoice({ clientCaseIds: [701, 702], clientCaseId: 701 }), clientId: 42, fetchPayments });
+    expect(result).toEqual([row]); expect(result[0]).toBe(row); expect(fetchPayments.mock.calls[1][0]).toMatchObject({ clientId: 42, caseId: undefined });
+  });
+  it('owned helper: legacy fallback denial cannot restore a previously visible paid row', async () => {
+    const fetchPayments = vi.fn().mockResolvedValueOnce([]).mockRejectedValueOnce(new Error('HTTP 403 - Доступ закрыт'));
+    await expect(loadClientInvoiceRelatedPayments({ invoice: createInvoice(), clientId: 42, visiblePayments: [createPayment({ isPaid: true })], fetchPayments })).rejects.toThrow('HTTP 403');
+    expect(fetchPayments).toHaveBeenCalledTimes(2);
+  });
+
 });
