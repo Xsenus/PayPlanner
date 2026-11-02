@@ -29,7 +29,7 @@ type HookState = ReturnType<typeof useAllRelated>;
 type Kind = 'case' | 'invoice' | 'act';
 type Action = 'create' | 'update' | 'delete';
 function mutate(state: HookState, kind: Kind, action: Action, current?: () => boolean): Promise<unknown> {
-  if (kind === 'case') return action === 'create' ? state.cases.createCase(casePayload, current) : action === 'update' ? state.cases.updateCase(1, casePayload, current) : state.cases.deleteCase(1, current);
+  if (kind === 'case') return action === 'create' ? state.cases.createCase(casePayload, current) : action === 'update' ? state.cases.updateCase(1, casePayload, current, caseRow()) : state.cases.deleteCase(1, current);
   if (kind === 'invoice') return action === 'create' ? state.invoices.createInvoice(invoicePayload, current) : action === 'update' ? state.invoices.updateInvoice(1, invoicePayload, current) : state.invoices.deleteInvoice(1, current);
   return action === 'create' ? state.acts.createAct(actPayload, current) : action === 'update' ? state.acts.updateAct(1, actPayload, current) : state.acts.deleteAct(1, current);
 }
@@ -54,7 +54,7 @@ describe('related mutation hook ownership', () => {
   it.each(['update', 'delete'] as const)('owned hooks microtask: late %s revocation cannot change the accepted case list', async action => {
     let current = true; vi.mocked(apiService.getCasesV1).mockResolvedValue([caseRow()]); apiWrite('case', action).mockImplementation(async () => { queueMicrotask(() => queueMicrotask(() => { current = false; })); return action === 'delete' ? undefined : { ...caseRow(), title: 'Private unaccepted update' }; });
     const { result } = renderHook(() => useClientCases(undefined, { legalEntityId: 9 })); await waitFor(() => expect(result.current.loading).toBe(false));
-    await act(async () => { await expect(action === 'update' ? result.current.updateCase(1, casePayload, () => current) : result.current.deleteCase(1, () => current)).rejects.toBeInstanceOf(StaleUiOperationError); });
+    await act(async () => { await expect(action === 'update' ? result.current.updateCase(1, casePayload, () => current, caseRow()) : result.current.deleteCase(1, () => current)).rejects.toBeInstanceOf(StaleUiOperationError); });
     expect(result.current.cases).toEqual([caseRow()]);
   });
   it('owned hooks: late case creation cannot enter a revoked caller list', async () => {
@@ -94,6 +94,7 @@ describe('related mutation hook ownership', () => {
         await act(async () => { await mutate(result.current, kind, action, () => true); });
         const payload = kind === 'case' ? casePayload : kind === 'invoice' ? invoicePayload : actPayload;
         if (action === 'create') expect(apiWrite(kind, action)).toHaveBeenCalledExactlyOnceWith(payload);
+        else if (action === 'update' && kind === 'case') expect(apiWrite(kind, action)).toHaveBeenCalledExactlyOnceWith(1, payload, caseRow());
         else if (action === 'update') expect(apiWrite(kind, action)).toHaveBeenCalledExactlyOnceWith(1, payload);
         else expect(apiWrite(kind, action)).toHaveBeenCalledExactlyOnceWith(1);
         expect(readCounts()).toEqual(before.map((n, i) => n + (kind === 'invoice' && (i === 1 || i === 2) || kind === 'act' && (i === 3 || i === 4) ? 1 : 0)));

@@ -5308,7 +5308,7 @@ function ClientDetailScreen({
     };
 
     if (caseMode === "edit" && editingCase) {
-      const updated = await apiService.updateCase(editingCase.id, base);
+      const updated = await apiService.updateCase(editingCase.id, base, editingCase);
       setCasesLocal((prev) =>
         (prev ?? []).map((item) =>
           item.id === updated.id ? { ...item, ...updated } : item,

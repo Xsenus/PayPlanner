@@ -1,4 +1,4 @@
-using System.Data.Common;
+﻿using System.Data.Common;
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
@@ -2507,7 +2507,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             ClientId = client.Id,
             Title = "Старый клиент",
         }, CancellationToken.None));
-        await db.Entry(created).ReloadAsync();
+        created = await db.ClientCases.SingleAsync(row => row.Id == created.Id);
         Assert.Equal(100000.50m, created.CourtClaimAmount);
         Assert.Equal(80000.10m, created.CourtAwardedAmount);
         Assert.Null(created.CourtStateFeeAmount);
@@ -3050,6 +3050,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             ClaimFiledAt = clientCase.ClaimFiledAt,
             CourtRegisteredAt = registeredAt,
         }, CancellationToken.None));
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
         {
             ClientId = clientCase.ClientId,
@@ -3057,7 +3058,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             Status = ClientCaseStatus.Open,
             ClaimFiledAt = clientCase.ClaimFiledAt,
         }, CancellationToken.None));
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.Equal(registeredAt, clientCase.CourtRegisteredAt);
         var details = Assert.IsType<ClientCase>(Assert.IsType<OkObjectResult>(
             await controller.GetById(clientCase.Id, CancellationToken.None)).Value);
@@ -3071,7 +3072,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             ClaimFiledAt = clientCase.ClaimFiledAt,
             ClearCourtRegisteredAt = true,
         }, CancellationToken.None));
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.Null(clientCase.CourtRegisteredAt);
         Assert.Equal(new DateTime(2026, 5, 11), clientCase.ClaimFiledAt);
     }
@@ -3990,7 +3991,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             Strategy = "Обновлённая позиция",
         }, CancellationToken.None);
         Assert.IsType<OkObjectResult>(update);
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.Null(clientCase.PositionReviewedAt);
         Assert.Null(clientCase.PositionReviewedByUserId);
         Assert.Equal(string.Empty, clientCase.PositionReviewedByName);
@@ -4062,7 +4063,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             NextHearingAt = rescheduled,
         }, CancellationToken.None);
         Assert.IsType<OkObjectResult>(update);
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.Equal(rescheduled, clientCase.NextHearingAt);
         Assert.Null(clientCase.NextHearingConfirmedAt);
         Assert.Null(clientCase.NextHearingConfirmedForAt);
@@ -4950,7 +4951,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         }, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(result);
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.Equal(effectiveAt, clientCase.CourtDecisionEffectiveAt);
         Assert.Equal(receivedAt, clientCase.ExecutiveWritReceivedAt);
         var details = Assert.IsType<OkObjectResult>(await controller.GetById(clientCase.Id, CancellationToken.None));
@@ -5051,6 +5052,8 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             ExecutiveWritSubmittedTo = "bank",
         }, CancellationToken.None);
         Assert.IsType<OkObjectResult>(saved);
+        task = await db.TaskJournalItems.SingleAsync(row => row.Id == task.Id);
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.Equal("done", task.Status);
         Assert.Contains("банк", task.Result);
         Assert.Equal(submittedAt, clientCase.ExecutiveWritSubmittedAt);
@@ -5071,6 +5074,8 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             ExecutiveWritSubmittedTo = "fssp",
         }, CancellationToken.None);
         Assert.IsType<OkObjectResult>(corrected);
+        task = await db.TaskJournalItems.SingleAsync(row => row.Id == task.Id);
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.Contains("ФССП", task.Result);
         Assert.Contains("05.10.2026", task.Result);
         Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id));
@@ -5097,6 +5102,8 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             ClearExecutiveWritSubmission = true,
         }, CancellationToken.None);
         Assert.IsType<OkObjectResult>(cleared);
+        task = await db.TaskJournalItems.SingleAsync(row => row.Id == task.Id);
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.Null(clientCase.ExecutiveWritSubmittedAt);
         Assert.Null(clientCase.ExecutiveWritSubmittedTo);
         Assert.Equal(2, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id));
@@ -7124,6 +7131,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.IsType<BadRequestObjectResult>(await controller.Update(clientCase.Id, closedModel, CancellationToken.None));
         Assert.Equal(ClientCaseStatus.Open, clientCase.Status);
 
+        reportAssigneeSetting = await db.SystemSettings.SingleAsync(row => row.Id == reportAssigneeSetting.Id);
         reportAssigneeSetting.Value = reportOwner.Id.ToString();
         var userTaggedTask = new TaskJournalItem
         {
@@ -7151,6 +7159,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             .ToListAsync());
         Assert.Equal("new", report.Status);
         Assert.True(report.IsCaseFinalReport);
+        userTaggedTask = await db.TaskJournalItems.SingleAsync(row => row.Id == userTaggedTask.Id);
         Assert.False(userTaggedTask.IsCaseFinalReport);
         Assert.Equal("done", userTaggedTask.Status);
         Assert.Equal(reportOwner.Id, report.AssigneeUserId);
@@ -7170,6 +7179,8 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             Status = ClientCaseStatus.Open,
             ResponsibleUserId = lawyer.Id,
         }, CancellationToken.None));
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
+        report = await db.TaskJournalItems.Include(row => row.Participants).SingleAsync(row => row.Id == report.Id);
         Assert.Equal("cancelled", report.Status);
 
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, closedModel, CancellationToken.None));
@@ -7346,7 +7357,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(rejected);
         Assert.Contains("причину", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.True(clientCase.InactivityRemindersEnabled);
 
         var accepted = await controller.Update(clientCase.Id, new ClientCase
@@ -7359,7 +7370,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         }, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(accepted);
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.False(clientCase.InactivityRemindersEnabled);
         Assert.Equal("Ожидаем решение клиента", clientCase.InactivityRemindersDisabledReason);
         Assert.Contains("Ожидаем решение клиента", clientCase.EventHistory, StringComparison.Ordinal);

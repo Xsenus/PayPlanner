@@ -93,8 +93,9 @@ export function useClientCases(clientId?: number | string, options: { enabled?: 
     [cid, legalEntityId],
   );
 
-  const updateCase = useCallback(async (id: number, payload: CaseCreateUpdate, isCurrent: () => boolean = () => true) => {
-    const updated = await awaitOwnedUiResult(() => apiService.updateCase(id, payload), isCurrent);
+  const updateCase = useCallback(async (id: number, payload: CaseCreateUpdate, isCurrent: () => boolean = () => true, original?: ClientCase) => {
+    if (!original || original.id !== id) throw new Error('Обновите карточку дела перед сохранением.');
+    const updated = await awaitOwnedUiResult(() => apiService.updateCase(id, payload, original), isCurrent);
     if (!isCurrent()) throw new StaleUiOperationError();
     abortRef.current?.abort();
     abortRef.current = null;

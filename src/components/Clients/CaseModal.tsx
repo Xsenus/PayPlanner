@@ -795,7 +795,7 @@ export function CaseModal({
       await awaitOwnedUiResult(() => Promise.resolve(onSave(patch)), operation.isCurrent);
       handleClose();
     } catch (e: unknown) {
-      if (operation.isCurrent() && !(e instanceof StaleUiOperationError)) setError(e instanceof Error ? e.message : String(e));
+      if (operation.isCurrent() && !(e instanceof StaleUiOperationError)) setError(extractDisplayErrorMessage(e, 'Не удалось сохранить дело.'));
     } finally {
       operation.finish();
     }

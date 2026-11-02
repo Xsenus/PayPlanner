@@ -2576,7 +2576,7 @@ export function LegalEntityModal({
       };
 
       if (caseMode === "edit" && editingCase) {
-        await updateLegalEntityCase(editingCase.id, payload, operation.isCurrent);
+        await updateLegalEntityCase(editingCase.id, payload, operation.isCurrent, editingCase);
         if (!operation.isCurrent()) throw new StaleUiOperationError();
         setCaseFinanceReloadToken((value) => value + 1);
         return;

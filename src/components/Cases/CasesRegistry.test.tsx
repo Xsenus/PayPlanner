@@ -1053,7 +1053,7 @@ describe('CasesRegistry', () => {
           title: 'ЗЕМЦОВ - обновленное дело',
           clientId: 12,
           status: 'Open',
-        }),
+        }), expect.objectContaining({ id: 1 })
       );
     });
   });

@@ -192,6 +192,7 @@ interface CourtComplaintDraft {
 }
 
 interface CaseEditDraft {
+  originalSource: ClientCase;
   timeZoneId: string;
   title: string;
   description: string;
@@ -1291,6 +1292,7 @@ function buildCourtComplaintDraft(instance = 'first', complaint?: ClientCaseCour
 
 function buildCaseEditDraft(caseItem: ClientCase, timeZoneId = activeCaseTimeZoneId): CaseEditDraft {
   return {
+    originalSource: Object.fromEntries(Object.entries(caseItem).filter(([, value]) => value === null || ['string', 'number', 'boolean'].includes(typeof value))) as unknown as ClientCase,
     timeZoneId,
     title: caseItem.title ?? '',
     description: caseItem.description ?? '',
@@ -2828,7 +2830,7 @@ function CaseDetailScreen({
     try {
       const previousStage = caseItem.stage;
       const patch = buildCasePatchFromEditDraft(caseEditDraft);
-      const updated = await awaitOwnedUiResult(() => apiService.updateCaseV2(caseItem.id, buildCaseUpdatePayload(caseItem, patch)), operation.isCurrent);
+      const updated = await awaitOwnedUiResult(() => apiService.updateCaseV2(caseItem.id, buildCaseUpdatePayload(caseEditDraft.originalSource, patch), caseEditDraft.originalSource), operation.isCurrent);
       if (!updated || updated.id !== caseItem.id) throw new Error('Не удалось подтвердить сохранение текущего дела.');
       currentCase.current = updated;
       setCaseItem(updated);

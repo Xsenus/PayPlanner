@@ -6852,8 +6852,10 @@ export class ApiService {
     });
   }
 
-  async updateCaseV2(id: number, model: Omit<ClientCase, 'id' | 'createdAt' | 'payments'>) {
-    return this.request<ClientCase>(`/v2/cases/${id}`, { method: 'PUT', body: JSON.stringify(model) });
+  async updateCaseV2(id: number, model: Omit<ClientCase, 'id' | 'createdAt' | 'payments'>, original: ClientCase) {
+    if (!original || original.id !== id) throw new Error('Обновите карточку дела перед сохранением.');
+    const expectedSource = Object.fromEntries(Object.entries(original).filter(([, value]) => value === null || ['string', 'number', 'boolean'].includes(typeof value)));
+    return this.request<ClientCase>(`/v2/cases/${id}/checked`, { method: 'PUT', body: JSON.stringify({ ...model, expectedSource }) });
   }
 
   async updateCaseControl(id: number, isUnderControl: boolean) {
@@ -6863,8 +6865,10 @@ export class ApiService {
     });
   }
 
-  async updateCase(id: number, model: Omit<ClientCase, 'id' | 'createdAt' | 'payments'>) {
-    return this.request<ClientCase>(`/cases/${id}`, { method: 'PUT', body: JSON.stringify(model) });
+  async updateCase(id: number, model: Omit<ClientCase, 'id' | 'createdAt' | 'payments'>, original: ClientCase) {
+    if (!original || original.id !== id) throw new Error('Обновите карточку дела перед сохранением.');
+    const expectedSource = Object.fromEntries(Object.entries(original).filter(([, value]) => value === null || ['string', 'number', 'boolean'].includes(typeof value)));
+    return this.request<ClientCase>(`/cases/${id}/checked`, { method: 'PUT', body: JSON.stringify({ ...model, expectedSource }) });
   }
 
   async deleteCase(id: number) {

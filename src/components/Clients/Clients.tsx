@@ -1025,7 +1025,7 @@ function ClientsScreen({ context, onOpenContract, onOpenInvoice, onOpenAct, onOp
 
     try {
     if (caseMode === 'edit' && editingCase) {
-      const updated = await awaitOwnedUiResult(() => apiService.updateCase(editingCase.id, base), operation.isCurrent);
+      const updated = await awaitOwnedUiResult(() => apiService.updateCase(editingCase.id, base, editingCase), operation.isCurrent);
       if (!updated || updated.id !== editingCase.id || updated.clientId !== caseClientId) throw new Error('Не удалось подтвердить сохранённое дело. Обновите карточку.');
       latestList.current.setClients((prev) =>
         prev.map((c) =>

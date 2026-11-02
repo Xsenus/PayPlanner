@@ -115,6 +115,7 @@ public class CasesControllerTests
             Title = clientCase.Title,
             CourtClaimAmount = -1m,
         }, CancellationToken.None));
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
         {
             ClientId = clientCase.ClientId,
@@ -124,19 +125,21 @@ public class CasesControllerTests
             CourtStateFeeAmount = 3000m,
             OurCourtRole = "claimant",
         }, CancellationToken.None));
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
         {
             ClientId = clientCase.ClientId,
             Title = clientCase.Title,
             ClearCourtAwardedAmount = true,
         }, CancellationToken.None));
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
         {
             ClientId = clientCase.ClientId,
             Title = "Старый клиент",
         }, CancellationToken.None));
 
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.Equal(120000m, clientCase.CourtClaimAmount);
         Assert.Null(clientCase.CourtAwardedAmount);
         Assert.Equal(3000m, clientCase.CourtStateFeeAmount);
@@ -164,6 +167,7 @@ public class CasesControllerTests
             ExecutiveWritSubmittedAt = submittedAt,
             ExecutiveWritSubmittedTo = "fssp",
         }, CancellationToken.None));
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.Equal(effectiveAt, clientCase.CourtDecisionEffectiveAt);
         Assert.Equal(receivedAt, clientCase.ExecutiveWritReceivedAt);
         Assert.Equal(submittedAt, clientCase.ExecutiveWritSubmittedAt);
@@ -176,6 +180,7 @@ public class CasesControllerTests
             Title = "Старый клиент",
             Status = ClientCaseStatus.Open,
         }, CancellationToken.None));
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.Equal(submittedAt, clientCase.ExecutiveWritSubmittedAt);
         Assert.Equal(receivedAt, clientCase.ExecutiveWritReceivedAt);
 
@@ -188,6 +193,7 @@ public class CasesControllerTests
             ClearExecutiveWritReceivedAt = true,
             ClearCourtDecisionEffectiveAt = true,
         }, CancellationToken.None));
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.Null(clientCase.ExecutiveWritSubmittedAt);
         Assert.Null(clientCase.ExecutiveWritSubmittedTo);
         Assert.Null(clientCase.ExecutiveWritReceivedAt);
@@ -215,6 +221,7 @@ public class CasesControllerTests
             Status = ClientCaseStatus.Open,
             Strategy = clientCase.Strategy,
         }, CancellationToken.None));
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.Equal(reviewedAt, clientCase.PositionReviewedAt);
 
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
@@ -224,6 +231,7 @@ public class CasesControllerTests
             Status = ClientCaseStatus.Open,
             Strategy = "Изменённая позиция",
         }, CancellationToken.None));
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.Null(clientCase.PositionReviewedAt);
         Assert.Null(clientCase.PositionReviewedByUserId);
         Assert.Equal(string.Empty, clientCase.PositionReviewedByName);
@@ -251,6 +259,7 @@ public class CasesControllerTests
             Status = ClientCaseStatus.Open,
             NextHearingAt = nextHearing,
         }, CancellationToken.None));
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.NotNull(clientCase.NextHearingConfirmedAt);
 
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
@@ -260,6 +269,7 @@ public class CasesControllerTests
             Status = ClientCaseStatus.Open,
             NextHearingAt = nextHearing.AddDays(1),
         }, CancellationToken.None));
+        clientCase = await db.ClientCases.SingleAsync(row => row.Id == clientCase.Id);
         Assert.Null(clientCase.NextHearingConfirmedForAt);
         Assert.Null(clientCase.NextHearingConfirmedAt);
         Assert.Null(clientCase.NextHearingConfirmedByUserId);

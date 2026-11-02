@@ -522,7 +522,7 @@ describe('LegalEntityModal integration', () => {
     it.each(['save', 'delete'] as const)('related write: current case %s keeps edit/delete callbacks and API identity', async action => {
       vi.mocked(apiService.getCasesV1).mockResolvedValue([row]); render(<LegalEntityModal {...propsFor('page')} />); fireEvent.click(await screen.findByTitle('Редактировать дело')); await screen.findByTestId(fixture.case); const current = child('case');
       await act(async () => { if (action === 'save') await save('case', current); else await current.onDelete!(); });
-      if (action === 'save') expect(apiService.updateCase).toHaveBeenCalledWith(81, expect.objectContaining({ title: 'Preserved case title', legalEntityId: 9, feeAmount: 215.5 })); else expect(apiService.deleteCase).toHaveBeenCalledExactlyOnceWith(81);
+      if (action === 'save') expect(apiService.updateCase).toHaveBeenCalledWith(81, expect.objectContaining({ title: 'Preserved case title', legalEntityId: 9, feeAmount: 215.5 }), expect.objectContaining({ id: 81 })); else expect(apiService.deleteCase).toHaveBeenCalledExactlyOnceWith(81);
     });
     it.each(['invoice', 'act'] as const)('related write edit: current %s keeps its existing ID and update payload', async kind => {
       if (kind === 'invoice') vi.mocked(apiService.getInvoices).mockResolvedValue({ items: [{ id: 82, invoiceEntityId: 82, number: 'INV-EDIT', type: 'Income', date: '2026-10-31', legalEntityId: 9, amount: 100, status: 'Pending' } as Invoice], total: 1, page: 1, pageSize: 5 });

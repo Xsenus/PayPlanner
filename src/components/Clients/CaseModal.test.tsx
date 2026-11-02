@@ -1353,4 +1353,18 @@ describe('CaseModal', () => {
     expect(screen.queryByRole('button', { name: 'Подтвердить дату заседания' })).toBeNull();
   });
 
+  it.each([
+    [409, 'Дело изменилось после открытия редактора. Обновите данные перед сохранением.', 'Дело изменилось после открытия редактора. Обновите данные перед сохранением.'],
+    [403, 'Forbidden', 'Недостаточно прав для выполнения действия.'],
+    [503, 'Сервис временно недоступен.', 'Сервис временно недоступен.'],
+  ])('case save error: HTTP %s shows a readable message and retains the draft without replay', async (status, message, visible) => {
+    const onClose = vi.fn(); const onSave = vi.fn().mockRejectedValue(new Error(`HTTP ${status} at https://synthetic.local/api/cases/1/checked - ${message}`));
+    render(<CaseModal isOpen onClose={onClose} caseData={createCase()} onSave={onSave} />);
+    fireEvent.change(screen.getByLabelText('Название дела'), { target: { value: 'Сохраняемый черновик' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/ }));
+    await screen.findByText(visible); expect(onSave).toHaveBeenCalledOnce(); expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Название дела')).toHaveProperty('value', 'Сохраняемый черновик');
+    expect(screen.queryByText(/https:\/\/synthetic\.local/)).toBeNull(); expect(screen.queryByText(/^HTTP \d/)).toBeNull();
+  });
+
 });

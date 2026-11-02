@@ -1322,7 +1322,7 @@ describe('CaseDetailPage', () => {
     expect((screen.getByLabelText('Стратегия и план действий') as HTMLTextAreaElement).value).toContain('Проверить доказательства');
     fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u }).at(-1) as HTMLElement);
     await waitFor(() => expect(apiService.updateCaseV2).toHaveBeenCalledWith(
-      15, expect.objectContaining({ strategy: expect.stringContaining('Проверить доказательства'), courtRegisteredAt: '2026-05-13', clearCourtRegisteredAt: false }),
+      15, expect.objectContaining({ strategy: expect.stringContaining('Проверить доказательства'), courtRegisteredAt: '2026-05-13', clearCourtRegisteredAt: false }), expect.objectContaining({ id: 15 })
     ));
   });
 
@@ -2378,7 +2378,7 @@ describe('CaseDetailPage', () => {
           courtClaimAmount: 100000.5,
           courtAwardedAmount: 75000,
           courtStateFeeAmount: 3500.25,
-        }),
+        }), expect.objectContaining({ id: 15 })
       );
     });
   });
@@ -2461,7 +2461,7 @@ describe('CaseDetailPage', () => {
           clientId: 12,
           legalEntityId: null,
           status: 'Open',
-        }),
+        }), expect.objectContaining({ id: 15 })
       );
     });
     expect(await screen.findByText('Карточка дела обновлена.')).toBeTruthy();
@@ -2513,7 +2513,7 @@ describe('CaseDetailPage', () => {
           executiveWritReceivedAt: null,
           executiveWritSubmittedAt: null,
           clearExecutiveWritSubmission: true,
-        }),
+        }), expect.objectContaining({ id: 15 })
       );
     });
   });
@@ -5669,6 +5669,7 @@ describe('CaseDetailPage', () => {
   });
 
   it('header owner: an admitted recovery write also blocks the header until its read finishes', async () => {
+    vi.mocked(apiService.setCourtRecoveryPayment).mockReset();
     let finish!: () => void;
     vi.mocked(apiService.setCourtRecoveryPayment).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
     vi.mocked(apiService.getCourtRecoveries).mockResolvedValue({ awardedAmount: 100000, receivedAmount: 0, remainingAmount: 100000, linkedPayments: [], availablePayments: [{ paymentId: 7, date: '2026-09-24', description: 'Поступление', paidAmount: 25000, allocatedAmount: null, effectiveAmount: 0, warning: null }], hasMoreAvailablePayments: false, hasCompletePaymentVisibility: true });
@@ -5748,6 +5749,7 @@ describe('CaseDetailPage', () => {
   });
 
   it('header owner: a header write blocks recovery without losing its selected amount', async () => {
+    vi.mocked(apiService.setCourtRecoveryPayment).mockReset();
     let finish!: (result: { updated: number; requested: number }) => void;
     vi.mocked(apiService.bulkUpdateCases).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
     vi.mocked(apiService.getCourtRecoveries).mockResolvedValue({ awardedAmount: 100000, receivedAmount: 0, remainingAmount: 100000, linkedPayments: [], availablePayments: [{ paymentId: 7, date: '2026-09-24', description: 'Поступление', paidAmount: 25000, allocatedAmount: null, effectiveAmount: 0, warning: null }], hasMoreAvailablePayments: false, hasCompletePaymentVisibility: true });
@@ -5837,6 +5839,26 @@ describe('CaseDetailPage', () => {
     if (kind === 'position') expect(apiService.reviewCasePosition).toHaveBeenCalledExactlyOnceWith(source.id, source.strategy);
     else expect(apiService.confirmNextHearing).toHaveBeenCalledExactlyOnceWith(source.id, source.nextHearingAt);
     expect(screen.queryByText(/отмечена как проверенная|Дата следующего заседания подтверждена/)).toBeNull();
+  });
+
+  it('case edit source: explicit read preserves the original history baseline of the draft', async () => {
+    const original = createCase({ eventHistory: 'Исходная история' });
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(original);
+    vi.mocked(apiService.updateCaseV2).mockRejectedValueOnce(new Error('HTTP 503 - Ответ потерян'));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.click((await screen.findAllByRole('button', { name: /Сохранить дело/ }))[0]);
+    await screen.findByRole('button', { name: 'Обновить данные дела' });
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ eventHistory: 'Новая запись коллеги' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить данные дела' }));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Сохранить дело/ })[0]).not.toHaveProperty('disabled', true));
+    vi.mocked(apiService.updateCaseV2).mockResolvedValue(createCase({ eventHistory: 'Новая запись коллеги' }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/ })[0]);
+    await waitFor(() => expect(apiService.updateCaseV2).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(apiService.updateCaseV2).mock.calls[1][2]).toMatchObject({ id: 15, eventHistory: 'Исходная история' });
+    expect(vi.mocked(apiService.updateCaseV2).mock.calls[1][1].eventHistory).toBe('Исходная история');
+    expect(vi.mocked(apiService.updateCaseV2).mock.calls[1][1]).not.toHaveProperty('originalSource');
   });
 
 });

@@ -1,3 +1,4 @@
+using PayPlanner.Api.Services.Cases;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -115,77 +116,80 @@ public class CasesController : ControllerBase
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] ClientCase model, CancellationToken ct)
+    [HttpPut("{id:int}/checked")]
+    public Task<IActionResult> UpdateWithSource(int id, [FromBody] CaseEditRequest model, CancellationToken ct)
+        => model.ExpectedSource is null
+            ? Task.FromResult<IActionResult>(BadRequest(new { message = "Для сохранения нужны исходные данные дела. Обновите карточку." }))
+            : Update(id, model, ct, model.ExpectedSource);
+
+    // In-process business entry point; HTTP commands must use UpdateWithSource.
+    [NonAction]
+    public async Task<IActionResult> Update(int id, ClientCase model, CancellationToken ct, ClientCase? expectedSource = null)
     {
-        if (await RequireCasesPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        var result = await CaseEditTransaction.RunAsync(_db, User, id, async (e, access) =>
         {
-            return forbidden;
-        }
+            if (expectedSource is not null && !CaseEditSnapshot.TryMerge(e, model, expectedSource, true, legacy: true))
+                return Conflict(new { message = "Дело изменилось после открытия редактора. Обновите данные перед сохранением." });
+            var visibility = access.Visibility;
+            var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
+            if (validation is not null) return validation;
+            if (!visibility.SeesAll) await CaseEditTransaction.LockVisibleOwnersAsync(_db, model, ct);
+            if (ValidateCourtDetails(model) is { } courtError) return BadRequest(courtError);
+            var receivedAt = model.ClearExecutiveWritReceivedAt ? null : model.ExecutiveWritReceivedAt ?? e.ExecutiveWritReceivedAt;
+            var submittedAt = model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedAt ?? e.ExecutiveWritSubmittedAt;
+            var submittedTo = model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedTo ?? e.ExecutiveWritSubmittedTo;
+            if (ClientCaseWritSubmissionRules.Validate(receivedAt, submittedAt, submittedTo) is { } writError) return BadRequest(writError);
 
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
-
-        var e = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (e is null) return NotFound();
-        var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
-        if (validation is not null) return validation;
-        if (ValidateCourtDetails(model) is { } courtError) return BadRequest(courtError);
-        var receivedAt = model.ClearExecutiveWritReceivedAt ? null : model.ExecutiveWritReceivedAt ?? e.ExecutiveWritReceivedAt;
-        var submittedAt = model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedAt ?? e.ExecutiveWritSubmittedAt;
-        var submittedTo = model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedTo ?? e.ExecutiveWritSubmittedTo;
-        if (ClientCaseWritSubmissionRules.Validate(receivedAt, submittedAt, submittedTo) is { } writError) return BadRequest(writError);
-
-        var shouldCloseLinkedTasks = !IsFinishedCaseStatus(e.Status) && IsFinishedCaseStatus(model.Status);
-        var shouldCancelFinalReport = IsFinishedCaseStatus(e.Status) && !IsFinishedCaseStatus(model.Status);
-        var isCourtCase = shouldCloseLinkedTasks && (ClientCaseFinalReportTaskService.HasCourtFields(model)
-            || (await ClientCaseFinalReportTaskService.FilterCourtCaseIdsAsync(_db, [e], ct)).Contains(e.Id));
-        var finalReportAssignee = isCourtCase
-            ? await ClientCaseFinalReportTaskService.ResolveAssigneeAsync(_db, ct)
-            : null;
-        if (isCourtCase && finalReportAssignee is null)
-        {
-            return BadRequest("Перед закрытием дела выберите в настройках журнала задач ответственного за итоговые отчёты с доступом ко всем делам.");
-        }
-        var previousSubmittedAt = e.ExecutiveWritSubmittedAt;
-        var previousSubmittedTo = e.ExecutiveWritSubmittedTo;
-        e.Title = model.Title;
-        e.Description = model.Description;
-        e.Status = model.Status;
-        e.ClientId = model.ClientId;
-        e.LegalEntityId = model.LegalEntityId;
-        ApplyCaseDetails(e, model);
-        CaseConfirmationResetPersistence.Apply(_db, e);
-        if (previousSubmittedAt != e.ExecutiveWritSubmittedAt
-            || !string.Equals(previousSubmittedTo, e.ExecutiveWritSubmittedTo, StringComparison.Ordinal))
-        {
-            var message = e.ExecutiveWritSubmittedAt.HasValue
-                ? $"Исполнительный лист подан {e.ExecutiveWritSubmittedAt.Value:dd.MM.yyyy} в {(e.ExecutiveWritSubmittedTo == "bank" ? "банк" : "ФССП")}. Отметил: {User.GetDisplayName()}."
-                : $"Отметка о подаче исполнительного листа снята. Изменил: {User.GetDisplayName()}.";
-            e.EventHistory = string.IsNullOrWhiteSpace(e.EventHistory) ? message : $"{e.EventHistory.TrimEnd()}\n{message}";
-        }
-
-        if (shouldCloseLinkedTasks)
-        {
-            await ClientCaseTaskSyncService.CloseActiveTasksForClosedCaseAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
-            if (isCourtCase)
+            var shouldCloseLinkedTasks = !IsFinishedCaseStatus(e.Status) && IsFinishedCaseStatus(model.Status);
+            var shouldCancelFinalReport = IsFinishedCaseStatus(e.Status) && !IsFinishedCaseStatus(model.Status);
+            var isCourtCase = shouldCloseLinkedTasks && (ClientCaseFinalReportTaskService.HasCourtFields(model)
+                || (await ClientCaseFinalReportTaskService.FilterCourtCaseIdsAsync(_db, [e], ct)).Contains(e.Id));
+            var finalReportAssignee = isCourtCase
+                ? await ClientCaseFinalReportTaskService.ResolveAssigneeAsync(_db, ct)
+                : null;
+            if (isCourtCase && finalReportAssignee is null)
             {
-                await ClientCaseFinalReportTaskService.CreateForClosedCasesAsync(_db, [e.Id], finalReportAssignee!, User.GetUserId(), User.GetDisplayName(), ct);
+                return BadRequest("Перед закрытием дела выберите в настройках журнала задач ответственного за итоговые отчёты с доступом ко всем делам.");
             }
-        }
-        if (shouldCancelFinalReport)
-        {
-            await ClientCaseFinalReportTaskService.CancelForReopenedCasesAsync(_db, [e.Id], User.GetUserId(), User.GetDisplayName(), ct);
-        }
+            var previousSubmittedAt = e.ExecutiveWritSubmittedAt;
+            var previousSubmittedTo = e.ExecutiveWritSubmittedTo;
+            e.Title = model.Title;
+            e.Description = model.Description;
+            e.Status = model.Status;
+            e.ClientId = model.ClientId;
+            e.LegalEntityId = model.LegalEntityId;
+            ApplyCaseDetails(e, model);
+            CaseConfirmationResetPersistence.Apply(_db, e);
+            if (previousSubmittedAt != e.ExecutiveWritSubmittedAt
+                || !string.Equals(previousSubmittedTo, e.ExecutiveWritSubmittedTo, StringComparison.Ordinal))
+            {
+                var message = e.ExecutiveWritSubmittedAt.HasValue
+                    ? $"Исполнительный лист подан {e.ExecutiveWritSubmittedAt.Value:dd.MM.yyyy} в {(e.ExecutiveWritSubmittedTo == "bank" ? "банк" : "ФССП")}. Отметил: {User.GetDisplayName()}."
+                    : $"Отметка о подаче исполнительного листа снята. Изменил: {User.GetDisplayName()}.";
+                e.EventHistory = string.IsNullOrWhiteSpace(e.EventHistory) ? message : $"{e.EventHistory.TrimEnd()}\n{message}";
+            }
 
-        await _db.SaveChangesAsync(ct);
-        await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
+            if (shouldCloseLinkedTasks)
+            {
+                await ClientCaseTaskSyncService.CloseActiveTasksForClosedCaseAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
+                if (isCourtCase)
+                {
+                    await ClientCaseFinalReportTaskService.CreateForClosedCasesAsync(_db, [e.Id], finalReportAssignee!, User.GetUserId(), User.GetDisplayName(), ct);
+                }
+            }
+            if (shouldCancelFinalReport)
+            {
+                await ClientCaseFinalReportTaskService.CancelForReopenedCasesAsync(_db, [e.Id], User.GetUserId(), User.GetDisplayName(), ct);
+            }
+
+            await _db.SaveChangesAsync(ct);
+            await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
+            await _db.Entry(e).ReloadAsync(ct);
+            return Ok(e);
+        }, ct);
+        if (result is not OkObjectResult { Value: ClientCase savedCase }) return result;
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        return Ok(e);
+        return Ok(savedCase);
     }
 
     [HttpDelete("{id:int}")]

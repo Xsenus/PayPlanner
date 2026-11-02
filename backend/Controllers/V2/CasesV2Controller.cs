@@ -1,3 +1,4 @@
+using PayPlanner.Api.Services.Cases;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
@@ -10710,122 +10711,128 @@ public partial class CasesV2Controller : ControllerBase
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] ClientCase model, CancellationToken ct)
+    [HttpPut("{id:int}/checked")]
+    public Task<IActionResult> UpdateWithSource(int id, [FromBody] CaseEditRequest model, CancellationToken ct)
+        => model.ExpectedSource is null
+            ? Task.FromResult<IActionResult>(BadRequest(new { message = "Для сохранения нужны исходные данные дела. Обновите карточку." }))
+            : Update(id, model, ct, model.ExpectedSource);
+
+    // In-process business entry point; HTTP commands must use UpdateWithSource.
+    [NonAction]
+    public async Task<IActionResult> Update(int id, ClientCase model, CancellationToken ct, ClientCase? expectedSource = null)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        DateTime? previousNextHearingAt = null, previousCourtDecisionAt = null;
+        var result = await CaseEditTransaction.RunAsync(_db, User, id, async (e, access) =>
         {
-            return forbidden;
-        }
-
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
-
-        var e = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (e is null) return NotFound();
-        var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
-        if (validation is not null) return validation;
-        if (!IsValidOurCourtRole(model.OurCourtRole)) return BadRequest("Укажите допустимую роль в судебном деле.");
-        if (!IsValidCourtPartyIdentifiers(model)) return BadRequest("ИНН должен содержать 10 или 12 цифр, ОГРН/ОГРНИП — 13 или 15 цифр.");
-        if (!IsValidCourtAmounts(model)) return BadRequest("Судебные суммы должны быть неотрицательными и содержать не более двух знаков после запятой.");
-        var submittedAt = model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedAt ?? e.ExecutiveWritSubmittedAt;
-        var submittedTo = model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedTo ?? e.ExecutiveWritSubmittedTo;
-        var receivedAt = model.ClearExecutiveWritReceivedAt ? null : model.ExecutiveWritReceivedAt ?? e.ExecutiveWritReceivedAt;
-        if (ClientCaseWritSubmissionRules.Validate(receivedAt, submittedAt, submittedTo) is { } writError) return BadRequest(writError);
-        var inactivityStateChanged = e.InactivityRemindersEnabled != model.InactivityRemindersEnabled;
-        if (!TryNormalizeInactivityReminderState(
-                model.InactivityRemindersEnabled,
-                model.InactivityRemindersDisabledReason,
-                e.InactivityRemindersDisabledReason,
-                requireNewReason: inactivityStateChanged && !model.InactivityRemindersEnabled,
-                out var inactivityDisabledReason,
-                out var inactivityValidationError))
-        {
-            return BadRequest(inactivityValidationError);
-        }
-        model.InactivityRemindersDisabledReason = inactivityDisabledReason;
-
-        var shouldCloseLinkedTasks = !IsFinishedCaseStatus(e.Status) && IsFinishedCaseStatus(model.Status);
-        var shouldCancelFinalReport = IsFinishedCaseStatus(e.Status) && !IsFinishedCaseStatus(model.Status);
-        var isCourtCase = shouldCloseLinkedTasks && (ClientCaseFinalReportTaskService.HasCourtFields(model)
-            || (await ClientCaseFinalReportTaskService.FilterCourtCaseIdsAsync(_db, [e], ct)).Contains(e.Id));
-        var finalReportAssignee = isCourtCase
-            ? await ClientCaseFinalReportTaskService.ResolveAssigneeAsync(_db, ct)
-            : null;
-        if (isCourtCase && finalReportAssignee is null)
-        {
-            return BadRequest("Перед закрытием дела выберите в настройках журнала задач ответственного за итоговые отчёты с доступом ко всем делам.");
-        }
-        var previousNextHearingAt = e.NextHearingAt;
-        var previousCourtDecisionAt = e.CourtDecisionAt;
-        var previousWritSubmittedAt = e.ExecutiveWritSubmittedAt;
-        var previousWritSubmittedTo = e.ExecutiveWritSubmittedTo;
-        var previousFeeAmount = e.FeeAmount;
-        var canViewFinance = await CanViewCaseFinanceAsync(ct);
-        e.Title = model.Title;
-        e.Description = model.Description;
-        e.Status = model.Status;
-        e.ClientId = model.ClientId;
-        e.LegalEntityId = model.LegalEntityId;
-        var previousHiddenFromExecutor = e.IsHiddenFromExecutor;
-        ApplyCaseDetails(e, model);
-        CaseConfirmationResetPersistence.Apply(_db, e);
-        if (previousWritSubmittedAt != e.ExecutiveWritSubmittedAt
-            || !string.Equals(previousWritSubmittedTo, e.ExecutiveWritSubmittedTo, StringComparison.Ordinal))
-        {
-            var destination = e.ExecutiveWritSubmittedTo == "bank" ? "банк" : "ФССП";
-            AppendCaseEvent(e, e.ExecutiveWritSubmittedAt.HasValue
-                ? $"Исполнительный лист подан {e.ExecutiveWritSubmittedAt.Value:dd.MM.yyyy} в {destination}. Отметил: {User.GetDisplayName()}."
-                : $"Отметка о подаче исполнительного листа снята. Изменил: {User.GetDisplayName()}.");
-        }
-        if (!canViewFinance)
-        {
-            e.FeeAmount = previousFeeAmount;
-        }
-        ApplyCaseControlState(e, model.IsUnderControl, User.GetUserId(), User.GetDisplayName());
-        if (previousHiddenFromExecutor != e.IsHiddenFromExecutor)
-        {
-            ApplyHiddenFromExecutorMetadata(e, e.IsHiddenFromExecutor, User.GetUserId(), User.GetDisplayName());
-        }
-        if (inactivityStateChanged)
-        {
-            var inactivityAuditReason = e.InactivityRemindersEnabled
-                ? "Автоконтроль дела включен."
-                : $"Автоконтроль дела выключен. Причина: {e.InactivityRemindersDisabledReason}";
-            AppendCaseEvent(e, $"{inactivityAuditReason} Изменил: {User.GetDisplayName()}.");
-            _db.SetAuditReason(inactivityAuditReason);
-        }
-
-        if (shouldCloseLinkedTasks)
-        {
-            await ClientCaseTaskSyncService.CloseActiveTasksForClosedCaseAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
-            if (isCourtCase)
+            _casesAccessTask = Task.FromResult<SectionAccessContext?>(access);
+            _canViewCaseFinanceTask = null;
+            var canViewFinance = await CanViewCaseFinanceAsync(ct);
+            if (expectedSource is not null && !CaseEditSnapshot.TryMerge(e, model, expectedSource, canViewFinance, legacy: false))
+                return Conflict(new { message = "Дело изменилось после открытия редактора. Обновите данные перед сохранением." });
+            var visibility = access.Visibility;
+            var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
+            if (validation is not null) return validation;
+            if (!visibility.SeesAll) await CaseEditTransaction.LockVisibleOwnersAsync(_db, model, ct);
+            if (!IsValidOurCourtRole(model.OurCourtRole)) return BadRequest("Укажите допустимую роль в судебном деле.");
+            if (!IsValidCourtPartyIdentifiers(model)) return BadRequest("ИНН должен содержать 10 или 12 цифр, ОГРН/ОГРНИП — 13 или 15 цифр.");
+            if (!IsValidCourtAmounts(model)) return BadRequest("Судебные суммы должны быть неотрицательными и содержать не более двух знаков после запятой.");
+            var submittedAt = model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedAt ?? e.ExecutiveWritSubmittedAt;
+            var submittedTo = model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedTo ?? e.ExecutiveWritSubmittedTo;
+            var receivedAt = model.ClearExecutiveWritReceivedAt ? null : model.ExecutiveWritReceivedAt ?? e.ExecutiveWritReceivedAt;
+            if (ClientCaseWritSubmissionRules.Validate(receivedAt, submittedAt, submittedTo) is { } writError) return BadRequest(writError);
+            var inactivityStateChanged = e.InactivityRemindersEnabled != model.InactivityRemindersEnabled;
+            if (!TryNormalizeInactivityReminderState(
+                    model.InactivityRemindersEnabled,
+                    model.InactivityRemindersDisabledReason,
+                    e.InactivityRemindersDisabledReason,
+                    requireNewReason: inactivityStateChanged && !model.InactivityRemindersEnabled,
+                    out var inactivityDisabledReason,
+                    out var inactivityValidationError))
             {
-                await ClientCaseFinalReportTaskService.CreateForClosedCasesAsync(_db, [e.Id], finalReportAssignee!, User.GetUserId(), User.GetDisplayName(), ct);
+                return BadRequest(inactivityValidationError);
             }
-        }
-        if (shouldCancelFinalReport)
-        {
-            await ClientCaseFinalReportTaskService.CancelForReopenedCasesAsync(_db, [e.Id], User.GetUserId(), User.GetDisplayName(), ct);
-        }
+            model.InactivityRemindersDisabledReason = inactivityDisabledReason;
 
-        await _db.SaveChangesAsync(ct);
-        await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
+            var shouldCloseLinkedTasks = !IsFinishedCaseStatus(e.Status) && IsFinishedCaseStatus(model.Status);
+            var shouldCancelFinalReport = IsFinishedCaseStatus(e.Status) && !IsFinishedCaseStatus(model.Status);
+            var isCourtCase = shouldCloseLinkedTasks && (ClientCaseFinalReportTaskService.HasCourtFields(model)
+                || (await ClientCaseFinalReportTaskService.FilterCourtCaseIdsAsync(_db, [e], ct)).Contains(e.Id));
+            var finalReportAssignee = isCourtCase
+                ? await ClientCaseFinalReportTaskService.ResolveAssigneeAsync(_db, ct)
+                : null;
+            if (isCourtCase && finalReportAssignee is null)
+            {
+                return BadRequest("Перед закрытием дела выберите в настройках журнала задач ответственного за итоговые отчёты с доступом ко всем делам.");
+            }
+            previousNextHearingAt = e.NextHearingAt;
+            previousCourtDecisionAt = e.CourtDecisionAt;
+            var previousWritSubmittedAt = e.ExecutiveWritSubmittedAt;
+            var previousWritSubmittedTo = e.ExecutiveWritSubmittedTo;
+            var previousFeeAmount = e.FeeAmount;
+            e.Title = model.Title;
+            e.Description = model.Description;
+            e.Status = model.Status;
+            e.ClientId = model.ClientId;
+            e.LegalEntityId = model.LegalEntityId;
+            var previousHiddenFromExecutor = e.IsHiddenFromExecutor;
+            ApplyCaseDetails(e, model);
+            CaseConfirmationResetPersistence.Apply(_db, e);
+            if (previousWritSubmittedAt != e.ExecutiveWritSubmittedAt
+                || !string.Equals(previousWritSubmittedTo, e.ExecutiveWritSubmittedTo, StringComparison.Ordinal))
+            {
+                var destination = e.ExecutiveWritSubmittedTo == "bank" ? "банк" : "ФССП";
+                AppendCaseEvent(e, e.ExecutiveWritSubmittedAt.HasValue
+                    ? $"Исполнительный лист подан {e.ExecutiveWritSubmittedAt.Value:dd.MM.yyyy} в {destination}. Отметил: {User.GetDisplayName()}."
+                    : $"Отметка о подаче исполнительного листа снята. Изменил: {User.GetDisplayName()}.");
+            }
+            if (!canViewFinance)
+            {
+                e.FeeAmount = previousFeeAmount;
+            }
+            ApplyCaseControlState(e, model.IsUnderControl, User.GetUserId(), User.GetDisplayName());
+            if (previousHiddenFromExecutor != e.IsHiddenFromExecutor)
+            {
+                ApplyHiddenFromExecutorMetadata(e, e.IsHiddenFromExecutor, User.GetUserId(), User.GetDisplayName());
+            }
+            if (inactivityStateChanged)
+            {
+                var inactivityAuditReason = e.InactivityRemindersEnabled
+                    ? "Автоконтроль дела включен."
+                    : $"Автоконтроль дела выключен. Причина: {e.InactivityRemindersDisabledReason}";
+                AppendCaseEvent(e, $"{inactivityAuditReason} Изменил: {User.GetDisplayName()}.");
+                _db.SetAuditReason(inactivityAuditReason);
+            }
+
+            if (shouldCloseLinkedTasks)
+            {
+                await ClientCaseTaskSyncService.CloseActiveTasksForClosedCaseAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
+                if (isCourtCase)
+                {
+                    await ClientCaseFinalReportTaskService.CreateForClosedCasesAsync(_db, [e.Id], finalReportAssignee!, User.GetUserId(), User.GetDisplayName(), ct);
+                }
+            }
+            if (shouldCancelFinalReport)
+            {
+                await ClientCaseFinalReportTaskService.CancelForReopenedCasesAsync(_db, [e.Id], User.GetUserId(), User.GetDisplayName(), ct);
+            }
+
+            await _db.SaveChangesAsync(ct);
+            await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
+            await _db.Entry(e).ReloadAsync(ct);
+            return Ok(e);
+        }, ct);
+        if (result is not OkObjectResult { Value: ClientCase savedCase }) return result;
         IReadOnlyCollection<int>? caseNotificationRecipients = null;
         if (_notificationService is not null
-            && !ClientCaseStageClassifier.IsPretrial(e)
-            && e.NextHearingAt.HasValue
-            && previousNextHearingAt != e.NextHearingAt)
+            && !ClientCaseStageClassifier.IsPretrial(savedCase)
+            && savedCase.NextHearingAt.HasValue
+            && previousNextHearingAt != savedCase.NextHearingAt)
         {
-            caseNotificationRecipients ??= await ResolveCaseNotificationRecipientIdsAsync(e.Id, ct);
+            caseNotificationRecipients ??= await ResolveCaseNotificationRecipientIdsAsync(savedCase.Id, ct);
             await _notificationService.NotifyCaseHearingDateChangedAsync(
-                e,
+                savedCase,
                 previousNextHearingAt,
-                e.NextHearingAt.Value,
+                savedCase.NextHearingAt.Value,
                 User.GetDisplayName(),
                 User.GetUserId() ?? 0,
                 caseNotificationRecipients,
@@ -10833,14 +10840,14 @@ public partial class CasesV2Controller : ControllerBase
                 ct);
         }
         if (_notificationService is not null
-            && !ClientCaseStageClassifier.IsPretrial(e)
-            && previousCourtDecisionAt?.Date != e.CourtDecisionAt?.Date)
+            && !ClientCaseStageClassifier.IsPretrial(savedCase)
+            && previousCourtDecisionAt?.Date != savedCase.CourtDecisionAt?.Date)
         {
-            caseNotificationRecipients ??= await ResolveCaseNotificationRecipientIdsAsync(e.Id, ct);
+            caseNotificationRecipients ??= await ResolveCaseNotificationRecipientIdsAsync(savedCase.Id, ct);
             await _notificationService.NotifyCaseDecisionDateChangedAsync(
-                e,
+                savedCase,
                 previousCourtDecisionAt,
-                e.CourtDecisionAt,
+                savedCase.CourtDecisionAt,
                 User.GetDisplayName(),
                 User.GetUserId() ?? 0,
                 caseNotificationRecipients,
@@ -10848,7 +10855,11 @@ public partial class CasesV2Controller : ControllerBase
                 ct);
         }
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        return Ok(e);
+        var reply = SelectRegistryCaseRows(new[] { savedCase }.AsQueryable()).Single();
+        if (!await CanViewCaseFinanceAsync(ct)) HideCaseFinanceData([reply]);
+        reply.CanRevealSensitiveData = true;
+        PopulateResponsibleViewAliases([reply]);
+        return Ok(reply);
     }
 
     [HttpPatch("{id:int}/control")]
