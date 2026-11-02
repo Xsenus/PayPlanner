@@ -10773,6 +10773,7 @@ public partial class CasesV2Controller : ControllerBase
         e.LegalEntityId = model.LegalEntityId;
         var previousHiddenFromExecutor = e.IsHiddenFromExecutor;
         ApplyCaseDetails(e, model);
+        CaseConfirmationResetPersistence.Apply(_db, e);
         if (previousWritSubmittedAt != e.ExecutiveWritSubmittedAt
             || !string.Equals(previousWritSubmittedTo, e.ExecutiveWritSubmittedTo, StringComparison.Ordinal))
         {

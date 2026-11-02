@@ -159,6 +159,7 @@ public class CasesController : ControllerBase
         e.ClientId = model.ClientId;
         e.LegalEntityId = model.LegalEntityId;
         ApplyCaseDetails(e, model);
+        CaseConfirmationResetPersistence.Apply(_db, e);
         if (previousSubmittedAt != e.ExecutiveWritSubmittedAt
             || !string.Equals(previousSubmittedTo, e.ExecutiveWritSubmittedTo, StringComparison.Ordinal))
         {
