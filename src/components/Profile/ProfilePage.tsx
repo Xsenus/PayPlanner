@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyRound, Link2, Loader2, RefreshCw, Save, ShieldCheck, Unlink2, Upload } from 'lucide-react';
 import {
   authService,
+  captureAuthSessionIdentity,
   type AuthProviderPublicSettings,
   type ContractorBalance,
   type ContractorBalanceItem,
@@ -16,6 +17,8 @@ import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useDocumentDeliveryOwner, type DocumentReadOwner } from '../../hooks/useDocumentDeliveryOwner';
+import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
@@ -81,6 +84,7 @@ type ContractorBalanceGroup = {
 type TimeZoneSettingLoadResult = {
   value?: string | null;
   missing: boolean;
+  confirmed: boolean;
 };
 
 const EMPTY_PUBLIC_SETTINGS: AuthProviderPublicSettings = {
@@ -325,29 +329,69 @@ function readFileAsDataUrl(file: File) {
   });
 }
 
-function isMissingUserSettingError(error: unknown) {
-  return error instanceof Error && error.message.includes('HTTP 404');
-}
-
-async function loadTimeZoneSetting(): Promise<TimeZoneSettingLoadResult> {
+async function loadTimeZoneSetting(signal: AbortSignal): Promise<TimeZoneSettingLoadResult> {
   try {
-    const response = await apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY);
-    return { value: response?.value, missing: false };
+    const response = await apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY, { signal });
+    if (response === null) return { value: null, missing: true, confirmed: true };
+    if (!response || response.key !== USER_TIME_ZONE_SETTING_KEY || typeof response.value !== 'string')
+      throw new Error('Не удалось подтвердить часовой пояс профиля.');
+    return { value: response.value, missing: false, confirmed: true };
   } catch (error) {
-    return { value: null, missing: isMissingUserSettingError(error) };
+    const missing = !signal.aborted && error instanceof Error && /^HTTP\s+404(?:\s|$)/i.test(error.message.trim());
+    return { value: null, missing, confirmed: missing };
   }
 }
 
+type ProfileReservation = { reserve: () => ((refresh: boolean) => void) | null; busy: boolean; revision: number };
 export function ProfilePage() {
-  const { refreshUser } = useAuth();
+  const { refreshUser, user } = useAuth();
+  const permissions = useRolePermissions(user?.role?.id);
+  const owner = useDocumentDeliveryOwner(JSON.stringify([user?.id, user?.role?.id, permissions]));
+  const reservations = useRef(new Map<number, object>());
+  const settledStaleWrites = useRef(new Map<number, number>());
+  const callbackOwner = useRef<string | null>(null);
+  const authenticated = captureAuthSessionIdentity().authenticated;
+  if (user && authenticated && callbackOwner.current === null) callbackOwner.current = owner.scope;
+  for (const id of settledStaleWrites.current.keys()) {
+    if (id !== user?.id && !reservations.current.has(id)) settledStaleWrites.current.delete(id);
+  }
+  const [, renderReservations] = useState(0);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const reserve = useCallback(() => {
+    if (!user || reservations.current.has(user.id)) return null;
+    const id = user.id; const entry = {}; reservations.current.set(id, entry);
+    renderReservations(value => value + 1);
+    return (refresh: boolean) => {
+      if (reservations.current.get(id) !== entry) return;
+      reservations.current.delete(id);
+      if (refresh) settledStaleWrites.current.set(id, (settledStaleWrites.current.get(id) ?? 0) + 1);
+      if (mounted.current) renderReservations(value => value + 1);
+    };
+  }, [user]);
+  if (!user || !authenticated) return null;
+  return <ProfilePageScreen key={owner.scope} user={user} permissions={permissions} refreshUser={refreshUser}
+    owner={owner} allowExternalCallback={callbackOwner.current === owner.scope} reservation={{ reserve, busy: reservations.current.has(user.id), revision: settledStaleWrites.current.get(user.id) ?? 0 }} />;
+}
+
+function ProfilePageScreen({ user, permissions, refreshUser, owner, reservation, allowExternalCallback }: {
+  user: User; permissions: ReturnType<typeof useRolePermissions>; refreshUser: () => Promise<void>;
+  owner: DocumentReadOwner; reservation: ProfileReservation; allowExternalCallback: boolean;
+}) {
   const { confirm } = useDialog();
   const toast = useToast();
-
+  const { capture } = owner;
+  const { begin: beginOwnedMutation } = useDocumentDeliveryOwner(owner.scope);
+  const { reserve } = reservation;
   const [profile, setProfile] = useState<User | null>(null);
-  const permissions = useRolePermissions(profile?.role?.id);
   const [publicSettings, setPublicSettings] = useState<AuthProviderPublicSettings>(EMPTY_PUBLIC_SETTINGS);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [timeZoneId, setTimeZoneId] = useState(() => normalizeUserTimeZoneId());
+  const [timeZoneConfirmed, setTimeZoneConfirmed] = useState(true);
+  const [taskDefaultsConfirmed, setTaskDefaultsConfirmed] = useState(true);
+  const timeZoneEdit = useRef(0);
+  const savedTimeZoneEdit = useRef(0);
+  const taskDefaultsEdited = useRef(false);
   const [taskNotificationDefaults, setTaskNotificationDefaults] = useState<TaskNotificationDefaults>(DEFAULT_TASK_NOTIFICATION_DEFAULTS);
   const [contractorBalance, setContractorBalance] = useState<ContractorBalance>(EMPTY_CONTRACTOR_BALANCE);
   const [passwordForm, setPasswordForm] = useState<PasswordFormState>(EMPTY_PASSWORD_FORM);
@@ -362,8 +406,8 @@ export function ProfilePage() {
   const [pendingPhotoCrop, setPendingPhotoCrop] = useState<PendingPhotoCropState | null>(null);
   const [profilePhotoFailed, setProfilePhotoFailed] = useState(false);
   const [activeSectionTab, setActiveSectionTab] = useState<ProfileSectionTab>('profile');
-  const canViewProfileAudit = profile?.role?.name === 'admin' || permissions.audit?.canView === true;
-  const canViewProfileCalendars = profile?.role?.name === 'admin' || permissions.calendar?.canView === true;
+  const canViewProfileAudit = user.role?.name === 'admin' || permissions.audit?.canView === true;
+  const canViewProfileCalendars = user.role?.name === 'admin' || permissions.calendar?.canView === true;
   const visibleProfileSectionTabs = useMemo(
     () => PROFILE_SECTION_TABS.filter((tab) => {
       if (tab.id === 'audit') return canViewProfileAudit;
@@ -372,7 +416,7 @@ export function ProfilePage() {
     }),
     [canViewProfileAudit, canViewProfileCalendars],
   );
-  const canUseEmployeeCalendarMode = profile?.role?.name === 'admin'
+  const canUseEmployeeCalendarMode = user.role?.name === 'admin'
     || permissions.calendar.viewScope === 'all'
     || permissions.calendar.viewScope === 'department'
     || permissions.calendar.viewScope === 'specific';
@@ -428,36 +472,97 @@ export function ProfilePage() {
     }
   }, []);
 
+  const readVersion = useRef(0);
+  const readAbort = useRef<AbortController | null>(null);
+  const draftVersion = useRef(0);
+  const editedFormFields = useRef(new Set<keyof FormState>());
+  const passwordVersion = useRef(0);
+  const photoReadVersion = useRef(0);
+  const busyRef = useRef(reservation.busy);
+  busyRef.current = reservation.busy;
+  const invalidateReads = useCallback(() => {
+    readVersion.current += 1;
+    readAbort.current?.abort(); readAbort.current = null;
+  }, []);
+  useEffect(() => () => invalidateReads(), [invalidateReads]);
+  const beginMutation = useCallback((kind: string) => {
+    if (!profile || profile.id !== user.id) return null;
+    const operation = beginOwnedMutation(kind);
+    if (!operation) return null;
+    const release = reserve();
+    if (!release) { operation.finish(); return null; }
+    invalidateReads();
+    return { isCurrent: operation.isCurrent, finish: () => { const refresh = !operation.isCurrent(); operation.finish(); release(refresh); } };
+  }, [beginOwnedMutation, invalidateReads, profile, reserve, user.id]);
+  const assertProfile = useCallback((value: User) => {
+    if (!value || value.id !== user.id) throw new Error('Не удалось подтвердить владельца профиля.');
+    return value;
+  }, [user.id]);
+  const applyProfileForm = useCallback((value: User, clearEdits = false) => {
+    if (clearEdits) editedFormFields.current.clear();
+    setForm(current => {
+      const next = buildFormState(value);
+      for (const key of editedFormFields.current) next[key] = current[key];
+      return next;
+    });
+  }, []);
   const loadProfile = useCallback(async () => {
-    const [nextProfile, nextProviders, nextTaskNotificationDefaults, nextTimeZone, nextContractorBalance] = await Promise.all([
+    const readOwner = capture();
+    if (!readOwner) throw new StaleUiOperationError();
+    invalidateReads(); const version = readVersion.current;
+    const edit = draftVersion.current;
+    const controller = new AbortController(); readAbort.current = controller;
+    const current = () => readOwner.isCurrent() && version === readVersion.current && !controller.signal.aborted;
+    const [nextProfile, nextProviders, nextTaskNotificationDefaults, nextTimeZone, nextContractorBalance] = await awaitOwnedUiResult(() => Promise.all([
       authService.getProfile(),
       authService.getAuthProviders(),
-      apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
-      loadTimeZoneSetting(),
+      apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY, { signal: controller.signal })
+        .then(value => {
+          if (value !== null && (!value || value.key !== TASK_NOTIFICATION_DEFAULTS_SETTING_KEY || typeof value.value !== 'string')) throw new Error('Unconfirmed task preferences.');
+          return { value, confirmed: true };
+        }).catch(() => ({ value: null, confirmed: false })),
+      loadTimeZoneSetting(controller.signal),
       authService.getContractorBalance().catch(() => EMPTY_CONTRACTOR_BALANCE),
-    ]);
-
+    ]), current);
+    assertProfile(nextProfile);
+    if (draftVersion.current !== edit) return nextProfile;
     setProfile(nextProfile);
-    setForm(buildFormState(nextProfile));
+    applyProfileForm(nextProfile);
     setPublicSettings(nextProviders);
-    setTaskNotificationDefaults(parseTaskNotificationDefaults(nextTaskNotificationDefaults?.value));
+    if (!taskDefaultsEdited.current) {
+      setTaskNotificationDefaults(parseTaskNotificationDefaults(nextTaskNotificationDefaults.value?.value));
+      setTaskDefaultsConfirmed(nextTaskNotificationDefaults.confirmed);
+    }
+    const timeZoneDirty = timeZoneEdit.current !== savedTimeZoneEdit.current;
     const nextTimeZoneId = normalizeUserTimeZoneId(nextTimeZone.value);
-    setTimeZoneId(nextTimeZoneId);
-    if (nextTimeZone.missing) {
-      void apiService.upsertUserSetting(USER_TIME_ZONE_SETTING_KEY, nextTimeZoneId).catch(() => undefined);
+    if (!timeZoneDirty) { setTimeZoneConfirmed(nextTimeZone.confirmed); setTimeZoneId(nextTimeZoneId); }
+    if (!timeZoneDirty && nextTimeZone.missing && current()) {
+      void awaitOwnedUiResult(() => apiService.initializeUserSetting(USER_TIME_ZONE_SETTING_KEY, nextTimeZoneId, { signal: controller.signal }), current).catch(() => undefined);
     }
     setContractorBalance(nextContractorBalance);
     return nextProfile;
-  }, []);
+  }, [applyProfileForm, assertProfile, capture, invalidateReads]);
 
+  const refreshProfile = useCallback(async () => {
+    const readOwner = capture();
+    if (!readOwner || busyRef.current) return;
+    try { await loadProfile(); }
+    catch (error) { if (readOwner.isCurrent() && !(error instanceof StaleUiOperationError)) toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить профиль пользователя.')); }
+  }, [capture, loadProfile, toast]);
   useEffect(() => {
+    const readOwner = capture(); if (!readOwner) return;
     setLoading(true);
     void loadProfile()
-      .catch((error) => {
-        toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить профиль пользователя.'));
-      })
-      .finally(() => setLoading(false));
-  }, [loadProfile, toast]);
+      .catch(error => { if (readOwner.isCurrent() && !(error instanceof StaleUiOperationError)) toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить профиль пользователя.')); })
+      .finally(() => { if (readOwner.isCurrent()) setLoading(false); });
+  }, [capture, loadProfile, toast]);
+
+  const observedStaleWrite = useRef(reservation.revision);
+  useEffect(() => {
+    if (observedStaleWrite.current === reservation.revision) return;
+    observedStaleWrite.current = reservation.revision;
+    void refreshProfile();
+  }, [refreshProfile, reservation.revision]);
 
   const providerCards = useMemo(() => {
     const identities = profile?.externalIdentities ?? [];
@@ -505,57 +610,45 @@ export function ProfilePage() {
 
   useEffect(() => {
     if (!pendingLink?.state || !pendingLink.provider) return;
-
-    let disposed = false;
+    const linkOwner = capture(); if (!linkOwner) return;
+    let disposed = false; let inFlight = false;
+    const current = () => !disposed && linkOwner.isCurrent();
     const interval = window.setInterval(async () => {
+      if (!current() || inFlight || busyRef.current) return;
+      const operation = beginMutation('link-status'); if (!operation) return;
+      inFlight = true;
       try {
-        const status = await authService.getExternalAuthStatus(pendingLink.state);
-        if (disposed) return;
-
+        const status = await awaitOwnedUiResult(() => authService.getExternalAuthStatus(pendingLink.state), () => current() && operation.isCurrent());
         if (status.completed && status.linked) {
-          window.clearInterval(interval);
-          closePopup();
-          setPendingLink(null);
-          setLinkingProvider(null);
-          clearExternalAuthQueryParams();
-          await loadProfile();
-          await refreshUser();
-          toast.success(`${providerLabel(status.provider)} успешно привязан к профилю.`);
+          try {
+            window.clearInterval(interval); closePopup(); setPendingLink(null); setLinkingProvider(null); clearExternalAuthQueryParams();
+            await awaitOwnedUiResult(() => loadProfile(), operation.isCurrent);
+            await awaitOwnedUiResult(() => refreshUser(), operation.isCurrent);
+            toast.success(`${providerLabel(status.provider)} успешно привязан к профилю.`);
+          } catch (error) {
+            if (operation.isCurrent() && !(error instanceof StaleUiOperationError)) toast.error(extractDisplayErrorMessage(error, 'Не удалось обновить профиль после привязки внешнего входа.'));
+          }
           return;
         }
-
         if (status.status === 'failed' || status.status === 'expired' || status.status === 'consumed') {
-          window.clearInterval(interval);
-          closePopup();
-          setPendingLink(null);
-          setLinkingProvider(null);
-          clearExternalAuthQueryParams();
-
-          if (status.status === 'failed') {
-            toast.error(status.detail || `Не удалось завершить привязку через ${providerLabel(pendingLink.provider)}.`);
-          } else if (status.status === 'expired') {
-            toast.error(`Сессия привязки ${providerLabel(pendingLink.provider)} истекла. Запустите её заново.`);
-          }
+          window.clearInterval(interval); closePopup(); setPendingLink(null); setLinkingProvider(null); clearExternalAuthQueryParams();
+          if (status.status === 'failed') toast.error(status.detail || `Не удалось завершить привязку через ${providerLabel(pendingLink.provider)}.`);
+          else if (status.status === 'expired') toast.error(`Сессия привязки ${providerLabel(pendingLink.provider)} истекла. Запустите её заново.`);
         }
       } catch (error) {
-        window.clearInterval(interval);
-        closePopup();
-        setPendingLink(null);
-        setLinkingProvider(null);
-        clearExternalAuthQueryParams();
-        toast.error(extractDisplayErrorMessage(error, 'Не удалось проверить статус привязки внешнего входа.'));
-      }
+        if (current() && !(error instanceof StaleUiOperationError)) {
+          window.clearInterval(interval); closePopup(); setPendingLink(null); setLinkingProvider(null); clearExternalAuthQueryParams();
+          toast.error(extractDisplayErrorMessage(error, 'Не удалось проверить статус привязки внешнего входа.'));
+        }
+      } finally { inFlight = false; operation.finish(); }
     }, 2000);
-
-    return () => {
-      disposed = true;
-      window.clearInterval(interval);
-    };
-  }, [closePopup, loadProfile, pendingLink, refreshUser, toast]);
+    return () => { disposed = true; window.clearInterval(interval); };
+  }, [beginMutation, capture, closePopup, loadProfile, pendingLink, refreshUser, toast]);
 
   useEffect(() => () => closePopup(), [closePopup]);
 
   useEffect(() => {
+    if (!allowExternalCallback) return;
     const params = new URLSearchParams(window.location.search);
     const state = params.get('externalAuthState');
     const provider = params.get('externalAuthProvider');
@@ -563,99 +656,114 @@ export function ProfilePage() {
       setPendingLink({ provider, state });
       setLinkingProvider(provider);
     }
-  }, []);
+  }, [allowExternalCallback]);
 
   const updateForm = <K extends keyof FormState>(key: K, value: FormState[K]) => {
+    draftVersion.current += 1; editedFormFields.current.add(key);
     setForm((current) => ({ ...current, [key]: value }));
   };
 
   const updatePasswordForm = <K extends keyof PasswordFormState>(key: K, value: PasswordFormState[K]) => {
+    passwordVersion.current += 1;
     setPasswordForm((current) => ({ ...current, [key]: value }));
   };
 
   const handleSave = async () => {
+    const operation = beginMutation('profile'); if (!operation) return;
+    const edit = draftVersion.current;
+    const timeZoneVersion = timeZoneEdit.current;
+    const saveTimeZone = timeZoneVersion !== savedTimeZoneEdit.current;
     setSaving(true);
+    let stage: 'profile' | 'timezone' | 'refresh' = 'profile';
     try {
-      const payload = buildProfileUpdatePayload(form);
-
-      const nextProfile = await authService.updateProfile(payload);
-      await apiService.upsertUserSetting(USER_TIME_ZONE_SETTING_KEY, timeZoneId);
+      const nextProfile = assertProfile(await awaitOwnedUiResult(() => authService.updateProfile(buildProfileUpdatePayload(form)), operation.isCurrent));
       setProfile(nextProfile);
-      setForm(buildFormState(nextProfile));
-      await refreshUser();
+      if (draftVersion.current === edit) applyProfileForm(nextProfile, true);
+      if (saveTimeZone) {
+        stage = 'timezone';
+        await awaitOwnedUiResult(() => apiService.upsertUserSetting(USER_TIME_ZONE_SETTING_KEY, timeZoneId), operation.isCurrent);
+        savedTimeZoneEdit.current = timeZoneVersion; setTimeZoneConfirmed(true);
+      }
+      stage = 'refresh';
+      await awaitOwnedUiResult(() => refreshUser(), operation.isCurrent);
       toast.success('Профиль обновлён.');
     } catch (error) {
-      toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить профиль.'));
+      if (operation.isCurrent() && !(error instanceof StaleUiOperationError)) {
+        const detail = extractDisplayErrorMessage(error, 'Не удалось сохранить профиль.');
+        toast.error(stage === 'profile' ? detail : stage === 'timezone' ? `Данные профиля сохранены, но часовой пояс не сохранён. ${detail}` : `${saveTimeZone ? 'Данные профиля и часовой пояс сохранены' : 'Данные профиля сохранены'}, но не удалось обновить данные входа. ${detail}`);
+        if (stage === 'timezone') { try { await awaitOwnedUiResult(() => refreshUser(), operation.isCurrent); } catch { /* Keep the original partial-save error. */ } }
+      }
     } finally {
-      setSaving(false);
+      if (operation.isCurrent()) setSaving(false);
+      operation.finish();
     }
   };
 
   const handleTaskNotificationDefaultsSave = async () => {
+    if (!taskDefaultsConfirmed && !taskDefaultsEdited.current) return;
+    const operation = beginMutation('task-defaults'); if (!operation) return;
     setSavingTaskNotificationDefaults(true);
     try {
-      await apiService.upsertUserSetting(
-        TASK_NOTIFICATION_DEFAULTS_SETTING_KEY,
-        serializeTaskNotificationDefaults(taskNotificationDefaults),
-      );
+      await awaitOwnedUiResult(() => apiService.upsertUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY,
+        serializeTaskNotificationDefaults(taskNotificationDefaults)), operation.isCurrent);
+      setTaskDefaultsConfirmed(true); taskDefaultsEdited.current = false;
       toast.success('Настройки напоминаний задач сохранены.');
     } catch (error) {
-      toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить настройки напоминаний задач.'));
+      if (operation.isCurrent() && !(error instanceof StaleUiOperationError)) toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить настройки напоминаний задач.'));
     } finally {
-      setSavingTaskNotificationDefaults(false);
+      if (operation.isCurrent()) setSavingTaskNotificationDefaults(false);
+      operation.finish();
     }
   };
 
-  const uploadProfilePhoto = useCallback(
-    async (file: File) => {
-      setUploadingPhoto(true);
-      try {
-        const nextProfile = await authService.uploadProfilePhoto(file);
-        setProfile(nextProfile);
-        setForm(buildFormState(nextProfile));
-        setPendingPhotoCrop(null);
-        await refreshUser();
-        toast.success('Фото профиля обновлено.');
-      } catch (error) {
+  const renderedPhotoVersion = photoReadVersion.current;
+  const uploadProfilePhoto = async (file: File) => {
+    if (!pendingPhotoCrop || renderedPhotoVersion !== photoReadVersion.current) return;
+    const operation = beginMutation('photo'); if (!operation) return;
+    const edit = draftVersion.current;
+    const current = () => operation.isCurrent() && renderedPhotoVersion === photoReadVersion.current;
+    setUploadingPhoto(true);
+    try {
+      const nextProfile = assertProfile(await awaitOwnedUiResult(() => authService.uploadProfilePhoto(file), current));
+      setProfile(nextProfile);
+      if (draftVersion.current === edit) applyProfileForm(nextProfile);
+      setPendingPhotoCrop(null);
+      await awaitOwnedUiResult(() => refreshUser(), current);
+      toast.success('Фото профиля обновлено.');
+    } catch (error) {
+      if (current() && !(error instanceof StaleUiOperationError)) {
         toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить фото профиля.'));
         throw error;
-      } finally {
-        setUploadingPhoto(false);
-        resetPhotoInput();
       }
-    },
-    [refreshUser, resetPhotoInput, toast],
-  );
+    } finally {
+      if (operation.isCurrent()) setUploadingPhoto(false);
+      if (current()) resetPhotoInput();
+      operation.finish();
+    }
+  };
 
-  const handlePhotoSelected = useCallback(
-    async (file?: File | null) => {
-      if (!file) {
-        resetPhotoInput();
-        return;
-      }
-
-      try {
-        const src = await readFileAsDataUrl(file);
-        setPendingPhotoCrop({
-          src,
-          fileName: file.name || 'profile-photo',
-          mimeType: file.type || 'image/png',
-        });
-      } catch (error) {
-        resetPhotoInput();
-        toast.error(extractDisplayErrorMessage(error, 'Не удалось подготовить изображение к загрузке.'));
-      }
-    },
-    [resetPhotoInput, toast],
-  );
+  const handlePhotoSelected = useCallback(async (file?: File | null) => {
+    const photoOwner = capture(); if (!photoOwner) return;
+    const version = ++photoReadVersion.current;
+    const current = () => photoOwner.isCurrent() && version === photoReadVersion.current;
+    if (!file) { resetPhotoInput(); return; }
+    try {
+      const src = await awaitOwnedUiResult(() => readFileAsDataUrl(file), current);
+      setPendingPhotoCrop({ src, fileName: file.name || 'profile-photo', mimeType: file.type || 'image/png' });
+    } catch (error) {
+      if (current() && !(error instanceof StaleUiOperationError)) { resetPhotoInput(); toast.error(extractDisplayErrorMessage(error, 'Не удалось подготовить изображение к загрузке.')); }
+    }
+  }, [capture, resetPhotoInput, toast]);
 
   const closeCropModal = useCallback(() => {
     if (uploadingPhoto) return;
+    photoReadVersion.current += 1;
     setPendingPhotoCrop(null);
     resetPhotoInput();
   }, [resetPhotoInput, uploadingPhoto]);
 
   const handlePasswordSave = async () => {
+    if (!capture()) return;
     if (!passwordForm.newPassword.trim()) {
       toast.error('Укажите новый пароль.');
       return;
@@ -666,27 +774,32 @@ export function ProfilePage() {
       return;
     }
 
+    const operation = beginMutation('password'); if (!operation) return;
+    const edit = passwordVersion.current;
     setChangingPassword(true);
     try {
-      const nextProfile = await authService.changePassword({
+      const nextProfile = assertProfile(await awaitOwnedUiResult(() => authService.changePassword({
         currentPassword: passwordForm.currentPassword || undefined,
         newPassword: passwordForm.newPassword,
-      });
+      }), operation.isCurrent));
       setProfile(nextProfile);
-      setPasswordForm(EMPTY_PASSWORD_FORM);
+      if (passwordVersion.current === edit) setPasswordForm(EMPTY_PASSWORD_FORM);
       toast.success('Пароль успешно изменён.');
     } catch (error) {
-      toast.error(extractDisplayErrorMessage(error, 'Не удалось изменить пароль.'));
+      if (operation.isCurrent() && !(error instanceof StaleUiOperationError)) toast.error(extractDisplayErrorMessage(error, 'Не удалось изменить пароль.'));
     } finally {
-      setChangingPassword(false);
+      if (operation.isCurrent()) setChangingPassword(false);
+      operation.finish();
     }
   };
 
   const handleLink = async (provider: ProviderId) => {
+    if (pendingLink || linkingProvider) return;
+    const operation = beginMutation('link'); if (!operation) return;
     setLinkingProvider(provider);
     try {
       if (provider === 'telegram') {
-        const started = await authService.startTelegramBotAuth('/?ppTab=profile', 'link');
+        const started = await awaitOwnedUiResult(() => authService.startTelegramBotAuth('/?ppTab=profile', 'link'), operation.isCurrent);
         setPendingLink({ provider, state: started.state });
         popupRef.current = window.open(started.authUrl, 'pp-profile-telegram-link', 'popup=yes,width=540,height=720');
         if (!popupRef.current) {
@@ -696,47 +809,43 @@ export function ProfilePage() {
         return;
       }
 
-      const started = await authService.startExternalAuth(provider, '/?ppTab=profile', 'link');
+      const started = await awaitOwnedUiResult(() => authService.startExternalAuth(provider, '/?ppTab=profile', 'link'), operation.isCurrent);
       setPendingLink({ provider, state: started.state });
       popupRef.current = window.open(started.authUrl, 'pp-profile-external-link', 'popup=yes,width=540,height=720');
       if (!popupRef.current) {
         window.location.assign(started.authUrl);
       }
     } catch (error) {
-      setLinkingProvider(null);
-      setPendingLink(null);
-      closePopup();
-      toast.error(extractDisplayErrorMessage(error, `Не удалось запустить привязку через ${providerLabel(provider)}.`));
-    }
+      if (operation.isCurrent() && !(error instanceof StaleUiOperationError)) {
+        setLinkingProvider(null); setPendingLink(null); closePopup();
+        toast.error(extractDisplayErrorMessage(error, `Не удалось запустить привязку через ${providerLabel(provider)}.`));
+      }
+    } finally { operation.finish(); }
   };
 
   const handleDetach = async (provider: ProviderId) => {
-    const approved = await confirm({
-      title: `Отвязать ${providerLabel(provider)}?`,
-      description:
-        'Этот способ входа перестанет работать для текущего профиля. Если это единственный способ входа без основного email, система не позволит отвязать его.',
-      confirmLabel: 'Отвязать',
-      cancelLabel: 'Отмена',
-      variant: 'danger',
-    });
-
-    if (!approved) return;
-
+    const operation = beginMutation('detach'); if (!operation) return;
     setUnlinkingProvider(provider);
+    const edit = draftVersion.current;
     try {
-      const result = await authService.detachExternalIdentity(provider);
+      const approved = await awaitOwnedUiResult(() => confirm({
+        title: `Отвязать ${providerLabel(provider)}?`,
+        description: 'Этот способ входа перестанет работать для текущего профиля. Если это единственный способ входа без основного email, система не позволит отвязать его.',
+        confirmLabel: 'Отвязать', cancelLabel: 'Отмена', variant: 'danger',
+      }), operation.isCurrent);
+      if (!approved) return;
+      const result = await awaitOwnedUiResult(() => authService.detachExternalIdentity(provider), operation.isCurrent);
       if (result.user) {
-        setProfile(result.user);
-        setForm(buildFormState(result.user));
-      } else {
-        await loadProfile();
-      }
-      await refreshUser();
+        setProfile(assertProfile(result.user));
+        if (draftVersion.current === edit) applyProfileForm(result.user);
+      } else { await awaitOwnedUiResult(() => loadProfile(), operation.isCurrent); }
+      await awaitOwnedUiResult(() => refreshUser(), operation.isCurrent);
       toast.success(`${providerLabel(provider)} отвязан от профиля.`);
     } catch (error) {
-      toast.error(extractDisplayErrorMessage(error, `Не удалось отвязать ${providerLabel(provider)}.`));
+      if (operation.isCurrent() && !(error instanceof StaleUiOperationError)) toast.error(extractDisplayErrorMessage(error, `Не удалось отвязать ${providerLabel(provider)}.`));
     } finally {
-      setUnlinkingProvider(null);
+      if (operation.isCurrent()) setUnlinkingProvider(null);
+      operation.finish();
     }
   };
 
@@ -763,7 +872,8 @@ export function ProfilePage() {
             </div>
             <button
               type="button"
-              onClick={() => void loadProfile()}
+              onClick={() => void refreshProfile()}
+              disabled={reservation.busy}
               className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
               <RefreshCw className="h-4 w-4" />
@@ -941,7 +1051,7 @@ export function ProfilePage() {
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      disabled={uploadingPhoto}
+                      disabled={reservation.busy || !profile}
                       className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {uploadingPhoto ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
@@ -1077,14 +1187,17 @@ export function ProfilePage() {
                 <label className="space-y-2">
                   <span className="text-sm font-medium text-slate-700">Часовой пояс</span>
                   <SystemSelect
+                    aria-label="Часовой пояс"
+                    aria-describedby={!timeZoneConfirmed ? "profile-timezone-load-status" : undefined}
                     value={timeZoneId}
-                    onChange={(event) => setTimeZoneId(event.target.value)}
+                    onChange={(event) => { draftVersion.current += 1; timeZoneEdit.current += 1; setTimeZoneConfirmed(true); setTimeZoneId(event.target.value); }}
                     className="w-full rounded-2xl border border-slate-300 px-3 py-3"
                   >
                     {USER_TIME_ZONE_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
                   </SystemSelect>
+                  {!timeZoneConfirmed ? <span id="profile-timezone-load-status" role="status" className="block text-xs text-amber-800">Часовой пояс не загрузился. Пока показан пояс браузера; сохранение контактов его не заменит. Выберите пояс вручную или обновите данные.</span> : null}
                 </label>
               </div>
 
@@ -1092,7 +1205,7 @@ export function ProfilePage() {
                 <button
                   type="button"
                   onClick={() => void handleSave()}
-                  disabled={saving}
+                  disabled={reservation.busy || !profile}
                   className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -1126,18 +1239,19 @@ export function ProfilePage() {
                 <button
                   type="button"
                   onClick={() => void handleTaskNotificationDefaultsSave()}
-                  disabled={savingTaskNotificationDefaults}
+                  disabled={reservation.busy || !profile || (!taskDefaultsConfirmed && !taskDefaultsEdited.current)}
                   className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {savingTaskNotificationDefaults ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   Сохранить
                 </button>
               </div>
+              {!taskDefaultsConfirmed ? <p role="status" className="mt-2 text-xs text-amber-800">Напоминания не загрузились. Обновите данные или выберите настройки вручную перед сохранением.</p> : null}
               <div className="mt-5">
                 <TaskNotificationDefaultsPanel
                   value={taskNotificationDefaults}
-                  onChange={setTaskNotificationDefaults}
-                  disabled={savingTaskNotificationDefaults}
+                  onChange={value => { draftVersion.current += 1; taskDefaultsEdited.current = true; setTaskNotificationDefaults(value); }}
+                  disabled={reservation.busy || !profile}
                 />
               </div>
             </div>
@@ -1182,7 +1296,7 @@ export function ProfilePage() {
                             key={item.id}
                             type="button"
                             onClick={() => void handleLink(item.id)}
-                            disabled={isLinking || unlinkingProvider !== null || uploadingPhoto}
+                            disabled={reservation.busy || linkingProvider !== null || unlinkingProvider !== null || uploadingPhoto}
                             className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:border-slate-300 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             {isLinking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
@@ -1221,7 +1335,7 @@ export function ProfilePage() {
                           <button
                             type="button"
                             onClick={() => void handleDetach(item.id)}
-                            disabled={isUnlinking || isLinking}
+                            disabled={reservation.busy || isUnlinking || isLinking}
                             className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             {isUnlinking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Unlink2 className="h-4 w-4" />}
@@ -1292,7 +1406,7 @@ export function ProfilePage() {
                 <button
                   type="button"
                   onClick={() => void handlePasswordSave()}
-                  disabled={changingPassword}
+                  disabled={reservation.busy || !profile}
                   className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {changingPassword ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
@@ -1326,7 +1440,7 @@ export function ProfilePage() {
         imageSrc={pendingPhotoCrop?.src ?? null}
         fileName={pendingPhotoCrop?.fileName ?? 'profile-photo'}
         mimeType={pendingPhotoCrop?.mimeType ?? 'image/png'}
-        submitting={uploadingPhoto}
+        submitting={reservation.busy}
         onClose={closeCropModal}
         onConfirm={uploadProfilePhoto}
       />
