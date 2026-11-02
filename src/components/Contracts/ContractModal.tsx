@@ -1,3 +1,4 @@
+import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
@@ -337,6 +338,7 @@ export function ContractModal({
     try {
       await onSubmit(payload);
     } catch (err) {
+      if (err instanceof StaleUiOperationError) return;
       if (err instanceof Error && !errorMessage) {
         setLocalError(err.message);
       }

@@ -1,3 +1,4 @@
+import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -63,6 +64,16 @@ describe('ContractModal', () => {
     vi.clearAllMocks();
   });
 
+
+  it.each(['stale', 'ordinary'])('caller ownership result: %s preserves correct error visibility', async kind => {
+    const error = kind === 'stale' ? new StaleUiOperationError() : new Error('Обычная ошибка документа');
+    const submit = vi.fn().mockRejectedValue(error);
+    render(<ContractModal open mode="create" contract={null} onClose={vi.fn()} onSubmit={submit} submitting={false} defaultClients={[{ id: 51, name: 'Контрагент' }]} />);
+    await waitFor(() => expect((screen.getByLabelText('Номер договора') as HTMLInputElement).value).toBe('Д-1'));
+    fireEvent.change(screen.getByLabelText('Сумма договора'), { target: { value: '1000' } }); fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    await waitFor(() => expect(Boolean(screen.queryByText(error.message))).toBe(kind === 'ordinary'));
+  });
   it('сохраняет введённую дату при смене часового пояса открытой формы', async () => {
     const props = {
       open: true,

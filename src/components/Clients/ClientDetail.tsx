@@ -37,6 +37,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useId,
   useMemo,
   useRef,
@@ -1419,14 +1420,36 @@ function ProfileDocumentReadList({ title, entries }: { title: string; entries: A
 
 type ClientDetailAuthority = { auth: ReturnType<typeof useAuth>; permissions: ReturnType<typeof useRolePermissions> };
 
+type RelatedDocumentKind = 'act' | 'contract';
+type DocumentReservations = { busy: (kind: RelatedDocumentKind, clientId: number) => boolean; reserve: (kind: RelatedDocumentKind, clientId: number) => (() => void) | null };
+
 export function ClientDetail(props: ClientDetailProps) {
+  // Lives above the keyed screen so a role/client switch cannot release a dispatched write.
+  const reservations = useRef(new Map<string, object>());
+  const [, renderReservations] = useState(0);
+  const reservationsMounted = useRef(true);
+  useEffect(() => { reservationsMounted.current = true; return () => { reservationsMounted.current = false; }; }, []);
+  const documentReservations: DocumentReservations = {
+    busy: (kind, id) => reservations.current.has(`${kind}:${id}`),
+    reserve: (kind, id) => {
+      const key = `${kind}:${id}`;
+      if (reservations.current.has(key)) return null;
+      const entry = {}; reservations.current.set(key, entry); renderReservations(value => value + 1);
+      return () => {
+        if (reservations.current.get(key) !== entry) return;
+        reservations.current.delete(key);
+        if (reservationsMounted.current) renderReservations(value => value + 1);
+      };
+    },
+  };
+
   const auth = useAuth();
   const permissions = useRolePermissions(auth.user?.role?.id);
   const owner = useDocumentDeliveryOwner(JSON.stringify([props.clientId, auth.user?.id, auth.user?.role?.id,
     auth.user?.departmentId, auth.isAdmin(), permissions]));
   const guard = <Args extends unknown[],>(callback: ((...args: Args) => void) | undefined) => callback
     ? (...args: Args) => { if (owner.capture()) callback(...args); } : undefined;
-  return <ClientDetailScreen key={owner.scope} {...props} authority={{ auth, permissions }} screenOwner={owner}
+  return <ClientDetailScreen key={owner.scope} {...props} authority={{ auth, permissions }} screenOwner={owner} documentReservations={documentReservations}
     onBack={() => { if (owner.capture()) props.onBack(); }}
     onClientUpdated={guard(props.onClientUpdated)} onOpenInvoicePage={guard(props.onOpenInvoicePage)}
     onOpenActPage={guard(props.onOpenActPage)} onCreateActPage={guard(props.onCreateActPage)}
@@ -1436,6 +1459,7 @@ export function ClientDetail(props: ClientDetailProps) {
 function ClientDetailScreen({
   authority,
   screenOwner,
+  documentReservations,
   clientId,
   onBack,
   onClientUpdated,
@@ -1445,7 +1469,7 @@ function ClientDetailScreen({
   onCreateActPage,
   onOpenCasePage,
   onOpenTask,
-}: ClientDetailProps & { authority: ClientDetailAuthority; screenOwner: DocumentReadOwner }) {
+}: ClientDetailProps & { authority: ClientDetailAuthority; screenOwner: DocumentReadOwner; documentReservations: DocumentReservations }) {
   const profileFieldId = useId();
   const { t } = useTranslation();
   const { user, isAdmin } = authority.auth;
@@ -2393,7 +2417,9 @@ function ClientDetailScreen({
   const [actModalOpen, setActModalOpen] = useState(false);
   const [actModalMode, setActModalMode] = useState<"create" | "edit">("create");
   const [selectedAct, setSelectedAct] = useState<Act | null>(null);
-  const [actSubmitting, setActSubmitting] = useState(false);
+  const actFormOwner = useDocumentDeliveryOwner(JSON.stringify([screenOwner.scope, activeSection, actModalOpen, actModalMode, selectedAct?.id]));
+  const actMutationOwner = useDocumentDeliveryOwner(screenOwner.scope);
+  const actSubmitting = documentReservations.busy('act', clientId);
   const [actModalError, setActModalError] = useState<string | null>(null);
 
   const today = useMemo(() => new Date(), []);
@@ -2558,7 +2584,11 @@ function ClientDetailScreen({
   const [selectedContract, setSelectedContract] = useState<Contract | null>(
     null,
   );
-  const [contractSubmitting, setContractSubmitting] = useState(false);
+  const contractFormOwner = useDocumentDeliveryOwner(JSON.stringify([screenOwner.scope, activeSection, contractModalOpen, contractModalMode, selectedContract?.id]));
+  const contractMutationOwner = useDocumentDeliveryOwner(screenOwner.scope);
+  const contractSubmitting = documentReservations.busy('contract', clientId);
+  const relatedConfirmations = useRef(new Set<AbortController>());
+  useLayoutEffect(() => { const pending = relatedConfirmations.current; return () => { for (const controller of pending) controller.abort(); }; }, [actFormOwner.scope, contractFormOwner.scope]);
   const [contractModalError, setContractModalError] = useState<string | null>(
     null,
   );
@@ -2753,6 +2783,9 @@ function ClientDetailScreen({
     });
   }, []);
 
+  const actListOwner = useDocumentDeliveryOwner(JSON.stringify([screenOwner.scope, activeSection, resolvedActPeriod.from,
+    resolvedActPeriod.to, actStatusFilter, relatedContractId, relatedInvoiceId, relatedPaymentId, debouncedActSearch, actSort, actPage, actPageSize]));
+  const actQueryRead = actListOwner.capture();
   const {
     acts: clientActs,
     loading: actsLoading,
@@ -2778,7 +2811,7 @@ function ClientDetailScreen({
     sortDir: actSort.direction,
     page: actPage,
     pageSize: actPageSize,
-  });
+  }, actListOwner);
 
   useEffect(() => {
     if (!actPageResetReadyRef.current) {
@@ -2910,6 +2943,9 @@ function ClientDetailScreen({
     [],
   );
 
+  const contractListOwner = useDocumentDeliveryOwner(JSON.stringify([screenOwner.scope, activeSection, resolvedContractPeriod.from,
+    resolvedContractPeriod.to, relatedInvoiceId, relatedActId, relatedPaymentId, debouncedContractSearch, contractSort, contractPage, contractPageSize]));
+  const contractQueryRead = contractListOwner.capture();
   const {
     contracts: clientContracts,
     loading: contractsLoading,
@@ -2933,7 +2969,7 @@ function ClientDetailScreen({
     sortDir: contractSort.direction,
     page: contractPage,
     pageSize: contractPageSize,
-  });
+  }, contractListOwner);
 
   useEffect(() => {
     setContractPage(1);
@@ -3307,7 +3343,39 @@ function ClientDetailScreen({
       operation.finish();
     }
   };
+  const latestRelatedRefresh = useRef<Record<RelatedDocumentKind, (current: () => boolean) => Promise<void>>>({ act: async () => {}, contract: async () => {} });
+  latestRelatedRefresh.current = {
+    act: async current => { if (current() && actQueryRead?.isCurrent()) await awaitOwnedUiResult(() => refreshActs(), current); },
+    contract: async current => { if (current() && contractQueryRead?.isCurrent()) await awaitOwnedUiResult(() => refreshContracts(), current); },
+  };
+  const canReadRelatedClient = () => Boolean(user?.id) && (userIsAdmin || clientPermissions.canView);
+  const beginRelatedAction = (kind: RelatedDocumentKind, allowed: () => boolean, requiresForm: boolean) => {
+    const formOwner = kind === 'act' ? actFormOwner : contractFormOwner;
+    const mutationOwner = kind === 'act' ? actMutationOwner : contractMutationOwner;
+    const queryRead = kind === 'act' ? actQueryRead : contractQueryRead;
+    const access = kind === 'act' ? actPermissions : contractPermissions;
+    const screen = captureScreen(); const form = formOwner.capture();
+    if (!screen || !form || (!requiresForm && activeSection !== (kind === 'act' ? 'acts' : 'contracts'))
+      || (requiresForm ? !(kind === 'act' ? actModalOpen : contractModalOpen) : !queryRead?.isCurrent())) throw new StaleUiOperationError();
+    if (!canReadRelatedClient() || !access.canView || !allowed()) throw new Error('Недостаточно прав для действия с документом.');
+    const release = documentReservations.reserve(kind, clientId);
+    if (!release) throw new Error('Дождитесь завершения текущего действия с документом.');
+    const operation = mutationOwner.begin(kind);
+    if (!operation) { release(); throw new StaleUiOperationError(); }
+    const current = () => screen.isCurrent() && form.isCurrent() && operation.isCurrent() && canReadRelatedClient() && access.canView && allowed()
+      && (requiresForm || queryRead?.isCurrent() === true);
+    const screenCurrent = () => screen.isCurrent() && canReadRelatedClient() && access.canView;
+    return { current, screenCurrent, listCurrent: () => queryRead?.isCurrent() === true,
+      finish: () => { operation.finish(); release(); } };
+  };
+  const confirmRelatedAction = async (options: Exclude<Parameters<typeof confirm>[0], string>, current: () => boolean) => {
+    const controller = new AbortController(); relatedConfirmations.current.add(controller);
+    try { return await awaitOwnedUiResult(() => confirm({ ...options, signal: controller.signal }), current); }
+    finally { relatedConfirmations.current.delete(controller); }
+  };
+  const reconcileRelatedAction = (kind: RelatedDocumentKind, current: () => boolean) => latestRelatedRefresh.current[kind](current);
   const openContractCreate = () => {
+    if (!captureScreen() || !canReadClient || !contractPermissions.canView || documentReservations.busy('contract', clientId)) return;
     if (!contractPermissions.canCreate) {
       showPermissionWarning("Недостаточно прав для добавления договоров.");
       return;
@@ -3320,6 +3388,7 @@ function ClientDetailScreen({
   };
 
   const openContractEdit = (contract: Contract) => {
+    if (!captureScreen() || !canReadClient || !contractPermissions.canView || documentReservations.busy('contract', clientId)) return;
     if (!contractPermissions.canEdit) {
       showPermissionWarning("Недостаточно прав для редактирования договоров.");
       return;
@@ -3332,89 +3401,75 @@ function ClientDetailScreen({
   };
 
   const closeContractModal = () => {
+    if (!captureScreen() || !contractFormOwner.capture()) return;
+    contractFormOwner.invalidate();
     setContractModalOpen(false);
     setSelectedContract(null);
     setContractModalError(null);
   };
 
   const submitContract = async (payload: ContractInput) => {
-    const isEdit = contractModalMode === "edit" && selectedContract;
-    if (isEdit && !contractPermissions.canEdit) {
-      showPermissionWarning("Недостаточно прав для редактирования договоров.");
-      return;
-    }
-    if (!isEdit && !contractPermissions.canCreate) {
-      showPermissionWarning("Недостаточно прав для добавления договоров.");
-      return;
-    }
-    const normalizedClients = payload.clients.some(
-      (entry) => entry.clientId === clientId,
-    )
-      ? payload.clients
-      : [...payload.clients, { clientId }];
-
-    const normalizedPayload: ContractInput = {
-      ...payload,
-      clients: normalizedClients,
-      actIds:
-        isEdit && selectedContract
-          ? (selectedContract.actIds ?? [])
-          : (payload.actIds ?? []),
-      invoiceIds:
-        isEdit && selectedContract
-          ? (selectedContract.invoiceIds ?? [])
-          : (payload.invoiceIds ?? []),
-      paymentIds:
-        isEdit && selectedContract
-          ? (selectedContract.paymentIds ?? [])
-          : (payload.paymentIds ?? []),
-    };
-    setContractSubmitting(true);
-    setContractModalError(null);
+    const isEdit = contractModalMode === 'edit';
+    const action = beginRelatedAction('contract', () => isEdit ? contractPermissions.canEdit : contractPermissions.canCreate, true);
+    let dispatched = false; let accepted = false;
     try {
-      if (isEdit && selectedContract) {
-        await updateContract(selectedContract.id, normalizedPayload);
-      } else {
-        await createContract(normalizedPayload);
-      }
-      closeContractModal();
-    } catch (err) {
-      setContractModalError(
-        err instanceof Error ? err.message : "Не удалось сохранить договор",
-      );
+      if (isEdit && (!selectedContract || !Number.isSafeInteger(selectedContract.id) || selectedContract.id <= 0)) throw new Error('Откройте договор заново перед сохранением.');
+      const normalizedClients = payload.clients.some(
+        (entry) => entry.clientId === clientId,
+      )
+        ? payload.clients
+        : [...payload.clients, { clientId }];
+
+      const normalizedPayload: ContractInput = {
+        ...payload,
+        clients: normalizedClients,
+        actIds:
+          isEdit && selectedContract
+            ? (selectedContract.actIds ?? [])
+            : (payload.actIds ?? []),
+        invoiceIds:
+          isEdit && selectedContract
+            ? (selectedContract.invoiceIds ?? [])
+            : (payload.invoiceIds ?? []),
+        paymentIds:
+          isEdit && selectedContract
+            ? (selectedContract.paymentIds ?? [])
+            : (payload.paymentIds ?? []),
+      };
+      setContractModalError(null);
+      const saved = await awaitOwnedUiResult(() => {
+        dispatched = true;
+        return isEdit ? updateContract(selectedContract!.id, normalizedPayload, action.current) : createContract(normalizedPayload, action.current);
+      }, action.current);
+      if (!Number.isSafeInteger(saved?.id) || saved.id <= 0 || (isEdit && saved.id !== selectedContract?.id)) throw new Error('Сервер вернул другой договор. Обновите список перед продолжением.');
+      if (!action.listCurrent()) await awaitOwnedUiResult(() => reconcileRelatedAction('contract', action.screenCurrent), action.current);
+      accepted = true; closeContractModal();
+    } catch (error) {
+      if (!action.current()) throw new StaleUiOperationError();
+      setContractModalError(extractDisplayErrorMessage(error, 'Не удалось сохранить договор')); throw error;
     } finally {
-      setContractSubmitting(false);
+      const stale = !action.current(); action.finish();
+      if (dispatched && !accepted && stale && action.screenCurrent()) void reconcileRelatedAction('contract', action.screenCurrent).catch(() => undefined);
     }
   };
 
   const removeContract = async (contract: Contract) => {
-    if (!contractPermissions.canDelete) {
-      showPermissionWarning("Недостаточно прав для удаления договоров.");
-      return;
-    }
-    const template =
-      t("contractDeleteConfirm") ?? "Удалить договор «{{number}}»?";
-    const confirmMessage = template.replace(
-      "{{number}}",
-      contract.number || contract.title || String(contract.id),
-    );
-    if (
-      !(await confirm({
-        title: "Подтверждение удаления",
-        description: confirmMessage,
-        confirmLabel: "Удалить",
-        cancelLabel: "Отмена",
-        variant: "danger",
-      }))
-    )
-      return;
-    setContractActionError(null);
+    let action: ReturnType<typeof beginRelatedAction> | undefined; let dispatched = false;
     try {
-      await deleteContract(contract.id);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Не удалось удалить договор";
-      setContractActionError(message);
+      action = beginRelatedAction('contract', () => contractPermissions.canDelete, false);
+      if (!Number.isSafeInteger(contract.id) || contract.id <= 0) throw new Error('Откройте договор заново перед удалением.');
+      const template = t('contractDeleteConfirm') ?? 'Удалить договор «{{number}}»?';
+      const accepted = await confirmRelatedAction({ title: 'Подтверждение удаления',
+        description: template.replace('{{number}}', contract.number || contract.title || String(contract.id)),
+        confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }, action.current);
+      if (!accepted || !action.current()) return;
+      setContractActionError(null); const current = action.current;
+      await awaitOwnedUiResult(() => { dispatched = true; return deleteContract(contract.id, current); }, current);
+    } catch (error) {
+      if (action?.current() && !(error instanceof StaleUiOperationError)) setContractActionError(extractDisplayErrorMessage(error, 'Не удалось удалить договор'));
+    } finally {
+      if (action) { const stale = !action.current(); action.finish();
+        if (dispatched && stale && action.screenCurrent()) void reconcileRelatedAction('contract', action.screenCurrent).catch(() => undefined); }
     }
   };
 
@@ -4822,6 +4877,7 @@ function ClientDetailScreen({
     }
   };
   const openAddAct = () => {
+    if (!captureScreen() || !canReadClient || !actPermissions.canView || documentReservations.busy('act', clientId)) return;
     if (!actPermissions.canCreate) {
       showPermissionWarning("Недостаточно прав для добавления актов.");
       return;
@@ -4846,6 +4902,7 @@ function ClientDetailScreen({
     setActModalOpen(true);
   };
   const openEditAct = (act: Act) => {
+    if (!captureScreen() || !canReadClient || !actPermissions.canView || documentReservations.busy('act', clientId)) return;
     if (!actPermissions.canEdit) {
       showPermissionWarning("Недостаточно прав для редактирования актов.");
       return;
@@ -4864,6 +4921,8 @@ function ClientDetailScreen({
     setEditingPayment(null);
   };
   const closeActModal = () => {
+    if (!captureScreen() || !actFormOwner.capture()) return;
+    actFormOwner.invalidate();
     setActModalOpen(false);
     setSelectedAct(null);
     setActModalError(null);
@@ -5014,68 +5073,46 @@ function ClientDetailScreen({
   };
 
   const submitAct = async (payload: ActInput) => {
-    const resolvedClientId = payload.clientId ?? clientId;
-    if (!resolvedClientId) {
-      setActModalError("Клиент не выбран");
-      return;
-    }
-
-    setActSubmitting(true);
-    setActModalError(null);
-    const body: ActInput = {
-      ...payload,
-      clientId: resolvedClientId,
-    };
-
+    const isEdit = actModalMode === 'edit';
+    const action = beginRelatedAction('act', () => isEdit ? actPermissions.canEdit : actPermissions.canCreate, true);
+    let dispatched = false; let accepted = false;
     try {
-      const isEdit = actModalMode === "edit" && selectedAct;
-      if (isEdit && !actPermissions.canEdit) {
-        showPermissionWarning("Недостаточно прав для редактирования актов.");
-        setActSubmitting(false);
-        return;
-      }
-      if (!isEdit && !actPermissions.canCreate) {
-        showPermissionWarning("Недостаточно прав для добавления актов.");
-        setActSubmitting(false);
-        return;
-      }
-      if (isEdit && selectedAct) {
-        await updateAct(selectedAct.id, body);
-      } else {
-        await createAct(body);
-      }
-      closeActModal();
+      const resolvedClientId = payload.clientId ?? clientId;
+      if (!resolvedClientId) throw new Error('Клиент не выбран');
+      if (isEdit && (!selectedAct || !Number.isSafeInteger(selectedAct.id) || selectedAct.id <= 0)) throw new Error('Откройте акт заново перед сохранением.');
+      const body: ActInput = { ...payload, clientId: resolvedClientId };
+      setActModalError(null);
+      const saved = await awaitOwnedUiResult(() => {
+        dispatched = true;
+        return isEdit ? updateAct(selectedAct!.id, body, action.current) : createAct(body, action.current);
+      }, action.current);
+      if (!Number.isSafeInteger(saved?.id) || saved.id <= 0 || (isEdit && saved.id !== selectedAct?.id)) throw new Error('Сервер вернул другой акт. Обновите список перед продолжением.');
+      if (!action.listCurrent()) await awaitOwnedUiResult(() => reconcileRelatedAction('act', action.screenCurrent), action.current);
+      accepted = true; closeActModal();
     } catch (error) {
-      setActModalError(
-        error instanceof Error ? error.message : "Не удалось сохранить акт",
-      );
+      if (!action.current()) throw new StaleUiOperationError();
+      setActModalError(extractDisplayErrorMessage(error, 'Не удалось сохранить акт')); throw error;
     } finally {
-      setActSubmitting(false);
+      const stale = !action.current(); action.finish();
+      if (dispatched && !accepted && stale && action.screenCurrent()) void reconcileRelatedAction('act', action.screenCurrent).catch(() => undefined);
     }
   };
 
   const removeAct = async (act: Act) => {
-    if (!actPermissions.canDelete) {
-      showPermissionWarning("Недостаточно прав для удаления актов.");
-      return;
-    }
-    if (
-      !(await confirm({
-        title: "Подтверждение удаления",
-        description: `Удалить акт №${act.number}?`,
-        confirmLabel: "Удалить",
-        cancelLabel: "Отмена",
-        variant: "danger",
-      }))
-    )
-      return;
+    let action: ReturnType<typeof beginRelatedAction> | undefined; let dispatched = false;
     try {
-      await deleteAct(act.id);
+      action = beginRelatedAction('act', () => actPermissions.canDelete, false);
+      if (!Number.isSafeInteger(act.id) || act.id <= 0) throw new Error('Откройте акт заново перед удалением.');
+      const accepted = await confirmRelatedAction({ title: 'Подтверждение удаления', description: `Удалить акт №${act.number}?`,
+        confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }, action.current);
+      if (!accepted || !action.current()) return;
+      const current = action.current;
+      await awaitOwnedUiResult(() => { dispatched = true; return deleteAct(act.id, current); }, current);
     } catch (error) {
-      toast.error(
-        extractDisplayErrorMessage(error, "Не удалось удалить акт"),
-        "Ошибка удаления",
-      );
+      if (action?.current() && !(error instanceof StaleUiOperationError)) toast.error(extractDisplayErrorMessage(error, 'Не удалось удалить акт'));
+    } finally {
+      if (action) { const stale = !action.current(); action.finish();
+        if (dispatched && stale && action.screenCurrent()) void reconcileRelatedAction('act', action.screenCurrent).catch(() => undefined); }
     }
   };
 
@@ -6186,6 +6223,7 @@ function ClientDetailScreen({
                 <button
                   type="button"
                   onClick={openAddAct}
+                  disabled={actSubmitting}
                   className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-amber-600 text-white shadow-sm transition-colors hover:bg-amber-700"
                   title={SECTION_META.acts.actionLabel}
                   aria-label={SECTION_META.acts.actionLabel}
@@ -6202,6 +6240,7 @@ function ClientDetailScreen({
                 <button
                   type="button"
                   onClick={openContractCreate}
+                  disabled={contractSubmitting}
                   className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm transition-colors hover:bg-indigo-700"
                   title={SECTION_META.contracts.actionLabel}
                   aria-label={SECTION_META.contracts.actionLabel}
@@ -10253,6 +10292,7 @@ function ClientDetailScreen({
                                         {actPermissions.canEdit && (
                                           <button
                                             type="button"
+                                            disabled={actSubmitting}
                                             onClick={() => openEditAct(act)}
                                             className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
                                             title={t("edit") ?? "Редактировать"}
@@ -10266,7 +10306,8 @@ function ClientDetailScreen({
                                         {actPermissions.canDelete && (
                                           <button
                                             type="button"
-                                            onClick={() => removeAct(act)}
+                                            disabled={actSubmitting}
+                                            onClick={() => void removeAct(act)}
                                             className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 hover:bg-red-50"
                                             title={t("delete") ?? "Удалить"}
                                             aria-label={
@@ -10733,6 +10774,7 @@ function ClientDetailScreen({
                                     {contractPermissions.canEdit && (
                                       <button
                                         type="button"
+                                        disabled={contractSubmitting}
                                         onClick={() =>
                                           openContractEdit(contract)
                                         }
@@ -10748,7 +10790,8 @@ function ClientDetailScreen({
                                     {contractPermissions.canDelete && (
                                       <button
                                         type="button"
-                                        onClick={() => removeContract(contract)}
+                                        disabled={contractSubmitting}
+                                        onClick={() => void removeContract(contract)}
                                         className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 hover:bg-red-50"
                                         title={t("delete") ?? "Удалить"}
                                         aria-label={t("delete") ?? "Удалить"}

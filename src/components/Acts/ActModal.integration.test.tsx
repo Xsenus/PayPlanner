@@ -1,3 +1,4 @@
+import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -991,6 +992,14 @@ describe('ActModal integration', () => {
       expect(submit).not.toHaveBeenCalled();
     });
 
+
+    it.each(['stale', 'ordinary'])('caller ownership result: %s preserves correct error visibility', async kind => {
+      const error = kind === 'stale' ? new StaleUiOperationError() : new Error('Обычная ошибка документа');
+      const value = sourceAct(); getActMock.mockResolvedValue(value); const submit = vi.fn().mockRejectedValue(error);
+      render(element(value, submit)); await ready(); fireEvent.click(saveButton());
+      await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+      await waitFor(() => expect(Boolean(screen.queryByText(error.message))).toBe(kind === 'ordinary'));
+    });
     it('keeps the next actor draft when an older save rejects late', async () => {
       const save = deferred<void>();
       const value = sourceAct();

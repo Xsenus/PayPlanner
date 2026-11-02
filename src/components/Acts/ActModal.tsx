@@ -1,3 +1,4 @@
+import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { hasStorableLineItemPrecision, lineItemPrecisionError, roundedLineTotal, sumLineAmounts } from '../../utils/lineItemMoney';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
@@ -1562,6 +1563,7 @@ export function ActModal({
     try {
       await onSubmit(payload);
     } catch (error) {
+      if (error instanceof StaleUiOperationError) return;
       if (editorScopeRef.current === editorScope && actReadRevisionRef.current === revision && error instanceof Error && !errorMessage) {
         setLocalError(error.message);
       }

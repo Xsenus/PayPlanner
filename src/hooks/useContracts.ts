@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { DocumentReadOwner } from './useDocumentDeliveryOwner';
+import { awaitOwnedUiResult } from '../utils/StaleUiOperationError';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
 import type { Contract, ContractInput, ContractStatus } from '../types';
 import { extractDisplayErrorMessage } from '../utils/errorUtils';
@@ -34,12 +36,13 @@ interface UseContractsResult {
   error: string | null;
   pagination: ContractsPagination;
   refresh: () => Promise<void>;
-  createContract: (payload: ContractInput) => Promise<Contract>;
-  updateContract: (id: number, payload: ContractInput) => Promise<Contract>;
-  deleteContract: (id: number) => Promise<void>;
+  refreshOwned: (isCurrent: () => boolean) => Promise<void>;
+  createContract: (payload: ContractInput, isCurrent?: () => boolean) => Promise<Contract>;
+  updateContract: (id: number, payload: ContractInput, isCurrent?: () => boolean) => Promise<Contract>;
+  deleteContract: (id: number, isCurrent?: () => boolean) => Promise<void>;
 }
 
-export function useContracts(filters: ContractsFilters): UseContractsResult {
+export function useContracts(filters: ContractsFilters, readOwner?: DocumentReadOwner): UseContractsResult {
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -54,9 +57,25 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
   const abortRef = useRef<AbortController | null>(null);
   const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
   const enabled = filters.enabled ?? true;
+  const readScope = readOwner?.scope;
+  const captureReadOwner = readOwner?.capture;
+  const [dataScope, setDataScope] = useState(readScope);
+  const resetReadScope = useRef<() => void>(() => undefined);
+  resetReadScope.current = () => {
+    abortRef.current?.abort(); abortRef.current = null; hasLoadedRef.current = false;
+    setContracts([]); setError(null); setLoading(enabled); setRefreshing(false);
+    setPagination({ page: filters.page ?? 1, pageSize: filters.pageSize ?? 20, total: 0 }); setDataScope(readScope);
+  };
+  useLayoutEffect(() => { if (readScope !== undefined) resetReadScope.current(); }, [readScope]);
+  const visible = readScope === undefined || dataScope === readScope;
+
 
   const fetchContracts = useCallback(
-    async (mode: 'auto' | 'refresh' = 'auto') => {
+    async (mode: 'auto' | 'refresh' = 'auto', ownsOperation: () => boolean = () => true) => {
+      const owner = captureReadOwner?.();
+      const ownsRead = () => !captureReadOwner || owner?.isCurrent() === true;
+      const isCurrent = () => ownsRead() && ownsOperation();
+      if (!isCurrent()) return;
       abortRef.current?.abort();
       abortRef.current = null;
       if (!enabled) {
@@ -96,7 +115,7 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
           },
           { signal: controller.signal },
         );
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || !isCurrent()) return;
         setContracts(response.items ?? []);
         setPagination({
           page: response.page ?? filters.page ?? 1,
@@ -105,7 +124,7 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
         });
         hasLoadedRef.current = true;
       } catch (err) {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || !isCurrent()) return;
         const message = extractDisplayErrorMessage(err, 'Не удалось загрузить договоры');
         setError(message);
         if (!hasLoadedRef.current) {
@@ -116,13 +135,13 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
         if (abortRef.current === controller) {
           abortRef.current = null;
         }
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && ownsRead()) {
           setLoading(false);
           setRefreshing(false);
         }
       }
     },
-    [enabled, filters.from, filters.to, filters.clientId, filters.invoiceId, filters.actId, filters.paymentId, filters.status, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize],
+    [enabled, filters.from, filters.to, filters.clientId, filters.invoiceId, filters.actId, filters.paymentId, filters.status, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize, captureReadOwner],
   );
 
   useEffect(() => {
@@ -138,39 +157,44 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
     await fetchContracts('refresh');
   }, [fetchContracts]);
 
+  const refreshOwned = useCallback(async (isCurrent: () => boolean) => {
+    await awaitOwnedUiResult(() => fetchContracts('refresh', isCurrent), isCurrent);
+  }, [fetchContracts]);
+
   const createContract = useCallback(
-    async (payload: ContractInput) => {
-      const created = await apiService.createContract(payload);
-      await refresh();
+    async (payload: ContractInput, isCurrent: () => boolean = () => true) => {
+      const created = await awaitOwnedUiResult(() => apiService.createContract(payload), isCurrent);
+      await refreshOwned(isCurrent);
       return created;
     },
-    [refresh],
+    [refreshOwned],
   );
 
   const updateContract = useCallback(
-    async (id: number, payload: ContractInput) => {
-      const updated = await apiService.updateContract(id, payload);
-      await refresh();
+    async (id: number, payload: ContractInput, isCurrent: () => boolean = () => true) => {
+      const updated = await awaitOwnedUiResult(() => apiService.updateContract(id, payload), isCurrent);
+      await refreshOwned(isCurrent);
       return updated;
     },
-    [refresh],
+    [refreshOwned],
   );
 
   const deleteContract = useCallback(
-    async (id: number) => {
-      await apiService.deleteContract(id);
-      await refresh();
+    async (id: number, isCurrent: () => boolean = () => true) => {
+      await awaitOwnedUiResult(() => apiService.deleteContract(id), isCurrent);
+      await refreshOwned(isCurrent);
     },
-    [refresh],
+    [refreshOwned],
   );
 
   return {
-    contracts,
-    loading,
-    refreshing,
-    error,
-    pagination,
+    contracts: visible ? contracts : [],
+    loading: visible ? loading : enabled,
+    refreshing: visible && refreshing,
+    error: visible ? error : null,
+    pagination: visible ? pagination : { page: filters.page ?? 1, pageSize: filters.pageSize ?? 20, total: 0 },
     refresh,
+    refreshOwned,
     createContract,
     updateContract,
     deleteContract,

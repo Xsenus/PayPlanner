@@ -16,6 +16,7 @@ import { documentCopyTestSession } from '../../test/documentCopySession';
 
 const CLIENT_PROFILE_NOTES_PREFIX = '__PP_CLIENT_PROFILE_V2__:';
 type LegalModalOwnerProps = { initial?: LegalEntityDetail | null; onClose: () => void; onSubmit: (payload: LegalEntityInput) => Promise<LegalEntityDetail> };
+const contractModalPropsSpy = vi.hoisted(() => vi.fn());
 const legalModalOwnerSpy = vi.hoisted(() => vi.fn());
 const invoiceLookupPropsSpy = vi.hoisted(() => vi.fn());
 const caseLookupPropsSpy = vi.hoisted(() => vi.fn());
@@ -499,7 +500,7 @@ vi.mock('../Accounts/InvoiceModal', () => ({
 }));
 
 vi.mock('../Contracts/ContractModal', () => ({
-  ContractModal: () => null,
+  ContractModal: (props: unknown) => { contractModalPropsSpy(props); return null; },
 }));
 
 vi.mock('../Tasks/TaskJournal', () => ({
@@ -670,7 +671,175 @@ async function setupInvoiceCaller(mode: 'create' | 'edit' | 'delete' = 'create',
   return { view, props, modal: currentClientInvoiceModal() };
 }
 
+
+type RelatedKind = 'act' | 'contract';
+type RelatedModalProps = { open: boolean; onClose: () => void; onSubmit: (payload: never) => Promise<unknown>; submitting: boolean; errorMessage?: string | null };
+const relatedModal = (kind: RelatedKind) => (kind === 'act' ? actModalPropsSpy : contractModalPropsSpy).mock.lastCall?.[0] as RelatedModalProps;
+const relatedPayload = (kind: RelatedKind) => ({ number: 'ДОК-проект', date: '2026-11-02', amount: 1250.75, clientId: 1,
+  ...(kind === 'act' ? { type: 'Income', status: 'Pending', invoiceIds: [101], clientCaseIds: [19] } : { billingMode: 'Fixed', isOpenEnded: false, clients: [{ clientId: 1 }], actIds: [31], invoiceIds: [101], paymentIds: [501] }) });
+const relatedRecord = (kind: RelatedKind, id = 91) => ({ ...relatedPayload(kind), id, number: `ДОК-${id}`, createdAt: '2026-11-02T00:00:00Z' });
+function relatedWrites(kind: RelatedKind) {
+  return kind === 'act' ? { create: emptyActsResult.createAct, edit: emptyActsResult.updateAct, delete: emptyActsResult.deleteAct }
+    : { create: emptyContractsResult.createContract, edit: emptyContractsResult.updateContract, delete: emptyContractsResult.deleteContract };
+}
+async function setupRelatedCaller(kind: RelatedKind, mode: 'create' | 'edit' | 'delete' = 'create') {
+  Object.assign(permissionsResult[kind === 'act' ? 'acts' : 'contracts'], { canView: true, canCreate: true, canEdit: true, canDelete: true });
+  const writes = relatedWrites(kind); for (const method of Object.values(writes)) method.mockReset();
+  writes.create.mockResolvedValue(relatedRecord(kind, 92)); writes.edit.mockResolvedValue(relatedRecord(kind)); writes.delete.mockResolvedValue(undefined);
+  if (kind === 'act') useActsMock.mockReturnValue({ ...emptyActsResult, acts: [relatedRecord(kind)], pagination: { total: 1, page: 1, pageSize: 10 } });
+  else useContractsMock.mockReturnValue({ ...emptyContractsResult, contracts: [relatedRecord(kind)], pagination: { total: 1, page: 1, pageSize: 10 } });
+  const props = { clientId: 1, onBack: vi.fn(), initialSection: kind === 'act' ? 'acts' as const : 'contracts' as const };
+  const view = render(<ClientDetail {...props} />);
+  if (mode === 'create') fireEvent.click(await screen.findByRole('button', { name: kind === 'act' ? 'Добавить акт' : 'Добавить договор' }));
+  else { const row = (await screen.findByText('№ДОК-91')).closest('tr')!; fireEvent.click(within(row).getByRole('button', { name: mode === 'edit' ? 'Редактировать' : 'Удалить' })); }
+  if (mode !== 'delete') await waitFor(() => expect(relatedModal(kind)?.open).toBe(true));
+  return { view, props, writes, modal: relatedModal(kind) };
+}
 describe('ClientDetail integration', () => {
+  it.each(['act', 'contract'] as const)('related document caller baseline: retained closed %s cannot dispatch', async kind => {
+    const { modal, writes } = await setupRelatedCaller(kind); act(() => modal.onClose());
+    await act(async () => { try { await modal.onSubmit(relatedPayload(kind) as never); } catch { /* stale refusal may reject */ } });
+    expect(writes.create).not.toHaveBeenCalled();
+  });
+  it.each(['act', 'contract'] as const)('related document caller baseline: revoked %s delete confirmation cannot dispatch', async kind => {
+    let approve!: (value: boolean) => void; confirmMock.mockReturnValueOnce(new Promise(resolve => { approve = resolve; }));
+    const { view, props, writes } = await setupRelatedCaller(kind, 'delete'); await waitFor(() => expect(confirmMock).toHaveBeenCalledOnce());
+    authState.roleId = 2; view.rerender(<ClientDetail {...props} />); await act(async () => approve(true));
+    expect(writes.delete).not.toHaveBeenCalled();
+  });
+
+
+  it.each((['act', 'contract'] as const).flatMap(kind => (['create', 'edit'] as const).map(mode => ({ kind, mode }))))(
+    'related document caller matrix: current $kind $mode preserves fields and independent permissions', async ({ kind, mode }) => {
+      const { modal, writes } = await setupRelatedCaller(kind, mode); permissionsResult.clients.canCreate = false; permissionsResult.clients.canEdit = false;
+      const body = relatedPayload(kind); await act(async () => modal.onSubmit(body as never));
+      const write = writes[mode]; expect(write).toHaveBeenCalledOnce();
+      expect(write.mock.calls[0][mode === 'create' ? 0 : 1]).toEqual(body); expect(write.mock.calls[0].at(-1)).toBeTypeOf('function');
+      expect(relatedModal(kind).open).toBe(false);
+    });
+  it.each((['act', 'contract'] as const).flatMap(kind => (['create', 'edit'] as const).flatMap(mode =>
+    ['operation', 'view', 'clientview', 'client', 'role', 'closed', 'login', 'actor', 'logout'].map(change => ({ kind, mode, change })))))(
+    'related document caller matrix: retained $kind $mode cannot dispatch after $change', async ({ kind, mode, change }) => {
+      const session = documentCopyTestSession(); try {
+        const { view, props, modal, writes } = await setupRelatedCaller(kind, mode); const access = permissionsResult[kind === 'act' ? 'acts' : 'contracts'];
+        if (change === 'operation') access[mode === 'create' ? 'canCreate' : 'canEdit'] = false;
+        if (change === 'view') access.canView = false;
+        if (change === 'clientview') permissionsResult.clients.canView = false;
+        if (change === 'client') view.rerender(<ClientDetail {...props} clientId={2} />);
+        if (change === 'role') { authState.roleId = 2; view.rerender(<ClientDetail {...props} />); }
+        if (change === 'closed') act(() => modal.onClose());
+        if (change === 'login' || change === 'actor' || change === 'logout') session.replace(change);
+        await act(async () => { await expect(modal.onSubmit(relatedPayload(kind) as never)).rejects.toBeInstanceOf(Error); });
+        expect(writes.create).not.toHaveBeenCalled(); expect(writes.edit).not.toHaveBeenCalled();
+      } finally { session.restore(); }
+    });
+  it.each((['act', 'contract'] as const).flatMap(kind => (['create', 'edit'] as const).flatMap(mode =>
+    ['success', 'error'].flatMap(outcome => ['client', 'role', 'operation', 'view', 'clientview', 'login', 'unmount'].map(change => ({ kind, mode, outcome, change }))))))(
+    'related document caller matrix: late $kind $mode $outcome is ignored after $change', async ({ kind, mode, outcome, change }) => {
+      const session = documentCopyTestSession(); try {
+        const { view, props, modal, writes } = await setupRelatedCaller(kind, mode); const access = permissionsResult[kind === 'act' ? 'acts' : 'contracts'];
+        let finish!: (value: unknown) => void; let fail!: (error: Error) => void;
+        writes[mode].mockReturnValueOnce(new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
+        let result!: Promise<unknown>; act(() => { result = modal.onSubmit(relatedPayload(kind) as never).catch(error => error); });
+        await waitFor(() => expect(writes[mode]).toHaveBeenCalledOnce()); const current = writes[mode].mock.calls[0].at(-1) as () => boolean; expect(current()).toBe(true);
+        if (change === 'client') view.rerender(<ClientDetail {...props} clientId={2} />);
+        if (change === 'role') { authState.roleId = 2; view.rerender(<ClientDetail {...props} />); }
+        if (change === 'operation') access[mode === 'create' ? 'canCreate' : 'canEdit'] = false;
+        if (change === 'view') access.canView = false;
+        if (change === 'clientview') permissionsResult.clients.canView = false;
+        if (change === 'login') session.replace(); if (change === 'unmount') view.unmount(); expect(current()).toBe(false);
+        await act(async () => { if (outcome === 'error') fail(new Error('Ошибка прежнего документа')); else finish(relatedRecord(kind, mode === 'create' ? 92 : 91)); expect(await result).toBeInstanceOf(StaleUiOperationError); });
+        expect(toastSuccessMock).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+        if (!['operation'].includes(change)) expect((kind === 'act' ? emptyActsResult : emptyContractsResult).refresh).not.toHaveBeenCalled();
+      } finally { session.restore(); }
+    });
+  it.each((['act', 'contract'] as const).flatMap(kind => (['create', 'edit'] as const).map(mode => ({ kind, mode }))))(
+    'related document caller matrix: only one $kind $mode stays reserved through role ABA', async ({ kind, mode }) => {
+      const { view, props, modal, writes } = await setupRelatedCaller(kind, mode); let finish!: (value: unknown) => void;
+      writes[mode].mockReturnValueOnce(new Promise(resolve => { finish = resolve; })); let first!: Promise<unknown>;
+      act(() => { first = modal.onSubmit(relatedPayload(kind) as never).catch(error => error); });
+      await act(async () => { await expect(modal.onSubmit(relatedPayload(kind) as never)).rejects.toThrow('Дождитесь'); });
+      authState.roleId = 2; view.rerender(<ClientDetail {...props} />); authState.roleId = 1; view.rerender(<ClientDetail {...props} />);
+      const button = await screen.findByRole('button', { name: kind === 'act' ? 'Добавить акт' : 'Добавить договор' }); expect(button).toHaveProperty('disabled', true);
+      fireEvent.click(button); expect(writes[mode]).toHaveBeenCalledOnce();
+      await act(async () => { finish(relatedRecord(kind, mode === 'create' ? 92 : 91)); expect(await first).toBeInstanceOf(StaleUiOperationError); });
+      await waitFor(() => expect(button).toHaveProperty('disabled', false)); expect(relatedModal(kind).open).toBe(false);
+    });
+  it.each(['act', 'contract'] as const)('related document caller matrix: closing pending %s keeps one write and reconciles current list', async kind => {
+    const { modal, writes } = await setupRelatedCaller(kind); let finish!: (value: unknown) => void; writes.create.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    let result!: Promise<unknown>; act(() => { result = modal.onSubmit(relatedPayload(kind) as never).catch(error => error); });
+    act(() => modal.onClose()); const button = screen.getByRole('button', { name: kind === 'act' ? 'Добавить акт' : 'Добавить договор' }); expect(button).toHaveProperty('disabled', true);
+    await act(async () => { finish(relatedRecord(kind, 92)); expect(await result).toBeInstanceOf(StaleUiOperationError); });
+    await waitFor(() => expect((kind === 'act' ? emptyActsResult : emptyContractsResult).refresh).toHaveBeenCalledOnce());
+    fireEvent.click(button); expect(relatedModal(kind).open).toBe(true); const next = relatedModal(kind); act(() => modal.onClose()); expect(relatedModal(kind)).toBe(next);
+  });
+  it.each((['act', 'contract'] as const).flatMap(kind => (['create', 'edit'] as const).map(mode => ({ kind, mode }))))(
+    'related document caller matrix: current $kind $mode error remains visible and explicit retry works', async ({ kind, mode }) => {
+      const { modal, writes } = await setupRelatedCaller(kind, mode); writes[mode].mockRejectedValueOnce(new Error('Не удалось записать документ'));
+      await act(async () => { await expect(modal.onSubmit(relatedPayload(kind) as never)).rejects.toThrow('Не удалось записать документ'); });
+      expect(relatedModal(kind).open).toBe(true); expect(relatedModal(kind).submitting).toBe(false); expect(relatedModal(kind).errorMessage).toContain('Не удалось записать документ');
+      await act(async () => relatedModal(kind).onSubmit(relatedPayload(kind) as never)); expect(writes[mode]).toHaveBeenCalledTimes(2); expect(relatedModal(kind).open).toBe(false);
+    });
+  it.each((['act', 'contract'] as const).flatMap(kind => [0, -1, NaN, 93].map(id => ({ kind, id }))))(
+    'related document caller matrix: foreign saved $kind ID $id cannot close edit', async ({ kind, id }) => {
+      const { modal, writes } = await setupRelatedCaller(kind, 'edit'); writes.edit.mockResolvedValueOnce(relatedRecord(kind, id));
+      await act(async () => { await expect(modal.onSubmit(relatedPayload(kind) as never)).rejects.toThrow('Сервер вернул другой'); });
+      expect(relatedModal(kind).open).toBe(true); expect(relatedModal(kind).errorMessage).toContain('Сервер вернул другой');
+    });
+  it.each(['act', 'contract'] as const)('related document caller matrix: repeated %s delete confirmation is single-flight and cancellable', async kind => {
+    let approve!: (value: boolean) => void; confirmMock.mockReturnValueOnce(new Promise(resolve => { approve = resolve; }));
+    const { writes } = await setupRelatedCaller(kind, 'delete'); const row = screen.getByText('№ДОК-91').closest('tr')!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Удалить' })); expect(confirmMock).toHaveBeenCalledOnce();
+    await act(async () => approve(false)); expect(writes.delete).not.toHaveBeenCalled();
+    fireEvent.click(within(row).getByRole('button', { name: 'Удалить' })); await waitFor(() => expect(writes.delete).toHaveBeenCalledOnce());
+    expect(writes.delete.mock.calls[0][0]).toBe(91); expect(writes.delete.mock.calls[0][1]).toBeTypeOf('function');
+  });
+
+  it('related document caller expansion: contract creation from profile keeps existing navigation available', async () => {
+    Object.assign(permissionsResult.contracts, { canView: true, canCreate: true });
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Добавить договор' })); await waitFor(() => expect(relatedModal('contract').open).toBe(true));
+    await act(async () => relatedModal('contract').onSubmit(relatedPayload('contract') as never)); expect(emptyContractsResult.createContract).toHaveBeenCalledOnce(); expect(relatedModal('contract').open).toBe(false);
+  });
+  it.each((['act', 'contract'] as const).flatMap(kind => ['view', 'operation', 'clientview', 'login', 'query'].map(change => ({ kind, change }))))(
+    'related document caller expansion: $kind confirmation cannot dispatch after $change', async ({ kind, change }) => {
+      const session = documentCopyTestSession(); try {
+        let approve!: (value: boolean) => void; confirmMock.mockReturnValueOnce(new Promise(resolve => { approve = resolve; }));
+        const { writes } = await setupRelatedCaller(kind, 'delete'); await waitFor(() => expect(confirmMock).toHaveBeenCalledOnce());
+        const access = permissionsResult[kind === 'act' ? 'acts' : 'contracts'];
+        if (change === 'view') access.canView = false; if (change === 'operation') access.canDelete = false;
+        if (change === 'clientview') permissionsResult.clients.canView = false; if (change === 'login') session.replace();
+        if (change === 'query') {
+          const search = screen.getByLabelText(kind === 'act' ? 'Поиск актов клиента' : 'Поиск договоров клиента'); fireEvent.change(search, { target: { value: 'Новый отбор' } });
+          await waitFor(() => expect((kind === 'act' ? useActsMock : useContractsMock).mock.lastCall?.[0].search).toBe('Новый отбор'));
+        }
+        await act(async () => approve(true)); expect(writes.delete).not.toHaveBeenCalled();
+      } finally { session.restore(); }
+    });
+  it.each((['act', 'contract'] as const).flatMap(kind => ['client', 'role', 'view', 'login', 'unmount'].flatMap(change => ['success', 'error'].map(outcome => ({ kind, change, outcome })))))(
+    'related document caller expansion: ignores late $kind deletion $outcome after $change', async ({ kind, change, outcome }) => {
+      const session = documentCopyTestSession(); try {
+        let approve!: (value: boolean) => void; confirmMock.mockReturnValueOnce(new Promise(resolve => { approve = resolve; }));
+        const { view, props, writes } = await setupRelatedCaller(kind, 'delete'); let finish!: () => void; let fail!: (error: Error) => void;
+        writes.delete.mockReturnValueOnce(new Promise<void>((resolve, reject) => { finish = resolve; fail = reject; }));
+        await act(async () => approve(true)); await waitFor(() => expect(writes.delete).toHaveBeenCalledOnce()); const current = writes.delete.mock.calls[0][1] as () => boolean;
+        if (change === 'client') view.rerender(<ClientDetail {...props} clientId={2} />);
+        if (change === 'role') { authState.roleId = 2; view.rerender(<ClientDetail {...props} />); }
+        if (change === 'view') permissionsResult[kind === 'act' ? 'acts' : 'contracts'].canView = false;
+        if (change === 'login') session.replace(); if (change === 'unmount') view.unmount(); expect(current()).toBe(false);
+        await act(async () => { if (outcome === 'error') fail(new Error('Ошибка прежнего удаления')); else finish(); });
+        expect(toastErrorMock).not.toHaveBeenCalled(); expect(toastSuccessMock).not.toHaveBeenCalled(); expect((kind === 'act' ? emptyActsResult : emptyContractsResult).refresh).not.toHaveBeenCalled();
+      } finally { session.restore(); }
+    });
+  it.each(['act', 'contract'] as const)('related document caller expansion: %s save reconciles the new query only once', async kind => {
+    const { modal, writes } = await setupRelatedCaller(kind); let finish!: (value: unknown) => void; writes.create.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    let result!: Promise<unknown>; act(() => { result = modal.onSubmit(relatedPayload(kind) as never); });
+    fireEvent.change(screen.getByLabelText(kind === 'act' ? 'Поиск актов клиента' : 'Поиск договоров клиента'), { target: { value: 'Новый отбор' } });
+    await waitFor(() => expect((kind === 'act' ? useActsMock : useContractsMock).mock.lastCall?.[0].search).toBe('Новый отбор'));
+    expect((writes.create.mock.calls[0][1] as () => boolean)()).toBe(true);
+    await act(async () => { finish(relatedRecord(kind, 92)); await result; });
+    expect((kind === 'act' ? emptyActsResult : emptyContractsResult).refresh).toHaveBeenCalledOnce(); expect(relatedModal(kind).open).toBe(false);
+  });
   it('invoice caller baseline: a retained closed submit cannot create another invoice', async () => {
     const { modal } = await setupInvoiceCaller(); act(() => modal.onClose());
     await act(async () => { await modal.onSubmit(clientInvoicePayload()).catch(() => undefined); });
@@ -1423,7 +1592,7 @@ describe('ClientDetail integration', () => {
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
     toastWarningMock.mockReset();
-    actModalPropsSpy.mockReset();
+    actModalPropsSpy.mockReset(); contractModalPropsSpy.mockReset();
     paymentModalPropsSpy.mockReset();
     taskJournalPropsSpy.mockReset();
     twoTypeStatsMock.mockReset();
@@ -1444,6 +1613,7 @@ describe('ClientDetail integration', () => {
     useContractsMock.mockReturnValue(emptyContractsResult);
     usePaymentsPagedMock.mockReturnValue(emptyPaymentsResult);
     for (const result of [emptyActsResult, emptyInvoicesResult, emptyContractsResult, emptyLegalEntitiesResult, emptyPaymentsResult]) result.refresh.mockClear();
+    for (const kind of ['act', 'contract'] as const) { const writes = relatedWrites(kind); writes.create.mockReset().mockResolvedValue(relatedRecord(kind, 92)); writes.edit.mockReset().mockResolvedValue(relatedRecord(kind)); writes.delete.mockReset().mockResolvedValue(undefined); }
 
     vi.mocked(apiService.getClient).mockReset().mockImplementation(async id => ({ ...createClient(), id }));
     vi.mocked(useClientStatuses).mockReturnValue({ statuses: [], loading: false, error: null, refresh: vi.fn() } as ReturnType<typeof useClientStatuses>);
@@ -1556,8 +1726,8 @@ describe('ClientDetail integration', () => {
       expect.objectContaining({ scope: expect.any(String), capture: expect.any(Function) }));
     expect(useInvoicesMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }),
       expect.objectContaining({ scope: expect.any(String), capture: expect.any(Function) }));
-    expect(useActsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
-    expect(useContractsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+    expect(useActsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }), expect.objectContaining({ scope: expect.any(String), capture: expect.any(Function) }));
+    expect(useContractsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }), expect.objectContaining({ scope: expect.any(String), capture: expect.any(Function) }));
     expect(apiService.getClients).not.toHaveBeenCalled();
     expect(apiService.getOksoDictionary).not.toHaveBeenCalled();
     expect(apiService.getOkpdtrDictionary).not.toHaveBeenCalled();
