@@ -1643,11 +1643,13 @@ export function CaseModal({
 
           <div className="md:col-span-2">
             <CaseHearingPreparationChecklist
+              actionOwner={caseActionOwner}
               caseItem={caseData}
               timeZoneId={timeZoneId}
               canEdit={allowEdit}
-              datesSaved={nextHearingAt === toDateTimeInput(caseData.nextHearingAt, timeZoneId)}
+              datesSaved={nextHearingAt === toDateTimeInput(caseData.nextHearingAt, timeZoneId) && responsibleUserId === (caseData.responsibleUserId ? String(caseData.responsibleUserId) : '')}
               initialDocuments={caseDocuments}
+              initialDocumentsLoading={documentsLoading}
             />
           </div>
 
@@ -1744,7 +1746,7 @@ export function CaseModal({
               onChange={(e) => setExecutiveWritReceivedAt(e.target.value)}
               disabled={saving}
             />
-            <div className="mt-2"><ExecutiveWritDocumentUpload caseId={caseData.id} canUpload={allowEdit} documents={caseDocuments} onUploaded={refreshDocuments} onAttemptSettled={() => { if (captureCaseOwner()) setUploadRevision((value) => value + 1); }} /></div>
+            <div className="mt-2"><ExecutiveWritDocumentUpload actionOwner={caseActionOwner} caseId={caseData.id} canUpload={allowEdit} documents={caseDocuments} onUploaded={refreshDocuments} onAttemptSettled={() => { if (captureCaseOwner()) setUploadRevision((value) => value + 1); }} /></div>
           </div>
 
           <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
@@ -2068,7 +2070,7 @@ export function CaseModal({
               placeholder="Позиция, риски, ближайшие шаги"
               disabled={saving || !allowEdit}
             />
-            <CasePositionTemplatePicker text={strategy} onChange={setStrategy} disabled={!allowEdit || saving} />
+            <CasePositionTemplatePicker actionOwner={caseActionOwner} caseId={caseData.id} text={strategy} onChange={setStrategy} disabled={!allowEdit} />
             <p className="mt-1 text-xs text-gray-600">
               {strategy.trim() !== (caseData.strategy ?? '').trim()
                 ? 'Позиция изменена: сохраните дело, прежняя отметка проверки будет сброшена.'

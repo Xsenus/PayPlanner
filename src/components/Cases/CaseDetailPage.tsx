@@ -59,6 +59,8 @@ import {
 
 import { apiService, type ContactDirectoryItemDto } from '../../services/api';
 import { useDialog } from '../../hooks/useDialog';
+import { useNestedCaseOperationOwner, type CaseOperationParent } from '../../hooks/useNestedCaseOperationOwner';
+import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
 import type {
   ActResponsible,
@@ -1714,7 +1716,10 @@ export function CaseDetailPage({
   const [copiedLink, setCopiedLink] = useState(false);
   const [editPageOpen, setEditPageOpen] = useState(false);
   const [caseEditDraft, setCaseEditDraft] = useState<CaseEditDraft | null>(null);
-  const [savingCaseEdit, setSavingCaseEdit] = useState(false);
+  const childCaseOwner = useNestedCaseOperationOwner(JSON.stringify(['case-detail-children', caseId, taskAccessKey, canEdit, canDelete, canViewFinance, canViewTasks, editPageOpen]), undefined, caseItem?.id === caseId);
+  const savingCaseEdit = childCaseOwner.kind === 'case-edit:save';
+  const childDocumentRead = useRef<AbortController | null>(null);
+  useEffect(() => () => childDocumentRead.current?.abort(), [childCaseOwner.scope]);
   const [stageTransitionPrompt, setStageTransitionPrompt] = useState<StageTransitionPromptState | null>(null);
   const [statusDraft, setStatusDraft] = useState('Open');
   const [priorityDraft, setPriorityDraft] = useState('normal');
@@ -2652,12 +2657,13 @@ export function CaseDetailPage({
   };
 
   const closeCaseEditPage = () => {
+    childCaseOwner.invalidate();
     setEditPageOpen(false);
     setCaseEditDraft(null);
   };
 
   const saveCaseFromPage = async () => {
-    if (!caseItem || !caseEditDraft) return;
+    if (!caseItem || !caseEditDraft || !editPageOpen || !canEdit || !childCaseOwner.capture()) return;
     if (!caseEditDraft.title.trim()) {
       setError('Введите название дела.');
       return;
@@ -2680,12 +2686,13 @@ export function CaseDetailPage({
       return;
     }
 
-    setSavingCaseEdit(true);
+    const operation = childCaseOwner.begin('case-edit:save'); if (!operation) return;
     setError(null);
     try {
       const previousStage = caseItem.stage;
       const patch = buildCasePatchFromEditDraft(caseEditDraft);
-      const updated = await apiService.updateCaseV2(caseItem.id, buildCaseUpdatePayload(caseItem, patch));
+      const updated = await awaitOwnedUiResult(() => apiService.updateCaseV2(caseItem.id, buildCaseUpdatePayload(caseItem, patch)), operation.isCurrent);
+      if (!updated || updated.id !== caseItem.id) throw new Error('Не удалось подтвердить сохранение текущего дела.');
       setCaseItem(updated);
       setCaseEditDraft(buildCaseEditDraft(updated));
       setEditPageOpen(false);
@@ -2693,9 +2700,9 @@ export function CaseDetailPage({
       setNotice('Карточка дела обновлена.');
       setReloadToken((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось сохранить карточку дела.');
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(err instanceof Error ? err.message : 'Не удалось сохранить карточку дела.');
     } finally {
-      setSavingCaseEdit(false);
+      operation.finish();
     }
   };
 
@@ -4001,22 +4008,31 @@ export function CaseDetailPage({
   const canManageDocuments = canEdit;
   const canDeleteDocuments = canManageDocuments && canDelete;
 
-  if (editPageOpen && caseEditDraft) {
+  if (editPageOpen && caseEditDraft && canEdit) {
     return (
       <CaseEditPage
+        actionOwner={childCaseOwner}
         caseItem={caseItem}
         draft={caseEditDraft}
         documents={documents}
         responsibles={responsibles}
-        saving={savingCaseEdit}
+        saving={savingCaseEdit || childCaseOwner.busy}
         error={error}
         canViewFinance={canViewFinance}
         onBack={closeCaseEditPage}
         onChange={setCaseEditDraft}
         onSave={() => void saveCaseFromPage()}
-        onWritUploaded={async () => setDocuments(await apiService.getCaseDocuments(caseItem.id))}
+        onWritUploaded={async () => {
+          const owner = childCaseOwner.capture(); if (!owner) throw new StaleUiOperationError();
+          const controller = new AbortController(); childDocumentRead.current?.abort(); childDocumentRead.current = controller;
+          try {
+            const rows = await awaitOwnedUiResult(() => apiService.getCaseDocuments(caseItem.id, controller.signal), () => owner.isCurrent() && !controller.signal.aborted);
+            if (!Array.isArray(rows) || !rows.every(row => row.clientCaseId === caseItem.id)) throw new Error('Не удалось подтвердить файлы текущего дела.');
+            setDocuments(rows);
+          } finally { if (childDocumentRead.current === controller) childDocumentRead.current = null; }
+        }}
         uploadRevision={uploadRevision}
-        onUploadAttemptSettled={() => setUploadRevision((value) => value + 1)}
+        onUploadAttemptSettled={() => { if (childCaseOwner.capture()) setUploadRevision(value => value + 1); }}
         onUploadPublished={async (signal) => {
           if (signal.aborted) return;
           // Start the parent-owned order refresh before the edit panel can
@@ -4529,10 +4545,12 @@ export function CaseDetailPage({
               onOpenTask={onOpenTask}
             />
             <CaseHearingPreparationChecklist
+              actionOwner={childCaseOwner}
               caseItem={caseItem}
               timeZoneId={caseTimeZoneId}
               canEdit={canEdit}
               initialDocuments={documents}
+              initialDocumentsLoading={documentsLoading}
             />
             <CourtPanel
               initialOverview={courtOverview}
@@ -5013,6 +5031,7 @@ export function CaseDetailPage({
 }
 
 function CaseEditPage({
+  actionOwner,
   caseItem,
   draft,
   documents,
@@ -5028,6 +5047,7 @@ function CaseEditPage({
   onUploadAttemptSettled,
   onUploadPublished,
 }: {
+  actionOwner: CaseOperationParent;
   caseItem: ClientCase;
   draft: CaseEditDraft;
   documents: ClientCaseDocument[];
@@ -5281,7 +5301,7 @@ function CaseEditPage({
             <label className="text-sm font-medium text-slate-700">Зарегистрирован судом<SystemDateInput aria-label="Дата регистрации в суде" type="date" value={draft.courtRegisteredAt} onChange={(event) => setField('courtRegisteredAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
             <label className="text-sm font-medium text-slate-700">Решение суда<SystemDateInput type="date" value={draft.courtDecisionAt} onChange={(event) => setField('courtDecisionAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
             <label className="text-sm font-medium text-slate-700">Решение вступило в силу<SystemDateInput aria-label="Дата вступления решения в силу" type="date" value={draft.courtDecisionEffectiveAt} onChange={(event) => setField('courtDecisionEffectiveAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /><span className="mt-1 block text-xs font-normal text-slate-500">Дата указывается вручную; CRM её не рассчитывает.</span></label>
-            <div><label className="text-sm font-medium text-slate-700">Исполнительный лист получен<SystemDateInput aria-label="Дата получения исполнительного листа" type="date" value={draft.executiveWritReceivedAt} onChange={(event) => setField('executiveWritReceivedAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label><div className="mt-2"><ExecutiveWritDocumentUpload caseId={caseItem.id} canUpload documents={documents} onUploaded={onWritUploaded} onAttemptSettled={onUploadAttemptSettled} /></div></div>
+            <div><label className="text-sm font-medium text-slate-700">Исполнительный лист получен<SystemDateInput aria-label="Дата получения исполнительного листа" type="date" value={draft.executiveWritReceivedAt} onChange={(event) => setField('executiveWritReceivedAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label><div className="mt-2"><ExecutiveWritDocumentUpload actionOwner={actionOwner} caseId={caseItem.id} canUpload documents={documents} onUploaded={onWritUploaded} onAttemptSettled={onUploadAttemptSettled} /></div></div>
             <div className="md:col-span-2"><CaseDocumentUploadStatusPanel key={caseItem.id} caseId={caseItem.id} revision={uploadRevision} onPublished={onUploadPublished} /></div>
             <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
               <label className="text-sm font-medium text-slate-700">Исполнительный лист подан<SystemDateInput aria-label="Дата подачи исполнительного листа" type="date" value={draft.executiveWritSubmittedAt} onChange={(event) => setField('executiveWritSubmittedAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
@@ -5302,7 +5322,7 @@ function CaseEditPage({
                 Стратегия и план действий
                 <textarea value={draft.strategy} onChange={(event) => setField('strategy', event.target.value)} rows={6} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
               </label>
-              <CasePositionTemplatePicker text={draft.strategy} onChange={(value) => setField('strategy', value)} />
+              <CasePositionTemplatePicker actionOwner={actionOwner} caseId={caseItem.id} text={draft.strategy} onChange={(value) => setField('strategy', value)} />
             </div>
             <label className="text-sm font-medium text-slate-700">
               Документы

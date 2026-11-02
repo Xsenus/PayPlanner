@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
+import { documentCopyTestSession } from '../../test/documentCopySession';
 import { apiService } from '../../services/api';
 import type { ClientCase, ClientCaseCourtEvent, ClientCaseDocument, ClientCaseWorkOrder } from '../../types';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
@@ -459,6 +460,7 @@ describe('CaseDetailPage', () => {
     expect(apiService.uploadCaseDocumentVersion).not.toHaveBeenCalled();
   });
   beforeEach(() => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
     vi.mocked(apiService.getMessengerDocumentDeliveryConfiguration).mockReset();
     vi.mocked(apiService.retireCaseDocumentUpload).mockReset();
     vi.mocked(apiService.getPendingCaseDocumentUploads).mockReset();
@@ -5278,4 +5280,17 @@ describe('CaseDetailPage', () => {
     });
     expect(screen.getByRole('button', { name: 'Ссылка скопирована' })).toBeTruthy();
   });
+  it('nested parent boundary: a pending writ upload blocks saving the full editor',async()=>{
+    let finish!: (row:ClientCaseDocument)=>void;vi.mocked(apiService.uploadCaseDocument).mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit/>);await screen.findByText('ЗЕМЦОВ - банкротство');fireEvent.click(screen.getByRole('button',{name:'Редактировать дело'}));await screen.findByLabelText('Загрузить скан исполнительного листа');fireEvent.change(screen.getByLabelText('Стратегия и план действий'),{target:{value:'Ручная позиция во время скана'}});fireEvent.change(screen.getByLabelText('Загрузить скан исполнительного листа'),{target:{files:[new File(['x'],'writ.pdf')]}});await waitFor(()=>expect(apiService.uploadCaseDocument).toHaveBeenCalledOnce());for(const button of screen.getAllByRole('button',{name:/Сохранить дело/})){expect(button).toHaveProperty('disabled',true);fireEvent.click(button);}expect(apiService.updateCaseV2).not.toHaveBeenCalled();await act(async()=>finish(createCaseDocument({documentType:'Исполнительный лист',status:'Получен'})));await waitFor(()=>expect(screen.getAllByRole('button',{name:/Сохранить дело/}).every(button=>!(button as HTMLButtonElement).disabled)).toBe(true));expect(screen.getByLabelText('Стратегия и план действий')).toHaveProperty('value','Ручная позиция во время скана');
+  });
+  it('nested parent boundary: revoked edit access prevents old writ followup reads',async()=>{
+    let finish!:(row:ClientCaseDocument)=>void;vi.mocked(apiService.uploadCaseDocument).mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));const props={caseId:15,onBack:vi.fn(),canEdit:true};const view=render(<CaseDetailPage {...props}/>);await screen.findByText('ЗЕМЦОВ - банкротство');fireEvent.click(screen.getByRole('button',{name:'Редактировать дело'}));fireEvent.change(await screen.findByLabelText('Загрузить скан исполнительного листа'),{target:{files:[new File(['x'],'writ.pdf')]}});view.rerender(<CaseDetailPage {...props} canEdit={false}/>);await act(async()=>{});const reads=vi.mocked(apiService.getCaseDocuments).mock.calls.length;await act(async()=>finish(createCaseDocument({documentType:'Исполнительный лист',status:'Получен'})));expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(reads);expect(screen.queryByRole('heading',{name:'Редактирование дела'})).toBeNull();
+  });
+  it('nested parent boundary: an already started writ refresh cannot replace files after revocation',async()=>{
+    let finish!:(rows:ClientCaseDocument[])=>void;const refresh=new Promise<ClientCaseDocument[]>(resolve=>{finish=resolve;});vi.mocked(apiService.getCaseDocuments).mockImplementation(async()=>vi.mocked(apiService.uploadCaseDocument).mock.calls.length?refresh:[]);const props={caseId:15,onBack:vi.fn(),canEdit:true};const view=render(<CaseDetailPage {...props}/>);await screen.findByText('ЗЕМЦОВ - банкротство');fireEvent.click(screen.getByRole('button',{name:'Документы'}));await act(async()=>{});fireEvent.click(screen.getByRole('button',{name:'Редактировать дело'}));fireEvent.change(await screen.findByLabelText('Загрузить скан исполнительного листа'),{target:{files:[new File(['x'],'writ.pdf')]}});await waitFor(()=>expect(vi.mocked(apiService.getCaseDocuments).mock.calls.some(([,signal])=>!!signal)).toBe(true));const signal=vi.mocked(apiService.getCaseDocuments).mock.calls.slice().reverse().find(([,signal])=>!!signal)?.[1];view.rerender(<CaseDetailPage {...props} canEdit={false}/>);expect(signal?.aborted).toBe(true);await act(async()=>finish([createCaseDocument({originalFileName:'ПРЕЖНИЙ СПИСОК.pdf'})]));expect(screen.getByRole('heading',{name:'Документы дела'})).toBeTruthy();expect(document.body.textContent).not.toContain('ПРЕЖНИЙ СПИСОК.pdf');
+  });
+  it('nested parent boundary: old full-editor save cannot replace another case',async()=>{
+    let finish!:(value:ClientCase)=>void;vi.mocked(apiService.updateCaseV2).mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));vi.mocked(apiService.getCaseV2).mockImplementation(async id=>createCase({id,title:id===16?'Следующее дело':'ЗЕМЦОВ - банкротство'}));const props={caseId:15,onBack:vi.fn(),canEdit:true};const view=render(<CaseDetailPage {...props}/>);await screen.findByText('ЗЕМЦОВ - банкротство');fireEvent.click(screen.getByRole('button',{name:'Редактировать дело'}));fireEvent.click((await screen.findAllByRole('button',{name:/Сохранить дело/}))[0]);await waitFor(()=>expect(apiService.updateCaseV2).toHaveBeenCalledOnce());view.rerender(<CaseDetailPage {...props} caseId={16}/>);await act(async()=>{});await act(async()=>finish(createCase({title:'ПРЕЖНИЙ ОТВЕТ СОХРАНЕНИЯ'})));expect(document.body.textContent).not.toContain('ПРЕЖНИЙ ОТВЕТ СОХРАНЕНИЯ');expect(screen.queryByText('Карточка дела обновлена.')).toBeNull();
+  });
+
 });

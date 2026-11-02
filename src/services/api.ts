@@ -6823,8 +6823,9 @@ export class ApiService {
     });
   }
 
-  async getCasePositionTemplates() {
-    return this.request<CasePositionTemplateListDto>('/v2/cases/position-templates');
+  async getCasePositionTemplates(options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
+    return this.request<CasePositionTemplateListDto>('/v2/cases/position-templates', { signal: options?.signal, cache: 'no-store' });
   }
 
   async createCasePositionTemplate(payload: { title: string; text: string; scope: 'shared' | 'personal' }) {
@@ -7675,8 +7676,9 @@ export class ApiService {
     return this.request<ClientCaseCourtEvent[]>(`/v2/cases/${caseId}/court-events`);
   }
 
-  async getCaseHearingPreparation(caseId: number) {
-    return this.request<ClientCaseHearingPreparation>(`/v2/cases/${caseId}/hearing-preparation`);
+  async getCaseHearingPreparation(caseId: number, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
+    return this.request<ClientCaseHearingPreparation>(`/v2/cases/${caseId}/hearing-preparation`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async updateCaseHearingPreparation(caseId: number, payload: {
