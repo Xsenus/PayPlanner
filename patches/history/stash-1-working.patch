@@ -1,0 +1,104 @@
+diff --git a/.gitignore b/.gitignore
+index 8da094eaef2e5833e6f0ff3dd31123cb294f8a3e..cd8f974e35b546a45a86d8cb4cb9c99b3b3b1496 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -35,7 +35,8 @@ Thumbs.db
+ .ReSharper*/
+ *_ReSharper*/
+ *.DotSettings.user
+-.cr/  # DevExpress CodeRush artifacts
++# DevExpress CodeRush artifacts
++.cr/
+ 
+ # ---- .NET / C# ----
+ bin/
+@@ -74,9 +75,15 @@ out/
+ # Databases (на случай локальной SQLite)
+ *.db
+ *.sqlite
++*.sqlite3
+ *.sqlite-journal
+ *.db-shm
+ *.db-wal
++*.backup
++*.dump
++*.bak
++*.mdf
++*.ldf
+ 
+ # ---- Misc ----
+ # /build/
+diff --git a/AGENTS.md b/AGENTS.md
+index a668de0cf72ed3de2b6a67e64b218b9aeb5941ce..b6c50f49d70f797ab3726bef86ade7024a13d573 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -1,3 +1,14 @@
++<!-- ilya-existing-database-policy-20261020 -->
++## Database infrastructure on PC ILYA
++
++When working on PC ILYA, read `C:\Users\User16\.codex\AGENTS.md` and `C:\Users\User16\.codex\infrastructure\LOCAL_DATABASES.md` before database work. Those local infrastructure rules take precedence over database setup recipes in this file, nested instructions, linked documentation, roadmaps, and test/setup scripts. A direct user request for a specific exception takes precedence.
++
++- Keep the project's database technology and compatibility requirements. Use an existing compatible server; create a separate project database and role there when the task requires it. Defaults: PostgreSQL 17 at `127.0.0.1:5433`; PostgreSQL 10 at `127.0.0.1:5432` for version-10 projects; MySQL 8 at `127.0.0.1:3306`; SQL Server 2022 Developer `ILYA` through `lpc:.` with Windows authentication. Verify server identity and project configuration first. SQLite projects stay on SQLite when appropriate.
++- Do not install, initialize, recreate, or start a separate database server, instance, cluster, LocalDB, or database container without a direct user request for that separate server. This includes Docker Compose dependencies, Testcontainers, Aspire, `initdb`, ephemeral integration/recovery runners, CI scripts, and aggregate test commands. Inspect scripts and hooks before running them; unavailable credentials or tools are not permission to provision a replacement. A test requiring a separate server remains unrun with an explicit reason until authorized; do not report it as passed.
++- Existing Compose/bootstrap/installation recipes below or in linked documents describe optional deployment scenarios; they are not permission to create database servers on ILYA. Use application-only startup configured for the existing server. Do not run an unchanged full-stack command that provisions a database as a dependency.
++- `79.174.94.14` is production PostgreSQL, never a development/test fallback. SQL Server `SERVER2016` belongs to one existing project with separate test/production databases; never use it for unrelated projects. Do not select or recreate `ILYA\MSSQLSERVER01`, `ILYA\MSSQLSERVER02`, `ILYA\MSSQLSERVER03`, or `(localdb)\MSSQLLocalDB`.
++- Keep secrets in existing secret stores or ignored local configuration; never print them or put them in instructions/Git. Prefer E for new large project data/backups after checking space and service permissions; moving existing data directories or changing shared services requires a separate concrete plan and approval under the global policy.
++
+ # Agent Instructions
+ 
+ ## YouGile: Draft Before Publishing
+diff --git a/docs/payplanner-unified-roadmap-2026-10-14.md b/docs/payplanner-unified-roadmap-2026-10-14.md
+index 0f1460dd68412e9e5397b07309703104746eade6..31feb72d1e9af2a630b857301743c8a9bd062805 100644
+--- a/docs/payplanner-unified-roadmap-2026-10-14.md
++++ b/docs/payplanner-unified-roadmap-2026-10-14.md
+@@ -1,8 +1,20 @@
+ # PayPlanner — единый план разработки и сверка источников
+ 
++## Текущая точка входа — 21 октября 2026
++
++Локальная `main` безопасно продолжена до `cf1b275bf`: 102 коммита прежней ветки объединены fast-forward, рабочие изменения не потеряны. На VPS подтверждена ревизия `0d292dc09`; `origin/main` пока остаётся на `bbcc76d6b`. Push и обновление VPS в этом проходе не выполнялись. После успешного push основной ветки и проверки её содержимого удалить уже объединённую вторичную ветку локально/на remote; до публикации main remote-ветка сохраняет ещё не опубликованные там коммиты.
++
++**Прогресс реализации: 8/167 (4,8%)**: 21 блок, в работе 76, не начато 37, заблокировано 3, решений 23, отдельной приёмки 20. Перепроверены все 21 сводки и 167 уникальных пакетов. Процент не повышался за очистку среды или повторное чтение сообщений.
++
++**Порядок исполнения: [полная очередь 167 пакетов](payplanner-work-order-2026-10-21.md).** Сначала срочные финансовые/ролевые вопросы, затем короткие независимые изменения, после них средние и длительные процессы. Размер ближайшего этапа не заменяет полный Definition of Done; подтверждённая потеря денег/данных всегда получает немедленный приоритет. G — отдельный обязательный барьер до каждого выпуска, а не последний пункт после завершения всей CRM.
++
++[Свежая сверка источников](yougile-sources/2026-10-21/verification.md): прочитаны 38/38 известных карточек YouGile и общий чат, проверен внутренний чат CRM в обновлённой локальной БД. Новых требований сверх объединённого плана не найдено в просмотренной области. **MAX после 16 октября ещё не перепроверен: требуется вход по QR.** Сохранённый реестр не выдаётся за свежую проверку; этот пункт полноты остаётся открытым до авторизации.
++
++[Передача в следующий чат](payplanner-handoff-2026-10-21.md) фиксирует очистку, точную копию БД, проверки, первый следующий шаг и ограничения публикации. Раздел подготовки 12/12 ниже — исторический результат объединения плана 14 октября, он не закрывает текущую проверку MAX.
++
+ Единый план подготовлен; источники сверены и прежние планы перенесены в архив. **Прогресс подготовки: 12/12 (100%)**: всего 12 этапов, завершено 12, в работе 0, не начато 0, заблокировано 0, решений 0, приёмки 0. Это прогресс составления плана, а не готовность CRM.
+ 
+-Основание: поручение пользователя изучить все карточки, четыре чата MAX, фотографии, скриншоты и действующие Roadmap; сопоставить требования с кодом и доказательствами, сохранить весь остаток и подготовить задания для Codex и Claude Code. Рабочая ветка `claude/practical-bardeen-pglcf3`, исходная ревизия `0d292dc09fa4e8fa33aa571fc86a8905420c25a7`.
++Основание: поручение пользователя изучить все карточки, четыре чата MAX, фотографии, скриншоты и действующие Roadmap; сопоставить требования с кодом и доказательствами, сохранить весь остаток и подготовить задания для Codex и Claude Code. Исходная ветка подготовки `claude/practical-bardeen-pglcf3`, историческая ревизия `0d292dc09fa4e8fa33aa571fc86a8905420c25a7`.
+ 
+ ## Этапы подготовки единого плана
+ 
+@@ -107,18 +119,17 @@
+ 
+ ## Порядок работы и доступ исполнителя
+ 
+-| Очередь | Какие пакеты | Зачем и какой доступ |
++| Очередь | Какие пакеты | Ближайший законченный результат и границы |
+ |---|---|---|
+-| Быстрые независимые изменения | VIS-00, затем VIS-01/12 и остальные утверждённые экраны; MSG-08; визуальная часть UX-02 | Исходники/безопасные макеты/mock API, C0. Подходит Claude без БД и VPS. Внешний вид не меняет права/финансовые handlers; фактическое сохранение проверяется отдельным C1 этапом |
+-| Срочные проверки сохранности | DOC-02, SEC-01, BANK-01/03; MSG-04/05, TSK-01/02/09 | Чужие финансовые источники, конкурентные деньги, адресаты и доступность работы. Синтетические данные/две БД, C1; найденный дефект исправляется до расширения соответствующей функции |
+-| Средние сценарии с существующим API | REQ-04/06, CAL-06/08, CASE-05, CNT-01/02, DOC-04/11 | Сначала текущий DTO/handler и адресная характеризация; затем поля/состояния/страницы/операция. C0 интерфейс и C1 данные/ошибки/права, обе карточки задач |
+-| Длительные связанные процессы | BANK-08/12, DOC-05…10, REQ-05/07…10, CRT-02…07, STG-014…020/W1…W3 | Несколько состояний, история, idempotency, permissions, источники/файлы/очередь. C1 fixtures/mock доступны Claude; реальный внешний provider не нужен для независимой основы |
+-| Решения и внешние зависимости | CMP-02, SAL-01, REQ-01…03/08, CRT-01/06, ENC-01, ESIGN-01, SMS-01, AI-01/MAX-02 | В каждом пакете указана конкретная недостающая бизнес-норма/доступ/поставщик. До решения допустима самостоятельная макетная/контрактная часть. Секреты, рабочая БД и внешняя рассылка не используются для разработки |
+-| Приёмка на среде | Пакеты `[acceptance]`, MAX-01, CAL-01/04, BANK-11, DOC-12, TAX-06, STG-021/025 | C2: согласованные реальные роли/провайдеры/устройства/бухгалтер, ограниченный набор и отчёт точной области. Не повторять уже принятую PAY-24 область без влияющей правки |
+-
+-Быстрый пакет — до рабочего дня при неизменном контракте, средний — несколько дней, длительный — несколько этапов. Это классификация сложности, а не обещание срока. Быстрый визуальный результат можно делать независимо от неразблокированного внешнего провайдера. Перед началом каждого пакета читать его основание/зависимости, сопоставлять current code и выполнять только оставшийся объём.
+-
+-Для Codex и Claude одинаковые правила: один основной владелец каждого требования, собственные синтетические данные, обязательная безопасность локальной почты, обе формы задач при изменении их поведения, компактный UI и полный применимый gate перед окончательным выпуском. Не включать production flags, не выполнять backfill и не публиковать YouGile по одной отметке roadmap.
++| G — до любого выпуска | REL-01/02 | Ресурсы/проверки точной ревизии, резервирование и контроль Actions/VPS после push. Исторический зелёный прогон не подменяет новый изменившийся выпуск |
++| P0 — срочные деньги и права | DOC-02, SEC-01; DOC-04/08, CMP-01/03; BANK-04/08, REQ-04 | Сначала доказанный финансовый/ролевой остаток и минимальный рабочий результат: источник акта, достоверная сумма, печатная форма, понятная заявка. Для большого пакета выделить узкую часть; уже исправленный пример не писать заново. C1, для печати — C0 и адресная проверка |
++| P1 — короткие независимые изменения | VIS-00 для одного экрана → VIS-12 → VIS-05 → визуальная часть VIS-07; MSG-08, UX-02; затем VIS-03/01/06 | Цвета, иконки, текст/рамки, плотность, расположение существующих действий и инструкция. Не вводить новый API, объединённую ленту или финансовый расчёт под видом быстрой правки. C0; сохранение/права проверяются в своём C1 этапе |
++| P2 — средние сценарии | TSK-01/02/05/09…12, MSG-04/05, REQ-06, CNT-01/02, DOC-11, CAL-02/03/05/06/08, UX-01; остальные средние UI | Один сценарий на существующем API, состояния/ошибки/роли и стоимость запросов. Точные владельцы и порядок всех пакетов приведены в полной очереди |
++| P3 — длительные связанные процессы | Остальной подтверждённый объём BANK/DOC/REQ/CRT/STG, полная автоматизация/интеграции | Декомпозиция по зависимостям, история/idempotency, конкуренция/права, файлы/очереди. Внешний provider не нужен для независимых synthetic/контрактных этапов |
++| D — решения заранее | Все 23 `[decision]` из профильных блоков | Точный вопрос, варианты и затрагиваемые примеры. Не угадывать налоговые/зарплатные правила или разрешение на внешнюю рассылку; независимый P1 идёт дальше |
++| A/B — приёмка и доступы | 20 `[acceptance]`, 3 `[!]` | Согласованные роли/поставщики/устройства и конкретные доказательства; ожидание одного доступа не блокирует независимую очередь. Принятую PAY-24 область не перепроверять без влияющего изменения |
++
++Все 167 идентификаторов, текущие статусы и единственный владелец каждого — в [полной очереди](payplanner-work-order-2026-10-21.md). Это порядок существующих задач, без создания повторных пакетов.
+ 
+ ## Правила будущих заданий
+ 

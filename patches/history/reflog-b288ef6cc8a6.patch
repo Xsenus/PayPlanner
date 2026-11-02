@@ -1,0 +1,679 @@
+diff --git a/src/components/Accounts/Accounts.tsx b/src/components/Accounts/Accounts.tsx
+index f7e54a99334ad1e79ef4d182555686276c8f0319..d82a2a32f5e9fc146dd4d23d572dafa5050925bf 100644
+--- a/src/components/Accounts/Accounts.tsx
++++ b/src/components/Accounts/Accounts.tsx
+@@ -2,6 +2,7 @@ import {
+   AlertTriangle,
+   CalendarRange,
+   CheckCircle2,
++  FilePlus2,
+   Loader2,
+   Pencil,
+   Plus,
+@@ -16,12 +17,22 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
+ import { useTranslation } from '../../hooks/useTranslation';
+ import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+ import { useInvoices, type InvoicesSortKey } from '../../hooks/useInvoices';
+-import type { Client, Invoice, InvoiceInput, PaymentKind, PaymentStatus } from '../../types';
++import type {
++  ActInput,
++  ActResponsible,
++  ActStatus,
++  Client,
++  Invoice,
++  InvoiceInput,
++  PaymentKind,
++  PaymentStatus,
++} from '../../types';
+ import { apiService } from '../../services/api';
+ import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
+ import { formatCurrencySmart } from '../../utils/formatters';
+ import { InvoiceModal } from './InvoiceModal';
+ import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
++import { ActModal } from '../Acts/ActModal';
+ 
+ type SortState = { key: InvoicesSortKey; direction: 'asc' | 'desc' };
+ 
+@@ -50,6 +61,7 @@ function formatDate(value?: string | null): string {
+ }
+ 
+ const STATUS_ORDER: PaymentStatus[] = ['Pending', 'Overdue', 'Completed', 'Processing', 'Cancelled'];
++const PAGE_SIZE_STORAGE_KEY = 'pp.accounts.page_size';
+ 
+ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
+   const { user } = useAuth();
+@@ -72,7 +84,15 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
+   const debouncedSearch = useDebouncedValue(search.trim(), 400);
+   const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
+   const [page, setPage] = useState(1);
+-  const pageSize = 15;
++  const [pageSize, setPageSize] = useState<number>(() => {
++    if (typeof window === 'undefined') return 15;
++    const raw = window.localStorage.getItem(PAGE_SIZE_STORAGE_KEY);
++    const parsed = raw ? Number(raw) : NaN;
++    if (Number.isFinite(parsed) && parsed > 0) {
++      return parsed;
++    }
++    return 15;
++  });
+ 
+   const {
+     invoices,
+@@ -109,6 +129,14 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
+     setTypeFilter(defaultType);
+   }, [defaultType]);
+ 
++  useEffect(() => {
++    try {
++      window.localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(pageSize));
++    } catch {
++      /** ignore storage errors */
++    }
++  }, [pageSize]);
++
+   const totalPages = useMemo(() => {
+     if (!pagination.pageSize) return 1;
+     return Math.max(1, Math.ceil((pagination.total ?? 0) / pagination.pageSize));
+@@ -171,6 +199,20 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
+     Cancelled: 'bg-slate-100 text-slate-600 border border-slate-200',
+   };
+ 
++  const actStatusLabels: Record<ActStatus, string> = {
++    Created: t('actStatusCreated') ?? 'Создан',
++    Transferred: t('actStatusTransferred') ?? 'Передано',
++    Signed: t('actStatusSigned') ?? 'Подписано',
++    Terminated: t('actStatusTerminated') ?? 'Расторгнуто',
++  };
++
++  const actStatusClasses: Record<ActStatus, string> = {
++    Created: 'bg-slate-100 text-slate-700 border border-slate-200',
++    Transferred: 'bg-amber-100 text-amber-800 border border-amber-200',
++    Signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
++    Terminated: 'bg-rose-100 text-rose-700 border border-rose-200',
++  };
++
+   const typeLabels: Record<PaymentKind, string> = {
+     Income: t('invoiceTypeIncome') ?? 'Доходные счета',
+     Expense: t('invoiceTypeExpense') ?? 'Расходные счета',
+@@ -225,6 +267,15 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
+   const [lookupsLoading, setLookupsLoading] = useState(false);
+   const [lookupsError, setLookupsError] = useState<string | null>(null);
+ 
++  const [actModalOpen, setActModalOpen] = useState(false);
++  const [actModalError, setActModalError] = useState<string | null>(null);
++  const [actSubmitting, setActSubmitting] = useState(false);
++  const [actClients, setActClients] = useState<Client[]>([]);
++  const [actResponsibles, setActResponsibles] = useState<ActResponsible[]>([]);
++  const [actLookupsLoading, setActLookupsLoading] = useState(false);
++  const [actLookupsError, setActLookupsError] = useState<string | null>(null);
++  const [actDraft, setActDraft] = useState<ActInput | null>(null);
++
+   const ensureClients = useCallback(async () => {
+     if (!modalOpen) return;
+     if (clients.length > 0 && !lookupsError) return;
+@@ -240,12 +291,39 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
+     }
+   }, [modalOpen, clients.length, lookupsError]);
+ 
++  const ensureActLookups = useCallback(async () => {
++    if (!actModalOpen) return;
++    if (actClients.length > 0 && actResponsibles.length > 0 && !actLookupsError) return;
++    setActLookupsLoading(true);
++    try {
++      const [clientsResponse, responsiblesResponse] = await Promise.all([
++        apiService.getClients(),
++        apiService.getActResponsibles(),
++      ]);
++      setActClients(clientsResponse ?? []);
++      setActResponsibles(responsiblesResponse ?? []);
++      setActLookupsError(null);
++    } catch (err) {
++      setActLookupsError(
++        err instanceof Error ? err.message : (t('actsLookupsError') ?? 'Не удалось загрузить справочники'),
++      );
++    } finally {
++      setActLookupsLoading(false);
++    }
++  }, [actClients.length, actLookupsError, actModalOpen, actResponsibles.length, t]);
++
+   useEffect(() => {
+     if (modalOpen) {
+       void ensureClients();
+     }
+   }, [modalOpen, ensureClients]);
+ 
++  useEffect(() => {
++    if (actModalOpen) {
++      void ensureActLookups();
++    }
++  }, [actModalOpen, ensureActLookups]);
++
+   const openCreateModal = () => {
+     setModalMode('create');
+     setSelectedInvoice(null);
+@@ -266,6 +344,12 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
+     setModalError(null);
+   };
+ 
++  const closeActModal = () => {
++    setActModalOpen(false);
++    setActModalError(null);
++    setActDraft(null);
++  };
++
+   const submitInvoice = async (payload: InvoiceInput) => {
+     setSubmitting(true);
+     setModalError(null);
+@@ -283,6 +367,29 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
+     }
+   };
+ 
++  const submitAct = async (payload: ActInput) => {
++    setActSubmitting(true);
++    setActModalError(null);
++
++    const body: ActInput = {
++      ...payload,
++      invoiceNumber: payload.invoiceNumber || actDraft?.invoiceNumber,
++      clientId: payload.clientId ?? actDraft?.clientId,
++      responsibleId: payload.responsibleId ?? actDraft?.responsibleId,
++      status: payload.status ?? actDraft?.status ?? 'Created',
++    };
++
++    try {
++      await apiService.createAct(body);
++      await refresh();
++      closeActModal();
++    } catch (error) {
++      setActModalError(error instanceof Error ? error.message : 'Не удалось сохранить акт');
++    } finally {
++      setActSubmitting(false);
++    }
++  };
++
+   const removeInvoice = async (invoice: Invoice) => {
+     if (!canDelete) return;
+     if (!window.confirm(t('invoiceDeleteConfirm') ?? 'Удалить счёт?')) return;
+@@ -300,17 +407,75 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
+     setSearch('');
+   };
+ 
++  const handlePageSizeChange = (value: number) => {
++    setPageSize(value);
++    setPage(1);
++  };
++
++  const openCreateAct = (invoice: Invoice) => {
++    if (!permissions.acts.canCreate) {
++      window.alert(t('permissionNoAddAct') ?? 'Недостаточно прав для добавления актов');
++      return;
++    }
++
++    const draftStatus: ActStatus =
++      invoice.status === 'Completed'
++        ? 'Signed'
++        : invoice.status === 'Overdue'
++          ? 'Transferred'
++          : 'Created';
++
++    setActDraft({
++      number: '',
++      title: invoice.actTitle ?? invoice.description ?? undefined,
++      date: invoice.dueDate ?? invoice.date,
++      amount: invoice.amount,
++      invoiceNumber: invoice.number,
++      counterpartyInn: invoice.counterpartyInn ?? undefined,
++      status: draftStatus,
++      clientId: invoice.clientId ?? undefined,
++      responsibleId: invoice.responsibleId ?? undefined,
++      comment: invoice.actReference ?? undefined,
++    });
++
++    setActModalError(null);
++    setActModalOpen(true);
++  };
++
+   const typeOptions: FilterType[] = ['All', 'Income', 'Expense'];
+ 
+   return (
+     <div className="min-h-screen bg-gray-50">
+       <div className="mx-auto w-full max-w-[calc(100vw-2rem)] px-4 py-8 sm:px-6 lg:px-8">
+-        <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+-          <div className="flex flex-col gap-3">
+-            <div>
++        <div className="mb-6 flex flex-col gap-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
++          <div className="flex flex-wrap items-start justify-between gap-4">
++            <div className="flex flex-col gap-2">
+               <h1 className="text-2xl font-bold text-gray-900">{headingTitle}</h1>
+               <p className="text-sm text-gray-500">{headingDescription}</p>
+             </div>
++
++            <div className="flex flex-wrap items-center gap-2">
++              <button
++                type="button"
++                onClick={() => refresh()}
++                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
++              >
++                <RotateCcw className={refreshing ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
++                {t('invoiceRefresh') ?? 'Обновить'}
++              </button>
++              {canCreate && (
++                <button
++                  type="button"
++                  onClick={openCreateModal}
++                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
++                >
++                  <Plus className="h-4 w-4" /> {t('invoiceAdd') ?? 'Добавить счёт'}
++                </button>
++              )}
++            </div>
++          </div>
++
++          <div className="flex flex-wrap items-center gap-3">
+             {lockType ? (
+               <span
+                 className={`inline-flex items-center gap-2 self-start rounded-full px-4 py-1 text-sm font-semibold ${
+@@ -320,7 +485,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
+                 {typeFilterLabels[typeFilter === 'Expense' ? 'Expense' : 'Income']}
+               </span>
+             ) : (
+-              <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-gray-200 bg-white p-1 shadow-sm">
++              <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-gray-200 bg-gray-50 p-1 shadow-sm">
+                 {typeOptions.map((option) => {
+                   const isActive = option === typeFilter;
+                   const buttonLabel =
+@@ -346,105 +511,111 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
+                 })}
+               </div>
+             )}
+-          </div>
+ 
+-          <div className="flex flex-wrap items-center gap-3">
+-            <button
+-              type="button"
+-              onClick={() => refresh()}
+-              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+-            >
+-              <RotateCcw className={refreshing ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+-              {t('invoiceRefresh') ?? 'Обновить'}
+-            </button>
+-            {canCreate && (
+-              <button
+-                type="button"
+-                onClick={openCreateModal}
+-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+-              >
+-                <Plus className="h-4 w-4" /> {t('invoiceAdd') ?? 'Добавить счёт'}
+-              </button>
+-            )}
++            <div className="flex flex-wrap items-center gap-2">
++              {summaryCards.map((card) => {
++                const Icon = card.icon;
++                return (
++                  <div
++                    key={card.key}
++                    className={`flex min-w-[160px] items-center gap-3 rounded-xl px-4 py-3 text-sm shadow-sm ${card.accent}`}
++                  >
++                    <div className="rounded-full bg-white/60 p-2 text-gray-700">
++                      <Icon className="h-4 w-4" />
++                    </div>
++                    <div>
++                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
++                        {card.title}
++                      </div>
++                      <div className="text-base font-semibold text-gray-900">
++                        {formatCurrencySmart(card.amount).short}
++                      </div>
++                      <div className="text-xs text-gray-600">
++                        {(t('invoiceSummaryCount') ?? 'Количество счетов') + ': '} {card.count}
++                      </div>
++                    </div>
++                  </div>
++                );
++              })}
++            </div>
+           </div>
+-        </div>
+ 
+-        <div className="mb-6 grid gap-4 md:grid-cols-3">
+-          {summaryCards.map((card) => {
+-            const Icon = card.icon;
+-            return (
+-              <div
+-                key={card.key}
+-                className={`rounded-2xl p-5 shadow-sm ${card.accent}`}
+-              >
+-                <div className="flex items-center justify-between">
+-                  <div>
+-                    <p className="text-sm font-medium">{card.title}</p>
+-                    <p className="mt-2 text-2xl font-semibold">
+-                      {formatCurrencySmart(card.amount).full}
+-                    </p>
+-                  </div>
+-                  <Icon className="h-10 w-10 opacity-80" />
+-                </div>
+-                <p className="mt-4 text-xs">
+-                  {t('invoiceSummaryCount') ?? 'Количество счетов'}: {card.count}
+-                </p>
++          <div className="flex flex-wrap items-end gap-3">
++            <div className="flex flex-col gap-2">
++              <span className="flex items-center gap-2 text-sm font-semibold text-gray-700">
++                <CalendarRange className="h-4 w-4 text-gray-500" />
++                {t('accountsFiltersPeriod') ?? 'Период'}
++              </span>
++              <div className="flex items-center gap-2">
++                <input
++                  type="date"
++                  value={from}
++                  onChange={(e) => setFrom(e.target.value)}
++                  className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
++                />
++                <span className="text-gray-500">—</span>
++                <input
++                  type="date"
++                  value={to}
++                  onChange={(e) => setTo(e.target.value)}
++                  className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
++                />
+               </div>
+-            );
+-          })}
+-        </div>
++            </div>
+ 
+-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+-          <div className="flex items-center gap-2">
+-            <CalendarRange className="h-4 w-4 text-gray-500" />
+-            <input
+-              type="date"
+-              value={from}
+-              onChange={(e) => setFrom(e.target.value)}
+-              className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+-            />
+-            <span className="text-gray-500">—</span>
+-            <input
+-              type="date"
+-              value={to}
+-              onChange={(e) => setTo(e.target.value)}
+-              className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+-            />
+-          </div>
++            <label className="flex flex-col gap-2 text-sm font-semibold text-gray-700">
++              <span>{t('accountsFiltersStatus') ?? 'Статус'}</span>
++              <select
++                value={statusFilter}
++                onChange={(e) => setStatusFilter(e.target.value as 'all' | PaymentStatus)}
++                className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
++              >
++                <option value="all">{t('allStatuses') ?? 'Все статусы'}</option>
++                {STATUS_ORDER.map((status) => (
++                  <option key={status} value={status}>
++                    {statusLabels[status]}
++                  </option>
++                ))}
++              </select>
++            </label>
++
++            <label className="flex min-w-[240px] flex-1 flex-col gap-2 text-sm font-semibold text-gray-700">
++              <span>{t('accountsFiltersSearch') ?? 'Поиск по счетам'}</span>
++              <div className="relative">
++                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
++                <input
++                  type="search"
++                  value={search}
++                  onChange={(e) => setSearch(e.target.value)}
++                  placeholder={t('invoiceSearchPlaceholder') ?? 'Номер счёта, клиент или акт'}
++                  className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
++                />
++              </div>
++            </label>
++
++            <label className="flex flex-col gap-2 text-sm font-semibold text-gray-700">
++              <span>{t('accountsTableSizeLabel') ?? 'Таблица'}</span>
++              <select
++                value={pageSize}
++                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
++                className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
++              >
++                {[10, 15, 25, 50, 100].map((size) => (
++                  <option key={size} value={size}>
++                    {t('accountsTableSizeOption', { count: size }) ?? `${size} строк`}
++                  </option>
++                ))}
++              </select>
++            </label>
+ 
+-          <div>
+-            <select
+-              value={statusFilter}
+-              onChange={(e) => setStatusFilter(e.target.value as 'all' | PaymentStatus)}
+-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
++            <button
++              type="button"
++              onClick={handleResetFilters}
++              className="inline-flex items-center gap-2 self-end rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+             >
+-              <option value="all">{t('allStatuses') ?? 'Все статусы'}</option>
+-              {STATUS_ORDER.map((status) => (
+-                <option key={status} value={status}>
+-                  {statusLabels[status]}
+-                </option>
+-              ))}
+-            </select>
+-          </div>
+-
+-          <div className="relative flex-1 min-w-[220px]">
+-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+-            <input
+-              type="search"
+-              value={search}
+-              onChange={(e) => setSearch(e.target.value)}
+-              placeholder={t('invoiceSearchPlaceholder') ?? 'Номер счёта, клиент или акт'}
+-              className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+-            />
++              {t('invoiceFiltersReset') ?? 'Сбросить'}
++            </button>
+           </div>
+-
+-          <button
+-            type="button"
+-            onClick={handleResetFilters}
+-            className="ml-auto inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+-          >
+-            {t('invoiceFiltersReset') ?? 'Сбросить'}
+-          </button>
+         </div>
+ 
+         {summaryBuckets.pending.count > 0 && (
+@@ -521,6 +692,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
+                     if (invoice.actNumber) actPieces.push(`№${invoice.actNumber}`);
+                     if (invoice.actTitle) actPieces.push(invoice.actTitle);
+                     const actLine = actPieces.join(' · ');
++                    const actStatus = (invoice.actStatus ?? null) as ActStatus | null;
+                     const typeBadgeClass = typeBadgeClasses[type];
+                     const typeLabel = typeLabels[type];
+                     const primaryName =
+@@ -591,12 +763,45 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
+                         <td className="px-4 py-3">{formatDate(invoice.dueDate)}</td>
+                         <td className="px-4 py-3">
+                           {actLine ? (
+-                            <div className="font-medium text-gray-900">{actLine}</div>
++                            <div className="flex flex-col gap-2">
++                              <div className="font-medium text-gray-900">{actLine}</div>
++                              {actStatus && (
++                                <span
++                                  className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-xs font-semibold ${
++                                    actStatusClasses[actStatus]
++                                  }`}
++                                >
++                                  {actStatusLabels[actStatus]}
++                                </span>
++                              )}
++                              {invoice.actReference && (
++                                <div className="text-xs text-gray-500">{invoice.actReference}</div>
++                              )}
++                              {permissions.acts.canCreate && (
++                                <button
++                                  type="button"
++                                  onClick={() => openCreateAct(invoice)}
++                                  className="inline-flex w-fit items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
++                                >
++                                  <FilePlus2 className="h-4 w-4" />
++                                  {t('accountsActAddMore') ?? 'Добавить акт'}
++                                </button>
++                              )}
++                            </div>
+                           ) : (
+-                            <div className="text-gray-500">—</div>
+-                          )}
+-                          {invoice.actReference && (
+-                            <div className="text-xs text-gray-500">{invoice.actReference}</div>
++                            <div className="flex flex-col gap-2 text-sm text-gray-600">
++                              <span>{t('accountsActMissing') ?? 'Акт не привязан'}</span>
++                              {permissions.acts.canCreate && (
++                                <button
++                                  type="button"
++                                  onClick={() => openCreateAct(invoice)}
++                                  className="inline-flex w-fit items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
++                                >
++                                  <FilePlus2 className="h-4 w-4" />
++                                  {t('accountsActCreate') ?? 'Создать акт'}
++                                </button>
++                              )}
++                            </div>
+                           )}
+                         </td>
+                         <td className="px-4 py-3">
+@@ -684,6 +889,23 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
+           defaultType={typeFilter === 'All' ? undefined : typeFilter}
+           lockType={lockType}
+         />
++
++        <ActModal
++          open={actModalOpen}
++          mode="create"
++          act={null}
++          createDefaults={actDraft ?? undefined}
++          onClose={closeActModal}
++          onSubmit={submitAct}
++          submitting={actSubmitting}
++          errorMessage={actModalError}
++          clients={actClients}
++          responsibles={actResponsibles}
++          lookupsLoading={actLookupsLoading}
++          lookupsError={actLookupsError}
++          defaultClientId={actDraft?.clientId ?? undefined}
++          defaultResponsibleId={actDraft?.responsibleId ?? undefined}
++        />
+       </div>
+     </div>
+   );
+diff --git a/src/components/Acts/ActModal.tsx b/src/components/Acts/ActModal.tsx
+index 769e358bef10597eb47e8954d6158e832e6ddea2..dae2328577b6cb7ace68011758e5a4c46344f6f9 100644
+--- a/src/components/Acts/ActModal.tsx
++++ b/src/components/Acts/ActModal.tsx
+@@ -9,6 +9,12 @@ interface ActModalProps {
+   open: boolean;
+   mode: 'create' | 'edit';
+   act: Act | null;
++  createDefaults?: Partial<ActInput & { counterpartyInn?: string; invoiceNumber?: string }> & {
++    number?: string;
++    title?: string | null;
++    date?: string;
++    amount?: number;
++  };
+   onClose: () => void;
+   onSubmit: (payload: ActInput) => Promise<void>;
+   submitting: boolean;
+@@ -40,20 +46,32 @@ function normalizeActToForm(
+   act: Act | null,
+   defaultClientId?: number | null,
+   defaultResponsibleId?: number | null,
++  defaults?: ActModalProps['createDefaults'],
+ ): FormState {
+   if (!act) {
+     const today = toDateInputValue(new Date());
+     return {
+-      number: '',
+-      title: '',
+-      date: today,
+-      amount: '',
+-      invoiceNumber: '',
+-      counterpartyInn: '',
+-      status: 'Created',
+-      clientId: defaultClientId ? String(defaultClientId) : '',
+-      responsibleId: defaultResponsibleId ? String(defaultResponsibleId) : '',
+-      comment: '',
++      number: defaults?.number ?? '',
++      title: defaults?.title ?? '',
++      date: toDateInputValue(defaults?.date || new Date()) || today,
++      amount:
++        defaults?.amount !== undefined && defaults?.amount !== null
++          ? String(defaults.amount)
++          : '',
++      invoiceNumber: defaults?.invoiceNumber ?? '',
++      counterpartyInn: defaults?.counterpartyInn ?? '',
++      status: defaults?.status ?? 'Created',
++      clientId: defaults?.clientId
++        ? String(defaults.clientId)
++        : defaultClientId
++          ? String(defaultClientId)
++          : '',
++      responsibleId: defaults?.responsibleId
++        ? String(defaults.responsibleId)
++        : defaultResponsibleId
++          ? String(defaultResponsibleId)
++          : '',
++      comment: defaults?.comment ?? '',
+     };
+   }
+ 
+@@ -79,6 +97,7 @@ export function ActModal({
+   open,
+   mode,
+   act,
++  createDefaults,
+   onClose,
+   onSubmit,
+   submitting,
+@@ -92,16 +111,16 @@ export function ActModal({
+ }: ActModalProps) {
+   const { t } = useTranslation();
+   const [form, setForm] = useState<FormState>(() =>
+-    normalizeActToForm(act, defaultClientId, defaultResponsibleId),
++    normalizeActToForm(act, defaultClientId, defaultResponsibleId, createDefaults),
+   );
+   const [localError, setLocalError] = useState<string | null>(null);
+ 
+   useEffect(() => {
+     if (open) {
+-      setForm(normalizeActToForm(act, defaultClientId, defaultResponsibleId));
++      setForm(normalizeActToForm(act, defaultClientId, defaultResponsibleId, createDefaults));
+       setLocalError(null);
+     }
+-  }, [open, act, defaultClientId, defaultResponsibleId]);
++  }, [open, act, defaultClientId, defaultResponsibleId, createDefaults]);
+ 
+   const isEdit = mode === 'edit';
+ 
+diff --git a/src/locales/ru.ts b/src/locales/ru.ts
+index 9e3dc8c054b5db173961ed45d6ac4a22934d4eff..35d5534c3809f1e620b4642979f3dd36321d7637 100644
+--- a/src/locales/ru.ts
++++ b/src/locales/ru.ts
+@@ -140,6 +140,16 @@ export const ru = {
+   invoiceScheduleHint: 'Помогает контролировать вовремя ли оплатят счёт.',
+   invoiceDocumentsTitle: 'Связанные документы',
+   invoiceDocumentsHint: 'Прикрепите акт или оставьте комментарий.',
++  accountsFiltersPeriod: 'Период',
++  accountsFiltersStatus: 'Статус счёта',
++  accountsFiltersSearch: 'Поиск по счетам',
++  accountsTableSizeLabel: 'Таблица',
++  accountsTableSizeOption: '{{count}} строк',
++  accountsActMissing: 'Акт по счёту пока не создан',
++  accountsActCreate: 'Создать акт',
++  accountsActAddMore: 'Добавить акт',
++  permissionNoAddAct: 'Недостаточно прав для добавления актов.',
++  actsLookupsError: 'Не удалось загрузить справочники по актам',
+   acts: 'Акты',
+   actSectionTitle: 'Сводка и список',
+   actSectionDescription: 'Управляйте исходящими актами и контролируйте их статусы.',

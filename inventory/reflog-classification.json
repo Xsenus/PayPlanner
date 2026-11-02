@@ -1,0 +1,499 @@
+[
+  {
+    "commit": "c49d446a1f533f74ecba5cca6f887ce6c1127e97",
+    "path": ".github/workflows/visual-smoke.yml",
+    "blob": "9a3caddc71a635c070d2a406cbfe22ab421310fd",
+    "classification": "archive-reviewed-draft",
+    "comparison": "5b88f5d98734d9aa"
+  },
+  {
+    "commit": "f49f58d4ac5961636fc8e7641a21f4262edec6f2",
+    "path": "backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs",
+    "blob": "b6e68d1478878e36f091dfb39e9f5dea07ea77ac",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "f49f58d4ac5961636fc8e7641a21f4262edec6f2",
+    "path": "backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs",
+    "blob": "fa212d63834a8b1bb9c05a997bb36bbcc617ecbd",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "f49f58d4ac5961636fc8e7641a21f4262edec6f2",
+    "path": "docs/development-roadmap-release-integration-2026-10-28.md",
+    "blob": "e9cce005d2e443f441e4c53633987536dc9378d9",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "f49f58d4ac5961636fc8e7641a21f4262edec6f2",
+    "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+    "blob": "c5632b6738d9564b29911f66b0c1b469d4576044",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "f49f58d4ac5961636fc8e7641a21f4262edec6f2",
+    "path": "scripts/report-backend-execution.mjs",
+    "blob": "a5fa6552529b950c283b9518995d666a67b21be3",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "f49f58d4ac5961636fc8e7641a21f4262edec6f2",
+    "path": "scripts/report-backend-execution.node-tests.mjs",
+    "blob": "a28d8ab135c4ed5712867c5b041c8e4ca25bd11a",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "f49f58d4ac5961636fc8e7641a21f4262edec6f2",
+    "path": "tools/PayPlanner.TestShards/BoundedBatchScheduler.cs",
+    "blob": "2ba84d0077c62976690b92d171f29403c56d0f50",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "f49f58d4ac5961636fc8e7641a21f4262edec6f2",
+    "path": "tools/PayPlanner.TestShards/ExecutionScheduling.cs",
+    "blob": "5483e897aacdec7925e090562eb357ad7dddd9c3",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "64546c10a2d04f1e38d5dff2a6b887cf0eb4e9d0",
+    "path": "backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs",
+    "blob": "b6e68d1478878e36f091dfb39e9f5dea07ea77ac",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "64546c10a2d04f1e38d5dff2a6b887cf0eb4e9d0",
+    "path": "backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs",
+    "blob": "fa212d63834a8b1bb9c05a997bb36bbcc617ecbd",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "64546c10a2d04f1e38d5dff2a6b887cf0eb4e9d0",
+    "path": "docs/development-roadmap-release-integration-2026-10-28.md",
+    "blob": "8edde05881ccd8198b68a6bb8796bf93f403b91a",
+    "classification": "archive-reviewed-draft",
+    "comparison": "1f1717030baa0954"
+  },
+  {
+    "commit": "64546c10a2d04f1e38d5dff2a6b887cf0eb4e9d0",
+    "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+    "blob": "bba8eef21400ff09830f0a7665b311708091b6e5",
+    "classification": "archive-reviewed-draft",
+    "comparison": "32bc0b57e4335b99"
+  },
+  {
+    "commit": "64546c10a2d04f1e38d5dff2a6b887cf0eb4e9d0",
+    "path": "scripts/report-backend-execution.mjs",
+    "blob": "a5fa6552529b950c283b9518995d666a67b21be3",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "64546c10a2d04f1e38d5dff2a6b887cf0eb4e9d0",
+    "path": "scripts/report-backend-execution.node-tests.mjs",
+    "blob": "a28d8ab135c4ed5712867c5b041c8e4ca25bd11a",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "64546c10a2d04f1e38d5dff2a6b887cf0eb4e9d0",
+    "path": "src/components/Navigation/Navigation.test.tsx",
+    "blob": "bde29ee1313fa8d65780fc0fad0b5db683f5255e",
+    "classification": "archive-reviewed-draft",
+    "comparison": "b1f2b66e7dfacf0a"
+  },
+  {
+    "commit": "64546c10a2d04f1e38d5dff2a6b887cf0eb4e9d0",
+    "path": "tools/PayPlanner.TestShards/BoundedBatchScheduler.cs",
+    "blob": "2ba84d0077c62976690b92d171f29403c56d0f50",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "64546c10a2d04f1e38d5dff2a6b887cf0eb4e9d0",
+    "path": "tools/PayPlanner.TestShards/ExecutionScheduling.cs",
+    "blob": "5483e897aacdec7925e090562eb357ad7dddd9c3",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "28a2e95d09141c6871b7038ae51acc9031d88b85",
+    "path": "backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs",
+    "blob": "b6e68d1478878e36f091dfb39e9f5dea07ea77ac",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "28a2e95d09141c6871b7038ae51acc9031d88b85",
+    "path": "backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs",
+    "blob": "fa212d63834a8b1bb9c05a997bb36bbcc617ecbd",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "28a2e95d09141c6871b7038ae51acc9031d88b85",
+    "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+    "blob": "222dd1d9d80ed4a2841cf7f6ca4a64567e651ee6",
+    "classification": "archive-reviewed-draft",
+    "comparison": "5fe01e75e08c61f8"
+  },
+  {
+    "commit": "28a2e95d09141c6871b7038ae51acc9031d88b85",
+    "path": "scripts/report-backend-execution.mjs",
+    "blob": "a5fa6552529b950c283b9518995d666a67b21be3",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "28a2e95d09141c6871b7038ae51acc9031d88b85",
+    "path": "scripts/report-backend-execution.node-tests.mjs",
+    "blob": "a28d8ab135c4ed5712867c5b041c8e4ca25bd11a",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "28a2e95d09141c6871b7038ae51acc9031d88b85",
+    "path": "tools/PayPlanner.TestShards/BoundedBatchScheduler.cs",
+    "blob": "2ba84d0077c62976690b92d171f29403c56d0f50",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "28a2e95d09141c6871b7038ae51acc9031d88b85",
+    "path": "tools/PayPlanner.TestShards/ExecutionScheduling.cs",
+    "blob": "5483e897aacdec7925e090562eb357ad7dddd9c3",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "dba2d3b21e14d63e009a1d2d4998299bca3b8d5d",
+    "path": "backend/AppReleases/releases.json",
+    "blob": "1ba19e73f6cc875ec91b51511f0a12c28c79dd8d",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "dba2d3b21e14d63e009a1d2d4998299bca3b8d5d",
+    "path": "backend/Controllers/TasksController.cs",
+    "blob": "a90f98e13992639e13c11cb0ad47573bba74eafc",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "dba2d3b21e14d63e009a1d2d4998299bca3b8d5d",
+    "path": "backend/PayPlanner.Api.Tests/TasksControllerTests.cs",
+    "blob": "4b9303466caf17b2108ef2c3ff35bbbdbc1c55a2",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "dba2d3b21e14d63e009a1d2d4998299bca3b8d5d",
+    "path": "src/components/Tasks/TaskJournal.test.tsx",
+    "blob": "757b539c1d8a0cb071899128a81dec28d5193ef3",
+    "classification": "archive-reviewed-draft",
+    "comparison": "8243a6d1e4c19ef9"
+  },
+  {
+    "commit": "dba2d3b21e14d63e009a1d2d4998299bca3b8d5d",
+    "path": "src/components/Tasks/TaskJournal.tsx",
+    "blob": "71da57f91c2bf0141e53f3789c4aca00f717a5bb",
+    "classification": "archive-reviewed-draft",
+    "comparison": "dd456aaf45863d19"
+  },
+  {
+    "commit": "a67ef6b978906516556ddc261317667c5f00146f",
+    "path": "backend/AppReleases/releases.json",
+    "blob": "eaf5224188da5334474147f5a05422ccc98658ee",
+    "classification": "archive-reviewed-draft",
+    "comparison": "ace6e74975fec902"
+  },
+  {
+    "commit": "a67ef6b978906516556ddc261317667c5f00146f",
+    "path": "backend/Controllers/TasksController.cs",
+    "blob": "a90f98e13992639e13c11cb0ad47573bba74eafc",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "a67ef6b978906516556ddc261317667c5f00146f",
+    "path": "backend/PayPlanner.Api.Tests/TasksControllerTests.cs",
+    "blob": "4b9303466caf17b2108ef2c3ff35bbbdbc1c55a2",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "a67ef6b978906516556ddc261317667c5f00146f",
+    "path": "src/components/Tasks/TaskJournal.test.tsx",
+    "blob": "8b66e533e2db2de1190f7dc31ac8eece429907b0",
+    "classification": "archive-reviewed-draft",
+    "comparison": "20b525d5710f39e1"
+  },
+  {
+    "commit": "a67ef6b978906516556ddc261317667c5f00146f",
+    "path": "src/components/Tasks/TaskJournal.tsx",
+    "blob": "b49cb21b7879a732ad0c824c0a324707aafe61a2",
+    "classification": "archive-reviewed-draft",
+    "comparison": "fde76dc85d08c241"
+  },
+  {
+    "commit": "6de19d7d3ce0d71f10d1d7ac9e359d2c3f316ed1",
+    "path": "backend/AppReleases/releases.json",
+    "blob": "eaf5224188da5334474147f5a05422ccc98658ee",
+    "classification": "archive-reviewed-draft",
+    "comparison": "5e16806c9760260d"
+  },
+  {
+    "commit": "6de19d7d3ce0d71f10d1d7ac9e359d2c3f316ed1",
+    "path": "backend/Controllers/TasksController.cs",
+    "blob": "a90f98e13992639e13c11cb0ad47573bba74eafc",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "6de19d7d3ce0d71f10d1d7ac9e359d2c3f316ed1",
+    "path": "backend/PayPlanner.Api.Tests/TasksControllerTests.cs",
+    "blob": "4b9303466caf17b2108ef2c3ff35bbbdbc1c55a2",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "6de19d7d3ce0d71f10d1d7ac9e359d2c3f316ed1",
+    "path": "src/components/Tasks/TaskJournal.test.tsx",
+    "blob": "11982af8bc84e2194bdab5987be25ad83dbec728",
+    "classification": "archive-reviewed-draft",
+    "comparison": "9a03ca98687834ea"
+  },
+  {
+    "commit": "6de19d7d3ce0d71f10d1d7ac9e359d2c3f316ed1",
+    "path": "src/components/Tasks/TaskJournal.tsx",
+    "blob": "e36e55520b84ca9161add7489b57203bcfd453ff",
+    "classification": "archive-reviewed-draft",
+    "comparison": "2bfa7053c8cda6c3"
+  },
+  {
+    "commit": "91fa243a4f7674cf1e1f635accc1f4505ba326b8",
+    "path": "backend/AppReleases/releases.json",
+    "blob": "e599be379933c2c4c2935387c553f5c6faf3dea8",
+    "classification": "archive-reviewed-draft",
+    "comparison": "8f843bcccd811f09"
+  },
+  {
+    "commit": "91fa243a4f7674cf1e1f635accc1f4505ba326b8",
+    "path": "backend/Controllers/TasksController.cs",
+    "blob": "7780ae27395ada1c0e4faf4a81f28a206bf79c68",
+    "classification": "archive-reviewed-draft",
+    "comparison": "6b22e3f338ccede0"
+  },
+  {
+    "commit": "91fa243a4f7674cf1e1f635accc1f4505ba326b8",
+    "path": "backend/PayPlanner.Api.Tests/TasksControllerTests.cs",
+    "blob": "e9191111ab911ae3882a1d9b8215800287fce414",
+    "classification": "archive-reviewed-draft",
+    "comparison": "20a73f1ea084561b"
+  },
+  {
+    "commit": "91fa243a4f7674cf1e1f635accc1f4505ba326b8",
+    "path": "src/components/Tasks/TaskJournal.test.tsx",
+    "blob": "7f02c789bb9bed366fd73c87367bac67d490e025",
+    "classification": "archive-reviewed-draft",
+    "comparison": "98421d7fed0ddf55"
+  },
+  {
+    "commit": "91fa243a4f7674cf1e1f635accc1f4505ba326b8",
+    "path": "src/components/Tasks/TaskJournal.tsx",
+    "blob": "de4dd26d22848ad2b1ca21d278e4903e4a8bce5a",
+    "classification": "archive-reviewed-draft",
+    "comparison": "74a846303857b710"
+  },
+  {
+    "commit": "e9a88e3ffe69eaaa2586b1db47ade50ea2eea63e",
+    "path": "backend/Controllers/CashOrdersController.cs",
+    "blob": "bc2c2cae651d5c08cfddfe708c4c17fef85d1b56",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "e9a88e3ffe69eaaa2586b1db47ade50ea2eea63e",
+    "path": "backend/PayPlanner.Api.Tests/MoneyOperationsControllerTests.cs",
+    "blob": "c473e9b754535e2b90c95151c41240cf264ece47",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "e9a88e3ffe69eaaa2586b1db47ade50ea2eea63e",
+    "path": "src/components/Clients/ClientReconciliationAct.tsx",
+    "blob": "07d47e42a8e09b3d4b398e3c86daa44774c3588d",
+    "classification": "archive-reviewed-draft",
+    "comparison": "e00d16ee20b542ef"
+  },
+  {
+    "commit": "1033e22d00dac3b636b55dfd7598f6183f6ccf29",
+    "path": "backend/Controllers/CashOrdersController.cs",
+    "blob": "5c552ee22c07cedaecbd2d34843c1bb43ae0c43d",
+    "classification": "archive-reviewed-draft",
+    "comparison": "fbf951d128b936ad"
+  },
+  {
+    "commit": "1033e22d00dac3b636b55dfd7598f6183f6ccf29",
+    "path": "backend/PayPlanner.Api.Tests/MoneyOperationsControllerTests.cs",
+    "blob": "ac596a09ad7558822cb2fee7f302d1765bb63a72",
+    "classification": "archive-reviewed-draft",
+    "comparison": "9a911433b45ab722"
+  },
+  {
+    "commit": "1033e22d00dac3b636b55dfd7598f6183f6ccf29",
+    "path": "src/components/Clients/ClientReconciliationAct.tsx",
+    "blob": "07d47e42a8e09b3d4b398e3c86daa44774c3588d",
+    "classification": "archive-reviewed-draft",
+    "comparison": "6cd7083f4527fdff"
+  },
+  {
+    "commit": "1f4e8ae13f734d2ff823cd561065dcd9d650a3e5",
+    "path": "backend/AppReleases/releases.json",
+    "blob": "8512320d5711a328a69b30540fd442bb9b763582",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "1f4e8ae13f734d2ff823cd561065dcd9d650a3e5",
+    "path": "backend/Controllers/PaymentsController.cs",
+    "blob": "e1350045a6d95c2a5cc3b25df09c1c5a27f66f82",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "1f4e8ae13f734d2ff823cd561065dcd9d650a3e5",
+    "path": "backend/Models/Payment.cs",
+    "blob": "0589979f12bbdc5f7b1e9fcdcba874abfd6639c5",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "1f4e8ae13f734d2ff823cd561065dcd9d650a3e5",
+    "path": "backend/PayPlanner.Api.Tests/PaymentsControllerTests.cs",
+    "blob": "2c0bf96aec14cfe627bb0fd31fd7a7756d342fc5",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "1f4e8ae13f734d2ff823cd561065dcd9d650a3e5",
+    "path": "src/components/Calendar/PaymentModal.integration.test.tsx",
+    "blob": "772f3960d0652b424c23e9a44b8e3327411e1f58",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "1f4e8ae13f734d2ff823cd561065dcd9d650a3e5",
+    "path": "src/components/Calendar/PaymentModal.tsx",
+    "blob": "fae1bb3c1aeaf7a6a2db3751ebdb330638504ccd",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "1f4e8ae13f734d2ff823cd561065dcd9d650a3e5",
+    "path": "src/types/index.ts",
+    "blob": "8505ef3b37413c81da781bc803cbbf93250c7532",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "fe1ff53b888e42ad2baf501d440241682397898a",
+    "path": ".github/workflows/deploy.yml",
+    "blob": "5107acafc5dab06facf652e1d4ae516f1777fbe5",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "fe1ff53b888e42ad2baf501d440241682397898a",
+    "path": "package.json",
+    "blob": "3796a3f5b13035842ffe195b17a501da91dd5d0f",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "fe1ff53b888e42ad2baf501d440241682397898a",
+    "path": "scripts/run-integration-tests.mjs",
+    "blob": "4fec5f4f0c1097fc58d8396985271557ecf83b00",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "fe1ff53b888e42ad2baf501d440241682397898a",
+    "path": "src/components/Accounts/InvoiceModal.integration.test.tsx",
+    "blob": "3e6e5f61fd3e8c0da22d6644244fe88a96a1052e",
+    "classification": "archive-reviewed-draft",
+    "comparison": "08420ced94454b39"
+  },
+  {
+    "commit": "fe1ff53b888e42ad2baf501d440241682397898a",
+    "path": "src/components/Acts/ActModal.integration.test.tsx",
+    "blob": "330cf536614e7d4e05354edac7842167f8835315",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "fe1ff53b888e42ad2baf501d440241682397898a",
+    "path": "src/components/Calendar/PaymentModal.integration.test.tsx",
+    "blob": "eab990423e5eb3caae581e16344a14284305b885",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "fe1ff53b888e42ad2baf501d440241682397898a",
+    "path": "src/components/Money/MoneyOperations.integration.test.tsx",
+    "blob": "255906de3334bd8b94936e929dac6f20474ac965",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "5d733fc54dcbbc2e8f2670e1be147d91147f4fb1",
+    "path": "backend/Controllers/InvoicesController.cs",
+    "blob": "b4d133005b6905e1b1e493b7476442a5c8f1e821",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "5d733fc54dcbbc2e8f2670e1be147d91147f4fb1",
+    "path": "backend/PayPlanner.Api.Tests/AccountsControllerTests.cs",
+    "blob": "37327174e45b504157ee08dbfe7e4a6e924a48d6",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "5d733fc54dcbbc2e8f2670e1be147d91147f4fb1",
+    "path": "backend/PayPlanner.Api.Tests/InvoicePaymentConsistencyTests.cs",
+    "blob": "bd7464680a9e0387851b08d885b0e6f79e435c24",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "5d733fc54dcbbc2e8f2670e1be147d91147f4fb1",
+    "path": "backend/PayPlanner.Api.Tests/InvoicesControllerCrudTests.cs",
+    "blob": "abb273297e98d9e02b2bf9fc0f4315a504a95e06",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "5d733fc54dcbbc2e8f2670e1be147d91147f4fb1",
+    "path": "backend/Services/InvoiceManagedPaymentRules.cs",
+    "blob": "02349b48b6f34c2549c207f876298e98c6f42122",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "5d733fc54dcbbc2e8f2670e1be147d91147f4fb1",
+    "path": "src/utils/invoicePayments.test.ts",
+    "blob": "c40f2141fdb28441fff9d4689e9c1c1c3c71633b",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "5d733fc54dcbbc2e8f2670e1be147d91147f4fb1",
+    "path": "src/utils/invoicePayments.ts",
+    "blob": "9d0c388a69759ba7d54f4d46f7f9595645743a17",
+    "classification": "exact-published-history"
+  },
+  {
+    "commit": "c2b130b22fd081d95e3642575e9e4c4e1385ce93",
+    "path": "src/components/Accounts/Accounts.tsx",
+    "blob": "c5fb10732d56a9064207aacda51cae07f42bec06",
+    "classification": "archive-reviewed-draft",
+    "comparison": "152f286c5f5638a7"
+  },
+  {
+    "commit": "c2b130b22fd081d95e3642575e9e4c4e1385ce93",
+    "path": "src/components/Acts/ActModal.tsx",
+    "blob": "e23784577c0cfdc08f3e11b31f658040eccc2496",
+    "classification": "archive-reviewed-draft",
+    "comparison": "aecb9afe3de07652"
+  },
+  {
+    "commit": "c2b130b22fd081d95e3642575e9e4c4e1385ce93",
+    "path": "src/locales/ru.ts",
+    "blob": "12f60e39e2535a4132b7455f025e800f8ec5b420",
+    "classification": "archive-reviewed-draft",
+    "comparison": "c0766d1c48732f81"
+  },
+  {
+    "commit": "b288ef6cc8a6491549187290984e66bb7164c846",
+    "path": "src/components/Accounts/Accounts.tsx",
+    "blob": "d82a2a32f5e9fc146dd4d23d572dafa5050925bf",
+    "classification": "archive-reviewed-draft",
+    "comparison": "ed371782aaeee076"
+  },
+  {
+    "commit": "b288ef6cc8a6491549187290984e66bb7164c846",
+    "path": "src/components/Acts/ActModal.tsx",
+    "blob": "dae2328577b6cb7ace68011758e5a4c46344f6f9",
+    "classification": "archive-reviewed-draft",
+    "comparison": "76dc1be567881ea2"
+  },
+  {
+    "commit": "b288ef6cc8a6491549187290984e66bb7164c846",
+    "path": "src/locales/ru.ts",
+    "blob": "35d5534c3809f1e620b4642979f3dd36321d7637",
+    "classification": "archive-reviewed-draft",
+    "comparison": "91e3ff1eb8075dd8"
+  }
+]

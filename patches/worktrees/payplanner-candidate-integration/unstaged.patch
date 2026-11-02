@@ -1,0 +1,825 @@
+diff --git a/backend/AppReleases/releases.json b/backend/AppReleases/releases.json
+index 8d6d02e8544a1e6f54525240ba684afb50ada259..94ea66c8db70c7d8c3288091442bc0865ca7fe99 100644
+--- a/backend/AppReleases/releases.json
++++ b/backend/AppReleases/releases.json
+@@ -1,6 +1,20 @@
+ [
+   {
+-<<<<<<< e85d1f22d795b78ca8c3543eb3b14410c3a75747
++    "releaseId": "2026-10-26-task-journal-notification-refresh",
++    "version": "1.14.143",
++    "releasedAt": "2026-10-26T05:40:00Z",
++    "title": "Обновление журнала задач по уведомлениям",
++    "summary": "Новые уведомления больше не прерывают загрузку списка задач.",
++    "isActive": true,
++    "source": "agent",
++    "items": [
++      {
++        "type": "fixed",
++        "text": "В журнале задач новые уведомления дожидаются завершения текущей загрузки списка, после чего журнал показывает свежие данные. Несколько уведомлений подряд объединяются в одно обновление. Исправление действует при старой и новой карточке задачи; смена фильтра или сотрудника по-прежнему сразу загружает соответствующий список."
++      }
++    ]
++  },
++  {
+     "releaseId": "2026-10-25-act-editor-narrow-screen",
+     "version": "1.14.142",
+     "releasedAt": "2026-10-25T02:20:50Z",
+@@ -89,28 +103,16 @@
+     "releasedAt": "2026-10-24T15:52:37Z",
+     "title": "Когда сохранять реквизиты компании в документе",
+     "summary": "В настройках основных компаний можно выбрать момент сохранения реквизитов и изображений для новых счетов, актов и договоров.",
+-=======
+-    "releaseId": "2026-10-26-task-journal-notification-refresh",
+-    "version": "1.14.137",
+-    "releasedAt": "2026-10-26T05:40:00Z",
+-    "title": "Обновление журнала задач по уведомлениям",
+-    "summary": "Новые уведомления больше не прерывают загрузку списка задач.",
+->>>>>>> 7cd89d840b52827e79146696bc53fafd57244ddd
+     "isActive": true,
+     "source": "agent",
+     "items": [
+       {
+-<<<<<<< e85d1f22d795b78ca8c3543eb3b14410c3a75747
+         "type": "new",
+         "text": "В разделе «Основные компании» администратор может выбрать, когда сохранять реквизиты, логотип, печать и подпись в новом документе: при первой подготовке файла или сразу при создании. Во втором режиме компанию-продавца и подразделение выбирают до сохранения счёта, акта или договора. В документе показаны основание и дата фиксации; для старых снимков без сохранённой даты это обозначено прямо."
+       },
+       {
+         "type": "important",
+         "text": "По умолчанию сохраняется прежний порядок — при первой подготовке файла. Новая настройка действует только для новых документов: уже созданные документы сохраняют своё правило, а выпущенные снимки не переписываются при изменении профиля компании. Объединение баз со снимками или подразделениями, которые пока нельзя безопасно перенести, останавливается до записи данных."
+-=======
+-        "type": "fixed",
+-        "text": "В журнале задач новые уведомления дожидаются завершения текущей загрузки списка, после чего журнал показывает свежие данные. Несколько уведомлений подряд объединяются в одно обновление. Исправление действует при старой и новой карточке задачи; смена фильтра или сотрудника по-прежнему сразу загружает соответствующий список."
+->>>>>>> 7cd89d840b52827e79146696bc53fafd57244ddd
+       }
+     ]
+   },
+diff --git a/backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs b/backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs
+index 61f6048b517f41f8739ec483b525989bf0d7b4a2..da3e23756ad1d7b51ba1da7aede81a33cd757a50 100644
+--- a/backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs
++++ b/backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs
+@@ -9,6 +9,128 @@ public sealed class BoundedBatchSchedulerTests
+     private const ulong Gib = 1024UL * 1024 * 1024;
+     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(10);
+ 
++    [Fact]
++    public async Task MemoryRecoveryStartsAnotherBatchBeforeTheFirstBatchFinishes()
++    {
++        var available = 7 * Gib;
++        var firstStarted = Signal();
++        var secondStarted = Signal();
++        var release = Signal();
++        var active = 0;
++        var maxActive = 0;
++        var observationGate = new object();
++        var completed = new ConcurrentBag<string>();
++        var run = BoundedBatchScheduler.RunAsync(Batches("heavy", 2), "auto", 2,
++            () => new ExecutionResources(Volatile.Read(ref available), 6), async batch =>
++            {
++                var count = Interlocked.Increment(ref active);
++                lock (observationGate) maxActive = Math.Max(maxActive, count);
++                if (count == 1) firstStarted.TrySetResult();
++                if (count == 2) secondStarted.TrySetResult();
++                try { await release.Task; }
++                finally { Interlocked.Decrement(ref active); completed.Add(batch.Id); }
++            }, recheckInterval: TimeSpan.FromMilliseconds(20));
++        try
++        {
++            await firstStarted.Task.WaitAsync(Deadline);
++            Assert.Equal(1, Volatile.Read(ref active));
++            Volatile.Write(ref available, 12 * Gib);
++            await secondStarted.Task.WaitAsync(Deadline);
++            Assert.False(run.IsCompleted);
++            Assert.Equal(2, Volatile.Read(ref active));
++        }
++        finally { release.TrySetResult(); }
++        await run.WaitAsync(Deadline);
++        Assert.Equal(2, maxActive);
++        Assert.Equal(new[] { "heavy-0", "heavy-1" }, completed.Order());
++    }
++
++    [Fact]
++    public async Task MemoryRecoveryDoesNotExceedTheExplicitSingleWorkerLimit()
++    {
++        var available = 7 * Gib;
++        var firstStarted = Signal();
++        var observedRecovery = Signal();
++        var release = Signal();
++        var active = 0;
++        var maxActive = 0;
++        var observationGate = new object();
++        var recoveryProbes = 0;
++        ExecutionResources Probe()
++        {
++            var current = Volatile.Read(ref available);
++            if (current >= 12 * Gib && Interlocked.Increment(ref recoveryProbes) == 3) observedRecovery.TrySetResult();
++            return new(current, 6);
++        }
++        var run = BoundedBatchScheduler.RunAsync(Batches("heavy", 2), "1", 2, Probe, async _ =>
++        {
++            var count = Interlocked.Increment(ref active);
++            lock (observationGate) maxActive = Math.Max(maxActive, count);
++            firstStarted.TrySetResult();
++            try { await release.Task; }
++            finally { Interlocked.Decrement(ref active); }
++        }, recheckInterval: TimeSpan.FromMilliseconds(20));
++        try
++        {
++            await firstStarted.Task.WaitAsync(Deadline);
++            Volatile.Write(ref available, 12 * Gib);
++            await observedRecovery.Task.WaitAsync(Deadline);
++            Assert.Equal(1, Volatile.Read(ref active));
++        }
++        finally { release.TrySetResult(); }
++        await run.WaitAsync(Deadline);
++        Assert.Equal(1, maxActive);
++    }
++
++    [Fact]
++    public async Task ReducedMemoryDelaysPendingWorkWithoutStoppingAnActiveSibling()
++    {
++        var available = 12 * Gib;
++        var firstTwoStarted = Signal();
++        var budgetReduced = Signal();
++        var thirdStarted = Signal();
++        var releaseFirst = Signal();
++        var releaseSecond = Signal();
++        var releaseThird = Signal();
++        var starts = 0;
++        var completions = new ConcurrentBag<string>();
++        var run = BoundedBatchScheduler.RunAsync(Batches("heavy", 3), "auto", 2,
++            () => new ExecutionResources(Volatile.Read(ref available), 6), async batch =>
++            {
++                if (Interlocked.Increment(ref starts) == 2) firstTwoStarted.TrySetResult();
++                try
++                {
++                    if (batch.Id == "heavy-0") await releaseFirst.Task;
++                    else if (batch.Id == "heavy-1") await releaseSecond.Task;
++                    else { thirdStarted.TrySetResult(); await releaseThird.Task; }
++                }
++                finally { completions.Add(batch.Id); }
++            }, value =>
++            {
++                if (value.Kind == "budget-change" && value.Workers == 1 && value.Active == 1) budgetReduced.TrySetResult();
++            }, TimeSpan.FromMilliseconds(20));
++        try
++        {
++            await firstTwoStarted.Task.WaitAsync(Deadline);
++            Volatile.Write(ref available, 7 * Gib);
++            releaseSecond.TrySetResult();
++            await budgetReduced.Task.WaitAsync(Deadline);
++            Assert.Equal(2, Volatile.Read(ref starts));
++            Assert.False(thirdStarted.Task.IsCompleted);
++            Assert.False(run.IsCompleted);
++            releaseFirst.TrySetResult();
++            await thirdStarted.Task.WaitAsync(Deadline);
++        }
++        finally
++        {
++            releaseFirst.TrySetResult();
++            releaseSecond.TrySetResult();
++            releaseThird.TrySetResult();
++        }
++        await run.WaitAsync(Deadline);
++        Assert.Equal(new[] { "heavy-0", "heavy-1", "heavy-2" }, completions.Order());
++    }
++
+     [Theory]
+     [InlineData(2)]
+     [InlineData(4)]
+diff --git a/backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs b/backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs
+index e4a033e0822f1ea5f9a1f955371963a88c93f7ba..c9aa46646727fd949c2d356008c49c6c0404ef3f 100644
+--- a/backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs
++++ b/backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs
+@@ -123,12 +123,24 @@ public sealed class BoundedTestExecutionTests
+     public void WorkerBudgetUsesAvailableMemoryAndActualHostProcessors(string requested, int gib, int processors, int expected)
+         => Assert.Equal(expected, ExecutionScheduling.WorkerBudget(requested, (ulong)gib * Fixture.Gib, processors));
+ 
++    [Theory]
++    [InlineData("auto", 6, 2)]
++    [InlineData("auto", 8, 4)]
++    [InlineData("auto", 2, 1)]
++    [InlineData("1", 8, 1)]
++    [InlineData("2", 8, 2)]
++    [InlineData("4", 6, 2)]
++    public void PartitionCapacityRespectsUserAndProcessorLimitsWithoutReservingMemory(string requested, int processors, int expected)
++        => Assert.Equal(expected, ExecutionScheduling.PartitionCapacity(requested, processors));
++
+     [Fact]
+     public void MemoryAndConcurrencyBoundariesDoNotStartUnbudgetedWorkers()
+     {
+         Assert.Throws<InvalidDataException>(() => ExecutionScheduling.WorkerBudget("auto", Fixture.Gib - 1, 8));
+         Assert.Throws<InvalidDataException>(() => ExecutionScheduling.WorkerBudget("3", 20 * Fixture.Gib, 8));
+         Assert.Throws<InvalidDataException>(() => ExecutionScheduling.WorkerBudget("auto", 20 * Fixture.Gib, 0));
++        Assert.Throws<InvalidDataException>(() => ExecutionScheduling.PartitionCapacity("3", 8));
++        Assert.Throws<InvalidDataException>(() => ExecutionScheduling.PartitionCapacity("auto", 0));
+         Assert.Equal(2, ExecutionScheduling.WorkerBudget("auto", 12 * Fixture.Gib - 1, 8));
+         Assert.Equal(1, ExecutionScheduling.WorkerBudget("auto", 8 * Fixture.Gib - 1, 8));
+         Assert.True(ExecutionScheduling.CanLaunchAdditional(0, 4, Fixture.Gib));
+diff --git a/backend/PayPlanner.Api.Tests/StorageStageWriterProcessTests.cs b/backend/PayPlanner.Api.Tests/StorageStageWriterProcessTests.cs
+index f4f03d8bebc45e9a1bfbb0e77cb0b436d3111b4a..f71d2fe4cebbdc9509c9c3520b5657d6a4c6e007 100644
+--- a/backend/PayPlanner.Api.Tests/StorageStageWriterProcessTests.cs
++++ b/backend/PayPlanner.Api.Tests/StorageStageWriterProcessTests.cs
+@@ -11,15 +11,59 @@ using Xunit;
+ 
+ namespace PayPlanner.Api.Tests;
+ 
+-public sealed partial class StorageStageCapacityServiceTests : IClassFixture<PostgreSqlMigratedTemplate>
++public sealed partial class StorageStageCapacityServiceTests : IClassFixture<PostgreSqlMigratedTemplate>, IClassFixture<CurrentModelDatabaseTemplates>
+ {
+     private readonly PostgreSqlMigratedTemplate writerPostgresTemplate;
++    private readonly SqliteMigratedTemplate writerSqliteModelTemplate;
+ 
+-    public StorageStageCapacityServiceTests(PostgreSqlMigratedTemplate writerPostgresTemplate)
+-        => this.writerPostgresTemplate = writerPostgresTemplate;
++    public StorageStageCapacityServiceTests(PostgreSqlMigratedTemplate writerPostgresTemplate, CurrentModelDatabaseTemplates currentModel)
++        => (this.writerPostgresTemplate, writerSqliteModelTemplate) = (writerPostgresTemplate, currentModel.Sqlite);
+ 
+     private Task<WriterProcessFixture> CreateWriterFixtureAsync(bool postgres, params IInterceptor[] interceptors)
+-        => WriterProcessFixture.CreateFromTemplateAsync(writerPostgresTemplate, postgres, interceptors);
++        => WriterProcessFixture.CreateFromTemplateAsync(writerPostgresTemplate, writerSqliteModelTemplate, postgres, interceptors);
++
++    [Fact]
++    public async Task SqliteWriterTemplateMatchesFreshSchemaAndKeepsFixturesIndependent()
++    {
++        await using var fresh = await WriterProcessFixture.CreateAsync(false);
++        await using var first = await CreateWriterFixtureAsync(false);
++        await using var second = await CreateWriterFixtureAsync(false);
++        Assert.NotEqual(fresh.Root, first.Root);
++        Assert.NotEqual(first.Root, second.Root);
++
++        static async Task<string[]> SchemaAsync(PaymentContext db)
++        {
++            await using var command = db.Database.GetDbConnection().CreateCommand();
++            command.CommandText = "SELECT type, name, coalesce(sql, '') FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name";
++            await using var reader = await command.ExecuteReaderAsync();
++            var rows = new List<string>();
++            while (await reader.ReadAsync()) rows.Add($"{reader.GetString(0)}|{reader.GetString(1)}|{reader.GetString(2)}");
++            return rows.ToArray();
++        }
++
++        static async Task<string> PragmaAsync(PaymentContext db, string name)
++        {
++            await using var command = db.Database.GetDbConnection().CreateCommand();
++            command.CommandText = $"PRAGMA {name}";
++            return Convert.ToString(await command.ExecuteScalarAsync())!;
++        }
++
++        var expectedSchema = await SchemaAsync(fresh.Db);
++        Assert.Equal(expectedSchema, await SchemaAsync(first.Db));
++        Assert.Equal(expectedSchema, await SchemaAsync(second.Db));
++        foreach (var name in new[] { "foreign_keys", "recursive_triggers", "defer_foreign_keys", "journal_mode", "query_only" })
++        {
++            var expected = await PragmaAsync(fresh.Db, name);
++            Assert.Equal(expected, await PragmaAsync(first.Db, name));
++            Assert.Equal(expected, await PragmaAsync(second.Db, name));
++        }
++        first.Db.SystemSettings.Add(new() { Key = "synthetic.sqlite.template.isolation", Value = "first" });
++        await first.Db.SaveChangesAsync();
++        Assert.False(await fresh.Db.SystemSettings.AnyAsync(s => s.Key == "synthetic.sqlite.template.isolation"));
++        Assert.False(await second.Db.SystemSettings.AnyAsync(s => s.Key == "synthetic.sqlite.template.isolation"));
++        await using var independentReader = second.NewContext();
++        Assert.False(await independentReader.SystemSettings.AnyAsync(s => s.Key == "synthetic.sqlite.template.isolation"));
++    }
+ 
+     [Theory]
+     [InlineData(false, "live")]
+@@ -197,14 +241,14 @@ public sealed partial class StorageStageCapacityServiceTests : IClassFixture<Pos
+ 
+         // Explicit migration tests retain their fresh, uncached database path.
+         public static Task<WriterProcessFixture> CreateAsync(bool postgres, params IInterceptor[] interceptors)
+-            => CreateCoreAsync(null, postgres, interceptors);
++            => CreateCoreAsync(null, null, postgres, interceptors);
+ 
+         public static Task<WriterProcessFixture> CreateFromTemplateAsync(PostgreSqlMigratedTemplate template,
+-            bool postgres, params IInterceptor[] interceptors)
+-            => CreateCoreAsync(template, postgres, interceptors);
++            SqliteMigratedTemplate sqliteTemplate, bool postgres, params IInterceptor[] interceptors)
++            => CreateCoreAsync(template, sqliteTemplate, postgres, interceptors);
+ 
+         private static async Task<WriterProcessFixture> CreateCoreAsync(PostgreSqlMigratedTemplate? template,
+-            bool postgres, IInterceptor[] interceptors)
++            SqliteMigratedTemplate? sqliteTemplate, bool postgres, IInterceptor[] interceptors)
+         {
+             PaymentContext? db = null;
+             NpgsqlConnection? admin = null;
+@@ -252,12 +296,25 @@ public sealed partial class StorageStageCapacityServiceTests : IClassFixture<Pos
+                 }
+                 else
+                 {
++                    var sqlitePath = Path.Combine(root, "fixture.sqlite");
++                    if (sqliteTemplate is not null)
++                    {
++                        await using var clone = await sqliteTemplate.CreateFileDatabaseAsync(sqlitePath);
++                    }
+                     db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>()
+-                        .UseSqlite($"Data Source={Path.Combine(root, "fixture.sqlite")};Pooling=False").AddInterceptors(interceptors).Options);
+-                    await db.Database.EnsureCreatedAsync();
++                        .UseSqlite($"Data Source={sqlitePath};Pooling=False").AddInterceptors(interceptors).Options);
++                    if (sqliteTemplate is null) await db.Database.EnsureCreatedAsync();
+                     // Keep this fixture's unpooled connection alive while independent readers and the child writer run.
+                     // Disposing Db closes only this owned connection before strict directory cleanup.
+                     await db.Database.OpenConnectionAsync();
++                    if (sqliteTemplate is not null)
++                    {
++                        // EnsureCreated enables WAL for file databases. Preserve that behaviour
++                        // for independent readers and child writers after copying the schema.
++                        await using var journal = db.Database.GetDbConnection().CreateCommand();
++                        journal.CommandText = "PRAGMA journal_mode=WAL";
++                        Assert.Equal("wal", Convert.ToString(await journal.ExecuteScalarAsync()));
++                    }
+                 }
+                 var emailSetting = await db.SystemSettings.SingleOrDefaultAsync(row => row.Key == "notifications.email.enabled");
+                 if (emailSetting is null) db.SystemSettings.Add(new() { Key = "notifications.email.enabled", Value = "false" });
+diff --git a/docs/payplanner-handoff-2026-10-21.md b/docs/payplanner-handoff-2026-10-21.md
+index 895e6041e0957f5d8df37fa8db8acb4a08ebf6dc..d99cde2105e85fe3f83b15a9387bef6c8f4e8c0f 100644
+--- a/docs/payplanner-handoff-2026-10-21.md
++++ b/docs/payplanner-handoff-2026-10-21.md
+@@ -1,4 +1,5 @@
+-<<<<<<< e85d1f22d795b78ca8c3543eb3b14410c3a75747
++**Черновик объединённого кандидата:** записи ниже сохранены из обеих веток и описывают проверку прежних ревизий. Для объединённого кандидата полный gate и CI ещё не выполнялись.
++
+ **Текущий срез, 26 октября:** SETTINGS **137–142** квалифицированы локально: полный backend **10007/10007 + восстановленные 5/5**, полный frontend **3527**, форматирование и сборки успешны. Составной backend receipt `d04e72d3…`, финализатор **17934 native 0**; исходный R12 **7593 exit 1** сохранён как неуспешный. Обычный переход 136→142 подтвердил сохранность 16 непустых таблиц и старых строк истории миграций; оставшиеся отрицательные проверки и чистый startup завершены отдельно, все **16 условий** успешны (`ed2a810a…`, **8272 native 0**, cleanup успешен). При завершении проверок успешные тесты, build, publish, frontend и пройденный переход БД не повторялись. По отдельному решению пользователя сначала выпускается проверенный кандидат из **release&#47;settings-1.14.142**, база **9448c76f**; параллельное ускорение в удалённом **main f696bb15** сохраняется для последующего объединения и одной квалификации общего кандидата. На VPS пока **9448c76f / 1.14.136**. Commit/push и установка 142 ещё впереди; локальные результаты не объявляются успешным CI. Прогресс **9/167 (5.4%)**.
+ 
+ **Решения пользователя, 26 октября:** DOC-01 — окончательный номер при первом успешном сохранении; старые номера и действующее правило повторного использования номера удалённого черновика не меняются. REQ-02 — успех только после полной оплаты связанного документа за услугу этой заявки. REQ-03 — до успеха явно завершить или отменить открытые задачи самой заявки; задачи существующего дела, результаты и оплаты не трогать. Эти три пакета переведены в «не начато»: реализация и проверки впереди, новых завершённых пакетов нет. Общий прогресс **9/167 (5.4%)**.
+@@ -6,9 +7,8 @@
+ **Продолжение backend, 25 октября 16:40 UTC:** R11 выполняет первую из четырёх полных тестовых частей. Полное форматирование переиспользовано по семи успешным native-командам и точным хэшам их результатов. Исправлено небезопасное получение списка дочерних процессов; 12 граничных проверок и короткий native-запуск успешны, независимый source review без блокеров. Причина конкретной аварии R10 окончательно не доказана: дамп подтверждает чтение NULL в Python, но не сохраняет нужный Python-callsite. После аварии все шесть сверок входов, PostgreSQL и frontend совпали; окружение основного агента отдельно совпало с исходным. Полный backend **10007 + 5** ещё не квалифицирован. Успешные frontend **3527**, сборка, адресный backend **892** и форматирование не повторяются. Пользовательские приложения не закрываются. Общий прогресс **9/167 (5.4%)**.
+ 
+ **Текущий барьер backend, 25 октября 16:20 UTC:** R10 прерван аварией управляющего Python-процесса в 15:58:31 UTC. Windows зафиксировал `python313.dll`, исключение `0xc0000005`; сообщения об упавшем тесте нет. Первая часть не записала итоговый TRX и не квалифицирована; остальные части не запускались. Исходные журналы и state сохраняются, проверяются заключительные границы окружения и причина аварии. Все проверки полного semantic format уже прошли: API из R9 и шесть команд R10 покрывают все пять проектов без исключения правил или файлов. Успешные frontend **3527**, сборка и адресный backend **892** сохраняются без повторов; полный backend **10007 + 5** пока не подтверждён. Пользовательские приложения не закрываются. Прогресс **9/167 (5.4%)**.
+-=======
++
+ > **Текущая передача: [25 октября, ускорение и CI](payplanner-handoff-2026-10-25.md).** Код fe4cda5c отправлен; local9882+5/backend и3552/frontend успешны. Автоматическая доставка остановлена квотой GitHub и двумя file-symlink EPERM на XSENUS, deploy не запускался. Ниже сохранён предыдущий продуктовый срез.
+->>>>>>> 7cd89d840b52827e79146696bc53fafd57244ddd
+ 
+ # PayPlanner HOME — передача, итог 25 октября 2026
+ 
+diff --git a/docs/payplanner-release-roadmap-2026-10-14.md b/docs/payplanner-release-roadmap-2026-10-14.md
+index 66fc6eb4706607bc5fe77a465a55bad357b2d50c..ae50967976e392d406b55e0c3d165386dbbe8a31 100644
+--- a/docs/payplanner-release-roadmap-2026-10-14.md
++++ b/docs/payplanner-release-roadmap-2026-10-14.md
+@@ -1,4 +1,23 @@
+-<<<<<<< e85d1f22d795b78ca8c3543eb3b14410c3a75747
++**Черновик объединённого кандидата:** записи ниже сохранены из обеих веток и описывают проверку прежних ревизий. Для объединённого кандидата полный gate и CI ещё не выполнялись.
++
++## Исследование скорости локальных проверок — 27 октября 2026
++
++В отдельной рабочей копии исследована подготовка независимых SQLite-баз для тестов хранилища. Путь настоящих миграций сохранён; проверены совпадение схемы, настройки журнала и независимость копий, шесть сценариев с отдельным процессом и семь сценариев миграций. Первый вариант обнаружил несовпадение режима журнала и сохранён как неуспешный; после исправления адресные проверки прошли. Восемнадцать проверок владельца шаблона и один сценарий существующего локального PostgreSQL также прошли; список тестовых баз роли до и после совпал. Две пары запусков одинаковых 16 сценариев дали 13,90/13,78 с исходного и 11,71/11,61 с экспериментального варианта. Сборки и фоновая нагрузка различались; эти результаты не доказывают ускорение полного набора. Полная проверка окончательного объединённого кандидата и обязательный CI остаются впереди. Статусы REL и общий прогресс не менялись: REL **0/3 (0%)**, общий **9/167 (5,4%)**.
++
++Дополнительный адресный замер в одном процессе и одной сборке: после прогрева выполнены восемь чередующихся пар подготовки, проверки данных и очистки фикстуры. Медиана прежнего пути — 270,30 мс, нового — 38,40 мс. Проверка пройдена; исходные измерения и временный диагностический код сохранены вне проекта. Это время отдельной операции, а не оценка ускорения полного прогона. Диагностический тест из рабочего набора удалён после измерения; обязательные существующие проверки сохранены.
++
++Каталог экспериментальной сборки отдельно сравнен с исходным через существующий планировщик: сохранены идентификатор, полное имя и отображаемое имя всех 9882 исходных случаев; добавлен один случай проверки схемы и независимости копий. Это подтверждение обнаружения каталога, а не успешное выполнение всего набора или CI.
++
++После этого подготовлено динамическое изменение числа работников: разбиение заранее допускает число частей в пределах процессоров и заданного пользователем лимита, а запуск следующего процесса повторно проверяет свободную память. При снижении доступной памяти новые процессы ожидают, уже запущенные сохраняются; изолированные случаи остаются последовательными. В исходном прогоне первая часть получила одного работника при 6,88 ГиБ свободной памяти; из 800 замеров в интервале выполнения её заданий 754 показывали не менее 8 ГиБ. Эти значения измерены при одном работнике и не доказывают, сколько памяти осталось бы после запуска второго. Адресно прошли 114 проверок планировщика и проверки объединения; отдельный технический прогон 12 выбранных случаев завершил все четыре части и точное объединение. Это не полный выпускной gate и не измерение ускорения полного набора. В текущем каталоге сохранены все 9882 прежних случая и добавлены десять проверок, включая новую проверку фикстуры.
++
++На текущей сборке экспериментального пакета повторно прошли все 16 выбранных сценариев PostgreSQL и 31 сценарий SQLite с проверками шаблонов, миграций и межпроцессного доступа; имена совпали с исходными сохранёнными каталогами. Использован существующий локальный сервер PostgreSQL 17.2 на порту 5433 с выделенной тестовой ролью и табличным пространством на E; проверенные временные базы после запуска освобождены. Эти адресные проверки не заменяют полный gate окончательного кандидата и обязательный CI.
++
++Дополнительно на той же сборке прошли 13 отдельных сценариев PostgreSQL: шесть с дочерним процессом и семь с настоящим обновлением и откатом миграций. Исходные имена всех случаев совпали; выбранные тестовые базы роли после запуска отсутствовали, как и до запуска. Общий применимый backend gate и CI остаются незавершёнными.
++
++Свежие оценки длительности также проверены на отдельном историческом профиле: расчётный разброс сумм между четырьмя частями снизился с 478 до 370 секунд без изменения каталога. Это не измерение ускорения: части локально выполняются последовательно, а идеализированный расчёт для двух работников даёт одинаковую нижнюю границу для обоих планов. Реальное время зависит от хвостов партий, изолированных случаев, ресурсов и накладных расходов; замену профиля по одному расчёту не принимаем.
++
++Проверка объединения опубликованной ветки настроек с сохранённой веткой выпуска выявила семь конфликтующих путей. Среди них удалённый при разделении тестов журнала исходный файл, изменённый в настройках; четыре названия новых сценариев настроек отсутствуют в разделённых файлах и требуют ручной проверки и переноса всех параметров и проверок. Также требуется согласовать совпадающий номер записи обновлений, браузерный сценарий и различающиеся способы запуска тестового инструмента. Шесть незакоммиченных файлов эксперимента ускорения не пересекаются по имени с изменениями ветки настроек, но совместимость логики и итоговый каталог ещё не проверены. Слияние и полный gate не выполнялись.
++
+ **Текущий срез, 26 октября:** SETTINGS **137–142** квалифицированы локально: полный backend **10007/10007 + восстановленные 5/5**, полный frontend **3527**, форматирование и сборки успешны. Составной backend receipt `d04e72d3…`, финализатор **17934 native 0**; исходный R12 **7593 exit 1** сохранён как неуспешный. Обычный переход 136→142 подтвердил сохранность 16 непустых таблиц и старых строк истории миграций; оставшиеся отрицательные проверки и чистый startup завершены отдельно, все **16 условий** успешны (`ed2a810a…`, **8272 native 0**, cleanup успешен). При завершении проверок успешные тесты, build, publish, frontend и пройденный переход БД не повторялись. По отдельному решению пользователя сначала выпускается проверенный кандидат из **release&#47;settings-1.14.142**, база **9448c76f**; параллельное ускорение в удалённом **main f696bb15** сохраняется для последующего объединения и одной квалификации общего кандидата. На VPS пока **9448c76f / 1.14.136**. Commit/push и установка 142 ещё впереди; локальные результаты не объявляются успешным CI. Прогресс **9/167 (5.4%)**.
+ 
+ **REL-01/02: обязательные барьеры доставки 142.** После сохранённого R12 exit 1 сначала закрыть только проваленную сверку пяти служебных publish-файлов: их отдельная проверенная копия, точный возврат исходных артефактов, свежие шесть сверок и PostgreSQL, первый original public verifier. Связать новый фактический terminal exit 0 после finally с исходными 12 успешными этапами без их повторов; прежний failed-state и terminal 1 не переписывать. Затем обычный startup 136→142 на непустых синтетических данных должен сохранить 16 таблиц и полные прежние 208 строк миграций, добавить только Seller (209), отдельный чистый startup — дать 208. Затем выполнить конечный перенос 114 путей и 22 согласованных документов, обычное Git staging и настоящий semantic EOL-контроль 28 путей, связать реальные committed blobs с квалифицированными исходниками. Упаковать готовые R12 backend и c40 frontend без новой сборки. В сценарии установки требуется отдельный строгий приём результата original verifier, вызванного внутри полного wrapper, с фактическими output/terminal receipts; выдуманная native-команда verify не допускается. До применения обязательны bash syntax и адресные положительные/отрицательные admission-контроли, свежая проверенная внешняя резервная копия, контроль места/нагрузки, а после установки — live версия, API, frontend и сохранность данных. Source review адаптеров не является выполнением этих шагов. GitHub Actions проверить отдельно; локальный PASS не объявлять успешным CI. При частичном startup ошибка останавливает установку для разбора, автоматического восстановления БД нет.
+@@ -8,7 +27,7 @@
+ **Текущий барьер backend, 25 октября 16:20 UTC:** R10 прерван аварией управляющего Python-процесса в 15:58:31 UTC. Windows зафиксировал `python313.dll`, исключение `0xc0000005`; сообщения об упавшем тесте нет. Первая часть не записала итоговый TRX и не квалифицирована; остальные части не запускались. Исходные журналы и state сохраняются, проверяются заключительные границы окружения и причина аварии. Все проверки полного semantic format уже прошли: API из R9 и шесть команд R10 покрывают все пять проектов без исключения правил или файлов. Успешные frontend **3527**, сборка и адресный backend **892** сохраняются без повторов; полный backend **10007 + 5** пока не подтверждён. Пользовательские приложения не закрываются. Прогресс **9/167 (5.4%)**.
+ 
+ > **Актуальная доставка REL-01/02, 25 октября:** **9448c76f / 1.14.136 установлен на VPS**. [Протокол](deployment-manual-2026-10-25.md): полный frontend **3419/3419**, backend R8 **9808+5** по неизменным входам, каталог **1/1**; успешные проверки при доставке не повторялись. Первый отказ rsync безопасно откатился, перед checksum-продолжением сделана новая полная проверенная внешняя копия. Public/revision/health/readiness и сохранность 14 таблиц подтверждены. Actions **40156586337** неуспешен из-за Billing и WSL shell до trusted-host verifier; локальная квалификация и ручная установка не заменяют CI. SETTINGS 137–142 не установлены: сборка R14, адресный backend 892, полный frontend 3527 и полное semantic format завершены; R11 выполняет первую из четырёх полных backend-частей 10007+5, успешный полный backend и CI ещё не подтверждены. Bundle pilot остаётся отдельным неподтверждённым объёмом. REL **0/3 (0%)**, общий **9/167 (5.4%)**, пакеты целиком не закрыты.
+-=======
++
+ ## Итоговая проверка хранения на XSENUS и обновления журнала — 26 октября 2026
+ 
+ Полный локальный backend-прогон выявил отмену загрузки журнала задач при получении нового уведомления: 7379 проверок прошли, одна завершилась ошибкой; оставшиеся этапы не выполнялись. Этот запуск сохранён как неуспешный. Обновления по уведомлениям теперь дожидаются обоих текущих ответов и объединяются; смена фильтра, сотрудника и закрытие раздела сохраняют отмену прежних запросов. Все прежние проверки сохранены, добавлено 16 регрессий. Адресно прошли 51/51 проверок журнала и оба исходных браузерных сценария со старой и новой карточкой без ослабления проверки серверных ошибок. Добавлена запись 1.14.137 в «Что нового».
+@@ -42,7 +61,6 @@ Hosted-вычисления перенесены на существующий X
+ REL-01/02 остаются в работе: **0/3 (0%)**, общий продуктовый прогресс **9/167 (5.4%)**. Ниже сохранены исторические срезы прежних кандидатов; они не отменяют текущий итог и не являются новой очередью повторной реализации.
+ 
+ > **Актуальный REL-01/02, общий кандидат R8:** **Локальная квалификация общего кандидата R8:** свежий полный backend **9808/9808**, восстановленные HTTP/browser-проверки **5/5**, все **12 этапов** и исходная проверка входов завершены с native-кодом **0**. State SHA 564e32e9e5c6d5d161f22661ee12d29262915d3af4f1c7c40d4d6a8a6b725304, original verify (delivery-input-verification.json) SHA 51848404d5c6868dc657441b7f56116002cfc731acd9caa1186f6a51494010f1, составной receipt SHA 1964351b3541c001e14d794cad0b0bc7b16def71a23a5af4004ef4836509e529. Исходные остановки из-за дописанного диагностического лога, порога памяти и несовпадения служебных файлов публикации сохранены в отдельных отчётах. Завершение подтверждено составным отчётом без повторного запуска успешных тестов, восстановления и публикации пакета. Локальная квалификация не является успешным CI или установкой. **Полный frontend текущего R8 — 3372 проверки:** успешный NEXT frontend r3 сохранён по точным проверенным входам: D:/PayPlannerRelease/20261024-next-frontend-type-recovery-r3/run-01/frontend-state.json, SHA 88f2407c9cd399f1db3383bbdb52c6f952e39bd5ee06b4d56f797b947e29590f. API 69d98c2a…, Tests 75b8c3c8…, build qualification d38592f9…. Windows/Node и Linux-only ограничения сохраняются; local не означает CI. Активные записи текущего пакета — 1.14.113–1.14.127; UI/REQ128–136 и SETTINGS137–140 относятся к следующей работе. Три model-template fixture, две browser-fixture, изоляция временных файлов Tasks и исправленный SQL-реестр входят в проверенный текущий scope. Ускорение описывается только фактическими timings; bundle pilot SETTINGS не квалифицирован. REL0/3(0%), общий9/167(5.4%); Push и ручная установка89689498 подтверждены протоколом ниже; CI остаётся неуспешным из-за Billing/отмены backend.
+->>>>>>> 7cd89d840b52827e79146696bc53fafd57244ddd
+ 
+ > **Сохранённый предшествующий срез R5/R6:** **Актуальный REL-01/02 на 24 октября:** полный backend R5 остановился: **2388 passed / 1 failed из 2389**, `ProviderSpecificSqlTests` ожидал 7 SQL-блокировок вместо фактических 13; три последующие части не запускались, `full_gate=false`, очистка собственных БД/сеансов завершена. Следующий R6 объединяет исходники текущего выпуска, пять fixture-источников ускорения (237 модельных и 29 browser-сценариев; `D:/PayPlannerRelease/20261024-test-fixture-performance/implementation/source-parity.json` и `browser-schema-followup/source-preparation.json`) и [исправление SQL-реестра](../backend/PayPlanner.Api.Tests/ProviderSpecificSqlTests.cs) с четырьмя отрицательными проверками (`sql-registry-repair/source-repair.json`, SHA `0c3f7dea…`). Сборка, адресная квалификация и измерение ускорения R6 ещё впереди; успешного полного backend и CI нет. Новая косметика Act/VIS-05/VIS-07 остаётся отдельным будущим пакетом. Последняя подтверждённая установка VPS — `41ecf6eb`; новых commit/push/установки нет. Прогресс REL **0/3 (0%)**, общий **9/167 (5.4%)**.
+ 
+diff --git a/docs/payplanner-work-order-2026-10-21.md b/docs/payplanner-work-order-2026-10-21.md
+index 028e7ee38c29b2da5ad37821166e6b9a345c4853..40dd6a32d33859e358d9634441356b7f9681142a 100644
+--- a/docs/payplanner-work-order-2026-10-21.md
++++ b/docs/payplanner-work-order-2026-10-21.md
+@@ -1,12 +1,12 @@
++**Черновик объединённого кандидата:** записи ниже сохранены из обеих веток и описывают проверку прежних ревизий. Для объединённого кандидата полный gate и CI ещё не выполнялись.
++
+ # PayPlanner — порядок продолжения на 25 октября 2026
+ 
+ **Решения пользователя, 26 октября:** DOC-01 — окончательный номер при первом успешном сохранении; старые номера и действующее правило повторного использования номера удалённого черновика не меняются. REQ-02 — успех только после полной оплаты связанного документа за услугу этой заявки. REQ-03 — до успеха явно завершить или отменить открытые задачи самой заявки; задачи существующего дела, результаты и оплаты не трогать. Эти три пакета переведены в «не начато»: реализация и проверки впереди, новых завершённых пакетов нет. Общий прогресс **9/167 (5.4%)**.
+ 
+-<<<<<<< e85d1f22d795b78ca8c3543eb3b14410c3a75747
+ **Решения пользователя, 25 октября:** MSG-03 — скрывать переписку только у текущего сотрудника, с возможностью восстановить; общая история и сообщения других участников сохраняются. MSG-01 — при переносе задачи прежние сообщения остаются в исходном деле, новые относятся к новому делу. Доступ к закрытым чатам продолжает проверяться; смена дела не расширяет аудиторию автоматически. Это согласованные правила для реализации, а не уже выпущенная функция. MSG-03 переведён из ожидания решения в работу; завершённых пакетов не добавлено, общий прогресс **9/167 (5.4%)**.
+-=======
++
+ Рабочий вход в [единый план](payplanner-unified-roadmap-2026-10-14.md). Основание — [новая сверка](payplanner-source-review-2026-10-21.md); состояние домашней среды — в [передаче](payplanner-handoff-2026-10-21.md). Это очередь оставшегося объёма, а не команда немедленно реализовать все пакеты. После очистки и выпуска пользователь уточнил приоритет: быстрее отдавать небольшие законченные результаты, сначала простые задачи, затем сложные. [Разбор длительности проверок и план ускорения](archive/roadmaps/payplanner-delivery-acceleration-plan-2026-10-21.md) содержит исходные измерения и дальнейшие этапы; первый пакет реализован локально, адресные проверки 62/62 backend, 60/60 карточка счёта, 102/102 workflow. [Результаты и ограничения измерений](development-test-acceleration-2026-10-21.md). Исторические адресные результаты ниже дополнены полным gate 9441/9441 + 5/5 и установкой a83c70b9 на VPS 23 октября; успешные проверки повторять не нужно.
+->>>>>>> 7cd89d840b52827e79146696bc53fafd57244ddd
+ 
+ **Текущий выпуск установлен:** **9448c76f / 1.14.136**, [протокол 25 октября](deployment-manual-2026-10-25.md). Frontend 3419 и backend R8 9808+5 подтверждены, успешные проверки при установке не повторялись. SETTINGS 137–142 ещё не установлен: адресный backend892 и полный frontend3527 завершены; полное semantic format завершено; полный backend квалифицирован составно: **10007 + 5**, qualification `d04e72d3…`, финализатор **17934 — native 0**. Установка 142 и успешный CI ещё не подтверждены. [Актуальные доказательства](development-settings-verification-2026-10-25.md). Следующие небольшие исправления мессенджера готовятся отдельно. Работать с доступной памятью, пользовательские приложения не закрывать и повторно освобождать память не просить; качество и обязательные gates сохраняются.
+ 
+diff --git a/docs/system-surface-inventory.generated.md b/docs/system-surface-inventory.generated.md
+index fc157c6796dd655a8f6bcc5ad30ddbc50707b96f..3c22c50d329c96a8e7c87ab7d498202d70eee3ad 100644
+--- a/docs/system-surface-inventory.generated.md
++++ b/docs/system-surface-inventory.generated.md
+@@ -78,13 +78,8 @@
+ 
+ | Компонент | Файл | Строка | Тест найден | Документация |
+ | --- | --- | --- | --- | --- |
+-<<<<<<< e85d1f22d795b78ca8c3543eb3b14410c3a75747
+-| InvoiceModal | src/components/Accounts/InvoiceModal.tsx | 4413 | да | docs/action-map-pay-32-individual-client-2026-10-12.md, docs/date-time-inventory.md, docs/development-test-acceleration-2026-10-21.md, docs/final-acceptance-2026-06-10.md, docs/financial-invoice-cancellation-current-state-2026-07-08.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/payplanner-delivery-acceleration-plan-2026-10-21.md, docs/payplanner-financial-documents-roadmap-2026-10-14.md |
++| InvoiceModal | src/components/Accounts/InvoiceModal.tsx | 4413 | да | docs/action-map-pay-32-individual-client-2026-10-12.md, docs/date-time-inventory.md, docs/development-performance-audit-2026-10-23.md, docs/development-test-acceleration-2026-10-21.md, docs/final-acceptance-2026-06-10.md, docs/financial-invoice-cancellation-current-state-2026-07-08.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/payplanner-financial-documents-roadmap-2026-10-14.md |
+ | ActModal | src/components/Acts/ActModal.tsx | 1632 | да | docs/action-map-pay-32-individual-client-2026-10-12.md, docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md |
+-=======
+-| InvoiceModal | src/components/Accounts/InvoiceModal.tsx | 4407 | да | docs/action-map-pay-32-individual-client-2026-10-12.md, docs/date-time-inventory.md, docs/development-performance-audit-2026-10-23.md, docs/development-test-acceleration-2026-10-21.md, docs/final-acceptance-2026-06-10.md, docs/financial-invoice-cancellation-current-state-2026-07-08.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/payplanner-financial-documents-roadmap-2026-10-14.md |
+-| ActModal | src/components/Acts/ActModal.tsx | 1628 | да | docs/action-map-pay-32-individual-client-2026-10-12.md, docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md |
+->>>>>>> 7cd89d840b52827e79146696bc53fafd57244ddd
+ | Login | src/components/Auth/Login.tsx | 73 | да | docs/external-authentication-security-and-performance.md, docs/field-encryption-candidates.generated.md, docs/field-encryption-data-inventory-2026-07-30.md, docs/full-project-audit-2026-06-10.md |
+ | Register | src/components/Auth/Register.tsx | 94 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/date-time-inventory.md, docs/field-encryption-candidates.generated.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/payplanner-tax-roadmap-2026-10-14.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md |
+ | PaymentModal | src/components/Calendar/PaymentModal.tsx | 2931 | да | docs/action-map-pay-32-individual-client-2026-10-12.md, docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md, docs/max-latest-reply-drafts-2026-10-15.md, docs/max-review-and-replies-2026-10-16.md, docs/payplanner-financial-documents-roadmap-2026-10-14.md, docs/technical-stabilization-log.md |
+@@ -96,13 +91,8 @@
+ | ClientPortalPage | src/components/Public/ClientPortalPage.tsx | 223 | да | нет |
+ | RoleModal | src/components/Roles/RoleModal.tsx | 121 | нет | docs/full-project-audit-2026-06-10.md |
+ | S3Storage | src/components/S3Storage/S3Storage.tsx | 773 | да | docs/date-time-inventory.md, docs/development-pause-plan-2026-09-30.md, docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/s3-storage-acceptance-checklist.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/unpushed-changes-map-2026-10-03.md |
+-<<<<<<< e85d1f22d795b78ca8c3543eb3b14410c3a75747
+ | TaskJournalSettings | src/components/Settings/TaskJournalSettings.tsx | 998 | да | docs/action-map-pay-20-task-cards-2026-10-12.md, docs/payplanner-task-billing-bulk-plan-2026-10-23.md, docs/payplanner-visual-comparison-2026-10-23.md, docs/task-template-current-state-2026-07-09.md |
+-| TaskJournal | src/components/Tasks/TaskJournal.tsx | 10702 | да | docs/action-map-pay-19-journal-2026-10-12.md, docs/action-map-pay-20-task-cards-2026-10-12.md, docs/action-map-pay-32-individual-client-2026-10-12.md, docs/backend-build-speed-2026-10-11.md, docs/batch-operations-audit-coverage-2026-06-10.md, docs/calendar-log-cleanup-execution-2026-10-23.md, docs/calendar-log-compaction-2026-10-23.md, docs/claude-branch-review-2026-10-10.md, docs/claude-handoff-for-codex-review-2026-10-12.md, docs/claude-next-development-prompt-2026-10-10.md, docs/claude-yougile-ui-development-spec-2026-10-10.md, docs/codex-preparation-report-2026-10-12.md, docs/codex-preparation-request-2026-10-12.md, docs/date-time-inventory.md, docs/development-pause-plan-2026-09-30.md, docs/development-release-preparation-2026-10-06.md, docs/ef-production-warning-cleanup-plan-2026-06-22.md, docs/field-encryption-candidates.generated.md, docs/field-encryption-data-inventory-2026-07-30.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/max-latest-reply-drafts-2026-10-15.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/payplanner-payroll-roadmap-2026-10-14.md, docs/payplanner-task-billing-bulk-plan-2026-10-23.md, docs/payplanner-ui-roadmap-2026-10-14.md, docs/payplanner-visual-comparison-2026-10-23.md, docs/release-verification-history-2026-10-06.md, docs/storage-backup-snapshot-boundary-audit-2026-09-28.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-participants-current-state-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md, docs/unpushed-changes-map-2026-10-03.md, docs/yougile-clarifications-drafts-2026-10-09.md |
+-=======
+-| TaskJournalSettings | src/components/Settings/TaskJournalSettings.tsx | 961 | да | docs/action-map-pay-20-task-cards-2026-10-12.md, docs/payplanner-task-billing-bulk-plan-2026-10-23.md, docs/payplanner-visual-comparison-2026-10-23.md, docs/task-template-current-state-2026-07-09.md |
+-| TaskJournal | src/components/Tasks/TaskJournal.tsx | 10704 | да | docs/action-map-pay-19-journal-2026-10-12.md, docs/action-map-pay-20-task-cards-2026-10-12.md, docs/action-map-pay-32-individual-client-2026-10-12.md, docs/backend-build-speed-2026-10-11.md, docs/calendar-log-cleanup-execution-2026-10-23.md, docs/calendar-log-compaction-2026-10-23.md, docs/claude-branch-review-2026-10-10.md, docs/claude-handoff-for-codex-review-2026-10-12.md, docs/claude-next-development-prompt-2026-10-10.md, docs/claude-yougile-ui-development-spec-2026-10-10.md, docs/codex-preparation-report-2026-10-12.md, docs/codex-preparation-request-2026-10-12.md, docs/date-time-inventory.md, docs/development-pause-plan-2026-09-30.md, docs/development-performance-audit-2026-10-23.md, docs/development-performance-implementation-2026-10-23.md, docs/development-release-preparation-2026-10-06.md, docs/ef-production-warning-cleanup-plan-2026-06-22.md, docs/field-encryption-candidates.generated.md, docs/field-encryption-data-inventory-2026-07-30.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/max-latest-reply-drafts-2026-10-15.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/payplanner-handoff-2026-10-25.md, docs/payplanner-payroll-roadmap-2026-10-14.md, docs/payplanner-task-billing-bulk-plan-2026-10-23.md, docs/payplanner-ui-roadmap-2026-10-14.md, docs/payplanner-visual-comparison-2026-10-23.md, docs/release-verification-history-2026-10-06.md, docs/storage-backup-snapshot-boundary-audit-2026-09-28.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-participants-current-state-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md, docs/unpushed-changes-map-2026-10-03.md, docs/yougile-clarifications-drafts-2026-10-09.md |
+->>>>>>> 7cd89d840b52827e79146696bc53fafd57244ddd
++| TaskJournal | src/components/Tasks/TaskJournal.tsx | 10744 | да | docs/action-map-pay-19-journal-2026-10-12.md, docs/action-map-pay-20-task-cards-2026-10-12.md, docs/action-map-pay-32-individual-client-2026-10-12.md, docs/backend-build-speed-2026-10-11.md, docs/batch-operations-audit-coverage-2026-06-10.md, docs/calendar-log-cleanup-execution-2026-10-23.md, docs/calendar-log-compaction-2026-10-23.md, docs/claude-branch-review-2026-10-10.md, docs/claude-handoff-for-codex-review-2026-10-12.md, docs/claude-next-development-prompt-2026-10-10.md, docs/claude-yougile-ui-development-spec-2026-10-10.md, docs/codex-preparation-report-2026-10-12.md, docs/codex-preparation-request-2026-10-12.md, docs/date-time-inventory.md, docs/development-pause-plan-2026-09-30.md, docs/development-performance-audit-2026-10-23.md, docs/development-performance-implementation-2026-10-23.md, docs/development-release-preparation-2026-10-06.md, docs/ef-production-warning-cleanup-plan-2026-06-22.md, docs/field-encryption-candidates.generated.md, docs/field-encryption-data-inventory-2026-07-30.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/max-latest-reply-drafts-2026-10-15.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/payplanner-handoff-2026-10-25.md, docs/payplanner-payroll-roadmap-2026-10-14.md, docs/payplanner-task-billing-bulk-plan-2026-10-23.md, docs/payplanner-ui-roadmap-2026-10-14.md, docs/payplanner-visual-comparison-2026-10-23.md, docs/release-verification-history-2026-10-06.md, docs/storage-backup-snapshot-boundary-audit-2026-09-28.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-participants-current-state-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md, docs/unpushed-changes-map-2026-10-03.md, docs/yougile-clarifications-drafts-2026-10-09.md |
+ | FormPromptModal | src/components/ui/FormPromptModal.tsx | 65 | да | нет |
+ | TextPromptModal | src/components/ui/TextPromptModal.tsx | 55 | да | docs/full-project-audit-2026-06-10.md |
+ | YandexDisk | src/components/YandexDisk/YandexDisk.tsx | 722 | да | docs/action-map-pay-19-journal-2026-10-12.md, docs/action-map-pay-20-task-cards-2026-10-12.md, docs/development-pause-plan-2026-09-30.md, docs/field-encryption-candidates.generated.md, docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/release-verification-history-2026-10-06.md, docs/storage-backup-snapshot-boundary-audit-2026-09-28.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/unpushed-changes-map-2026-10-03.md, docs/yandex-disk-integration-delivery-report.md |
+@@ -681,8 +671,7 @@
+ | GET | api/contacts/phonebook/yealink/{token} | ContactsController | GetYealinkRemotePhonebook | backend/Controllers/ContactsController.cs:742 | публичный ([AllowAnonymous]) | да | docs/contacts-directory-implementation-log.md |
+ | POST | api/contacts/imports/yealink | ContactsController | ImportYealinkXml | backend/Controllers/ContactsController.cs:786 | [Authorize] | нет | docs/contacts-directory-implementation-log.md |
+ | POST | merge/preview | ContactsController | PreviewMerge | backend/Controllers/ContactsController.Merge.cs:39 | не задано | да | нет |
+-<<<<<<< e85d1f22d795b78ca8c3543eb3b14410c3a75747
+-| POST | merge | ContactsController | MergeContacts | backend/Controllers/ContactsController.Merge.cs:52 | не задано | да | docs/calendar-log-cleanup-execution-2026-10-23.md, docs/claude-merge-review-2026-10-11.md, docs/claude-yougile-operations-development-spec-2026-10-10.md, docs/date-time-inventory.md, docs/deployment-manual-2026-10-23.md, docs/development-bank-import-verification-2026-10-16.md, docs/development-final-gate-2026-10-21.md, docs/development-xsenus-runner-2026-10-21.md, docs/frontend-hook-test-coverage-2026-06-10.md, docs/max-latest-reply-drafts-2026-10-15.md, docs/max-today-reply-drafts-2026-10-14.md, docs/payplanner-card-coverage-2026-10-14.md, docs/payplanner-contacts-telephony-roadmap-2026-10-14.md, docs/payplanner-handoff-2026-10-21.md, docs/yougile-payplanner-drafts-2026-10-12.md, docs/yougile-work-categories-2026-10-12.md |
++| POST | merge | ContactsController | MergeContacts | backend/Controllers/ContactsController.Merge.cs:52 | не задано | да | docs/calendar-log-cleanup-execution-2026-10-23.md, docs/claude-merge-review-2026-10-11.md, docs/claude-yougile-operations-development-spec-2026-10-10.md, docs/date-time-inventory.md, docs/deployment-ci-2026-10-25.md, docs/deployment-manual-2026-10-23.md, docs/development-bank-import-verification-2026-10-16.md, docs/development-final-gate-2026-10-21.md, docs/development-xsenus-runner-2026-10-21.md, docs/frontend-hook-test-coverage-2026-06-10.md, docs/max-latest-reply-drafts-2026-10-15.md, docs/max-today-reply-drafts-2026-10-14.md, docs/payplanner-card-coverage-2026-10-14.md, docs/payplanner-contacts-telephony-roadmap-2026-10-14.md, docs/payplanner-handoff-2026-10-21.md, docs/payplanner-handoff-2026-10-25.md, docs/yougile-payplanner-drafts-2026-10-12.md, docs/yougile-work-categories-2026-10-12.md |
+ | GET | api/[controller] | ContractsController | Get | backend/Controllers/ContractsController.cs:315 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+ | GET | api/[controller]/{id:int} | ContractsController | GetById | backend/Controllers/ContractsController.cs:348 | [Authorize] | да | нет |
+ | GET | api/[controller]/{id:int}/document | ContractsController | GetDocument | backend/Controllers/ContractsController.cs:376 | [Authorize] | да | нет |
+@@ -710,36 +699,6 @@
+ | PUT | api/[controller]/{id:int} | ContractsController | Update | backend/Controllers/ContractsController.cs:1223 | [Authorize] | да | нет |
+ | DELETE | api/[controller]/{id:int} | ContractsController | Delete | backend/Controllers/ContractsController.cs:1306 | [Authorize] | да | нет |
+ | PUT | api/[controller]/{id:int}/seller | ContractsController | SetSeller | backend/Controllers/ContractsController.cs:1600 | [Authorize] | да | нет |
+-=======
+-| POST | merge | ContactsController | MergeContacts | backend/Controllers/ContactsController.Merge.cs:52 | не задано | да | docs/calendar-log-cleanup-execution-2026-10-23.md, docs/claude-merge-review-2026-10-11.md, docs/claude-yougile-operations-development-spec-2026-10-10.md, docs/date-time-inventory.md, docs/deployment-ci-2026-10-25.md, docs/deployment-manual-2026-10-23.md, docs/development-bank-import-verification-2026-10-16.md, docs/development-final-gate-2026-10-21.md, docs/development-xsenus-runner-2026-10-21.md, docs/frontend-hook-test-coverage-2026-06-10.md, docs/max-latest-reply-drafts-2026-10-15.md, docs/max-today-reply-drafts-2026-10-14.md, docs/payplanner-card-coverage-2026-10-14.md, docs/payplanner-contacts-telephony-roadmap-2026-10-14.md, docs/payplanner-handoff-2026-10-21.md, docs/payplanner-handoff-2026-10-25.md, docs/yougile-payplanner-drafts-2026-10-12.md, docs/yougile-work-categories-2026-10-12.md |
+-| GET | api/[controller] | ContractsController | Get | backend/Controllers/ContractsController.cs:313 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+-| GET | api/[controller]/{id:int} | ContractsController | GetById | backend/Controllers/ContractsController.cs:346 | [Authorize] | да | нет |
+-| GET | api/[controller]/{id:int}/document | ContractsController | GetDocument | backend/Controllers/ContractsController.cs:367 | [Authorize] | да | нет |
+-| GET | api/[controller]/{id:int}/termination-agreement | ContractsController | GetTerminationAgreement | backend/Controllers/ContractsController.cs:411 | [Authorize] | да | нет |
+-| POST | api/[controller]/{id:int}/yandex-disk | ContractsController | UploadDocumentToYandexDisk | backend/Controllers/ContractsController.cs:456 | [Authorize] | да | нет |
+-| POST | api/[controller]/{id:int}/send-email | ContractsController | SendEmail | backend/Controllers/ContractsController.cs:574 | [Authorize] | да | нет |
+-| GET | api/[controller]/document-template-settings | ContractsController | GetDocumentTemplateSettings | backend/Controllers/ContractsController.cs:644 | [Authorize] | нет | нет |
+-| PUT | api/[controller]/document-template-settings | ContractsController | UpsertDocumentTemplateSettings | backend/Controllers/ContractsController.cs:648 | [Authorize] | да | нет |
+-| GET | api/[controller]/document-template-settings/history | ContractsController | GetDocumentTemplateHistory | backend/Controllers/ContractsController.cs:688 | [Authorize] | да | нет |
+-| GET | api/[controller]/document-template-settings/history/{versionId:int} | ContractsController | GetDocumentTemplateVersion | backend/Controllers/ContractsController.cs:699 | [Authorize] | да | нет |
+-| POST | api/[controller]/document-template-settings/history/{versionId:int}/restore | ContractsController | RestoreDocumentTemplateVersion | backend/Controllers/ContractsController.cs:723 | [Authorize] | да | нет |
+-| POST | api/[controller]/{id:int}/send-to-signing | ContractsController | SendToSigning | backend/Controllers/ContractsController.cs:773 | [Authorize] | да | нет |
+-| GET | api/[controller]/{id:int}/termination-check | ContractsController | GetTerminationCheck | backend/Controllers/ContractsController.cs:800 | [Authorize] | да | нет |
+-| POST | api/[controller]/{id:int}/mark-concluded | ContractsController | MarkConcluded | backend/Controllers/ContractsController.cs:809 | [Authorize] | да | нет |
+-| POST | api/[controller]/{id:int}/mark-not-signed | ContractsController | MarkNotSigned | backend/Controllers/ContractsController.cs:838 | [Authorize] | нет | нет |
+-| POST | api/[controller]/{id:int}/status | ContractsController | UpdateStatus | backend/Controllers/ContractsController.cs:866 | [Authorize] | да | нет |
+-| POST | api/[controller]/{id:int}/terminate | ContractsController | Terminate | backend/Controllers/ContractsController.cs:982 | [Authorize] | да | нет |
+-| POST | api/[controller]/{id:int}/cancel | ContractsController | Cancel | backend/Controllers/ContractsController.cs:1037 | [Authorize] | да | нет |
+-| GET | api/[controller]/numbering-settings | ContractsController | GetNumberingSettings | backend/Controllers/ContractsController.cs:1098 | [Authorize] | нет | нет |
+-| PUT | api/[controller]/numbering-settings | ContractsController | UpsertNumberingSettings | backend/Controllers/ContractsController.cs:1102 | [Authorize] | да | нет |
+-| GET | api/[controller]/rules-settings | ContractsController | GetRulesSettings | backend/Controllers/ContractsController.cs:1118 | [Authorize] | нет | нет |
+-| PUT | api/[controller]/rules-settings | ContractsController | UpsertRulesSettings | backend/Controllers/ContractsController.cs:1122 | [Authorize] | да | нет |
+-| GET | api/[controller]/next-number | ContractsController | GetNextNumber | backend/Controllers/ContractsController.cs:1134 | [Authorize] | нет | нет |
+-| POST | api/[controller] | ContractsController | Create | backend/Controllers/ContractsController.cs:1151 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+-| PUT | api/[controller]/{id:int} | ContractsController | Update | backend/Controllers/ContractsController.cs:1211 | [Authorize] | да | нет |
+-| DELETE | api/[controller]/{id:int} | ContractsController | Delete | backend/Controllers/ContractsController.cs:1294 | [Authorize] | да | нет |
+-| PUT | api/[controller]/{id:int}/seller | ContractsController | SetSeller | backend/Controllers/ContractsController.cs:1594 | [Authorize] | да | нет |
+->>>>>>> 7cd89d840b52827e79146696bc53fafd57244ddd
+ | GET | api/integrations/dadata/settings | DadataIntegrationSettingsController | Get | backend/Controllers/DadataIntegrationSettingsController.cs:26 | [Authorize] | да | нет |
+ | PUT | api/integrations/dadata/settings | DadataIntegrationSettingsController | Update | backend/Controllers/DadataIntegrationSettingsController.cs:61 | [Authorize] | да | нет |
+ | GET | api/database/status | DatabaseAdminController | GetStatus | backend/Controllers/DatabaseAdminController.cs:58 | [Authorize(Policy = "Admin")] | нет | docs/crm-legal-module-release-runbook.md, docs/full-project-audit-2026-06-10.md |
+diff --git a/scripts/check-case-retirement-live-browser.mjs b/scripts/check-case-retirement-live-browser.mjs
+index 12ae7d0fed9d645353fbda5ed9ee13e9c8b885c8..b166dcb63b6caa47cd0c09f02a11cb97fceea368 100644
+--- a/scripts/check-case-retirement-live-browser.mjs
++++ b/scripts/check-case-retirement-live-browser.mjs
+@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
+ import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+ import { createServer as createControlServer } from 'node:http';
++import { build, preview } from 'vite';
+ import { prepareSyntheticBrowserUi } from './synthetic-browser-ui.mjs';
+ import { createCaseReadLifecycle, createCaseRestartObserver, createCaseStartupReadTrace, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
+ import { openRetirementProductionBundle, retirementBundlePhase, withRetirementBuildEnvironment } from './case-retirement-production-bundle.mjs';
+@@ -103,59 +104,34 @@ try {
+     });
+     controlUrl = `http://127.0.0.1:${control.address().port}/apply`;
+   }
+-<<<<<<< e85d1f22d795b78ca8c3543eb3b14410c3a75747
+-  // Match the existing managed-chat gate: compile the real release UI before
+-  // navigation, inside the same enclosing three-minute scenario budget.
+-  // A second entry exposes the real upload helper, shared with the UI bundle;
+-  // it replaces source-module imports, not the browser's storage or API calls.
+-  let uiConfig, fixtureChunk, realtimeDisconnectUrls, realtimePollingUrls;
++  // Both paths use the real production bundle and upload/auth fixture entry.
++  let fixtureChunk, realtimeDisconnectUrls, realtimePollingUrls;
+   if (process.env.CASE_RETIREMENT_BUNDLE_ROOT) {
+     bundleLease = await openRetirementProductionBundle({ root: process.env.CASE_RETIREMENT_BUNDLE_ROOT,
+       owner: process.env.CASE_RETIREMENT_BUNDLE_OWNER, api, build });
+-    uiConfig = bundleLease.config;
+     fixtureChunk = { fileName: bundleLease.fixtureFile };
+     realtimeDisconnectUrls = bundleLease.disconnectFiles.map(file => ui + '/' + file);
+     realtimePollingUrls = bundleLease.pollingFiles.map(file => ui + '/' + file);
++    const startPreview = () => preview({ ...bundleLease.config, preview: { host: '127.0.0.1', port, strictPort: true } });
++    vite = await phase('preview-listen', () => withRetirementBuildEnvironment(startPreview));
+   } else {
+-  await writeFile(fixtureEntry,
+-    `export { beginCaseDocumentUpload } from ${JSON.stringify(resolve('src/services/caseDocumentUploadAttempts.ts').replaceAll('\\', '/'))};\n`
+-    + `export { getAuthToken } from ${JSON.stringify(resolve('src/services/api.ts').replaceAll('\\', '/'))};\n`);
+-  const outDir = join(root, 'case-retirement-ui-dist');
+-  await mkdir(outDir);
+-  uiConfig = { envDir: root, cacheDir: join(root, 'vite-browser-cache'), logLevel: 'error',
+-    build: { outDir, emptyOutDir: false, rollupOptions: {
+-      input: { index: resolve('index.html'), 'case-retirement-fixture': fixtureEntry },
+-      preserveEntrySignatures: 'strict',
+-    } } };
+-  const built = await build(uiConfig);
+-  const chunks = (Array.isArray(built) ? built : [built]).flatMap(output => output.output ?? [])
+-    .filter(chunk => chunk.type === 'chunk');
+-  assert.ok(chunks.some(chunk => chunk.isEntry && chunk.name === 'index' && chunk.code.length > 0),
+-=======
+-  // The shared second entry still exposes the actual production upload/auth helpers.
+-  const browserUi = await prepareSyntheticBrowserUi({ api, port });
+-  const { chunks } = browserUi;
+-  assert.ok(chunks.some(chunk => chunk.isEntry && chunk.name === 'index' && chunk.codeLength > 0),
+->>>>>>> 7cd89d840b52827e79146696bc53fafd57244ddd
+-    'The real case-document UI entry must compile successfully.');
+-  const fixtureChunks = chunks.filter(chunk => chunk.isEntry && chunk.name === 'case-retirement-fixture');
+-  assert.equal(fixtureChunks.length, 1, 'The real upload helper must have one compiled fixture entry.');
+-  fixtureChunk = fixtureChunks[0];
+-  assert.ok(['beginCaseDocumentUpload', 'getAuthToken'].every(name => fixtureChunk.exports.includes(name)),
+-    'The compiled fixture must preserve the real upload and authentication helpers.');
+-  const moduleUrls = source => chunks.filter(chunk => chunk.moduleIds.some(id => id.replaceAll('\\', '/').endsWith(source)))
+-    .map(chunk => ui + '/' + chunk.fileName);
+-  realtimeDisconnectUrls = moduleUrls('/src/services/realtimeNotifications.ts');
+-  realtimePollingUrls = moduleUrls('/src/components/Notifications/RealtimeNotificationToasts.tsx');
+-  assert.ok(realtimeDisconnectUrls.length > 0 && realtimePollingUrls.length > 0,
+-    'The release bundle must retain the real notification modules.');
+-<<<<<<< e85d1f22d795b78ca8c3543eb3b14410c3a75747
++    const browserUi = await prepareSyntheticBrowserUi({ api, port });
++    const { chunks } = browserUi;
++    assert.ok(chunks.some(chunk => chunk.isEntry && chunk.name === 'index' && chunk.codeLength > 0),
++      'The real case-document UI entry must compile successfully.');
++    const fixtureChunks = chunks.filter(chunk => chunk.isEntry && chunk.name === 'case-retirement-fixture');
++    assert.equal(fixtureChunks.length, 1, 'The real upload helper must have one compiled fixture entry.');
++    fixtureChunk = fixtureChunks[0];
++    assert.ok(['beginCaseDocumentUpload', 'getAuthToken'].every(name => fixtureChunk.exports.includes(name)),
++      'The compiled fixture must preserve the real upload and authentication helpers.');
++    const moduleUrls = source => chunks.filter(chunk => chunk.moduleIds.some(id => id.replaceAll('\\', '/').endsWith(source)))
++      .map(chunk => ui + '/' + chunk.fileName);
++    realtimeDisconnectUrls = moduleUrls('/src/services/realtimeNotifications.ts');
++    realtimePollingUrls = moduleUrls('/src/components/Notifications/RealtimeNotificationToasts.tsx');
++    assert.ok(realtimeDisconnectUrls.length > 0 && realtimePollingUrls.length > 0,
++      'The release bundle must retain the real notification modules.');
++    vite = await browserUi.startPreview();
+   }
+-  const startPreview = () => preview({ ...uiConfig, preview: { host: '127.0.0.1', port, strictPort: true } });
+-  vite = await phase('preview-listen', () => bundleLease ? withRetirementBuildEnvironment(startPreview) : startPreview());
+-=======
+-  vite = await browserUi.startPreview();
+->>>>>>> 7cd89d840b52827e79146696bc53fafd57244ddd
+   // Own the browser before navigation so a failed page load still closes it.
+   await phase('browser-open', () => cli('open', 'about:blank', '--browser', browser));
+   opened = true;
+@@ -533,11 +509,7 @@ try {
+         // Release the owned IPC handle only after Vite has removed its stdin termination listener.
+         if (control) process.stdin.destroy();
+         await rm(scenarioPath, { force: true });
+-<<<<<<< e85d1f22d795b78ca8c3543eb3b14410c3a75747
+-        await rm(fixtureEntry, { force: true });
+         if (bundleLease) await bundleLease.close();
+-=======
+->>>>>>> 7cd89d840b52827e79146696bc53fafd57244ddd
+       }
+     }
+   }
+diff --git a/src/components/Tasks/TaskJournal.actions.test.tsx b/src/components/Tasks/TaskJournal.actions.test.tsx
+index c930466bddcce7bb0594864a4c1e61b0c5880a47..becd4766ab57fb4af12ed20463fdcecdcce64ae0 100644
+--- a/src/components/Tasks/TaskJournal.actions.test.tsx
++++ b/src/components/Tasks/TaskJournal.actions.test.tsx
+@@ -319,6 +319,7 @@ describe('TaskJournal', () => {
+     fireEvent.click(screen.getByRole('checkbox', { name: `Выбрать задачу ${task.title}` }));
+     fireEvent.change(screen.getByLabelText('Массово изменить приоритет'), { target: { value: 'urgent' } });
+     fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт выбранных' }));
++    await waitFor(() => expect((screen.getByRole('button', { name: 'Изменить учёт' }) as HTMLButtonElement).disabled).toBe(false));
+     fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт' }));
+     await screen.findByText(/Изменено: 1.*Уже установлен нужный учёт/);
+     expect(apiMock.bulkUpdateTaskJournalItems).toHaveBeenCalledExactlyOnceWith({ ids: [101], billingClassification: 'internal', includeCompleted: false,
+@@ -335,6 +336,7 @@ describe('TaskJournal', () => {
+       items: [{ id: task.id, outcome: 'updated', reason: null, updatedAt: '2026-10-24T02:03:04.7654321Z' }] });
+     fireEvent.click(screen.getByRole('checkbox', { name: `Выбрать задачу ${task.title}` }));
+     fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт выбранных' }));
++    await waitFor(() => expect((screen.getByRole('button', { name: 'Изменить учёт' }) as HTMLButtonElement).disabled).toBe(false));
+     fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт' }));
+     await waitFor(() => expect(apiMock.bulkUpdateTaskJournalItems).toHaveBeenCalledOnce());
+     expect(apiMock.bulkUpdateTaskJournalItems.mock.calls[0][0]).toEqual(expect.objectContaining({ ids: [task.id], billingClassification: 'internal' }));
+diff --git a/src/components/Tasks/TaskJournal.billing.test.tsx b/src/components/Tasks/TaskJournal.billing.test.tsx
+index 1a9ebb305f529e83fdd909c9882b177ab3aae52e..bb0e7b4142baa285ddf2c8e744bf17296409475b 100644
+--- a/src/components/Tasks/TaskJournal.billing.test.tsx
++++ b/src/components/Tasks/TaskJournal.billing.test.tsx
+@@ -1,5 +1,7 @@
+-import { setupTaskJournalTests, apiMock, authState, permissionsState, todayAt, createTask, renderJournal, openFirstTaskForEdit, openNewTaskFormAsGlobalInternal } from './TaskJournal.test-support';
+-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
++import { setupTaskJournalTests, apiMock, toastMock, authState, permissionsState, todayAt, createTask, renderJournal, openFirstTaskForEdit, openNewTaskFormAsGlobalInternal } from './TaskJournal.test-support';
++import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
++import { TaskJournal } from './TaskJournal';
++import type { TaskJournalItem } from '../../utils/taskJournalStore';
+ import { describe, expect, it, vi } from 'vitest';
+ 
+ describe('TaskJournal', () => {
+@@ -18,10 +20,94 @@ describe('TaskJournal', () => {
+     fireEvent.click(screen.getByRole('option', { name: 'Неоплачиваемая / внутренняя' }));
+     fireEvent.click(within(dialog).getByRole('button', { name: 'Сохранить тип оплаты' }));
+ 
+-    await waitFor(() => expect(apiMock.updateTaskBillingClassification).toHaveBeenCalledWith(task.id, 'internal', null));
++    await waitFor(() => expect(apiMock.updateTaskBillingClassification).toHaveBeenCalledWith(task.id, 'internal', null, { expectedUpdatedAt: task.updatedAt ?? null }));
+     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Учёт задачи и счёт' })).toBeNull());
+   });
+ 
++  it.each((['legacy', 'modern'] as const).flatMap((cardMode) => (['Fixed', 'Actual'] as const).map((billingMode) => [cardMode, billingMode] as const)))('preserves the %s card contract snapshot for explicit future-only %s classification and retains an unsaved title', async (taskCardWindowMode, billingMode) => {
++    const task = createTask({ clientBillingClassification: 'billable', billingStatus: billingMode === 'Fixed' ? 'fixed' : 'unbilled',
++      billingContractId: 301, billingContractNumber: 'SYNTHETIC-301', billingMode, updatedAt: '2026-10-24T01:02:03.1234567Z' });
++    apiMock.updateTaskBillingClassification.mockResolvedValueOnce({ ...task, clientBillingClassification: 'internal', billingStatus: 'internal' });
++    await renderJournal([task], { settings: { taskCardWindowMode, contractTaskBillingMode: 'allowFutureClassification' } });
++    await openFirstTaskForEdit();
++    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
++    fireEvent.change(within(card).getByTestId('task-title-input'), { target: { value: 'Несохранённое название договорной задачи' } });
++    apiMock.getTaskBillingContext.mockClear();
++    fireEvent.click(within(card).getByRole('button', { name: 'Учёт и счёт' }));
++    const dialog = await screen.findByRole('dialog', { name: 'Учёт задачи и счёт' });
++    expect(apiMock.getTaskBillingContext).not.toHaveBeenCalled();
++    expect(within(dialog).queryByRole('combobox', { name: 'Договор для оплаты задачи' })).toBeNull();
++    expect(within(dialog).getByText(/Договор №SYNTHETIC-301/)).toBeTruthy();
++    fireEvent.click(within(dialog).getByRole('combobox', { name: /^Тип оплаты задачи/ }));
++    fireEvent.click(screen.getByRole('option', { name: 'Неоплачиваемая / внутренняя' }));
++    const save = within(dialog).getByRole('button', { name: 'Сохранить тип оплаты' });
++    expect((save as HTMLButtonElement).disabled).toBe(true);
++    expect(apiMock.updateTaskBillingClassification).not.toHaveBeenCalled();
++    fireEvent.click(within(dialog).getByRole('checkbox', { name: /Подтверждаю смену только будущего учёта/ }));
++    fireEvent.click(save);
++    await waitFor(() => expect(apiMock.updateTaskBillingClassification).toHaveBeenCalledExactlyOnceWith(task.id, 'internal', 301,
++      { expectedUpdatedAt: '2026-10-24T01:02:03.1234567Z', allowContractClassification: true }));
++    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Учёт задачи и счёт' })).toBeNull());
++    expect((within(card).getByTestId('task-title-input') as HTMLInputElement).value).toBe('Несохранённое название договорной задачи');
++    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
++    expect(apiMock.linkTaskBillingInvoice).not.toHaveBeenCalled();
++  });
++
++  it.each(['legacy', 'modern'] as const)('keeps a grandfathered contract intact when future-only editing is disabled in the %s card', async (taskCardWindowMode) => {
++    const task = createTask({ clientBillingClassification: 'internal', billingStatus: 'internal', billingContractId: 301, billingContractNumber: 'SYNTHETIC-301', billingMode: 'Fixed' });
++    await renderJournal([task], { settings: { taskCardWindowMode, contractTaskBillingMode: 'retainContractTasks' } });
++    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
++    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
++    fireEvent.click(within(card).getByRole('button', { name: 'Учёт и счёт' }));
++    const dialog = await screen.findByRole('dialog', { name: 'Учёт задачи и счёт' });
++    expect(within(dialog).getByText(/Изменение договорных задач запрещено настройкой/)).toBeTruthy();
++    expect(within(dialog).queryByRole('checkbox', { name: /Подтверждаю смену только будущего учёта/ })).toBeNull();
++    fireEvent.click(within(dialog).getByRole('combobox', { name: /^Тип оплаты задачи/ }));
++    fireEvent.click(screen.getByRole('option', { name: 'Платная' }));
++    expect((within(dialog).getByRole('button', { name: 'Сохранить тип оплаты' }) as HTMLButtonElement).disabled).toBe(true);
++    expect(apiMock.updateTaskBillingClassification).not.toHaveBeenCalled();
++    expect(within(dialog).getByText(/Договор №SYNTHETIC-301/)).toBeTruthy();
++  });
++
++  it.each(['legacy', 'modern'] as const)('rechecks admin policy before the %s card submits a contract decision', async (taskCardWindowMode) => {
++    const task = createTask({ clientBillingClassification: 'billable', billingStatus: 'fixed', billingContractId: 301, billingMode: 'Fixed' });
++    await renderJournal([task], { settings: { taskCardWindowMode, contractTaskBillingMode: 'allowFutureClassification' } });
++    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
++    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
++    fireEvent.click(within(card).getByRole('button', { name: 'Учёт и счёт' }));
++    const dialog = await screen.findByRole('dialog', { name: 'Учёт задачи и счёт' });
++    fireEvent.click(within(dialog).getByRole('combobox', { name: /^Тип оплаты задачи/ }));
++    fireEvent.click(screen.getByRole('option', { name: 'Неоплачиваемая / внутренняя' }));
++    fireEvent.click(within(dialog).getByRole('checkbox', { name: /Подтверждаю смену только будущего учёта/ }));
++    apiMock.getTaskJournalSettings.mockResolvedValueOnce({ contractTaskBillingMode: 'retainContractTasks' });
++    fireEvent.click(within(dialog).getByRole('button', { name: 'Сохранить тип оплаты' }));
++    await within(dialog).findByText(/Изменение договорных задач отключено в настройках/);
++    expect(apiMock.updateTaskBillingClassification).not.toHaveBeenCalled();
++    expect(within(dialog).getByRole('checkbox', { name: /Подтверждаю смену только будущего учёта/ })).toBeTruthy();
++  });
++
++  it.each(['legacy', 'modern'] as const)('does not apply a pending contract decision to another actor in the %s card', async (taskCardWindowMode) => {
++    const task = createTask({ clientBillingClassification: 'billable', billingStatus: 'fixed', billingContractId: 301, billingMode: 'Fixed' });
++    const view = await renderJournal([task], { settings: { taskCardWindowMode, contractTaskBillingMode: 'allowFutureClassification' } });
++    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
++    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
++    fireEvent.click(within(card).getByRole('button', { name: 'Учёт и счёт' }));
++    const dialog = await screen.findByRole('dialog', { name: 'Учёт задачи и счёт' });
++    fireEvent.click(within(dialog).getByRole('combobox', { name: /^Тип оплаты задачи/ }));
++    fireEvent.click(screen.getByRole('option', { name: 'Неоплачиваемая / внутренняя' }));
++    fireEvent.click(within(dialog).getByRole('checkbox', { name: /Подтверждаю смену только будущего учёта/ }));
++    let finish!: (value: TaskJournalItem) => void;
++    apiMock.updateTaskBillingClassification.mockImplementationOnce(() => new Promise<TaskJournalItem>((resolve) => { finish = resolve; }));
++    fireEvent.click(within(dialog).getByRole('button', { name: 'Сохранить тип оплаты' }));
++    await waitFor(() => expect(apiMock.updateTaskBillingClassification).toHaveBeenCalledTimes(1));
++    toastMock.success.mockClear();
++    authState.user = { ...authState.user, id: 8 };
++    view.rerender(<TaskJournal />);
++    await act(async () => { finish({ ...task, clientBillingClassification: 'internal', billingStatus: 'internal' }); });
++    expect(toastMock.success).not.toHaveBeenCalledWith('Учёт задачи обновлён.', 'Журнал задач');
++    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
++  });
++
+   it.each(['legacy', 'modern'] as const)('links an earlier invoice from the %s task card only after confirmation', async (taskCardWindowMode) => {
+     const task = createTask({ clientBillingClassification: 'billable', billingStatus: 'unbilled' });
+     apiMock.getTaskBillingInvoices.mockResolvedValue([{ id: 901, number: 'INV-901', date: todayAt(9), amount: 4200, workflowStatus: 'Draft' }]);
+diff --git a/tools/PayPlanner.TestShards/BoundedBatchScheduler.cs b/tools/PayPlanner.TestShards/BoundedBatchScheduler.cs
+index dc742677aec9405f4e77ff216ba67c9c6afbd865..1c9e08796e02aba9d0b384c45d71389378c5cf0d 100644
+--- a/tools/PayPlanner.TestShards/BoundedBatchScheduler.cs
++++ b/tools/PayPlanner.TestShards/BoundedBatchScheduler.cs
+@@ -10,9 +10,12 @@ public sealed record SchedulingEvent(string Kind, string Lane, int Workers, ulon
+ public static class BoundedBatchScheduler
+ {
+     public static async Task RunAsync(IReadOnlyCollection<ExecutionBatch> batches, string requestedWorkers, int initialBudget,
+-        Func<ExecutionResources> readResources, Func<ExecutionBatch, Task> executeBatch, Action<SchedulingEvent>? observe = null)
++        Func<ExecutionResources> readResources, Func<ExecutionBatch, Task> executeBatch, Action<SchedulingEvent>? observe = null,
++        TimeSpan? recheckInterval = null)
+     {
+         ShardPlan.Require(initialBudget is 1 or 2 or 4, "Invalid initial worker budget.");
++        var interval = recheckInterval ?? TimeSpan.FromSeconds(1);
++        ShardPlan.Require(interval >= TimeSpan.FromMilliseconds(10) && interval <= TimeSpan.FromSeconds(30), "Invalid resource recheck interval.");
+         ShardPlan.Require(batches.All(batch => batch.Lane is "fast" or "heavy" or "exclusive")
+             && batches.Select(batch => batch.Id).Distinct(StringComparer.Ordinal).Count() == batches.Count,
+             "Execution batches have invalid lanes or duplicate identities.");
+@@ -38,6 +41,16 @@ public static class BoundedBatchScheduler
+                         failures.Add(new InvalidDataException("Available RAM fell below 1 GiB; pending batches were not started."));
+                         observe?.Invoke(new("memory-floor", lane, budget, resource.AvailableBytes, resource.Processors, active.Count));
+                     }
++                    if (!resourceFailure)
++                    {
++                        var updatedBudget = lane == "exclusive" ? 1
++                            : Math.Min(initialBudget, ExecutionScheduling.WorkerBudget(requestedWorkers, resource.AvailableBytes, resource.Processors));
++                        if (updatedBudget != budget)
++                        {
++                            budget = updatedBudget;
++                            observe?.Invoke(new("budget-change", lane, budget, resource.AvailableBytes, resource.Processors, active.Count));
++                        }
++                    }
+                     while (!resourceFailure && queue.Count > 0 && ExecutionScheduling.CanLaunchAdditional(active.Count, budget, resource.AvailableBytes))
+                     {
+                         observe?.Invoke(new("launch-budget", lane, budget, resource.AvailableBytes, resource.Processors, active.Count));
+@@ -47,7 +60,11 @@ public static class BoundedBatchScheduler
+                         resource = readResources();
+                     }
+                     if (active.Count == 0) break;
+-                    var completed = await Task.WhenAny(active);
++                    // When a queued batch is waiting for memory, recheck while its
++                    // sibling runs rather than fixing concurrency until that sibling exits.
++                    var delay = queue.Count > 0 && !resourceFailure ? Task.Delay(interval) : null;
++                    var completed = await Task.WhenAny(delay is null ? active : active.Append(delay));
++                    if (completed == delay) continue;
+                     active.Remove(completed);
+                     try { await completed; }
+                     catch (Exception error) { failures.Add(error); }
+diff --git a/tools/PayPlanner.TestShards/BoundedTestRunner.cs b/tools/PayPlanner.TestShards/BoundedTestRunner.cs
+index 71b1fcdcdb661233208bf7492e322b1dbf112101..b288775a4bce291b10fd6ec289e61815a6c1a37b 100644
+--- a/tools/PayPlanner.TestShards/BoundedTestRunner.cs
++++ b/tools/PayPlanner.TestShards/BoundedTestRunner.cs
+@@ -126,13 +126,15 @@ internal static class BoundedTestRunner
+         try
+         {
+             var admitted = HostResources.Read();
+-            partitionCount = ExecutionScheduling.WorkerBudget(workers, admitted.AvailableBytes, admitted.Processors);
++            var admittedWorkers = ExecutionScheduling.WorkerBudget(workers, admitted.AvailableBytes, admitted.Processors);
++            partitionCount = ExecutionScheduling.PartitionCapacity(workers, admitted.Processors);
+             batches = ExecutionScheduling.Batches(plan, shard, suite, partitionCount);
+             Record(new
+             {
+                 Kind = "initial-budget",
+                 Utc = DateTime.UtcNow,
+                 BatchCount = partitionCount,
++                AdmittedWorkers = admittedWorkers,
+                 admitted.AvailableBytes,
+                 admitted.Processors
+             });
+diff --git a/tools/PayPlanner.TestShards/ExecutionScheduling.cs b/tools/PayPlanner.TestShards/ExecutionScheduling.cs
+index 5aa7c9d2e0d38b1e6b63121f22f08ecbf97e5033..04d9a497d8686dc6b34c1412d87c2281c1cbf82b 100644
+--- a/tools/PayPlanner.TestShards/ExecutionScheduling.cs
++++ b/tools/PayPlanner.TestShards/ExecutionScheduling.cs
+@@ -133,6 +133,16 @@ public static class ExecutionScheduling
+         return requested == "auto" ? safe : Math.Min(safe, int.Parse(requested, System.Globalization.CultureInfo.InvariantCulture));
+     }
+ 
++    // Partitioning does not launch processes. Keep enough independent batches for a
++    // later memory increase while retaining the requested and processor limits.
++    public static int PartitionCapacity(string requested, int processors)
++    {
++        ShardPlan.Require(requested is "auto" or "1" or "2" or "4", "Workers must be auto, 1, 2 or 4.");
++        ShardPlan.Require(processors > 0, "The host processor count is unavailable.");
++        var processorLimit = processors >= 8 ? 4 : processors >= 4 ? 2 : 1;
++        return requested == "auto" ? processorLimit : Math.Min(processorLimit, int.Parse(requested, System.Globalization.CultureInfo.InvariantCulture));
++    }
++
+     public static bool CanLaunchAdditional(int active, int initialBudget, ulong availableBytes)
+     {
+         ShardPlan.Require(active >= 0 && initialBudget is 1 or 2 or 4, "Invalid execution worker state.");

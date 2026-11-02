@@ -1,0 +1,201 @@
+diff --git a/backend/Controllers/CashOrdersController.cs b/backend/Controllers/CashOrdersController.cs
+index a60db57eba9504643ab09e49a599c18a2d8391dd..5c552ee22c07cedaecbd2d34843c1bb43ae0c43d 100644
+--- a/backend/Controllers/CashOrdersController.cs
++++ b/backend/Controllers/CashOrdersController.cs
+@@ -969,36 +969,37 @@ public class CashOrdersController : ControllerBase
+     .ko1 {
+       display: grid;
+       grid-template-columns: 100mm 13mm 64mm;
+-      gap: 4mm;
+-      width: 184mm;
++      gap: 1mm;
++      width: 178mm;
+       margin: 27mm 0 0 16mm;
+     }
+-    .order, .receipt { min-width: 0; }
+-    .cut { position: relative; min-height: 148mm; border-left: 1px solid #111; border-right: 2px solid #111; }
++    .order, .receipt { min-width: 0; position: relative; }
++    .cut { position: relative; min-height: 130mm; border-left: 1px solid #111; border-right: 2px solid #111; }
+     .cut::before { content: ""; position: absolute; top: 0; bottom: 0; left: 6mm; border-left: 1px dashed #111; }
+     .cut span { position: absolute; top: 42mm; left: 50%; transform: translateX(-50%); writing-mode: vertical-rl; letter-spacing: 5px; font-weight: 700; font-size: 8px; }
+-    .top-note { margin-left: 56mm; margin-bottom: 9mm; font-size: 7px; line-height: 1.3; }
++    .top-note { margin-left: 56mm; margin-bottom: 3mm; font-size: 7px; line-height: 1.3; }
+     .org-line { border-bottom: 2px solid #111; min-height: 18px; padding: 0 6px 2px; }
+     .hint { color: #333; font-size: 6px; text-align: center; }
+-    .header-row { display: grid; grid-template-columns: 1fr 21mm; gap: 3mm; align-items: end; margin-top: 0; }
++    .header-row { display: block; padding-right: 38mm; margin-top: 8mm; }
+     .code-box, .doc-meta, .ledger { border-collapse: collapse; width: 100%; table-layout: fixed; }
+     .code-box td, .doc-meta td, .ledger th, .ledger td { border: 1px solid #111; padding: 1.5mm 1mm; text-align: center; vertical-align: middle; }
++    .code-box { position: absolute; top: 10mm; right: 0; width: 21mm; }
+     .code-box td:first-child { border-left: 0; text-align: right; padding-right: 8px; }
+     .code-box td:last-child { font-weight: 700; }
+-    .title { margin: 7mm 0 7mm; text-align: center; font-size: 15px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
+-    .doc-meta { width: 36mm; margin-left: auto; margin-bottom: 5mm; font-size: 7px; }
++    .title { width: 70mm; margin: 6mm 0 5mm 0; text-align: center; font-size: 11.5px; line-height: 1.05; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
++    .doc-meta { position: absolute; top: 31mm; right: 0; width: 36mm; margin: 0; font-size: 7px; }
+     .doc-meta .value { font-size: 10px; font-weight: 700; }
+     .ledger { font-size: 7px; }
+     .ledger th { font-weight: 400; }
+     .ledger .sum { font-size: 7px; white-space: nowrap; }
+-    .line-field { display: grid; grid-template-columns: auto 1fr; gap: 2mm; align-items: end; margin-top: 2mm; font-size: 7px; }
+-    .line { min-height: 4.5mm; border-bottom: 1px solid #111; padding: 0 1.5mm .5mm; }
+-    .long-line { margin-top: 2mm; min-height: 5mm; border-bottom: 1px solid #111; }
+-    .amount-words { display: grid; grid-template-columns: auto 1fr auto 18mm auto 12mm auto; gap: 2mm; align-items: end; margin-top: 2.5mm; font-size: 7px; }
++    .line-field { display: grid; grid-template-columns: auto 1fr; gap: 2mm; align-items: end; margin-top: 1.4mm; font-size: 7px; }
++    .line { min-height: 4mm; border-bottom: 1px solid #111; padding: 0 1.5mm .4mm; }
++    .long-line { margin-top: 1.4mm; min-height: 4.2mm; border-bottom: 1px solid #111; }
++    .amount-words { display: grid; grid-template-columns: auto 1fr auto 18mm auto 12mm auto; gap: 2mm; align-items: end; margin-top: 1.8mm; font-size: 7px; }
+     .amount-words .line { text-align: left; }
+     .amount-words .kopecks, .receipt .kopecks { text-align: center; }
+-    .sign-row { display: grid; grid-template-columns: 28mm 1fr 1fr; gap: 6mm; align-items: end; margin-top: 2.5mm; font-size: 7px; }
+-    .sign-line { border-bottom: 1px solid #111; min-height: 5mm; text-align: center; padding-bottom: .5mm; }
++    .sign-row { display: grid; grid-template-columns: 28mm 1fr 1fr; gap: 6mm; align-items: end; margin-top: 2mm; font-size: 7px; }
++    .sign-line { border-bottom: 1px solid #111; min-height: 4.4mm; text-align: center; padding-bottom: .4mm; }
+     .sign-label { font-size: 6px; text-align: center; color: #333; margin-top: .5mm; }
+     .receipt .org-line { margin: 0 0 0; text-align: center; }
+     .receipt-title { text-align: center; font-size: 15px; font-weight: 800; margin: 2mm 0 9mm; text-transform: uppercase; }
+diff --git a/backend/PayPlanner.Api.Tests/MoneyOperationsControllerTests.cs b/backend/PayPlanner.Api.Tests/MoneyOperationsControllerTests.cs
+index 8e068f48960bb050c6274874005a1f46700026e7..ac596a09ad7558822cb2fee7f302d1765bb63a72 100644
+--- a/backend/PayPlanner.Api.Tests/MoneyOperationsControllerTests.cs
++++ b/backend/PayPlanner.Api.Tests/MoneyOperationsControllerTests.cs
+@@ -2498,7 +2498,11 @@ public class MoneyOperationsControllerTests
+         Assert.Contains("Форма по ОКУД", content.Content);
+         Assert.Contains("@page { size: A4 portrait; margin: 0; }", content.Content);
+         Assert.Contains("grid-template-columns: 100mm 13mm 64mm", content.Content);
++        Assert.Contains("gap: 1mm", content.Content);
++        Assert.Contains("width: 178mm", content.Content);
+         Assert.Contains("margin: 27mm 0 0 16mm", content.Content);
++        Assert.Contains("min-height: 130mm", content.Content);
++        Assert.Contains(".title { width: 70mm; margin: 6mm 0 5mm 0", content.Content);
+         Assert.Contains("border-left: 1px dashed #111", content.Content);
+         Assert.Contains("25 001-25", content.Content);
+         Assert.Contains("25 001", content.Content);
+diff --git a/src/components/Clients/ClientReconciliationAct.tsx b/src/components/Clients/ClientReconciliationAct.tsx
+index 1f2f9b5a2bf2143c4d4d48469f3d16c3fae6a559..07d47e42a8e09b3d4b398e3c86daa44774c3588d 100644
+--- a/src/components/Clients/ClientReconciliationAct.tsx
++++ b/src/components/Clients/ClientReconciliationAct.tsx
+@@ -184,7 +184,12 @@ function createParty(
+ 
+ function formatAccountingMoney(value: number) {
+   if (!value) return "";
+-  return value.toFixed(2).replace(".", ",");
++  return value
++    .toLocaleString("ru-RU", {
++      minimumFractionDigits: 2,
++      maximumFractionDigits: 2,
++    })
++    .replace(/\u00a0/g, " ");
+ }
+ 
+ function formatAccountingMoneyText(value: number) {
+@@ -303,7 +308,7 @@ function buildReconciliationExcelHtml({
+       background: #fff;
+       color: #333;
+       font-family: Arial, "DejaVu Sans", sans-serif;
+-      font-size: ${fixedPrintLayout ? "10.5pt" : "10pt"};
++      font-size: ${fixedPrintLayout ? "10pt" : "10pt"};
+       line-height: 1.18;
+       -webkit-print-color-adjust: exact !important;
+       print-color-adjust: exact !important;
+@@ -312,47 +317,49 @@ function buildReconciliationExcelHtml({
+       position: relative;
+       width: ${fixedPrintLayout ? "265mm" : "100%"};
+       min-height: ${fixedPrintLayout ? "190mm" : "auto"};
+-      margin: ${fixedPrintLayout ? "3.2mm auto 0" : "0"};
++      margin: ${fixedPrintLayout ? "6mm auto 0" : "0"};
+       padding: 0;
+     }
+     h1 {
+-      margin: 0 0 ${fixedPrintLayout ? "5.5mm" : "8px"};
++      margin: 0 0 ${fixedPrintLayout ? "4mm" : "8px"};
+       text-align: center;
+-      font-size: ${fixedPrintLayout ? "28pt" : "16pt"};
++      font-size: ${fixedPrintLayout ? "24pt" : "16pt"};
+       line-height: 1.05;
+       font-weight: 400;
+     }
+     .subtitle {
+       width: 100%;
+-      margin: 0 auto ${fixedPrintLayout ? "7mm" : "14px"};
++      margin: 0 auto ${fixedPrintLayout ? "8mm" : "14px"};
+       text-align: center;
+       white-space: pre-line;
+       font-size: ${fixedPrintLayout ? "12pt" : "10pt"};
+       line-height: 1.35;
+     }
+     .intro {
+-      margin: 0 0 ${fixedPrintLayout ? "3.2mm" : "14px"};
++      margin: 0 0 ${fixedPrintLayout ? "4.4mm" : "14px"};
+       white-space: normal;
+       font-size: ${fixedPrintLayout ? "12pt" : "10pt"};
+       line-height: 1.35;
+     }
+     .act-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+-    .act-table col.date { width: 25mm; }
++    .act-table col.date { width: ${fixedPrintLayout ? "26mm" : "25mm"}; }
+     .act-table col.doc { width: 53mm; }
+-    .act-table col.debit { width: 26mm; }
+-    .act-table col.credit { width: 26mm; }
++    .act-table col.debit { width: ${fixedPrintLayout ? "26.5mm" : "26mm"}; }
++    .act-table col.credit { width: ${fixedPrintLayout ? "26.5mm" : "26mm"}; }
+     .act-table col.right-date { width: 27mm; }
+     .act-table col.right-doc { width: 53mm; }
+-    .act-table col.right-debit { width: 26mm; }
+-    .act-table col.right-credit { width: 29mm; }
++    .act-table col.right-debit { width: ${fixedPrintLayout ? "26.5mm" : "26mm"}; }
++    .act-table col.right-credit { width: ${fixedPrintLayout ? "26.7mm" : "29mm"}; }
+     .act-table th,
+     .act-table td {
+       border: 1px solid #c7c7c7;
+-      padding: ${fixedPrintLayout ? "1.9mm 2.8mm" : "5px"};
+-      height: ${fixedPrintLayout ? "6.75mm" : "auto"};
++      padding: ${fixedPrintLayout ? "1.15mm 2mm" : "5px"};
++      height: ${fixedPrintLayout ? "5.3mm" : "auto"};
+       vertical-align: middle;
+-      font-size: ${fixedPrintLayout ? "10.5pt" : "10pt"};
++      font-size: ${fixedPrintLayout ? "9pt" : "10pt"};
++      line-height: ${fixedPrintLayout ? "1.12" : "1.18"};
+     }
++    ${fixedPrintLayout ? ".act-table td:nth-child(2), .act-table td:nth-child(6) { white-space: nowrap; }" : ""}
+     .act-table th {
+       text-align: center;
+       font-weight: 400;
+@@ -362,7 +369,7 @@ function buildReconciliationExcelHtml({
+     .amount { text-align: right; white-space: nowrap; }
+     .total td, .balance-row td { font-weight: 700; }
+     .summary {
+-      margin-top: ${fixedPrintLayout ? "8mm" : "18px"};
++      margin-top: ${fixedPrintLayout ? "5mm" : "18px"};
+       width: 100%;
+       border-collapse: collapse;
+       table-layout: fixed;
+@@ -377,7 +384,7 @@ function buildReconciliationExcelHtml({
+     .summary strong { font-weight: 700; }
+     .sign {
+       position: relative;
+-      margin-top: ${fixedPrintLayout ? "7mm" : "18px"};
++      margin-top: ${fixedPrintLayout ? "4mm" : "18px"};
+       width: 100%;
+       border-collapse: collapse;
+       table-layout: fixed;
+@@ -435,8 +442,7 @@ function buildReconciliationExcelHtml({
+ <div class="act-sheet">
+   <h1>Акт сверки</h1>
+   <div class="subtitle">взаимных расчетов за период: ${escapeHtml(toRuDate(draft.periodFrom))} - ${escapeHtml(toRuDate(draft.periodTo))}
+-между ${escapeHtml(executor.nameWithInn)}
+-и ${escapeHtml(client.nameWithInn)}</div>
++между ${escapeHtml(executor.nameWithInn)} и ${escapeHtml(client.nameWithInn)}</div>
+   <div class="intro">Мы, нижеподписавшиеся, ${escapeHtml(executor.signerPosition)} ${escapeHtml(executor.name)}, с одной стороны, и ${escapeHtml(client.name)}, с другой стороны, составили настоящий акт сверки в том, что состояние взаимных расчетов по данным учета следующее:</div>
+   <table class="act-table">
+     <colgroup>
+@@ -488,8 +494,8 @@ function buildReconciliationExcelHtml({
+   </table>
+   <table class="summary">
+     <tr>
+-      <td>По данным ${escapeHtml(executor.name)} и ${escapeHtml(client.name)}</td>
+-      <td>По данным ${escapeHtml(executor.name)} и ${escapeHtml(client.name)}</td>
++      <td>${fixedPrintLayout ? `По данным ${escapeHtml(executor.name)}` : `По данным ${escapeHtml(executor.name)} и ${escapeHtml(client.name)}`}</td>
++      <td>${fixedPrintLayout ? "" : `По данным ${escapeHtml(executor.name)} и ${escapeHtml(client.name)}`}</td>
+     </tr>
+     <tr>
+       <td>${escapeHtml(getBalanceSummary(totals.balance, draft.periodTo, executor.name, client.name)).replace(" составляет ", " составляет <strong>").replace(" руб.", " руб.</strong>")}</td>

@@ -1,0 +1,358 @@
+diff --git a/backend/Controllers/InvoicesController.cs b/backend/Controllers/InvoicesController.cs
+index c6dad0ef4ca691b4297cfe15e3de3925ee372f90..b4d133005b6905e1b1e493b7476442a5c8f1e821 100644
+--- a/backend/Controllers/InvoicesController.cs
++++ b/backend/Controllers/InvoicesController.cs
+@@ -843,6 +843,7 @@ public class InvoicesController : ControllerBase
+             ? clientCaseValidation.ClientCaseIds[0]
+             : null;
+ 
++        int? preservedProtectedPaymentId = null;
+         if (await ShouldForkProtectedRepresentativeInvoicePaymentAsync(
+                 payment,
+                 number,
+@@ -854,6 +855,7 @@ public class InvoicesController : ControllerBase
+                 resolvedClientCaseId,
+                 ct))
+         {
++            preservedProtectedPaymentId = payment.Id;
+             payment = await ForkProtectedRepresentativeInvoicePaymentAsync(payment, ct);
+         }
+ 
+@@ -944,8 +946,9 @@ public class InvoicesController : ControllerBase
+ 
+         await SyncInvoiceLineItemsAsync(payment, request.LineItems, ct);
+         await SyncInvoiceClientCasesAsync(payment, clientCaseValidation.ClientCaseIds, ct);
+-        await SyncInvoiceActsAsync(payment, actValidation.ActIds, number, ct, previousInvoiceNumber);
+-        var installmentSyncError = await SyncInstallmentPaymentsAsync(payment, request, responsibleIds, ct);
++        await SyncInvoiceActsAsync(payment, actValidation.ActIds, number, ct, previousInvoiceNumber);
++        await SyncLinkedPaymentBindingsAsync(payment, clientCaseValidation.ClientCaseIds, responsibleIds, preservedProtectedPaymentId, ct);
++        var installmentSyncError = await SyncInstallmentPaymentsAsync(payment, request, responsibleIds, ct);
+         if (installmentSyncError is not null)
+         {
+             return installmentSyncError;
+@@ -3514,6 +3517,58 @@ public class InvoicesController : ControllerBase
+         return null;
+     }
+ 
++    private async Task SyncLinkedPaymentBindingsAsync(
++        Payment invoicePayment,
++        IReadOnlyCollection<int> clientCaseIds,
++        IReadOnlyCollection<int> responsibleIds,
++        int? preservedProtectedPaymentId,
++        CancellationToken ct)
++    {
++        var invoiceEntityId = invoicePayment.InvoiceId ?? invoicePayment.Invoice?.Id;
++        if (!invoiceEntityId.HasValue || invoiceEntityId.Value <= 0)
++        {
++            return;
++        }
++
++        var linkedPayments = await _db.Payments
++            .Include(payment => payment.Responsibles)
++            .Where(payment =>
++                payment.InvoiceId == invoiceEntityId.Value
++                && payment.Id != invoicePayment.Id
++                && (!preservedProtectedPaymentId.HasValue || payment.Id != preservedProtectedPaymentId.Value)
++                && payment.DocumentKind != DocumentKind.Invoice
++                && (payment.SystemNotes == null
++                    || !payment.SystemNotes.Contains(InstallmentPaymentMarker)))
++            .ToListAsync(ct);
++
++        foreach (var linkedPayment in linkedPayments)
++        {
++            SyncPaymentBindingsFromInvoice(linkedPayment, invoicePayment);
++            await SyncInvoiceClientCasesAsync(linkedPayment, clientCaseIds, ct);
++            SyncPaymentResponsibles(linkedPayment, responsibleIds);
++            PaymentDomainService.Normalize(linkedPayment);
++        }
++    }
++
++    private static void SyncPaymentBindingsFromInvoice(Payment payment, Payment invoicePayment)
++    {
++        payment.Account = invoicePayment.Account;
++        payment.AccountDate = invoicePayment.AccountDate;
++        payment.Type = invoicePayment.Type;
++        payment.ClientId = invoicePayment.ClientId;
++        payment.LegalEntityId = invoicePayment.LegalEntityId;
++        payment.ExpenseClientId = invoicePayment.ExpenseClientId;
++        payment.ExpenseLegalEntityId = invoicePayment.ExpenseLegalEntityId;
++        payment.ContractId = invoicePayment.ContractId;
++        payment.ClientCaseId = invoicePayment.ClientCaseId;
++        payment.ClientCaseReference = invoicePayment.ClientCaseReference;
++        payment.PaymentSourceId = invoicePayment.PaymentSourceId;
++        payment.ServiceId = invoicePayment.ServiceId;
++        payment.IncomeTypeId = invoicePayment.IncomeTypeId;
++        payment.DealTypeId = invoicePayment.DealTypeId;
++        payment.PaymentStatusId = invoicePayment.PaymentStatusId;
++    }
++
+     private void SyncGeneratedInstallmentBindings(
+         Payment invoicePayment,
+         IReadOnlyCollection<Payment> generatedInstallments,
+@@ -3521,22 +3576,7 @@ public class InvoicesController : ControllerBase
+     {
+         foreach (var installment in generatedInstallments)
+         {
+-            installment.Account = invoicePayment.Account;
+-            installment.AccountDate = invoicePayment.AccountDate;
+-            installment.Type = invoicePayment.Type;
+-            installment.ClientId = invoicePayment.ClientId;
+-            installment.LegalEntityId = invoicePayment.LegalEntityId;
+-            installment.ExpenseClientId = invoicePayment.ExpenseClientId;
+-            installment.ExpenseLegalEntityId = invoicePayment.ExpenseLegalEntityId;
+-            installment.ContractId = invoicePayment.ContractId;
+-            installment.ClientCaseId = invoicePayment.ClientCaseId;
+-            installment.ClientCaseReference = invoicePayment.ClientCaseReference;
+-            installment.PaymentSourceId = invoicePayment.PaymentSourceId;
+-            installment.ServiceId = invoicePayment.ServiceId;
+-            installment.IncomeTypeId = invoicePayment.IncomeTypeId;
+-            installment.DealTypeId = invoicePayment.DealTypeId;
+-            installment.PaymentStatusId = invoicePayment.PaymentStatusId;
+-
++            SyncPaymentBindingsFromInvoice(installment, invoicePayment);
+             SyncPaymentResponsibles(installment, responsibleIds);
+         }
+     }
+diff --git a/backend/PayPlanner.Api.Tests/AccountsControllerTests.cs b/backend/PayPlanner.Api.Tests/AccountsControllerTests.cs
+index 1092c176f11c0c614a93581f10e64eda2ae89bc1..37327174e45b504157ee08dbfe7e4a6e924a48d6 100644
+--- a/backend/PayPlanner.Api.Tests/AccountsControllerTests.cs
++++ b/backend/PayPlanner.Api.Tests/AccountsControllerTests.cs
+@@ -170,8 +170,8 @@ public class AccountsControllerTests
+         var row = Assert.Single(payload.Items);
+ 
+         Assert.Equal("24", row.AccountNumber);
+-        Assert.Equal(2, row.Payments.Count);
+-        Assert.Equal(new[] { 3_000m, 10_000m }, row.Payments.Select(payment => payment.Amount).OrderBy(value => value).ToArray());
++        var payment = Assert.Single(row.Payments);
++        Assert.Equal(3_000m, payment.Amount);
+         Assert.Equal(new DateTime(2026, 4, 4), row.DueDate);
+     }
+ 
+diff --git a/backend/PayPlanner.Api.Tests/InvoicePaymentConsistencyTests.cs b/backend/PayPlanner.Api.Tests/InvoicePaymentConsistencyTests.cs
+index d780a31c4f0d0022f6f08994007a9e48ccf4adc2..bd7464680a9e0387851b08d885b0e6f79e435c24 100644
+--- a/backend/PayPlanner.Api.Tests/InvoicePaymentConsistencyTests.cs
++++ b/backend/PayPlanner.Api.Tests/InvoicePaymentConsistencyTests.cs
+@@ -140,9 +140,8 @@ public class InvoicePaymentConsistencyTests
+ 
+         Assert.Equal("25", registryRow.AccountNumber);
+         Assert.Equal(aggregate.InvoicePaymentId, registryRow.Invoice?.Id);
+-        Assert.Equal(
+-            new[] { aggregate.InvoicePaymentId, aggregate.SiblingPaymentId },
+-            registryRow.Payments.Select(payment => payment.Id).OrderBy(id => id).ToArray());
++        var registryPayment = Assert.Single(registryRow.Payments);
++        Assert.Equal(aggregate.SiblingPaymentId, registryPayment.Id);
+ 
+         var paymentsResult = await paymentsController.Get(
+             from: new DateTime(2026, 4, 1),
+@@ -424,9 +423,8 @@ public class InvoicePaymentConsistencyTests
+         Assert.Equal("26", registryRow.AccountNumber);
+         Assert.Equal(aggregate.InvoicePaymentId, registryRow.Invoice?.Id);
+         Assert.Equal(aggregate.InvoiceEntityId, registryRow.Invoice?.InvoiceEntityId);
+-        Assert.Equal(
+-            new[] { aggregate.InvoicePaymentId, aggregate.SiblingPaymentId },
+-            registryRow.Payments.Select(payment => payment.Id).OrderBy(id => id).ToArray());
++        var registryPayment = Assert.Single(registryRow.Payments);
++        Assert.Equal(aggregate.SiblingPaymentId, registryPayment.Id);
+ 
+         var paymentsResult = await paymentsController.Get(
+             from: new DateTime(2026, 4, 1),
+@@ -542,9 +540,8 @@ public class InvoicePaymentConsistencyTests
+         Assert.Equal("24", registryRow.AccountNumber);
+         Assert.Equal(aggregate.InvoicePaymentId, registryRow.Invoice?.Id);
+         Assert.Equal(aggregate.InvoiceEntityId, registryRow.Invoice?.InvoiceEntityId);
+-        Assert.Equal(
+-            new[] { aggregate.InvoicePaymentId, createdPayment.Id },
+-            registryRow.Payments.Select(payment => payment.Id).OrderBy(id => id).ToArray());
++        var registryPayment = Assert.Single(registryRow.Payments);
++        Assert.Equal(createdPayment.Id, registryPayment.Id);
+ 
+         var paymentsResult = await paymentsController.Get(
+             from: new DateTime(2026, 4, 1),
+diff --git a/backend/PayPlanner.Api.Tests/InvoicesControllerCrudTests.cs b/backend/PayPlanner.Api.Tests/InvoicesControllerCrudTests.cs
+index ff2990a437e41acf129d5b37c407cd4f7f805036..abb273297e98d9e02b2bf9fc0f4315a504a95e06 100644
+--- a/backend/PayPlanner.Api.Tests/InvoicesControllerCrudTests.cs
++++ b/backend/PayPlanner.Api.Tests/InvoicesControllerCrudTests.cs
+@@ -1147,6 +1147,120 @@ public class InvoicesControllerCrudTests
+         });
+     }
+ 
++    [Fact]
++    public async Task Update_ToLegalEntity_PropagatesToRegularLinkedPayments()
++    {
++        await using var db = await CreateContextAsync();
++        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
++
++        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
++        var originalClientId = await CreateClientAsync(db, "Original Client");
++        var legalEntityId = await CreateLegalEntityAsync(db, "Lada Lux");
++        var responsibleId1 = await CreateUserAsync(db, "Original Responsible");
++        var responsibleId2 = await CreateUserAsync(db, "Updated Responsible");
++        var paymentSourceId = await CreatePaymentSourceAsync(db, "Bank");
++        var serviceId = await CreateServiceAsync(db, "Legal Service");
++        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
++
++        var createRequest = CreateRequest("INV-LINKED-OWNER", originalClientId, new DateTime(2026, 4, 10), 50_000m);
++        createRequest.ResponsibleIds = [responsibleId1];
++
++        var createAction = await controller.Create(createRequest, CancellationToken.None);
++        var created = Assert.IsType<CreatedResult>(createAction.Result);
++        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
++
++        var createdParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
++        var firstLinkedPayment = new Payment
++        {
++            InvoiceId = createdParent.InvoiceId,
++            Account = createdParent.Account,
++            AccountDate = createdParent.AccountDate,
++            Date = new DateTime(2026, 5, 10),
++            PlannedDate = new DateTime(2026, 5, 10),
++            Amount = 35_000m,
++            PaidAmount = 0m,
++            Status = PaymentStatus.Overdue,
++            Type = PaymentType.Income,
++            ClientId = originalClientId,
++            Description = "First linked payment",
++            DocumentKind = DocumentKind.Payment,
++            CreatedAt = DateTime.UtcNow,
++        };
++        firstLinkedPayment.Responsibles.Add(new PaymentResponsible { UserId = responsibleId1 });
++
++        var secondLinkedPayment = new Payment
++        {
++            InvoiceId = createdParent.InvoiceId,
++            Account = createdParent.Account,
++            AccountDate = createdParent.AccountDate,
++            Date = new DateTime(2026, 6, 10),
++            PlannedDate = new DateTime(2026, 6, 10),
++            Amount = 50_000m,
++            PaidAmount = 50_000m,
++            PaidDate = new DateTime(2026, 5, 15),
++            LastPaymentDate = new DateTime(2026, 5, 15),
++            IsPaid = true,
++            Status = PaymentStatus.Completed,
++            Type = PaymentType.Income,
++            ClientId = originalClientId,
++            Description = "Second linked payment",
++            DocumentKind = DocumentKind.Payment,
++            CreatedAt = DateTime.UtcNow,
++        };
++        secondLinkedPayment.Responsibles.Add(new PaymentResponsible { UserId = responsibleId1 });
++
++        db.Payments.AddRange(firstLinkedPayment, secondLinkedPayment);
++        await db.SaveChangesAsync();
++        db.ChangeTracker.Clear();
++
++        var updateRequest = CreateLegalEntityRequest("INV-LINKED-OWNER", legalEntityId, new DateTime(2026, 4, 10), 135_000m);
++        updateRequest.ResponsibleIds = [responsibleId2];
++        updateRequest.PaymentSourceId = paymentSourceId;
++        updateRequest.ServiceId = serviceId;
++
++        var updateAction = await controller.Update(createdDto.Id, updateRequest, CancellationToken.None);
++
++        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
++        _ = Assert.IsType<InvoiceDto>(ok.Value);
++
++        db.ChangeTracker.Clear();
++        var updatedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
++        Assert.Null(updatedParent.ClientId);
++        Assert.Equal(legalEntityId, updatedParent.LegalEntityId);
++        Assert.Equal(135_000m, updatedParent.Amount);
++
++        var linkedPayments = await db.Payments
++            .AsNoTracking()
++            .Where(payment => payment.InvoiceId == updatedParent.InvoiceId && payment.DocumentKind == DocumentKind.Payment)
++            .ToListAsync();
++        linkedPayments = linkedPayments.OrderBy(payment => payment.Amount).ToList();
++        Assert.Equal(2, linkedPayments.Count);
++        Assert.Equal(new[] { 35_000m, 50_000m }, linkedPayments.Select(payment => payment.Amount).ToArray());
++        Assert.Equal(0m, linkedPayments[0].PaidAmount);
++        Assert.Equal(50_000m, linkedPayments[1].PaidAmount);
++        Assert.True(linkedPayments[1].IsPaid);
++        Assert.Equal(PaymentStatus.Completed, linkedPayments[1].Status);
++        Assert.Equal(new DateTime(2026, 5, 15), linkedPayments[1].PaidDate);
++        Assert.Equal(new DateTime(2026, 5, 15), linkedPayments[1].LastPaymentDate);
++        Assert.All(linkedPayments, payment =>
++        {
++            Assert.Null(payment.ClientId);
++            Assert.Equal(legalEntityId, payment.LegalEntityId);
++            Assert.Equal("INV-LINKED-OWNER", payment.Account);
++            Assert.Equal(new DateTime(2026, 4, 10), payment.AccountDate);
++            Assert.Equal(paymentSourceId, payment.PaymentSourceId);
++            Assert.Equal(serviceId, payment.ServiceId);
++        });
++
++        var linkedResponsibleIds = await db.Set<PaymentResponsible>()
++            .AsNoTracking()
++            .Where(item => linkedPayments.Select(payment => payment.Id).Contains(item.PaymentId))
++            .Select(item => item.UserId)
++            .Distinct()
++            .ToListAsync();
++        Assert.Equal(new[] { responsibleId2 }, linkedResponsibleIds);
++    }
++
+     [Fact]
+     public async Task Update_ForksProtectedRepresentativePayment_WhenInvoiceWouldOverwriteLegacyAdvance()
+     {
+diff --git a/backend/Services/InvoiceManagedPaymentRules.cs b/backend/Services/InvoiceManagedPaymentRules.cs
+index d9a2721ddb41a1f846ec97728e45c3b64cd3f9d2..02349b48b6f34c2549c207f876298e98c6f42122 100644
+--- a/backend/Services/InvoiceManagedPaymentRules.cs
++++ b/backend/Services/InvoiceManagedPaymentRules.cs
+@@ -58,7 +58,8 @@ public static class InvoiceManagedPaymentRules
+             return false;
+         }
+ 
+-        return snapshot.Any(IsGeneratedInstallmentPayment)
++        return snapshot.Any(payment => payment.DocumentKind != DocumentKind.Invoice)
++            || snapshot.Any(IsGeneratedInstallmentPayment)
+             || IsLegacyBrokenInstallmentAggregate(snapshot);
+     }
+ 
+diff --git a/src/utils/invoicePayments.test.ts b/src/utils/invoicePayments.test.ts
+index 37450d437e9b764e8a1775805636c7d9fc3822e8..c40f2141fdb28441fff9d4689e9c1c1c3c71633b 100644
+--- a/src/utils/invoicePayments.test.ts
++++ b/src/utils/invoicePayments.test.ts
+@@ -157,6 +157,28 @@ describe('invoicePayments utilities', () => {
+     expect(result.map((payment) => payment.id)).toEqual([548]);
+   });
+ 
++  it('hides the representative invoice row when regular linked payments exist', () => {
++    const representativeInvoice = createPayment({
++      id: 547,
++      documentKind: 'Invoice',
++      invoiceId: 30,
++      amount: 135_000,
++    });
++    const linkedPayment = createPayment({
++      id: 548,
++      documentKind: 'Payment',
++      invoiceId: 30,
++      amount: 35_000,
++    });
++
++    const result = filterRepresentativeInvoiceWhenInstallmentsExist([
++      representativeInvoice,
++      linkedPayment,
++    ]);
++
++    expect(result.map((payment) => payment.id)).toEqual([548]);
++  });
++
+   it('keeps the representative row when converted legacy installments exceed it', () => {
+     const firstInstallment = createPayment({
+       id: 548,
+diff --git a/src/utils/invoicePayments.ts b/src/utils/invoicePayments.ts
+index a5255150336d1a1d7a57e756421eba7ffeae9be7..9d0c388a69759ba7d54f4d46f7f9595645743a17 100644
+--- a/src/utils/invoicePayments.ts
++++ b/src/utils/invoicePayments.ts
+@@ -239,7 +239,10 @@ export function filterRepresentativeInvoiceWhenInstallmentsExist(payments: Payme
+     return payments;
+   }
+ 
+-  if (!payments.some(isGeneratedInstallmentPayment) && !isLegacyBrokenInstallmentAggregate(payments)) {
++  const hasLinkedPaymentRows = payments.some(
++    (payment) => payment.id !== representativeInvoice.id && payment.documentKind !== 'Invoice',
++  );
++  if (!hasLinkedPaymentRows && !payments.some(isGeneratedInstallmentPayment) && !isLegacyBrokenInstallmentAggregate(payments)) {
+     return payments;
+   }
+ 

@@ -1,0 +1,752 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beginCaseDocumentGeneration, beginCaseDocumentUpload, confirmCaseDocumentUpload, confirmPublishedCaseDocumentUploads, confirmRetiredCaseDocumentUpload } from './caseDocumentUploadAttempts';
+import { API_BASE_URL } from './apiBaseUrl';
+import { ApiService } from './api';
+import { authService, AuthSessionChangedError } from './authService';
+import { createHash, webcrypto } from 'node:crypto';
+import { Buffer } from 'node:buffer';
+
+beforeEach(() => { sessionStorage.clear(); localStorage.clear(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); sessionStorage.clear(); localStorage.clear(); });
+const file = (body = 'owned bytes') => {
+  const selected = new File([body], 'evidence.txt', { type: 'text/plain', lastModified: 42 });
+  Object.defineProperty(selected, 'arrayBuffer', {
+    value: async () => {
+      const bytes = Buffer.from(body);
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    },
+  });
+  return selected;
+};
+const token = (id: number, iat = 1) => `header.${btoa(JSON.stringify({ sub: String(id), iss: 'owned-fixture', iat }))}.signature`;
+
+describe('generated publication proof', () => {
+  const scope = JSON.stringify(['template', API_BASE_URL, 15, 'custom', 'Иск', 'Подготовлен']);
+  const generation = { kind: 'template', requestSha256: 'a'.repeat(64), templateKey: 'custom', documentType: 'Иск', status: 'Подготовлен', sourceVerified: true };
+  const receipt = (key: string) => ({ uploadKey: key, status: 'uploaded', documentId: 19, version: 1, generation });
+
+  it.each(['matching', 'foreign-source', 'retired'])('checks an owned work order %s proof independently of template identities', (mode) => {
+    const orderScope = JSON.stringify(['work-order', API_BASE_URL, 15]);
+    const own = beginCaseDocumentGeneration(orderScope, token(1));
+    const template = beginCaseDocumentGeneration(scope, token(1));
+    if (mode === 'retired') confirmRetiredCaseDocumentUpload(15, API_BASE_URL, { uploadKey: own.key, status: 'retired' }, token(1), token(1));
+    else confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [{ ...receipt(own.key), generation: {
+      ...generation, kind: mode === 'matching' ? 'work-order' : 'template', templateKey: null, documentType: null, status: 'Согласован',
+    } }], token(1), token(1));
+    expect(beginCaseDocumentGeneration(orderScope, token(1)).key === own.key).toBe(mode === 'foreign-source');
+    expect(beginCaseDocumentGeneration(scope, token(1))).toEqual(template);
+  });
+
+  it('releases only a matching confirmed source and creates a new explicit attempt', () => {
+    const own = beginCaseDocumentGeneration(scope, token(1));
+    confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [receipt(own.key)], token(1), token(1));
+    expect(beginCaseDocumentGeneration(scope, token(1)).key).not.toBe(own.key);
+  });
+
+  it.each([{ kind: 'invoice' }, { sourceVerified: false }, { requestSha256: 'invalid' },
+    { templateKey: 'foreign' }, { documentType: 'Акт' }, { status: 'Подписан' }])('retains a mismatched source %j', (change) => {
+    const own = beginCaseDocumentGeneration(scope, token(1));
+    confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [{ ...receipt(own.key), generation: { ...generation, ...change } }], token(1), token(1));
+    expect(beginCaseDocumentGeneration(scope, token(1))).toEqual(own);
+  });
+
+  it('retains ambiguous duplicate receipts and receipts for another case', () => {
+    const own = beginCaseDocumentGeneration(scope, token(1));
+    confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [receipt(own.key), receipt(own.key)], token(1), token(1));
+    confirmPublishedCaseDocumentUploads(16, API_BASE_URL, [receipt(own.key)], token(1), token(1));
+    expect(beginCaseDocumentGeneration(scope, token(1))).toEqual(own);
+  });
+
+  it('accepts an owned retirement marker after the source has been cleaned up', () => {
+    const own = beginCaseDocumentGeneration(scope, token(1));
+    expect(confirmRetiredCaseDocumentUpload(15, API_BASE_URL, { uploadKey: own.key, status: 'retired' }, token(1), token(1))).toBe(true);
+    expect(beginCaseDocumentGeneration(scope, token(1)).key).not.toBe(own.key);
+  });
+
+  it('does not use a generated receipt to acknowledge selected file bytes', () => {
+    const fileScope = JSON.stringify(['case', API_BASE_URL, 15, '', 'Документ', 'Подготовлен']);
+    const own = beginCaseDocumentUpload(fileScope, file(), token(1));
+    confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [receipt(own.key)], token(1), token(1));
+    expect(beginCaseDocumentUpload(fileScope, file(), token(1))).toEqual(own);
+  });
+
+  it('recovers a lost retirement response with one GET and retains unrelated generation attempts', async () => {
+    localStorage.setItem('pp_token', token(1));
+    const own = beginCaseDocumentGeneration(scope, token(1));
+    const otherScope = JSON.stringify(['template', API_BASE_URL, 16, 'custom', 'Иск', 'Подготовлен']);
+    const other = beginCaseDocumentGeneration(otherScope, token(1));
+    const request = vi.fn<typeof fetch>(async (_url, options) => {
+      if (options?.method === 'POST') throw new TypeError('lost retirement response');
+      return new Response(JSON.stringify([{ uploadKey: own.key, status: 'retired', documentId: null, version: null }]),
+        { headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', request);
+    await expect(new ApiService().retireCaseDocumentUpload(15, own.key)).resolves.toMatchObject({ status: 'retired' });
+    expect(request.mock.calls.map((call) => call[1]?.method)).toEqual(['POST', 'GET']);
+    expect(request.mock.calls[0][1]?.body).toBeUndefined();
+    expect(beginCaseDocumentGeneration(scope, token(1)).key).not.toBe(own.key);
+    expect(beginCaseDocumentGeneration(otherScope, token(1))).toEqual(other);
+  });
+});
+
+describe('financial generation receipt identity', () => {
+  const types = { invoice: 'Счет', act: 'Акт', contract: 'Договор' };
+  it.each(['invoice', 'act', 'contract'] as const)('releases only an owned complete %s receipt', (kind) => {
+    const scope = JSON.stringify(['financial', API_BASE_URL, 15, kind, 'b'.repeat(64)]);
+    const own = beginCaseDocumentGeneration(scope, token(1));
+    const other = beginCaseDocumentGeneration(JSON.stringify(['financial', API_BASE_URL, 16, kind, 'b'.repeat(64)]), token(1));
+    const generation = { kind: 'financial', requestSha256: 'a'.repeat(64), templateKey: null,
+      documentType: types[kind], status: 'Черновик', sourceVerified: true, financialKind: kind };
+    const receipt = { uploadKey: own.key, status: 'uploaded', documentId: 19, version: 1, generation };
+    for (const change of [{ financialKind: null }, { sourceVerified: false }, { kind: 'template' },
+      { requestSha256: 'invalid' }, { documentType: 'Другой' }, { status: 'Подписан' }]) {
+      confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [{ ...receipt, generation: { ...generation, ...change } }], token(1), token(1));
+      expect(beginCaseDocumentGeneration(scope, token(1))).toEqual(own);
+    }
+    confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [receipt, receipt], token(1), token(1));
+    confirmPublishedCaseDocumentUploads(16, API_BASE_URL, [receipt], token(1), token(1));
+    confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [receipt], token(1), token(2));
+    expect(beginCaseDocumentGeneration(scope, token(1))).toEqual(own);
+    confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [receipt], token(1), token(1));
+    expect(beginCaseDocumentGeneration(scope, token(1)).key).not.toBe(own.key);
+    expect(beginCaseDocumentGeneration(JSON.stringify(['financial', API_BASE_URL, 16, kind, 'b'.repeat(64)]), token(1))).toEqual(other);
+  });
+
+  it.each(['invoice', 'act', 'contract'] as const)('releases %s after explicit owned retirement without its cleaned intent', (kind) => {
+    const scope = JSON.stringify(['financial', API_BASE_URL, 15, kind, 'b'.repeat(64)]);
+    const own = beginCaseDocumentGeneration(scope, token(1));
+    expect(confirmRetiredCaseDocumentUpload(15, API_BASE_URL, { uploadKey: own.key, status: 'retired' }, token(1), token(1))).toBe(true);
+    expect(beginCaseDocumentGeneration(scope, token(1)).key).not.toBe(own.key);
+  });
+});
+
+describe('case document attempt identity', () => {
+  it('retains a failed attempt through file reselection and a refreshed token', () => {
+    const first = beginCaseDocumentUpload('case:15', file(), token(1));
+    expect(beginCaseDocumentUpload('case:15', file(), token(1, 2))).toEqual(first);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).not.toContain('signature');
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).not.toContain('owned bytes');
+  });
+
+  it('separates actors, target cases and new version operations', () => {
+    const attempts = [beginCaseDocumentUpload('case:15', file(), token(1)),
+      beginCaseDocumentUpload('case:15', file(), token(2)), beginCaseDocumentUpload('case:16', file(), token(1)),
+      beginCaseDocumentUpload('version:17', file(), token(1))];
+    expect(new Set(attempts.map((attempt) => attempt.key)).size).toBe(4);
+  });
+
+  it('starts a new intentional upload after confirmed success, and ignores an older late receipt', () => {
+    const first = beginCaseDocumentUpload('case:15', file(), token(1));
+    confirmCaseDocumentUpload(first);
+    const next = beginCaseDocumentUpload('case:15', file(), token(1));
+    expect(next.key).not.toBe(first.key);
+    confirmCaseDocumentUpload(first);
+    expect(beginCaseDocumentUpload('case:15', file(), token(1)).key).toBe(next.key);
+  });
+
+  it('never evicts an unresolved identity to admit another upload', () => {
+    const first = beginCaseDocumentUpload('case:0', file(), token(1));
+    for (let i = 1; i < 64; i++) beginCaseDocumentUpload(`case:${i}`, file(), token(1));
+    expect(() => beginCaseDocumentUpload('case:64', file(), token(1))).toThrow('Слишком много');
+    expect(beginCaseDocumentUpload('case:0', file(), token(1))).toEqual(first);
+  });
+
+  it('does not silently replace a corrupt pending registry', () => {
+    sessionStorage.setItem('pp.case-document-upload-attempts.v1', '{broken');
+    expect(() => beginCaseDocumentUpload('case:15', file(), token(1))).toThrow('предыдущих загрузок');
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe('{broken');
+  });
+
+  it('blocks transmission if attempt persistence fails', async () => {
+    const request = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', request);
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('owned persistence failure'); });
+    await expect(new ApiService().uploadCaseDocument(15, file())).rejects.toThrow('попытка не отправлена');
+    expect(request).not.toHaveBeenCalled();
+  });
+});
+
+describe.each(['case', 'version'] as const)('case document API %s contract', (kind) => {
+  const upload = (api: ApiService, selected: File) => kind === 'case'
+    ? api.uploadCaseDocument(15, selected, { documentType: 'Документ', status: 'Подготовлен' })
+    : api.uploadCaseDocumentVersion(17, selected, { documentType: 'Документ', status: 'Подготовлен', clientCaseId: 15, documentKey: 'receipt-key' });
+  const intentMetadata = { requestedDocumentKey: kind === 'version' ? 'receipt-key' : null,
+    documentKey: 'receipt-key',
+    fileName: 'evidence.txt', contentType: 'text/plain', documentType: 'Документ', requestedStatus: 'Подготовлен' };
+
+  it('reuses the header after lost response and client recreation, then clears a confirmed receipt', async () => {
+    const request = vi.fn<typeof fetch>().mockRejectedValueOnce(new TypeError('owned lost response'))
+      .mockImplementation(async () => new Response(JSON.stringify({ id: 17 }), { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', request);
+    await expect(upload(new ApiService(), file())).rejects.toThrow('owned lost response');
+    await expect(upload(new ApiService(), file())).resolves.toMatchObject({ id: 17 });
+    const posts = request.mock.calls.filter((call) => call[1]?.method === 'POST');
+    const first = new Headers(posts[0][1]?.headers).get('X-Upload-Key');
+    const second = new Headers(posts[1][1]?.headers).get('X-Upload-Key');
+    expect(first).toMatch(/^[a-f0-9-]{36}$/);
+    expect(second).toBe(first);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBeNull();
+    const form = posts[1][1]?.body as FormData;
+    expect(form.get('file')).toBeInstanceOf(File);
+    expect(form.get('documentType')).toBe('Документ');
+    expect(form.get('status')).toBe('Подготовлен');
+    expect(new Headers(posts[1][1]?.headers).has('Content-Type')).toBe(false);
+    await upload(new ApiService(), file());
+    expect(new Headers(request.mock.calls.filter((call) => call[1]?.method === 'POST')[2][1]?.headers).get('X-Upload-Key')).not.toBe(first);
+  });
+
+  it('keeps the same identity when required copies return a temporary failure', async () => {
+    const request = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ message: 'owned copies pending' }), {
+      status: 503, headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', request);
+    await expect(upload(new ApiService(), file())).rejects.toThrow('503');
+    await expect(upload(new ApiService(), file())).rejects.toThrow('503');
+    const posts = request.mock.calls.filter((call) => call[1]?.method === 'POST');
+    expect(new Headers(posts[0][1]?.headers).get('X-Upload-Key'))
+      .toBe(new Headers(posts[1][1]?.headers).get('X-Upload-Key'));
+  });
+
+  it('recovers a lost response through an exact SHA receipt without a second multipart', async () => {
+    vi.stubGlobal('crypto', webcrypto);
+    let key = '';
+    const request = vi.fn<typeof fetch>(async (url, options) => {
+      if (options?.method === 'POST') {
+        key = new Headers(options.headers).get('X-Upload-Key')!;
+        throw new TypeError('owned lost response');
+      }
+      const value = String(url).includes('/documents/uploads?')
+        ? [{ ...intentMetadata, uploadKey: key, status: 'uploaded', documentId: 18, version: 2, sha256: createHash('sha256').update('owned bytes').digest('hex') }]
+        : { id: 18, clientCaseId: 15, documentKey: 'receipt-key', version: 2, sizeBytes: 11 };
+      return new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', request);
+    await expect(upload(new ApiService(), file())).resolves.toMatchObject({ id: 18 });
+    expect(request.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1);
+    expect(request.mock.calls[1][1]?.cache).toBe('no-store');
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBeNull();
+  });
+
+  it('rejects a generated receipt even when it matches the selected file hash and metadata', async () => {
+    vi.stubGlobal('crypto', webcrypto);
+    let key = '';
+    const request = vi.fn<typeof fetch>(async (_url, options) => {
+      if (options?.method === 'POST') {
+        key = new Headers(options.headers).get('X-Upload-Key')!;
+        throw new TypeError('owned lost response');
+      }
+      return new Response(JSON.stringify([{ ...intentMetadata, uploadKey: key, status: 'uploaded', documentId: 18, version: 2,
+        sha256: createHash('sha256').update('owned bytes').digest('hex'),
+        generation: { kind: 'template', requestSha256: 'a'.repeat(64), templateKey: 'custom', documentType: 'Документ', status: 'Подготовлен', sourceVerified: true } }]),
+      { headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', request);
+    await expect(upload(new ApiService(), file())).rejects.toThrow('owned lost response');
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).not.toBeNull();
+  });
+
+  it.each([400, 403, 409, 413])('does not replace a definitive HTTP %i rejection with an older receipt', async (status) => {
+    const request = vi.fn<typeof fetch>(async () => new Response('owned rejection', { status }));
+    vi.stubGlobal('fetch', request);
+    await expect(upload(new ApiService(), file())).rejects.toThrow(`HTTP ${status}`);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).not.toBeNull();
+  });
+
+  it.each(['waiting', 'retrying', 'manualRetry', 'paused', 'failed', 'unknown', 'retired'])('retains the attempt and original error for %s without resending', async (status) => {
+    let key = '';
+    const request = vi.fn<typeof fetch>(async (_url, options) => {
+      if (options?.method === 'POST') {
+        key = new Headers(options.headers).get('X-Upload-Key')!;
+        throw new TypeError('owned lost response');
+      }
+      return new Response(JSON.stringify([{ uploadKey: key, status, documentId: null }]), { headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', request);
+    await expect(upload(new ApiService(), file())).rejects.toThrow('owned lost response');
+    expect(request.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).not.toBeNull();
+  });
+
+  it('never confirms different bytes with identical browser metadata after the rejection response was lost', async () => {
+    vi.stubGlobal('crypto', webcrypto);
+    let key = '';
+    let posts = 0;
+    const request = vi.fn<typeof fetch>(async (_url, options) => {
+      if (options?.method === 'POST') {
+        key = new Headers(options.headers).get('X-Upload-Key')!;
+        posts++;
+        throw new TypeError('owned lost response');
+      }
+      return new Response(JSON.stringify([{ ...intentMetadata, uploadKey: key, status: posts === 1 ? 'unknown' : 'uploaded',
+        documentId: 18, version: 2, sha256: createHash('sha256').update('owned bytes').digest('hex') }]),
+      { headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', request);
+    await expect(upload(new ApiService(), file())).rejects.toThrow('owned lost response');
+    const originalKey = key;
+    await expect(upload(new ApiService(), file('other bytes'))).rejects.toThrow('owned lost response');
+    expect(key).toBe(originalKey);
+    expect(request).toHaveBeenCalledTimes(4);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).not.toBeNull();
+  });
+
+  it('bounds a stalled status request and retains the original error and identity', async () => {
+    vi.useFakeTimers();
+    try {
+      const request = vi.fn<typeof fetch>(async (_url, options) => {
+        if (options?.method === 'POST') throw new TypeError('owned lost response');
+        return await new Promise<Response>((_resolve, reject) => {
+          options!.signal!.addEventListener('abort', () => reject(new DOMException('owned timeout', 'AbortError')), { once: true });
+        });
+      });
+      vi.stubGlobal('fetch', request);
+      const outcome = expect(upload(new ApiService(), file())).rejects.toThrow('owned lost response');
+      await vi.advanceTimersByTimeAsync(5000);
+      await outcome;
+      expect(request.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1);
+      expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).not.toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(['hash', 'case', 'id', 'version', 'size', 'key'])('does not confirm an inconsistent %s receipt', async (change) => {
+    vi.stubGlobal('crypto', webcrypto);
+    let key = '';
+    const request = vi.fn<typeof fetch>(async (url, options) => {
+      if (options?.method === 'POST') {
+        key = new Headers(options.headers).get('X-Upload-Key')!;
+        throw new TypeError('owned lost response');
+      }
+      const value = String(url).includes('/documents/uploads?')
+        ? [{ ...intentMetadata, uploadKey: key, status: 'uploaded', documentId: 18, version: 2,
+          sha256: change === 'hash' ? 'invalid' : createHash('sha256').update('owned bytes').digest('hex') }]
+        : { id: change === 'id' ? 99 : 18, clientCaseId: change === 'case' ? 99 : 15,
+          documentKey: change === 'key' ? 'other-key' : 'receipt-key',
+          version: change === 'version' ? 99 : 2, sizeBytes: change === 'size' ? 99 : 11 };
+      return new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', request);
+    await expect(upload(new ApiService(), file())).rejects.toThrow('owned lost response');
+    expect(request.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).not.toBeNull();
+  });
+
+  it.each(['name', 'mime', 'type', 'status', 'target'])('does not confirm changed request %s even with identical bytes', async (change) => {
+    vi.stubGlobal('crypto', webcrypto);
+    let key = '';
+    const request = vi.fn<typeof fetch>(async (_url, options) => {
+      if (options?.method === 'POST') {
+        key = new Headers(options.headers).get('X-Upload-Key')!;
+        throw new TypeError('owned lost response');
+      }
+      return new Response(JSON.stringify([{ ...intentMetadata, uploadKey: key, status: 'uploaded', documentId: 18, version: 2,
+        sha256: createHash('sha256').update('owned bytes').digest('hex'),
+        fileName: change === 'name' ? 'other.txt' : intentMetadata.fileName,
+        contentType: change === 'mime' ? 'application/pdf' : intentMetadata.contentType,
+        documentType: change === 'type' ? 'Другой тип' : intentMetadata.documentType,
+        requestedStatus: change === 'status' ? 'Другой статус' : intentMetadata.requestedStatus,
+        requestedDocumentKey: change === 'target' ? 'other-key' : intentMetadata.requestedDocumentKey,
+      }]), { headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', request);
+    await expect(upload(new ApiService(), file())).rejects.toThrow('owned lost response');
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).not.toBeNull();
+  });
+});
+
+it('reads a bounded deduplicated status batch with cancellation and no cache', async () => {
+  const request = vi.fn<typeof fetch>(async () => new Response('[]', { headers: { 'content-type': 'application/json' } }));
+  vi.stubGlobal('fetch', request);
+  const controller = new AbortController();
+  const key = '4a1123bb-8cc5-4f32-9d89-47a8fbf48ac6';
+  await new ApiService().getCaseDocumentUploadStates(15, [key, key], controller.signal);
+  const url = new URL(String(request.mock.calls[0][0]));
+  expect(url.searchParams.getAll('uploadKeys')).toEqual([key]);
+  expect(request.mock.calls[0][1]?.cache).toBe('no-store');
+  expect(request.mock.calls[0][1]?.signal).toBe(controller.signal);
+  await expect(new ApiService().getCaseDocumentUploadStates(15, [])).rejects.toThrow('от 1 до 50');
+  await expect(new ApiService().getCaseDocumentUploadStates(15, Array(51).fill(key))).rejects.toThrow('от 1 до 50');
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+describe('explicit retirement API proof', () => {
+  const prepare = () => {
+    localStorage.setItem('pp_token', token(1));
+    return beginCaseDocumentUpload(JSON.stringify(['case', API_BASE_URL, 15, '', 'Документ', 'Подготовлен']), file(), token(1));
+  };
+  const proof = (key: string, status = 'retired') => ({ uploadKey: key, status, documentId: status === 'uploaded' ? 19 : null,
+    version: status === 'uploaded' ? 2 : null, sha256: status === 'uploaded' ? 'a'.repeat(64) : null,
+    documentKey: status === 'uploaded' ? 'old-document' : null });
+  const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
+  it.each(['retired', 'uploaded'])('confirms %s with one explicit POST and no file transmission', async (status) => {
+    const attempt = prepare();
+    const request = vi.fn<typeof fetch>(async () => response(proof(attempt.key.toUpperCase(), status)));
+    vi.stubGlobal('fetch', request);
+    await expect(new ApiService().retireCaseDocumentUpload(15, attempt.key)).resolves.toMatchObject({ status });
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBeNull();
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(String(request.mock.calls[0][0])).toContain(`/documents/uploads/${attempt.key}/retire`);
+    expect(request.mock.calls[0][1]).toMatchObject({ method: 'POST', cache: 'no-store' });
+    expect(request.mock.calls[0][1]?.body).toBeUndefined();
+    expect(request.mock.calls[0][1]).not.toHaveProperty('expectedStatus');
+  });
+  it.each(['network', 'server', 'accepted'])('uses one GET proof after %s and never replays POST', async (mode) => {
+    const attempt = prepare();
+    const request = vi.fn<typeof fetch>(async (_url, options) => {
+      if (options?.method === 'POST') {
+        if (mode === 'network') throw new TypeError('lost response');
+        return response(proof(attempt.key), mode === 'accepted' ? 202 : 500);
+      }
+      return response([proof(attempt.key)]);
+    });
+    vi.stubGlobal('fetch', request);
+    await expect(new ApiService().retireCaseDocumentUpload(15, attempt.key)).resolves.toMatchObject({ status: 'retired' });
+    expect(request.mock.calls.map((call) => call[1]?.method)).toEqual(['POST', 'GET']);
+    expect(request.mock.calls[1][1]?.cache).toBe('no-store');
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBeNull();
+  });
+  it.each([400, 403, 404, 409])('preserves the identity on definitive HTTP %i without another request', async (status) => {
+    const attempt = prepare(); const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    const request = vi.fn<typeof fetch>(async () => response({}, status)); vi.stubGlobal('fetch', request);
+    await expect(new ApiService().retireCaseDocumentUpload(15, attempt.key)).rejects.toThrow(`HTTP ${status}`);
+    expect(request).toHaveBeenCalledTimes(1); expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+  it.each(['waiting', 'failed', 'unknown', 'wrong key', 'invalid published', 'malformed'])('rejects a %s response without releasing the identity', async (mode) => {
+    const attempt = prepare(); const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    const value = mode === 'malformed' ? 'malformed' : mode === 'wrong key' ? proof(crypto.randomUUID())
+      : mode === 'invalid published' ? { ...proof(attempt.key, 'uploaded'), version: 0 } : proof(attempt.key, mode);
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => response(value)));
+    await expect(new ApiService().retireCaseDocumentUpload(15, attempt.key)).rejects.toThrow('не подтверждён');
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+  it('never treats 202 itself as retirement proof', async () => {
+    const attempt = prepare(); const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (_url, options) => options?.method === 'POST'
+      ? response(proof(attempt.key), 202) : response([proof(attempt.key, 'waiting')])));
+    await expect(new ApiService().retireCaseDocumentUpload(15, attempt.key)).rejects.toThrow('не подтверждён');
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+  it.each(['aborted', 'actor switched'])('ignores an %s late POST response and makes no follow-up request', async (mode) => {
+    const attempt = prepare(); const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    const controller = new AbortController();
+    const request = vi.fn<typeof fetch>(async () => {
+      if (mode === 'aborted') controller.abort(); else localStorage.setItem('pp_token', token(2));
+      return response(proof(attempt.key));
+    }); vi.stubGlobal('fetch', request);
+    await expect(new ApiService().retireCaseDocumentUpload(15, attempt.key, controller.signal)).rejects.toThrow();
+    expect(request).toHaveBeenCalledTimes(1); expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+  it('does not transmit when the confirmation belongs to an earlier actor', async () => {
+    const attempt = prepare(); localStorage.setItem('pp_token', token(2));
+    const request = vi.fn<typeof fetch>(); vi.stubGlobal('fetch', request);
+    await expect(new ApiService().retireCaseDocumentUpload(15, attempt.key, undefined, token(1))).rejects.toThrow('HTTP 403');
+    expect(request).not.toHaveBeenCalled();
+  });
+  it('does not transmit when the actor changes while refreshing the session', async () => {
+    const attempt = prepare(); const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    vi.spyOn(authService, 'ensureFreshSession').mockImplementation(async () => {
+      localStorage.setItem('pp_token', token(2)); return token(2);
+    });
+    const request = vi.fn<typeof fetch>(); vi.stubGlobal('fetch', request);
+    await expect(new ApiService().retireCaseDocumentUpload(15, attempt.key)).rejects.toThrow('HTTP 403');
+    expect(request).not.toHaveBeenCalled(); expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+  it.each(['aborted', 'actor switched', 'wrong key', 'missing', 'extra', 'waiting', 'forbidden'])('preserves the identity on %s GET proof after lost POST response', async (mode) => {
+    const attempt = prepare(); const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    const controller = new AbortController();
+    const request = vi.fn<typeof fetch>(async (_url, options) => {
+      if (options?.method === 'POST') throw new TypeError('lost ACK');
+      if (mode === 'aborted') controller.abort();
+      if (mode === 'actor switched') localStorage.setItem('pp_token', token(2));
+      const values = mode === 'missing' ? [] : mode === 'extra' ? [proof(attempt.key), proof(crypto.randomUUID())]
+        : [proof(mode === 'wrong key' ? crypto.randomUUID() : attempt.key, mode === 'waiting' ? 'waiting' : 'retired')];
+      return response(values, mode === 'forbidden' ? 403 : 200);
+    }); vi.stubGlobal('fetch', request);
+    await expect(new ApiService().retireCaseDocumentUpload(15, attempt.key, controller.signal)).rejects.toThrow();
+    expect(request.mock.calls.map((call) => call[1]?.method)).toEqual(['POST', 'GET']);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+  it('bounds GET proof even when the transport ignores abort and discards its late response', async () => {
+    vi.useFakeTimers();
+    try {
+      const attempt = prepare(); const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+      let complete!: (value: Response) => void;
+      const request = vi.fn<typeof fetch>(async (_url, options) => options?.method === 'POST'
+        ? Promise.reject(new TypeError('lost ACK')) : new Promise<Response>((resolve) => { complete = resolve; }));
+      vi.stubGlobal('fetch', request);
+      const result = new ApiService().retireCaseDocumentUpload(15, attempt.key);
+      const rejection = expect(result).rejects.toThrow('прервана');
+      await vi.advanceTimersByTimeAsync(5000); await rejection;
+      complete(response([proof(attempt.key)])); await vi.advanceTimersByTimeAsync(1);
+      expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+      expect(request.mock.calls.map((call) => call[1]?.method)).toEqual(['POST', 'GET']); expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+  it('allows the existing 401 refresh only for the same actor and confirms the idempotent action', async () => {
+    const attempt = prepare();
+    vi.spyOn(authService, 'ensureFreshSession').mockResolvedValueOnce(token(1)).mockImplementationOnce(async () => {
+      const refreshed = token(1, 2); localStorage.setItem('pp_token', refreshed); return refreshed;
+    });
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(response({}, 401)).mockResolvedValueOnce(response(proof(attempt.key)));
+    vi.stubGlobal('fetch', request);
+    await expect(new ApiService().retireCaseDocumentUpload(15, attempt.key)).resolves.toMatchObject({ status: 'retired' });
+    expect(request.mock.calls.map((call) => call[1]?.method)).toEqual(['POST', 'POST']);
+    expect(request.mock.calls[0][0]).toBe(request.mock.calls[1][0]);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBeNull();
+  });
+  it('keeps inaccessible registry data even after server retirement is proved', async () => {
+    const attempt = prepare(); const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => response(proof(attempt.key))));
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('denied'); });
+    await expect(new ApiService().retireCaseDocumentUpload(15, attempt.key)).rejects.toThrow('данные вкладки недоступны');
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+  it('bounds POST waiting and recovers its timeout with a single GET, clearing both timers', async () => {
+    vi.useFakeTimers();
+    try {
+      const attempt = prepare();
+      const timerSpy = vi.spyOn(globalThis, 'setTimeout');
+      const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+      const request = vi.fn<typeof fetch>(async (_url, options) => options?.method === 'POST'
+        ? new Promise<Response>((_resolve, reject) => options.signal?.addEventListener('abort', () => reject(new DOMException('timeout', 'AbortError')), { once: true }))
+        : response([proof(attempt.key)])); vi.stubGlobal('fetch', request);
+      const result = new ApiService().retireCaseDocumentUpload(15, attempt.key);
+      await vi.advanceTimersByTimeAsync(10000);
+      await expect(result).resolves.toMatchObject({ status: 'retired' });
+      // Response's deferred zero-delay stream cleanup runs on the next tick.
+      // Draining 1 ms cannot conceal either operation deadline (5/10 seconds).
+      await vi.advanceTimersByTimeAsync(1);
+      for (const [index, call] of timerSpy.mock.calls.entries()) {
+        if (call[1] === 10000 || call[1] === 5000)
+          expect(clearSpy.mock.calls.some((cleared) => cleared[0] === timerSpy.mock.results[index].value)).toBe(true);
+      }
+      expect(request.mock.calls.map((call) => call[1]?.method)).toEqual(['POST', 'GET']); expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+describe('explicit retirement attempt acknowledgement', () => {
+  const scope = (id = 15, api = API_BASE_URL) => JSON.stringify(['case', api, id, '', 'Документ', 'Подготовлен']);
+  const receipt = (key: string, status = 'retired') => ({ uploadKey: key, status });
+  it('releases only the exact own case/version keys and preserves unresolved and foreign attempts', () => {
+    const own = beginCaseDocumentUpload(scope(), file(), token(1));
+    const version = beginCaseDocumentUpload(JSON.stringify(['version', API_BASE_URL, 18, 'Документ', 'Подготовлен']), file(), token(1));
+    const foreign = [beginCaseDocumentUpload(scope(16), file(), token(1)), beginCaseDocumentUpload(scope(), file(), token(2)),
+      beginCaseDocumentUpload(scope(15, 'https://other.invalid'), file(), token(1)),
+      beginCaseDocumentUpload(scope(), new File(['other'], 'other.txt'), token(1))];
+    expect(confirmRetiredCaseDocumentUpload(15, API_BASE_URL, receipt(own.key.toUpperCase()), token(1), token(1, 2))).toBe(true);
+    expect(confirmRetiredCaseDocumentUpload(15, API_BASE_URL, receipt(version.key), token(1), token(1))).toBe(true);
+    expect(JSON.parse(sessionStorage.getItem('pp.case-document-upload-attempts.v1')!).map((item: { key: string }) => item.key))
+      .toEqual(foreign.map((item) => item.key));
+    expect(beginCaseDocumentUpload(scope(), file(), token(1)).key).not.toBe(own.key);
+  });
+  it.each(['uploaded', 'waiting', 'retrying', 'paused', 'failed', 'manualRetry', 'unknown', 'deadLetter'])('does not release a %s outcome', (status) => {
+    const own = beginCaseDocumentUpload(scope(), file(), token(1));
+    const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    expect(confirmRetiredCaseDocumentUpload(15, API_BASE_URL, receipt(own.key, status), token(1), token(1))).toBe(false);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+  it('rejects a changed actor, issuer, case, API and malformed identity without mutation', () => {
+    const own = beginCaseDocumentUpload(scope(), file(), token(1));
+    const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    expect(confirmRetiredCaseDocumentUpload(15, API_BASE_URL, receipt(own.key), token(1), token(2))).toBe(false);
+    const issuer = `header.${btoa(JSON.stringify({ sub: '1', iss: 'other-issuer' }))}.signature`;
+    expect(confirmRetiredCaseDocumentUpload(15, API_BASE_URL, receipt(own.key), token(1), issuer)).toBe(false);
+    expect(confirmRetiredCaseDocumentUpload(16, API_BASE_URL, receipt(own.key), token(1), token(1))).toBe(false);
+    expect(confirmRetiredCaseDocumentUpload(15, 'https://other.invalid', receipt(own.key), token(1), token(1))).toBe(false);
+    expect(confirmRetiredCaseDocumentUpload(15, API_BASE_URL, receipt(own.key), null, null)).toBe(false);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+    const malformed = JSON.stringify([{ ...own, identity: 'unparseable' }]);
+    sessionStorage.setItem('pp.case-document-upload-attempts.v1', malformed);
+    expect(confirmRetiredCaseDocumentUpload(15, API_BASE_URL, receipt(own.key), token(1), token(1))).toBe(false);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(malformed);
+  });
+  it('preserves a newer attempt when an old retirement proof arrives late', () => {
+    const old = beginCaseDocumentUpload(scope(), file(), token(1)); confirmCaseDocumentUpload(old);
+    const next = beginCaseDocumentUpload(scope(), file(), token(1));
+    expect(confirmRetiredCaseDocumentUpload(15, API_BASE_URL, receipt(old.key), token(1), token(1))).toBe(true);
+    expect(beginCaseDocumentUpload(scope(), file(), token(1))).toEqual(next);
+  });
+  it.each(['corrupt', 'oversized', 'read denied', 'write denied', 'remove denied'])('keeps unresolved storage on %s', (mode) => {
+    const own = beginCaseDocumentUpload(scope(), file(), token(1));
+    if (mode === 'corrupt') sessionStorage.setItem('pp.case-document-upload-attempts.v1', '{broken');
+    if (mode === 'oversized') sessionStorage.setItem('pp.case-document-upload-attempts.v1', JSON.stringify(Array(65).fill(own)));
+    if (mode === 'write denied') beginCaseDocumentUpload(scope(16), file(), token(1));
+    const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    if (mode === 'read denied') vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied'); });
+    if (mode === 'write denied') vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('denied'); });
+    if (mode === 'remove denied') vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('denied'); });
+    expect(confirmRetiredCaseDocumentUpload(15, API_BASE_URL, receipt(own.key), token(1), token(1))).toBe(false);
+    vi.restoreAllMocks(); expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+  it('does not acknowledge retirement through ordinary discovery or status polling', async () => {
+    localStorage.setItem('pp_token', token(1));
+    const own = beginCaseDocumentUpload(scope(), file(), token(1));
+    const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (url) => new Response(JSON.stringify(String(url).includes('/pending')
+      ? { items: [receipt(own.key)], nextCursor: null } : [receipt(own.key)]), { headers: { 'content-type': 'application/json' } })));
+    await new ApiService().getPendingCaseDocumentUploads(15);
+    await new ApiService().getCaseDocumentUploadStates(15, [own.key], undefined, { acknowledgePublishedAttempts: true });
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+});
+
+describe('background publication attempt acknowledgement', () => {
+  const caseScope = (id = 15, api = API_BASE_URL) => JSON.stringify(['case', api, id, '', 'Документ', 'Подготовлен']);
+  const versionScope = (api = API_BASE_URL) => JSON.stringify(['version', api, 18, 'Документ', 'Подготовлен']);
+  const receipt = (key: string) => ({ uploadKey: key, status: 'uploaded', documentId: 19, version: 2 });
+
+  it.each(['discovery', 'status'])('retains the local attempt after a forbidden %s response in the same session', async (mode) => {
+    localStorage.setItem('pp_token', token(1));
+    const own = beginCaseDocumentUpload(caseScope(), file(), token(1));
+    const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: 'HTTP 403: forbidden' }), { status: 403, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const api = new ApiService();
+    await expect(mode === 'discovery' ? api.getPendingCaseDocumentUploads(15) : api.getCaseDocumentUploadStates(15, [own.key]))
+      .rejects.toThrow('HTTP 403');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+
+  it.each(['discovery', 'status'])('rejects late sensitive %s data after an actor switch', async (mode) => {
+    localStorage.setItem('pp_token', token(1));
+    const own = beginCaseDocumentUpload(caseScope(), file(), token(1));
+    const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => {
+      localStorage.setItem('pp_token', token(2));
+      const items = [{ ...receipt(own.key), fileName: 'private-old-actor.pdf' }];
+      return new Response(JSON.stringify(mode === 'discovery' ? { items, nextCursor: null } : items), { headers: { 'content-type': 'application/json' } });
+    }));
+    const api = new ApiService();
+    await expect(mode === 'discovery' ? api.getPendingCaseDocumentUploads(15) : api.getCaseDocumentUploadStates(15, [own.key]))
+      .rejects.toBeInstanceOf(AuthSessionChangedError);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+
+  it('releases own case and version keys while preserving other actors, cases, APIs and unresolved attempts', () => {
+    const own = beginCaseDocumentUpload(caseScope(), file(), token(1));
+    const version = beginCaseDocumentUpload(versionScope(), file(), token(1));
+    const foreign = [beginCaseDocumentUpload(caseScope(16), file(), token(1)),
+      beginCaseDocumentUpload(caseScope(), file(), token(2)), beginCaseDocumentUpload(caseScope(15, 'https://other.invalid'), file(), token(1)),
+      beginCaseDocumentUpload(versionScope('https://other.invalid'), file(), token(1))];
+    const unresolved = beginCaseDocumentUpload(caseScope(), new File(['pending'], 'pending.txt', { lastModified: 43 }), token(1));
+    confirmPublishedCaseDocumentUploads(15, API_BASE_URL,
+      [own, version, ...foreign].map((item) => receipt(item.key.toUpperCase())), token(1), token(1, 2));
+    const remaining = JSON.parse(sessionStorage.getItem('pp.case-document-upload-attempts.v1')!);
+    expect(remaining.map((item: { key: string }) => item.key)).toEqual([...foreign, unresolved].map((item) => item.key));
+  });
+
+  it.each(['waiting', 'retrying', 'paused', 'failed', 'manualRetry', 'unknown', 'retired'])('retains a %s attempt', (status) => {
+    const attempt = beginCaseDocumentUpload(caseScope(), file(), token(1));
+    const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [{ ...receipt(attempt.key), status }], token(1), token(1));
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+
+  it.each([{ documentId: 0, version: 2 }, { documentId: null, version: 2 }, { documentId: 19, version: 0 },
+    { documentId: 19, version: null }, { documentId: 19.5, version: 2 }])('retains an invalid receipt %j', (shape) => {
+    const attempt = beginCaseDocumentUpload(caseScope(), file(), token(1));
+    const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [{ ...receipt(attempt.key), ...shape }], token(1), token(1));
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+
+  it('does not acknowledge a response after an actor switch or without an identified actor', () => {
+    const attempt = beginCaseDocumentUpload(caseScope(), file(), token(1));
+    const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [receipt(attempt.key)], token(1), token(2));
+    confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [receipt(attempt.key)], null, null);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+
+  it('makes one slot available after publication without evicting other pending identities', () => {
+    const first = beginCaseDocumentUpload(caseScope(), file(), token(1));
+    for (let i = 1; i < 64; i++) beginCaseDocumentUpload(caseScope(i + 100), file(), token(1));
+    expect(() => beginCaseDocumentUpload(caseScope(999), file(), token(1))).toThrow('Слишком много');
+    confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [receipt(first.key)], token(1), token(1));
+    expect(() => beginCaseDocumentUpload(caseScope(999), file(), token(1))).not.toThrow();
+    expect(JSON.parse(sessionStorage.getItem('pp.case-document-upload-attempts.v1')!)).toHaveLength(64);
+  });
+
+  it('preserves a newer intentional attempt when an old publication receipt arrives late', () => {
+    const first = beginCaseDocumentUpload(caseScope(), file(), token(1));
+    confirmCaseDocumentUpload(first);
+    const next = beginCaseDocumentUpload(caseScope(), file(), token(1));
+    confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [receipt(first.key)], token(1), token(1));
+    expect(beginCaseDocumentUpload(caseScope(), file(), token(1))).toEqual(next);
+  });
+
+  it('preserves corrupt or inaccessible storage without turning the successful read into a failure', () => {
+    sessionStorage.setItem('pp.case-document-upload-attempts.v1', '{broken');
+    expect(() => confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [receipt(crypto.randomUUID())], token(1), token(1))).not.toThrow();
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe('{broken');
+    sessionStorage.clear();
+    const attempt = beginCaseDocumentUpload(caseScope(), file(), token(1));
+    beginCaseDocumentUpload(caseScope(16), file(), token(1));
+    const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('storage denied'); });
+    expect(() => confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [receipt(attempt.key)], token(1), token(1))).not.toThrow();
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+
+  it.each(['status', 'discovery'])('acknowledges an authorized %s read while byte-recovery status reads keep the identity', async (mode) => {
+    localStorage.setItem('pp_token', token(1));
+    const attempt = beginCaseDocumentUpload(caseScope(), file(), token(1));
+    const values = [receipt(attempt.key)];
+    const request = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(mode === 'discovery' ? { items: values, nextCursor: null } : values),
+      { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', request);
+    const service = new ApiService();
+    if (mode === 'status') {
+      await service.getCaseDocumentUploadStates(15, [attempt.key]);
+      expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).not.toBeNull();
+      await service.getCaseDocumentUploadStates(15, [attempt.key], undefined, { acknowledgePublishedAttempts: true });
+    } else await service.getPendingCaseDocumentUploads(15);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBeNull();
+    expect(request.mock.calls.every((call) => (call[1]?.method ?? 'GET') === 'GET')).toBe(true);
+  });
+
+  it('does not release an unrequested receipt key from an exact status batch', async () => {
+    localStorage.setItem('pp_token', token(1));
+    const attempt = beginCaseDocumentUpload(caseScope(), file(), token(1));
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => new Response(JSON.stringify([receipt(attempt.key)]),
+      { headers: { 'content-type': 'application/json' } })));
+    await new ApiService().getCaseDocumentUploadStates(15, [crypto.randomUUID()], undefined, { acknowledgePublishedAttempts: true });
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).not.toBeNull();
+  });
+
+  it.each(['aborted', 'actor switch', 'forbidden'])('preserves the identity after a %s read', async (mode) => {
+    localStorage.setItem('pp_token', token(1));
+    const attempt = beginCaseDocumentUpload(caseScope(), file(), token(1));
+    const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    const controller = new AbortController();
+    const request = vi.fn<typeof fetch>(async () => {
+      if (mode === 'aborted') controller.abort();
+      if (mode === 'actor switch') localStorage.setItem('pp_token', token(2));
+      return new Response(JSON.stringify([receipt(attempt.key)]), {
+        status: mode === 'forbidden' ? 403 : 200, headers: { 'content-type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', request);
+    await new ApiService().getCaseDocumentUploadStates(15, [attempt.key], controller.signal,
+      { acknowledgePublishedAttempts: true }).catch(() => undefined);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not acknowledge an oversized receipt page or a malformed identity', () => {
+    const attempt = beginCaseDocumentUpload(caseScope(), file(), token(1));
+    const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    confirmPublishedCaseDocumentUploads(15, API_BASE_URL, Array(51).fill(receipt(attempt.key)), token(1), token(1));
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+    const malformed = JSON.stringify([{ identity: 'unparseable', key: attempt.key }]);
+    sessionStorage.setItem('pp.case-document-upload-attempts.v1', malformed);
+    confirmPublishedCaseDocumentUploads(15, API_BASE_URL, [receipt(attempt.key)], token(1), token(1));
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(malformed);
+  });
+});

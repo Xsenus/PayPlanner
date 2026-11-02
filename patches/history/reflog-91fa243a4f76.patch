@@ -1,0 +1,242 @@
+diff --git a/backend/AppReleases/releases.json b/backend/AppReleases/releases.json
+index eb3d6f51c165a2c2fb1a4db40f73889b309f9031..e599be379933c2c4c2935387c553f5c6faf3dea8 100644
+--- a/backend/AppReleases/releases.json
++++ b/backend/AppReleases/releases.json
+@@ -1,4 +1,19 @@
+ [
++  {
++    "releaseId": "2026-05-30-task-completion-default-result-all-paths",
++    "version": "1.13.122",
++    "releasedAt": "2026-05-30T13:42:54+07:00",
++    "title": "Задачи без результата закрываются стабильнее",
++    "summary": "Закрытие задачи стало одинаково работать через кнопку завершения и через сохранение статуса.",
++    "isActive": true,
++    "source": "agent",
++    "items": [
++      {
++        "type": "fixed",
++        "text": "В журнале задач задачу теперь можно перевести в статус «Готово» даже при сохранении формы вручную, если исполнитель не заполнил результат. В этом случае CRM подставит стандартный результат «Задача выполнена.» и корректно закроет задачу."
++      }
++    ]
++  },
+   {
+     "releaseId": "2026-05-30-print-forms-fixed-reference-layout",
+     "version": "1.13.121",
+diff --git a/backend/Controllers/TasksController.cs b/backend/Controllers/TasksController.cs
+index 9d80163d3710c2ea1858f39c494fb90532e274cd..7780ae27395ada1c0e4faf4a81f28a206bf79c68 100644
+--- a/backend/Controllers/TasksController.cs
++++ b/backend/Controllers/TasksController.cs
+@@ -24,6 +24,7 @@ public class TasksController : ControllerBase
+ {
+     private const long MaxTaskFileBytes = 25L * 1024L * 1024L;
+     private const string InternalTaskObjectName = "Внутренняя задача";
++    private const string DefaultTaskCompletionResult = "Задача выполнена.";
+     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+     private static readonly HashSet<string> AllowedStatuses = new(StringComparer.OrdinalIgnoreCase)
+     {
+@@ -1404,7 +1405,8 @@ public class TasksController : ControllerBase
+         }
+ 
+         var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
+-        var statusValidation = ValidateStatusRules(nextStatus, NormalizeOptional(request.Result), participants.Items);
++        var nextResult = NormalizeCompletionResult(nextStatus, request.Result);
++        var statusValidation = ValidateStatusRules(nextStatus, nextResult, participants.Items);
+         if (statusValidation is not null)
+         {
+             return BadRequest(new { message = statusValidation });
+@@ -1433,7 +1435,7 @@ public class TasksController : ControllerBase
+             Type = NormalizeEnumValue(request.Type, AllowedTypes, "task"),
+             Priority = NormalizeEnumValue(request.Priority, AllowedPriorities, "normal"),
+             Status = nextStatus,
+-            Result = NormalizeOptional(request.Result),
++            Result = nextResult,
+             RemindersJson = SerializeList(request.Reminders, AllowedReminders, ["atDue"]),
+             ChannelsJson = SerializeList(request.Channels, AllowedChannels, ["inApp"]),
+             TagsJson = SerializeFreeList(request.Tags),
+@@ -1505,7 +1507,8 @@ public class TasksController : ControllerBase
+         var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
+         var approvalQueueRestarted = ShouldRestartApprovalQueue(previousStatus, nextStatus);
+         participants = ResetApprovalQueueIfStartingApproval(previousStatus, nextStatus, participants);
+-        var statusValidation = ValidateStatusRules(nextStatus, NormalizeOptional(request.Result), participants.Items);
++        var nextResult = NormalizeCompletionResult(nextStatus, request.Result);
++        var statusValidation = ValidateStatusRules(nextStatus, nextResult, participants.Items);
+         if (statusValidation is not null)
+         {
+             return BadRequest(new { message = statusValidation });
+@@ -1535,7 +1538,7 @@ public class TasksController : ControllerBase
+         entity.Type = NormalizeEnumValue(request.Type, AllowedTypes, "task");
+         entity.Priority = NormalizeEnumValue(request.Priority, AllowedPriorities, "normal");
+         entity.Status = nextStatus;
+-        entity.Result = NormalizeOptional(request.Result);
++        entity.Result = nextResult;
+         entity.RemindersJson = SerializeList(request.Reminders, AllowedReminders, ["atDue"]);
+         entity.ChannelsJson = SerializeList(request.Channels, AllowedChannels, ["inApp"]);
+         entity.TagsJson = SerializeFreeList(request.Tags);
+@@ -1616,12 +1619,8 @@ public class TasksController : ControllerBase
+         }
+ 
+         var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
+-        var nextResult = NormalizeOptional(request.Result) ?? entity.Result;
+-        if (string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase)
+-            && string.IsNullOrWhiteSpace(nextResult))
+-        {
+-            return BadRequest(new { message = "Перед завершением задачи заполните результат." });
+-        }
++        var requestedResult = NormalizeOptional(request.Result);
++        var nextResult = NormalizeCompletionResult(nextStatus, requestedResult ?? entity.Result);
+ 
+         var statusValidation = ValidateStatusRules(nextStatus, nextResult, entity.Participants);
+         if (statusValidation is not null)
+@@ -1636,9 +1635,11 @@ public class TasksController : ControllerBase
+         var oldResult = entity.Result;
+ 
+         entity.Status = nextStatus;
+-        if (NormalizeOptional(request.Result) is { } result)
++        if (requestedResult is not null
++            || (string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase)
++                && string.IsNullOrWhiteSpace(entity.Result)))
+         {
+-            entity.Result = result;
++            entity.Result = nextResult;
+         }
+         entity.UpdatedAt = DateTime.UtcNow;
+ 
+@@ -2957,12 +2958,6 @@ public class TasksController : ControllerBase
+             return "Комментарий к изменению не должен превышать 4000 символов.";
+         }
+ 
+-        if (string.Equals(request.Status, "done", StringComparison.OrdinalIgnoreCase)
+-            && string.IsNullOrWhiteSpace(request.Result))
+-        {
+-            return "Перед завершением задачи заполните результат.";
+-        }
+-
+         return null;
+     }
+ 
+@@ -3067,6 +3062,15 @@ public class TasksController : ControllerBase
+     private static string? NormalizeOptional(string? value)
+         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+ 
++    private static string? NormalizeCompletionResult(string status, string? result)
++    {
++        var normalized = NormalizeOptional(result);
++        return string.Equals(status, "done", StringComparison.OrdinalIgnoreCase)
++            && normalized is null
++                ? DefaultTaskCompletionResult
++                : normalized;
++    }
++
+     private static DateTime? NormalizeApprovalDueAt(DateTime? value)
+         => value.HasValue && value.Value != default ? value.Value : null;
+ 
+diff --git a/backend/PayPlanner.Api.Tests/TasksControllerTests.cs b/backend/PayPlanner.Api.Tests/TasksControllerTests.cs
+index 7c3aa0e11949954b3abc8106319fb378967ba278..e9191111ab911ae3882a1d9b8215800287fce414 100644
+--- a/backend/PayPlanner.Api.Tests/TasksControllerTests.cs
++++ b/backend/PayPlanner.Api.Tests/TasksControllerTests.cs
+@@ -302,7 +302,7 @@ public class TasksControllerTests
+     }
+ 
+     [Fact]
+-    public async Task UpdateStatus_DoneRequiresResult()
++    public async Task UpdateStatus_DoneWithoutResultUsesDefaultResult()
+     {
+         await using var db = await CreateContextAsync();
+         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+@@ -315,11 +315,15 @@ public class TasksControllerTests
+             Status = "done",
+         }, CancellationToken.None);
+ 
+-        Assert.IsType<BadRequestObjectResult>(result.Result);
++        var ok = Assert.IsType<OkObjectResult>(result.Result);
++        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
++
++        Assert.Equal("done", dto.Status);
++        Assert.Equal("Задача выполнена.", dto.Result);
+     }
+ 
+     [Fact]
+-    public async Task UpdateTask_DoneRequiresResult()
++    public async Task UpdateTask_DoneWithoutResultUsesDefaultResult()
+     {
+         await using var db = await CreateContextAsync();
+         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+@@ -335,7 +339,11 @@ public class TasksControllerTests
+             Status = "done",
+         }, CancellationToken.None);
+ 
+-        Assert.IsType<BadRequestObjectResult>(result.Result);
++        var ok = Assert.IsType<OkObjectResult>(result.Result);
++        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
++
++        Assert.Equal("done", dto.Status);
++        Assert.Equal("Задача выполнена.", dto.Result);
+     }
+ 
+     [Fact]
+diff --git a/src/components/Tasks/TaskJournal.test.tsx b/src/components/Tasks/TaskJournal.test.tsx
+index 2836d206511d0fa6d5771be7abf0932c7fa1d954..7f02c789bb9bed366fd73c87367bac67d490e025 100644
+--- a/src/components/Tasks/TaskJournal.test.tsx
++++ b/src/components/Tasks/TaskJournal.test.tsx
+@@ -1575,6 +1575,25 @@ describe('TaskJournal', () => {
+     }));
+   });
+ 
++  it('saves a task as done with a default result when the status is changed manually', async () => {
++    await renderJournal([createTask({ status: 'approved', result: '' })], { waitForTitle: null });
++    fireEvent.click(screen.getByTestId('task-quick-filter-all'));
++    fireEvent.change(screen.getByLabelText('Статус'), { target: { value: 'all' } });
++    await screen.findAllByText('Тестовая задача');
++
++    await openFirstTaskForEdit();
++
++    fireEvent.change(screen.getByTestId('task-editor-status-select'), { target: { value: 'done' } });
++    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
++
++    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
++    expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
++      status: 'done',
++      result: 'Задача выполнена.',
++    }));
++    expect(toastMock.error).not.toHaveBeenCalledWith('Перед завершением задачи заполните результат.', 'Журнал задач');
++  });
++
+   it('shows and saves approval due date in the task editor', async () => {
+     const approvalDueAt = todayAt(16, 30);
+     await renderJournal([createTask({ approvalDueAt })]);
+diff --git a/src/components/Tasks/TaskJournal.tsx b/src/components/Tasks/TaskJournal.tsx
+index 787b54469101349b6fd178881062903d1b442a70..de4dd26d22848ad2b1ca21d278e4903e4a8bce5a 100644
+--- a/src/components/Tasks/TaskJournal.tsx
++++ b/src/components/Tasks/TaskJournal.tsx
+@@ -2090,11 +2090,6 @@ export function TaskJournal({
+       toast.error('Укажите наименование задачи.', 'Журнал задач');
+       return;
+     }
+-    if (form.status === 'done' && !form.result.trim()) {
+-      toast.error('Перед завершением задачи заполните результат.', 'Журнал задач');
+-      return;
+-    }
+-
+     if (form.contractorPaymentEnabled) {
+       const selectedAssignee = assignees.find((assignee) => assignee.id === form.assigneeUserId);
+       if (!selectedAssignee?.isExternalContractor) {
+@@ -2130,7 +2125,9 @@ export function TaskJournal({
+       objectName: form.isInternal ? INTERNAL_TASK_OBJECT_NAME : form.objectName.trim(),
+       title: form.title.trim(),
+       description: form.description.trim(),
+-      result: form.result.trim(),
++      result: form.status === 'done' && !form.result.trim()
++        ? DEFAULT_TASK_COMPLETION_RESULT
++        : form.result.trim(),
+       changeComment: form.changeComment?.trim() || null,
+       dueAt: fromLocalInputValue(form.dueAt),
+       approvalDueAt: form.approvalDueAt ? fromLocalInputValue(form.approvalDueAt) : null,
+@@ -5733,7 +5730,7 @@ function TaskModal({
+               </select>
+             </Field>
+             <Field label="Статус">
+-              <select value={form.status} onChange={(event) => update('status', event.target.value as TaskJournalStatus)} disabled={isReadOnly} className="form-input">
++              <select data-testid="task-editor-status-select" value={form.status} onChange={(event) => update('status', event.target.value as TaskJournalStatus)} disabled={isReadOnly} className="form-input">
+                 {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+               </select>
+             </Field>

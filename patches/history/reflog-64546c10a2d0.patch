@@ -1,0 +1,346 @@
+diff --git a/backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs b/backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs
+index da3e23756ad1d7b51ba1da7aede81a33cd757a50..b6e68d1478878e36f091dfb39e9f5dea07ea77ac 100644
+--- a/backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs
++++ b/backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs
+@@ -361,6 +361,99 @@ public sealed class BoundedBatchSchedulerTests
+         Assert.True(floorRecorded);
+     }
+ 
++    [Theory]
++    [InlineData("fast", 6)]
++    [InlineData("heavy", 6)]
++    [InlineData("exclusive", 7)]
++    public async Task IdleSchedulerWaitsForTheTestHostReserveThenRunsEveryPendingBatch(string lane, int requiredGib)
++    {
++        var available = 3 * Gib;
++        var waiting = Signal();
++        var started = new ConcurrentBag<string>();
++        var observations = new ConcurrentBag<string>();
++        var batches = Batches(lane, 2);
++        var run = BoundedBatchScheduler.RunAsync(batches, "1", 1,
++            () => new(Volatile.Read(ref available), 8), batch =>
++            {
++                started.Add(batch.Id);
++                return Task.CompletedTask;
++            }, value =>
++            {
++                observations.Add(value.Kind);
++                if (value.Kind == "admission-wait") waiting.TrySetResult();
++            }, TimeSpan.FromMilliseconds(20));
++        try
++        {
++            await waiting.Task.WaitAsync(Deadline);
++            Assert.Empty(started);
++            Assert.False(run.IsCompleted);
++        }
++        finally { Volatile.Write(ref available, (ulong)requiredGib * Gib); }
++        await run.WaitAsync(Deadline);
++        Assert.Equal(batches.Select(batch => batch.Id).Order(), started.Order());
++        Assert.Single(observations, kind => kind == "admission-wait");
++        Assert.Single(observations, kind => kind == "admission-ready");
++        Assert.DoesNotContain("memory-floor", observations);
++    }
++
++    [Fact]
++    public async Task UnrecoveredAdmissionReserveFailsWithoutStartingOrQualifyingPendingWork()
++    {
++        var clock = new AdmissionClock();
++        var starts = 0;
++        var observations = new List<string>();
++        var batches = Batches("heavy", 2).Concat(Batches("exclusive", 1)).ToArray();
++        await Assert.ThrowsAsync<InvalidDataException>(() => BoundedBatchScheduler.RunAsync(batches, "1", 1,
++            () =>
++            {
++                clock.Advance();
++                return new(3 * Gib, 8);
++            }, _ =>
++            {
++                starts++;
++                return Task.CompletedTask;
++            }, value => observations.Add(value.Kind), TimeSpan.FromMilliseconds(10), TimeSpan.FromSeconds(1), clock).WaitAsync(Deadline));
++        Assert.Equal(0, starts);
++        Assert.Single(observations, kind => kind == "admission-wait");
++        Assert.Single(observations, kind => kind == "admission-timeout");
++        Assert.DoesNotContain("launch-budget", observations);
++        Assert.DoesNotContain("admission-ready", observations);
++    }
++
++    [Fact]
++    public async Task AFailedProbeDuringAdmissionPreservesTheErrorAndStartsNoChild()
++    {
++        var failure = new IOException("The host memory probe is unavailable.");
++        var probes = 0;
++        var starts = 0;
++        var run = BoundedBatchScheduler.RunAsync(Batches("heavy", 2), "1", 1,
++            () => ++probes == 3 ? throw failure : new(3 * Gib, 8), _ =>
++            {
++                starts++;
++                return Task.CompletedTask;
++            }, recheckInterval: TimeSpan.FromMilliseconds(10));
++        Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() => run.WaitAsync(Deadline)));
++        Assert.Equal(0, starts);
++    }
++
++    [Fact]
++    public async Task InvalidAdmissionTimeoutsFailBeforeProbingOrDispatching()
++    {
++        foreach (var timeout in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(9), TimeSpan.FromMinutes(31) })
++            await Assert.ThrowsAsync<InvalidDataException>(() => BoundedBatchScheduler.RunAsync(Batches("heavy", 1), "1", 1,
++                () => throw new Xunit.Sdk.XunitException("Invalid options must fail before probing."),
++                _ => throw new Xunit.Sdk.XunitException("Invalid options must fail before dispatching."),
++                recheckInterval: TimeSpan.FromMilliseconds(10), admissionTimeout: timeout));
++    }
++
++    private sealed class AdmissionClock : TimeProvider
++    {
++        private long timestamp;
++        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
++        public override long GetTimestamp() => timestamp;
++        public void Advance() => timestamp += TimeSpan.TicksPerSecond;
++    }
++
+     private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+     private static ExecutionResources AmpleResources() => new(20 * Gib, 8);
+     private static ExecutionBatch[] Batches(string lane, int count) => Enumerable.Range(0, count)
+diff --git a/backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs b/backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs
+index 422d6f6dc9fe5771451a6249826991febd8b906d..fa212d63834a8b1bb9c05a997bb36bbcc617ecbd 100644
+--- a/backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs
++++ b/backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs
+@@ -183,8 +183,14 @@ public sealed class BoundedTestExecutionTests
+         Assert.Throws<InvalidDataException>(() => ExecutionScheduling.PartitionCapacity("auto", 0));
+         Assert.Equal(2, ExecutionScheduling.WorkerBudget("auto", 12 * Fixture.Gib - 1, 8));
+         Assert.Equal(1, ExecutionScheduling.WorkerBudget("auto", 8 * Fixture.Gib - 1, 8));
+-        Assert.True(ExecutionScheduling.CanLaunchAdditional(0, 4, Fixture.Gib));
++        Assert.False(ExecutionScheduling.CanLaunchAdditional(0, 4, Fixture.Gib));
+         Assert.False(ExecutionScheduling.CanLaunchAdditional(0, 4, Fixture.Gib - 1));
++        Assert.True(ExecutionScheduling.CanLaunchAdditional(0, 4, 6 * Fixture.Gib));
++        Assert.False(ExecutionScheduling.CanLaunchAdditional(0, 4, 6 * Fixture.Gib - 1));
++        Assert.True(ExecutionScheduling.CanLaunchAdditional(0, 4, 7 * Fixture.Gib, "exclusive"));
++        Assert.False(ExecutionScheduling.CanLaunchAdditional(0, 4, 7 * Fixture.Gib - 1, "exclusive"));
++        Assert.False(ExecutionScheduling.CanLaunchAdditional(1, 4, 20 * Fixture.Gib, "exclusive"));
++        Assert.Throws<InvalidDataException>(() => ExecutionScheduling.CanLaunchAdditional(0, 1, 20 * Fixture.Gib, "unknown"));
+         Assert.True(ExecutionScheduling.CanLaunchAdditional(1, 4, 6 * Fixture.Gib));
+         Assert.False(ExecutionScheduling.CanLaunchAdditional(1, 4, 6 * Fixture.Gib - 1));
+         Assert.False(ExecutionScheduling.CanLaunchAdditional(4, 4, 100 * Fixture.Gib));
+diff --git a/docs/development-roadmap-release-integration-2026-10-28.md b/docs/development-roadmap-release-integration-2026-10-28.md
+index e9e4814fd2d656258c9f55ac4941b77bf6d226d4..8edde05881ccd8198b68a6bb8796bf93f403b91a 100644
+--- a/docs/development-roadmap-release-integration-2026-10-28.md
++++ b/docs/development-roadmap-release-integration-2026-10-28.md
+@@ -1,8 +1,12 @@
+ # Объединение накопленных изменений и CI — 28 октября 2026
+ 
+-**Текущая граница перед публикацией:** конкретный допуск 11 миграций и 242 записей подключён к формированию плана, установщику, передаче и восстановительной копии. Адресная квалификация описана в разделе «Подключение допуска». Полный обязательный CI окончательного кандидата ещё не запускался; установка возможна только после фактического успеха всех его барьеров. Общий прогресс **9/167 (5.4%)**, REL **0/3 (0%)**.
++**Текущая граница перед публикацией:** PR #116 слит 28 октября в 13:56 UTC; main `a6521761` сохранён полностью. Его CI40701057823 остановился на трёх тестах навигации; backend и deploy пропущены. Исправление использует отдельные ID ролей для независимых сценариев и сбрасывает очередь ответов API; настоящий кэш и все проверки доступа сохранены. Адресно прошли 62/62 сценария навигации и прав, дополнительно 46/46 навигации в перемешанном порядке, lint и кодировки. Общий прогресс **9/167 (5.4%)**, REL **0/3 (0%)**. Установка возможна только после фактического успеха всех барьеров окончательного CI.
+ 
+-Локальная ветка `feature/roadmap-release-20261028` сохраняет накопленный кандидат коммитом `87fa4c4` и объединяет историю `origin/claude/practical-bardeen-pglcf3` (`cd76b9a575d357f009e517a20232a5d9b6b94bfb`). Слияние готовится локально; новый main, успешный CI этого кандидата и его установка пока не подтверждены. На VPS последнее документально подтверждённое обновление — SETTINGS 1.14.142 (`e85d1f22`). Более ранние сообщения об отсутствии 142 — исторические срезы.
++Накопленный кандидат `87fa4c4` и история `cd76b9a5` уже объединены в main. Подготовка исправлений CI ведётся отдельно в `xsenus/release-ci-recovery-20261028`, без возврата бизнес-исходников и миграций к старому состоянию. Конкретный допуск 11 миграций и 242 записей сохранён. На VPS последнее документально подтверждённое обновление — SETTINGS 1.14.142 (`e85d1f22`); readiness базовой версии подтверждён 28 октября, а новая установка ещё не выполнялась.
++
++Старый CI40671996889 на `cd76b9a5` завершён отменой: блоки 0 и 1 квалифицированы (2574/2574 и 2502/2502), блок 2 остановлен защитой памяти после 1459 успешных сценариев, блок 3 отменён до тестового шага. В новый кандидат перенесено ограниченное десятью минутами ожидание запаса перед запуском процесса: 4 ГиБ резерва плюс лимит heap группы. Порог 1 ГиБ, состав тестов, assertions и точная квалификация сохранены. Четыре C#-файла совпадают с проверенным 67/67 вариантом `28a2e95d`; отчёт диагностики проверен 6/6 на новом main. Старый полный локальный прогон этой отдельной ревизии остаётся историческим свидетельством и не заменяет обязательный CI объединённого исходного кода.
++
++**Риск времени сборки:** изолированная SDK-проба воспроизвела повторную компиляцию после коммита только документации из-за изменённого SourceLink/PDB при неизменной ссылочной DLL. Одна настройка SourceRevisionId это не устранила. SourceLink не отключался; дальнейшая оптимизация должна сохранить корректное получение исходников по символам. Доказательства сохранены в `E:/ProjectTemp/PayPlanner/20261027-sqlite-fixture-ab-01/sourcelink-incremental-probe-01/report.json`.
+ 
+ ## Проверка и доставка
+ 
+@@ -10,7 +14,7 @@
+ 
+ Тяжёлые стадии сериализованы; на процесс тестов выделены CPU1 и heap 3 ГиБ. Сохранены полные semantic/whitespace/style/analyzer проверки проектов, анализаторы сборки, browser, security, миграционные и остальные обязательные барьеры. Частный store закреплён за main и `D:/PayPlannerCIArtifacts/main-store`; CLI не принимает другой корень. Выходы частей проверяются по фактическим производителям и needs. Автоматическая отмена уже начатой остановленной резервной копии выключена. Для ручного workflow доставка требует явного release_to_vps=true; default false.
+ 
+-Удалённый run 40671996889 относится к cd76b9a5, не к этому объединённому кандидату. Его успех не является квалификацией нового исходного кода. Проверка ожидаемой ревизии на VPS обязательна после успешного CI и установки.
++Удалённые результаты отдельных блоков run 40671996889 относятся к cd76b9a5, не к этому объединённому кандидату. Они не являются квалификацией нового исходного кода. Проверка ожидаемой ревизии на VPS обязательна после успешного CI и установки.
+ 
+ ## Разрешение конфликтов
+ 
+diff --git a/docs/payplanner-release-roadmap-2026-10-14.md b/docs/payplanner-release-roadmap-2026-10-14.md
+index a2239a33ecb6a89436db0ba1f4430d608d40e07c..bba8eef21400ff09830f0a7665b311708091b6e5 100644
+--- a/docs/payplanner-release-roadmap-2026-10-14.md
++++ b/docs/payplanner-release-roadmap-2026-10-14.md
+@@ -1,6 +1,6 @@
+ ## Текущий выпуск и следующий барьер — 26 октября 2026
+ 
+-**Актуальная подготовка, 28 октября:** [объединение накопленного кандидата и CI](development-roadmap-release-integration-2026-10-28.md). Новый main, его полный CI и установка ещё не подтверждены; прежние срезы ниже сохраняют свои даты. Общий прогресс **9/167 (5.4%)**, REL **0/3 (0%)**.
++**Актуальная подготовка, 28 октября:** [объединение накопленного кандидата и CI](development-roadmap-release-integration-2026-10-28.md). PR #116 слит; main `a6521761` не квалифицирован: CI40701057823 остановлен на трёх сценариях навигации, deploy пропущен. Исправлены изоляция тестовых ролей и очередь ответов; 62/62 адресных проверки и 46/46 с перемешанным порядком успешны. Подготовлен допуск backend-процесса по запасу памяти после `memory-floor` старого CI; C#-файлы совпадают с адресно проверенным 67/67 вариантом, Node-отчёт — 6/6. Полный обязательный CI нового кандидата и установка впереди; старый локальный прогон не квалифицирует изменённый main. Общий прогресс **9/167 (5.4%)**, REL **0/3 (0%)**.
+ 
+ **Страницы счетов для сверки, 28 октября:** добавлен совместно поставляемый `GET api/money-operations/{id:int}/invoice-candidates/pages` и клиентское подтверждение запроса/страницы. Прежние маршруты массива сохранены. Маркер продолжения защищает согласованность чтения, не заменяет версию сохранения или журнал распределений BANK-03. SQLite/PostgreSQL: основная матрица **2/2** с 219 кандидатами/22 страницами; затем отдельные **2/2** метода чередования SQL для изменения операции/прав, без повторения успешной основной матрицы. Исходные хеши теста/DLL основного запуска сохранены, поздняя тестовая DLL не объявляется повторно полностью квалифицированной. UI/API **12 новых + 16 затронутых** случаев, статические проверки и синтетический браузер трёх размеров успешны. [Доказательства](D:/PayPlannerRelease/20261028-invoice-candidate-pages/evidence.json). Схема/миграции не менялись, запись 1.14.387 неактивна; обязательный единый CI всех семи jobs и установка впереди. Общий план **9/167 (5.4%)**, REL **0/3 (0%)**.
+ 
+diff --git a/scripts/report-backend-execution.mjs b/scripts/report-backend-execution.mjs
+index a381b84fd83b4a024bc0707a5d5aa7c2350b97ad..a5fa6552529b950c283b9518995d666a67b21be3 100644
+--- a/scripts/report-backend-execution.mjs
++++ b/scripts/report-backend-execution.mjs
+@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
+ import { pathToFileURL } from 'node:url';
+ 
+ const batchPattern = /^(fast|heavy|exclusive)-[0-9]+$/;
+-const eventKinds = new Set(['initial-budget', 'lane-budget', 'launch-budget', 'budget-change', 'memory-floor', 'started', 'native-exit']);
++const eventKinds = new Set(['initial-budget', 'lane-budget', 'launch-budget', 'budget-change', 'memory-floor', 'admission-wait', 'admission-ready', 'admission-timeout', 'started', 'native-exit']);
+ const errorKinds = new Set(['InvalidDataException', 'IOException', 'Win32Exception', 'InvalidOperationException',
+   'UnauthorizedAccessException', 'OutOfMemoryException', 'TaskCanceledException', 'OperationCanceledException', 'JsonException']);
+ const numberFields = ['BatchCount', 'AdmittedWorkers', 'AvailableBytes', 'Processors', 'Workers', 'Active', 'Cases', 'ExitCode', 'VstestPeakWorkingSetBytes'];
+diff --git a/scripts/report-backend-execution.node-tests.mjs b/scripts/report-backend-execution.node-tests.mjs
+index 135dff2c3a60cf86e6e9dabc01804f6e1fdcd548..a28d8ab135c4ed5712867c5b041c8e4ca25bd11a 100644
+--- a/scripts/report-backend-execution.node-tests.mjs
++++ b/scripts/report-backend-execution.node-tests.mjs
+@@ -42,6 +42,16 @@ test('distinguishes qualification from native success and missing metadata', t =
+   assert.equal(report.batches[1].exitCode, null);
+ });
+ 
++test('reports bounded admission waiting and timeout without exposing arbitrary fields', t => {
++  const f = fixture(t);
++  f.write('execution.json', { Events: ['admission-wait', 'admission-ready', 'admission-timeout'].map(Kind =>
++    ({ Kind, Lane: 'exclusive', Active: 0, AvailableBytes: 123, Message: 'secret-host-state' })) });
++  const report = executionReport(f.root, 0);
++  assert.deepEqual(report.events.map(row => row.Kind), ['admission-wait', 'admission-ready', 'admission-timeout']);
++  assert.equal(report.events.every(row => row.AvailableBytes === 123 && row.Active === 0), true);
++  assert.equal(JSON.stringify(report).includes('secret'), false);
++});
++
+ test('missing shard is reported without claiming successful execution', t => {
+   const f = fixture(t);
+   assert.deepEqual(executionReport(f.root, 1), { shard: 1, available: false });
+diff --git a/src/components/Navigation/Navigation.test.tsx b/src/components/Navigation/Navigation.test.tsx
+index cf76f4f7d02a4bda30a6b8ef25c523f867f4521b..bde29ee1313fa8d65780fc0fad0b5db683f5255e 100644
+--- a/src/components/Navigation/Navigation.test.tsx
++++ b/src/components/Navigation/Navigation.test.tsx
+@@ -48,6 +48,7 @@ vi.mock('../../hooks/useToast', () => ({
+ }));
+ 
+ const apiMock = vi.mocked(apiService);
++let nextRoleId = 1000;
+ 
+ const expandedSections = {
+   tasks: true,
+@@ -136,9 +137,11 @@ describe('Navigation links', () => {
+     vi.clearAllMocks();
+     authState.userId = 1;
+     authState.isAdmin = true;
+-    authState.roleId = 1;
++    // The real permissions service keeps its cache across component unmounts.
++    // Each scenario needs a fresh role, while rerenders within it share the cache.
++    authState.roleId = nextRoleId++;
+     authState.roleName = 'admin';
+-    apiMock.getRolePermissions.mockResolvedValue(defaultRolePermissions);
++    apiMock.getRolePermissions.mockReset().mockResolvedValue(defaultRolePermissions);
+     apiMock.getNavigationSettings.mockResolvedValue({ order: [], labels: {}, groups: [], updatedAt: null });
+     apiMock.updateNavigationSettings.mockImplementation(async (order, labels, groups) => ({ order, labels, groups, updatedAt: null }));
+     apiMock.getUserSetting.mockResolvedValue(null);
+@@ -406,7 +409,6 @@ describe('Navigation links', () => {
+ 
+   it('keeps court work visible to a cases-only role', async () => {
+     authState.isAdmin = false;
+-    authState.roleId = 101;
+     apiMock.getRolePermissions.mockResolvedValueOnce({
+       ...defaultRestrictedRolePermissions,
+       cases: { ...lawyerWorkSection },
+@@ -625,7 +627,6 @@ describe('Navigation links', () => {
+ 
+   it.each([false, true])('limits grouped accounting and management for a secretary, invoice access: %s', async (canViewAccounts) => {
+     authState.isAdmin = false;
+-    authState.roleId = 101;
+     authState.roleName = 'Секретарь';
+     apiMock.getRolePermissions.mockResolvedValueOnce({
+       ...defaultRestrictedRolePermissions,
+@@ -673,7 +674,6 @@ describe('Navigation links', () => {
+ 
+   it('shows settings for a non-admin role that can view integrations only', async () => {
+     authState.isAdmin = false;
+-    authState.roleId = 99;
+     authState.roleName = 'lawyer';
+     apiMock.getRolePermissions.mockResolvedValueOnce({
+       ...defaultRolePermissions,
+@@ -693,7 +693,6 @@ describe('Navigation links', () => {
+ 
+   it('shows only safe lawyer template sections in the left menu', async () => {
+     authState.isAdmin = false;
+-    authState.roleId = 100;
+     authState.roleName = 'Юрист';
+     apiMock.getRolePermissions.mockResolvedValueOnce(createLawyerTemplatePermissions());
+ 
+diff --git a/tools/PayPlanner.TestShards/BoundedBatchScheduler.cs b/tools/PayPlanner.TestShards/BoundedBatchScheduler.cs
+index 1c9e08796e02aba9d0b384c45d71389378c5cf0d..2ba84d0077c62976690b92d171f29403c56d0f50 100644
+--- a/tools/PayPlanner.TestShards/BoundedBatchScheduler.cs
++++ b/tools/PayPlanner.TestShards/BoundedBatchScheduler.cs
+@@ -11,11 +11,14 @@ public static class BoundedBatchScheduler
+ {
+     public static async Task RunAsync(IReadOnlyCollection<ExecutionBatch> batches, string requestedWorkers, int initialBudget,
+         Func<ExecutionResources> readResources, Func<ExecutionBatch, Task> executeBatch, Action<SchedulingEvent>? observe = null,
+-        TimeSpan? recheckInterval = null)
++        TimeSpan? recheckInterval = null, TimeSpan? admissionTimeout = null, TimeProvider? timeProvider = null)
+     {
+         ShardPlan.Require(initialBudget is 1 or 2 or 4, "Invalid initial worker budget.");
+         var interval = recheckInterval ?? TimeSpan.FromSeconds(1);
+         ShardPlan.Require(interval >= TimeSpan.FromMilliseconds(10) && interval <= TimeSpan.FromSeconds(30), "Invalid resource recheck interval.");
++        var admissionLimit = admissionTimeout ?? TimeSpan.FromMinutes(10);
++        ShardPlan.Require(admissionLimit >= interval && admissionLimit <= TimeSpan.FromMinutes(30), "Invalid resource admission timeout.");
++        var clock = timeProvider ?? TimeProvider.System;
+         ShardPlan.Require(batches.All(batch => batch.Lane is "fast" or "heavy" or "exclusive")
+             && batches.Select(batch => batch.Id).Distinct(StringComparer.Ordinal).Count() == batches.Count,
+             "Execution batches have invalid lanes or duplicate identities.");
+@@ -30,6 +33,7 @@ public static class BoundedBatchScheduler
+             observe?.Invoke(new("lane-budget", lane, budget, initial.AvailableBytes, initial.Processors, 0));
+             var active = new List<Task>();
+             var resourceFailure = false;
++            long? admissionStarted = null;
+             try
+             {
+                 while (queue.Count > 0 || active.Count > 0)
+@@ -51,15 +55,37 @@ public static class BoundedBatchScheduler
+                             observe?.Invoke(new("budget-change", lane, budget, resource.AvailableBytes, resource.Processors, active.Count));
+                         }
+                     }
+-                    while (!resourceFailure && queue.Count > 0 && ExecutionScheduling.CanLaunchAdditional(active.Count, budget, resource.AvailableBytes))
++                    while (!resourceFailure && queue.Count > 0 && ExecutionScheduling.CanLaunchAdditional(active.Count, budget, resource.AvailableBytes, lane))
+                     {
++                        if (admissionStarted is not null)
++                        {
++                            observe?.Invoke(new("admission-ready", lane, budget, resource.AvailableBytes, resource.Processors, active.Count));
++                            admissionStarted = null;
++                        }
+                         observe?.Invoke(new("launch-budget", lane, budget, resource.AvailableBytes, resource.Processors, active.Count));
+                         var batch = queue.Dequeue();
+                         try { active.Add(executeBatch(batch)); }
+                         catch (Exception error) { active.Add(Task.FromException(error)); }
+                         resource = readResources();
+                     }
+-                    if (active.Count == 0) break;
++                    if (active.Count == 0)
++                    {
++                        if (resourceFailure || queue.Count == 0) break;
++                        if (admissionStarted is null)
++                        {
++                            admissionStarted = clock.GetTimestamp();
++                            observe?.Invoke(new("admission-wait", lane, budget, resource.AvailableBytes, resource.Processors, 0));
++                        }
++                        if (clock.GetElapsedTime(admissionStarted.Value) >= admissionLimit)
++                        {
++                            resourceFailure = true;
++                            failures.Add(new InvalidDataException("Test-host memory reserve did not recover within the admission timeout; pending batches were not started."));
++                            observe?.Invoke(new("admission-timeout", lane, budget, resource.AvailableBytes, resource.Processors, 0));
++                            break;
++                        }
++                        await Task.Delay(interval);
++                        continue;
++                    }
+                     // When a queued batch is waiting for memory, recheck while its
+                     // sibling runs rather than fixing concurrency until that sibling exits.
+                     var delay = queue.Count > 0 && !resourceFailure ? Task.Delay(interval) : null;
+diff --git a/tools/PayPlanner.TestShards/ExecutionScheduling.cs b/tools/PayPlanner.TestShards/ExecutionScheduling.cs
+index 488f87dcccb3c5319b61a5c75b9067a099510548..5483e897aacdec7925e090562eb357ad7dddd9c3 100644
+--- a/tools/PayPlanner.TestShards/ExecutionScheduling.cs
++++ b/tools/PayPlanner.TestShards/ExecutionScheduling.cs
+@@ -150,10 +150,15 @@ public static class ExecutionScheduling
+         return requested == "auto" ? processorLimit : Math.Min(processorLimit, int.Parse(requested, System.Globalization.CultureInfo.InvariantCulture));
+     }
+ 
+-    public static bool CanLaunchAdditional(int active, int initialBudget, ulong availableBytes)
++    public static bool CanLaunchAdditional(int active, int initialBudget, ulong availableBytes, string lane = "heavy")
+     {
+         ShardPlan.Require(active >= 0 && initialBudget is 1 or 2 or 4, "Invalid execution worker state.");
+-        return active < initialBudget && availableBytes >= (active == 0 ? Gib : ReservedBytes + OrdinaryHeapBytes);
++        ShardPlan.Require(lane is "fast" or "heavy" or "exclusive", "Unsupported execution lane.");
++        // The first process needs the same reserve as its siblings. The 1 GiB
++        // floor is an emergency stop, not enough headroom to admit a test host.
++        var heap = lane == "exclusive" ? ExclusiveHeapBytes : OrdinaryHeapBytes;
++        return active < initialBudget && (lane != "exclusive" || active == 0)
++            && availableBytes >= ReservedBytes + heap;
+     }
+ 
+     public static void ConfigureWorkerEnvironment(IDictionary<string, string?> environment, string lane)

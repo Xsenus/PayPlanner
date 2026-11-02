@@ -1,0 +1,264 @@
+[
+  {
+    "commit": "c49d446a1f533f74ecba5cca6f887ce6c1127e97",
+    "parent_count": 1,
+    "changed_files": [
+      ".github/workflows/visual-smoke.yml"
+    ],
+    "patch_bytes": 10749,
+    "subject": "Подготовлена безопасная диагностика памяти runner",
+    "equivalent_main_commit": null
+  },
+  {
+    "commit": "c7b5306086cceec267ae7676766a82656d7ce09f",
+    "parent_count": 2,
+    "changed_files": [],
+    "patch_bytes": 15929,
+    "subject": "On xsenus/release-ci-recovery-20261028: Локальные проверки CI407066 до параллельного исправления main"
+  },
+  {
+    "commit": "eb475da26c65a7bc4de3a05ccf3c3eefb744cd55",
+    "parent_count": 1,
+    "changed_files": [],
+    "patch_bytes": 0,
+    "subject": "index on xsenus/release-ci-recovery-20261028: a49081bd Добавлено ожидание памяти перед backend-проверками"
+  },
+  {
+    "commit": "f49f58d4ac5961636fc8e7641a21f4262edec6f2",
+    "parent_count": 1,
+    "changed_files": [
+      "backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs",
+      "backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs",
+      "docs/development-roadmap-release-integration-2026-10-28.md",
+      "docs/payplanner-release-roadmap-2026-10-14.md",
+      "scripts/report-backend-execution.mjs",
+      "scripts/report-backend-execution.node-tests.mjs",
+      "tools/PayPlanner.TestShards/BoundedBatchScheduler.cs",
+      "tools/PayPlanner.TestShards/ExecutionScheduling.cs"
+    ],
+    "patch_bytes": 23602,
+    "subject": "Изолированы тестовые роли и добавлено ожидание памяти",
+    "equivalent_main_commit": "a49081bd6e471b446aaebb78e88c971e296bad76"
+  },
+  {
+    "commit": "64546c10a2d04f1e38d5dff2a6b887cf0eb4e9d0",
+    "parent_count": 1,
+    "changed_files": [
+      "backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs",
+      "backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs",
+      "docs/development-roadmap-release-integration-2026-10-28.md",
+      "docs/payplanner-release-roadmap-2026-10-14.md",
+      "scripts/report-backend-execution.mjs",
+      "scripts/report-backend-execution.node-tests.mjs",
+      "src/components/Navigation/Navigation.test.tsx",
+      "tools/PayPlanner.TestShards/BoundedBatchScheduler.cs",
+      "tools/PayPlanner.TestShards/ExecutionScheduling.cs"
+    ],
+    "patch_bytes": 29575,
+    "subject": "Изолированы тестовые роли и добавлено ожидание памяти",
+    "equivalent_main_commit": null
+  },
+  {
+    "commit": "28a2e95d09141c6871b7038ae51acc9031d88b85",
+    "parent_count": 1,
+    "changed_files": [
+      "backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs",
+      "backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs",
+      "docs/payplanner-release-roadmap-2026-10-14.md",
+      "scripts/report-backend-execution.mjs",
+      "scripts/report-backend-execution.node-tests.mjs",
+      "tools/PayPlanner.TestShards/BoundedBatchScheduler.cs",
+      "tools/PayPlanner.TestShards/ExecutionScheduling.cs"
+    ],
+    "patch_bytes": 20349,
+    "subject": "Добавлено ожидание запаса памяти перед запуском тестов",
+    "equivalent_main_commit": null
+  },
+  {
+    "commit": "d985914d945e724dbe570574d749eb9d5dda64b4",
+    "parent_count": 3,
+    "changed_files": [],
+    "patch_bytes": 87930,
+    "subject": "On main: Локальные записи перед синхронизацией 23.10.2026"
+  },
+  {
+    "commit": "9a5625ddae2942d09b606fadcce845cadeb9ea6b",
+    "parent_count": 1,
+    "changed_files": [],
+    "patch_bytes": 0,
+    "subject": "index on main: cf1b275bf Подтверждён полный прогон банковской выписки"
+  },
+  {
+    "commit": "62da8188a3bbb16ba0e9911d6eab679294037882",
+    "parent_count": 0,
+    "changed_files": [],
+    "patch_bytes": 71904,
+    "subject": "untracked files on main: cf1b275bf Подтверждён полный прогон банковской выписки"
+  },
+  {
+    "commit": "49f1d5af6184515781061a22756d98b66dc157a6",
+    "parent_count": 2,
+    "changed_files": [],
+    "patch_bytes": 2843,
+    "subject": "On main: Локальные правила инфраструктуры перед обновлением 20.10.2026"
+  },
+  {
+    "commit": "9f55dba01cfbb597d8fb0465b3854a0f39526a53",
+    "parent_count": 1,
+    "changed_files": [],
+    "patch_bytes": 0,
+    "subject": "index on main: 9666ca8a8 Исправить дубль номера кассового ордера в платежах"
+  },
+  {
+    "commit": "dba2d3b21e14d63e009a1d2d4998299bca3b8d5d",
+    "parent_count": 1,
+    "changed_files": [
+      "backend/AppReleases/releases.json",
+      "backend/Controllers/TasksController.cs",
+      "backend/PayPlanner.Api.Tests/TasksControllerTests.cs",
+      "src/components/Tasks/TaskJournal.test.tsx",
+      "src/components/Tasks/TaskJournal.tsx"
+    ],
+    "patch_bytes": 23299,
+    "subject": "Исправить закрытие задач без результата через сохранение",
+    "equivalent_main_commit": null
+  },
+  {
+    "commit": "a67ef6b978906516556ddc261317667c5f00146f",
+    "parent_count": 1,
+    "changed_files": [
+      "backend/AppReleases/releases.json",
+      "backend/Controllers/TasksController.cs",
+      "backend/PayPlanner.Api.Tests/TasksControllerTests.cs",
+      "src/components/Tasks/TaskJournal.test.tsx",
+      "src/components/Tasks/TaskJournal.tsx"
+    ],
+    "patch_bytes": 21162,
+    "subject": "Исправить закрытие задач без результата через сохранение",
+    "equivalent_main_commit": null
+  },
+  {
+    "commit": "6de19d7d3ce0d71f10d1d7ac9e359d2c3f316ed1",
+    "parent_count": 1,
+    "changed_files": [
+      "backend/AppReleases/releases.json",
+      "backend/Controllers/TasksController.cs",
+      "backend/PayPlanner.Api.Tests/TasksControllerTests.cs",
+      "src/components/Tasks/TaskJournal.test.tsx",
+      "src/components/Tasks/TaskJournal.tsx"
+    ],
+    "patch_bytes": 19253,
+    "subject": "Исправить закрытие задач без результата через сохранение",
+    "equivalent_main_commit": null
+  },
+  {
+    "commit": "91fa243a4f7674cf1e1f635accc1f4505ba326b8",
+    "parent_count": 1,
+    "changed_files": [
+      "backend/AppReleases/releases.json",
+      "backend/Controllers/TasksController.cs",
+      "backend/PayPlanner.Api.Tests/TasksControllerTests.cs",
+      "src/components/Tasks/TaskJournal.test.tsx",
+      "src/components/Tasks/TaskJournal.tsx"
+    ],
+    "patch_bytes": 13046,
+    "subject": "Исправить закрытие задач без результата через сохранение",
+    "equivalent_main_commit": null
+  },
+  {
+    "commit": "e9a88e3ffe69eaaa2586b1db47ade50ea2eea63e",
+    "parent_count": 1,
+    "changed_files": [
+      "backend/Controllers/CashOrdersController.cs",
+      "backend/PayPlanner.Api.Tests/MoneyOperationsControllerTests.cs",
+      "src/components/Clients/ClientReconciliationAct.tsx"
+    ],
+    "patch_bytes": 12208,
+    "subject": "Довести печатные формы до эталонов",
+    "equivalent_main_commit": null
+  },
+  {
+    "commit": "1033e22d00dac3b636b55dfd7598f6183f6ccf29",
+    "parent_count": 1,
+    "changed_files": [
+      "backend/Controllers/CashOrdersController.cs",
+      "backend/PayPlanner.Api.Tests/MoneyOperationsControllerTests.cs",
+      "src/components/Clients/ClientReconciliationAct.tsx"
+    ],
+    "patch_bytes": 12206,
+    "subject": "Довести печатные формы до эталонов",
+    "equivalent_main_commit": null
+  },
+  {
+    "commit": "1f4e8ae13f734d2ff823cd561065dcd9d650a3e5",
+    "parent_count": 1,
+    "changed_files": [
+      "backend/AppReleases/releases.json",
+      "backend/Controllers/PaymentsController.cs",
+      "backend/Models/Payment.cs",
+      "backend/PayPlanner.Api.Tests/PaymentsControllerTests.cs",
+      "src/components/Calendar/PaymentModal.integration.test.tsx",
+      "src/components/Calendar/PaymentModal.tsx",
+      "src/types/index.ts"
+    ],
+    "patch_bytes": 43442,
+    "subject": "Добавить выбор платежа для зачета рассрочки",
+    "equivalent_main_commit": null
+  },
+  {
+    "commit": "fe1ff53b888e42ad2baf501d440241682397898a",
+    "parent_count": 1,
+    "changed_files": [
+      ".github/workflows/deploy.yml",
+      "package.json",
+      "scripts/run-integration-tests.mjs",
+      "src/components/Accounts/InvoiceModal.integration.test.tsx",
+      "src/components/Acts/ActModal.integration.test.tsx",
+      "src/components/Calendar/PaymentModal.integration.test.tsx",
+      "src/components/Money/MoneyOperations.integration.test.tsx"
+    ],
+    "patch_bytes": 31862,
+    "subject": "Разделить быстрые и интеграционные тесты",
+    "equivalent_main_commit": null
+  },
+  {
+    "commit": "5d733fc54dcbbc2e8f2670e1be147d91147f4fb1",
+    "parent_count": 1,
+    "changed_files": [
+      "backend/Controllers/InvoicesController.cs",
+      "backend/PayPlanner.Api.Tests/AccountsControllerTests.cs",
+      "backend/PayPlanner.Api.Tests/InvoicePaymentConsistencyTests.cs",
+      "backend/PayPlanner.Api.Tests/InvoicesControllerCrudTests.cs",
+      "backend/Services/InvoiceManagedPaymentRules.cs",
+      "src/utils/invoicePayments.test.ts",
+      "src/utils/invoicePayments.ts"
+    ],
+    "patch_bytes": 18117,
+    "subject": "Исправить синхронизацию платежей при редактировании счета",
+    "equivalent_main_commit": "95ed2a558fdf8711c154e2ff5956b8f38de48b72"
+  },
+  {
+    "commit": "c2b130b22fd081d95e3642575e9e4c4e1385ce93",
+    "parent_count": 1,
+    "changed_files": [
+      "src/components/Accounts/Accounts.tsx",
+      "src/components/Acts/ActModal.tsx",
+      "src/locales/ru.ts"
+    ],
+    "patch_bytes": 43823,
+    "subject": "Revamp accounts header and act workflows",
+    "equivalent_main_commit": null
+  },
+  {
+    "commit": "b288ef6cc8a6491549187290984e66bb7164c846",
+    "parent_count": 1,
+    "changed_files": [
+      "src/components/Accounts/Accounts.tsx",
+      "src/components/Acts/ActModal.tsx",
+      "src/locales/ru.ts"
+    ],
+    "patch_bytes": 30526,
+    "subject": "Revamp accounts header and act controls",
+    "equivalent_main_commit": null
+  }
+]

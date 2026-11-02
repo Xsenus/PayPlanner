@@ -1,0 +1,2629 @@
+{
+  "created_utc": "2026-11-02T03:57:26.718649+00:00",
+  "main": "6a4488dadcf5dd9d6ae2953800294889cef9c967",
+  "worktrees": [
+    {
+      "path": "C:\\Users\\User16\\source\\repos\\PayPlanner",
+      "snapshot": "source-repos",
+      "head": "7cd89d840b52827e79146696bc53fafd57244ddd",
+      "files": []
+    },
+    {
+      "path": "C:\\Users\\User16\\.codex\\worktrees\\payplanner-browser-proof\\PayPlanner",
+      "snapshot": "payplanner-browser-proof",
+      "head": "28a2e95d09141c6871b7038ae51acc9031d88b85",
+      "files": []
+    },
+    {
+      "path": "C:\\Users\\User16\\.codex\\worktrees\\payplanner-candidate-integration\\PayPlanner",
+      "snapshot": "payplanner-candidate-integration",
+      "head": "7cd89d840b52827e79146696bc53fafd57244ddd",
+      "files": [
+        {
+          "path": "backend/AppReleases/releases.json",
+          "status": "MM",
+          "bytes": 2062694,
+          "sha256": "a14b2bbeb03f3bf339a9b55f0656f387b41c78d01ea1fecd833257429bab0c83",
+          "blob": "94ea66c8db70c7d8c3288091442bc0865ca7fe99",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/ActsController.cs",
+          "status": "M ",
+          "bytes": 104813,
+          "sha256": "bf83e320ad0de0228fc3a9d0fe6bb0a2b62f4b5bf9263f33c62d896d434e3a76",
+          "blob": "ed471bdea3ebd26e3bfb6fd09c2971f565a9d11f",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/ContractsController.cs",
+          "status": "M ",
+          "bytes": 127548,
+          "sha256": "655956f46b3615a46f9a92408e0d565e11adcfca440cda1072ff32d365d038df",
+          "blob": "38a21f5ad1b598d65b810efbd44e87debe0a65f4",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/DatabaseAdminController.cs",
+          "status": "M ",
+          "bytes": 24315,
+          "sha256": "106b3723bf965997fc84e93617a7af3e517fde95c04006c7b4bb352736c72e13",
+          "blob": "4d6823c8cb60bd75a641ff26714af6c3b32bed88",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/InvoicesController.cs",
+          "status": "M ",
+          "bytes": 307869,
+          "sha256": "7336fea3fdd28fbab11196ae9c7fb9ce769c50a6ea4ce4d7b4fad816bf8937cd",
+          "blob": "15e7388397487032212e4033b85ea6dd4b8b8301",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/LegalEntitiesController.cs",
+          "status": "M ",
+          "bytes": 117336,
+          "sha256": "485c5af9b4777b957ffdef867cb85470c5aa2bd3d97649840dc6da0596ad7532",
+          "blob": "736d650016160bd1572c13eba8d4a0d778895684",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/OwnCompaniesController.cs",
+          "status": "M ",
+          "bytes": 4712,
+          "sha256": "c49fa41e3f8c0b8be95598663f98294a646e7bea449421b260434754c6be5ad1",
+          "blob": "fbd8b9118d87201befdd745a3b8d202fecc132f2",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/TasksController.cs",
+          "status": "M ",
+          "bytes": 432954,
+          "sha256": "4e185cce0d3cae452eda7bc94a60d56d1f3c5c2f4cad9f20e2f282d60cb209e9",
+          "blob": "62517675b9fa92f6848c2ec52ad09b97bd496165",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/V2/CasesV2Controller.FinancialCapture.cs",
+          "status": "M ",
+          "bytes": 12799,
+          "sha256": "61fac464413ac457ecd473f028b3394ba663e6516381a949ef8ce09fd158710d",
+          "blob": "413ffd0360166376cd1cb65ad49d5785d580e124",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/V2/CasesV2Controller.cs",
+          "status": "M ",
+          "bytes": 742599,
+          "sha256": "05aa4cef53c1213c604a450de483fb14c439f27c5e99fecc8c77d35d0490b89f",
+          "blob": "c98fa866d080caa1c084919869567c4eb2993596",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Data/PaymentContext.cs",
+          "status": "M ",
+          "bytes": 295404,
+          "sha256": "c7b52d5e6a7ee5b43669fb07635c46bfb251c24b85b50707740ceac199c6bb27",
+          "blob": "a2403d530d7ccefafdd0b058008c742fceed5f6c",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Extensions/DataVisibilityQueryExtensions.cs",
+          "status": "M ",
+          "bytes": 28283,
+          "sha256": "0b8b0d818ed9d290b755671c091a586f38a62a70e8f0266a2fa07299615cc377",
+          "blob": "7ddb197b27f6e355bfe70cbcfb98c661b3349965",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Filters/DocumentSellerExceptionFilterAttribute.cs",
+          "status": "A ",
+          "bytes": 1011,
+          "sha256": "350f5c6c87dda1d7a97527ece46ef01f8db658ec968e2b6353401e932eaefe11",
+          "blob": "ad31af7d5772958d39c543ec0810cc8011a838c8",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Act.cs",
+          "status": "M ",
+          "bytes": 2717,
+          "sha256": "b7296043f0e696b14d121631161e0c9d4da37fbad1b25adab85bd4b429b96fa9",
+          "blob": "058e93e18f13c341c55de9fbdafd04ff0e5c74fe",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Contract.cs",
+          "status": "M ",
+          "bytes": 5140,
+          "sha256": "dbd275482ca22757603bf7af857df2c4dd1050605e0fe50f722f58e4fc5c980f",
+          "blob": "80adc426237a2fce8dc233bf9441d6aa0efcb3d5",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/DocumentSellerSnapshotPolicy.cs",
+          "status": "A ",
+          "bytes": 770,
+          "sha256": "898a17042c00399ca031657d5e74c19212dce3ecf971d4bd114862e66eb6dcc8",
+          "blob": "d4ac6b9d49961896cc15429f53ea01daa168dfd4",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Payment.cs",
+          "status": "M ",
+          "bytes": 14586,
+          "sha256": "ca32785c7f213c01509ac4b01181d79fbdfd4c93334073af6303e0b10cacc8fe",
+          "blob": "43e3736fc4df8bc0f29eb38b47bc4bea0ab27655",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Requests/DocumentSellerRequest.cs",
+          "status": "M ",
+          "bytes": 558,
+          "sha256": "def5e490aa8932cc9fa039af6e18b3a8900166211c16669bac5ac8ed40b0c67c",
+          "blob": "3b965d3b6283aa1b68579d069bcf5aa6bdd5d1aa",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Requests/TaskJournalSettingsRequest.cs",
+          "status": "M ",
+          "bytes": 1851,
+          "sha256": "a8354bf0f30260d86559cee726a8522fe7e1363e3330d1b082c7a61b1adbbc1a",
+          "blob": "34af8a11714aee16e5ec5230dca6793da9a2bd85",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Requests/UpdateMainCompanySettingsRequest.cs",
+          "status": "M ",
+          "bytes": 372,
+          "sha256": "5d6d1e55a374f3dbb66d22978c077c05c1b779945ceb71b61899a5967dea7b12",
+          "blob": "0fa022218b357f7dfa66970f4618a361b079db5c",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Requests/UpsertActRequest.cs",
+          "status": "M ",
+          "bytes": 2074,
+          "sha256": "aacfffdb4f8aa107abf3caabf48900c63ee420d717a436a756a19e092a436317",
+          "blob": "2cfc5edcad184d15f2123a67ff2633db2d075e97",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Requests/UpsertContractRequest.cs",
+          "status": "M ",
+          "bytes": 2237,
+          "sha256": "d6fee57ed2be59f6c67b25b7421986a0addb5721d2ad7d1b0c58d804208ecf67",
+          "blob": "f46c1bcc694c80454c6cc340c65c50941ec84366",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Requests/UpsertInvoiceRequest.cs",
+          "status": "M ",
+          "bytes": 3277,
+          "sha256": "88d816441b835b0ccd7123967e7c76bb09d2a48203348bdae0172a6f7df2b64f",
+          "blob": "435b0f621a6ba2ba2cd14ef4472f4754436e757d",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Requests/UpsertTaskJournalItemRequest.cs",
+          "status": "M ",
+          "bytes": 3612,
+          "sha256": "66b152c71d3cfc46c7d90614c01f335c11ec371a36afcd74665f74e625f4a0fb",
+          "blob": "820bb65d438e7dc64a6662cf9f5dc5d2010934a7",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Responses/ActDto.cs",
+          "status": "M ",
+          "bytes": 3364,
+          "sha256": "c3b3ea83463c13945877eac6cc6a64ebfa6c8d484d57590f6de6f42dad348596",
+          "blob": "e69f6638dd7f35a5053d7fa87c16e28560a8500f",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Responses/ContractDto.cs",
+          "status": "M ",
+          "bytes": 3383,
+          "sha256": "50e9c6d6f4814482f3048d93cb410d11ca59d451d38bf1c6584abe7bc7105535",
+          "blob": "f87ac8d8134dd0e86f6430b9f27ac618e66547a5",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Responses/InvoiceDto.cs",
+          "status": "M ",
+          "bytes": 5701,
+          "sha256": "3444c2d186eefd146171db14edab720c09a270c65efffbca17229e5a0e832afa",
+          "blob": "b85d1d45acbafb14bcd1c1aa4d89a55891de3c39",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Responses/LegalEntityDto.cs",
+          "status": "M ",
+          "bytes": 6360,
+          "sha256": "d07c2467ce63b9cabbb701534d0ae08a563f4dc5e7183625e3d8bc53ccff5c1d",
+          "blob": "5d117c8a03666fb4cab558fd9497ce0392327623",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Responses/TaskJournalDtos.cs",
+          "status": "M ",
+          "bytes": 17781,
+          "sha256": "a5eedca8536fdb959928bfea2dcb3fac0787adc0f052923847058e623b4ce3c3",
+          "blob": "3797d42767ffc2a5d897734a30c13758d1e3ad51",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Migrations/Migrations/20261024110000_AddDocumentSellerSnapshotPolicy.Designer.cs",
+          "status": "A ",
+          "bytes": 602376,
+          "sha256": "fc2820203135d14d862d32905b9c3f7c776c13f8949ca0dcaa4fda02e97c1bce",
+          "blob": "1fea6fc5f412b8b454c14565c0063bab87160ec8",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Migrations/Migrations/20261024110000_AddDocumentSellerSnapshotPolicy.cs",
+          "status": "A ",
+          "bytes": 1102,
+          "sha256": "6cd4c65597e6232172f355766b35adcc44dfc60f23a10825d3dccd5431982beb",
+          "blob": "bef6ec88c9c305fac8f9e755f57f91aaba4dd7a5",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Migrations/Migrations/PaymentContextModelSnapshot.cs",
+          "status": "M ",
+          "bytes": 602268,
+          "sha256": "5622587fbff6070081cae1c26389bdacf1e985f22cee99e6740633008a4ebdc7",
+          "blob": "801ea402f14cce31e0125554fcd68c526aa858ef",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/20261024110001_AddDocumentSellerSnapshotPolicyPostgres.Designer.cs",
+          "status": "A ",
+          "bytes": 646459,
+          "sha256": "4ad56c072b83f36b02533a61244a54beec6ad1deb0c1ebc1a860e9ce0dc0e642",
+          "blob": "0c958c08cfeb981c01237502d1b86fb9ab90ea54",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/20261024110001_AddDocumentSellerSnapshotPolicyPostgres.cs",
+          "status": "A ",
+          "bytes": 1172,
+          "sha256": "c4477a3cbb9339d97e633fc683befec85bafc7ba1d3e34310b700201cb672a95",
+          "blob": "ebe03070fbf537cbf6c1c6b4f04a4d4b9e276b5b",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/PostgreSqlPaymentContextModelSnapshot.cs",
+          "status": "M ",
+          "bytes": 646345,
+          "sha256": "29cbfffaa80526a3b5e1838542c0080f8a0b79651e97e0618b61da81e693c74e",
+          "blob": "ea6fbda7be03b8ad25ba0263d2d2526a4719b171",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/ActsControllerTests.cs",
+          "status": "M ",
+          "bytes": 164858,
+          "sha256": "2237d2cb87a987fc7647e36e07c2afc2682479bb01136ae0235871d358f27249",
+          "blob": "4fbbaf0df30d671f3864264eddb4563bab850326",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/BankImportProvenanceMigrationTests.cs",
+          "status": "M ",
+          "bytes": 20569,
+          "sha256": "8a76316e81b227225380e9dfac194ce837f811eabbf5a6c93c70d798f9124628",
+          "blob": "515eb44b3db71728406fdd22ea36cdfef88657af",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/BatchOperationAuditCoverageTests.cs",
+          "status": "M ",
+          "bytes": 2454,
+          "sha256": "86a3fac402130ec8383c4f92596aa7c4442d0b4d2165e6c3ab404e95a0dc1f6f",
+          "blob": "b2ad19456f502a6ab26e05fbbd26f81ef6918cf7",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs",
+          "status": " M",
+          "bytes": 14696,
+          "sha256": "cffee58e347eb0c726b0ef2386cc74c84ea990a5c233d58f831e411f4c70ffba",
+          "blob": "da3e23756ad1d7b51ba1da7aede81a33cd757a50",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs",
+          "status": " M",
+          "bytes": 20872,
+          "sha256": "f02743781283228c61b4bbe784b2eb142c34442a53f94412dbfbf68db1cef99f",
+          "blob": "c9aa46646727fd949c2d356008c49c6c0404ef3f",
+          "equals_main": false,
+          "blob_in_main_history": false
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/CancelledInvoiceBillingMigrationTests.cs",
+          "status": "M ",
+          "bytes": 10984,
+          "sha256": "d34612c7bc06dc090e056267643a919557663f490d025330d336e1a71bae9a18",
+          "blob": "9f494a826974acb280b68baecc9ae755fe2b011c",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/CaseCalendarRequestPrivacyTests.cs",
+          "status": "A ",
+          "bytes": 14797,
+          "sha256": "705f1a9e9860480a6cc5d3fa7ff928d7dd605f2d37d64b561c706ae00944848b",
+          "blob": "a94b3f1a4a4e0c3bfced81e9ffd00a43be105a82",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/CaseDocumentRetirementBrowserTests.cs",
+          "status": "M ",
+          "bytes": 14044,
+          "sha256": "baa9d2946ecf40b25450870ddeb884b75840c62fc4fcc0fdf845149295a1212e",
+          "blob": "9fa5a87cf608245c9215a4ca1ab25fc91d424088",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/CaseRetirementBrowserBundle.cs",
+          "status": "A ",
+          "bytes": 9008,
+          "sha256": "652e1906923f6285194d8bcbc2185578fc1fe55dde2e4f37139d20652ffac970",
+          "blob": "60d579dcae329c23030025e65f2ebd5d6b42a1e9",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/CaseRetirementBrowserBundleTests.cs",
+          "status": "A ",
+          "bytes": 3959,
+          "sha256": "8a7770fa06e3278df2ef83325a00a84404b03734b803247f7a813d41a438da07",
+          "blob": "6c6a983024388e66bcc52bddf6db653cb9591b0b",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/CasesV2ControllerTests.cs",
+          "status": "M ",
+          "bytes": 745169,
+          "sha256": "ae9f610c808f2582927f7ac663fd54fb751561f4a9cc1d7673fdc4b9d3bbc564",
+          "blob": "6116e17a7428004a2483a3ba23f741a94bcfdcee",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/DatabaseImportCompanySettingsTests.cs",
+          "status": "A ",
+          "bytes": 11813,
+          "sha256": "044792ac823491b67c7567c94f595ccbdfbce4f0b6b6f77df8ec65e9406e3964",
+          "blob": "c1803b4e5a805c402365631e3db9bd3cbff3f7eb",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/DatabaseImportSellerSnapshotTests.cs",
+          "status": "A ",
+          "bytes": 11786,
+          "sha256": "493b139da17e007f497b43ce12e0ac79e626b68a4fb68d38cef9bdc22ce7c5a7",
+          "blob": "eb7795230dfe52ccb132f513b3f0801897ce7ac5",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/DocumentSellerModulePermissionTests.cs",
+          "status": "A ",
+          "bytes": 7572,
+          "sha256": "2e5c1bf018d00e44dffdeb6032b8e3b76be5cc686867d90877f0b0c786c9fe61",
+          "blob": "05c8c25a149a391057377acf5c0302f151057f56",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/DocumentSellerPolicyMigrationTests.cs",
+          "status": "A ",
+          "bytes": 5193,
+          "sha256": "6bba7c6fe50850b902c5e9e53aac6934784e9e71d9e96a023766c5e1d7ba7f29",
+          "blob": "e76208ba7d226ceda0e6e63e7a826a8d8d9bc849",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/DocumentSellerSnapshotConcurrencyTests.cs",
+          "status": "A ",
+          "bytes": 16603,
+          "sha256": "9478542730ca0cc4748cb42a7d94457fe446a2a7d4873ceb646a5ceb6a864053",
+          "blob": "fb942838fc2c13d510d1fd92a6c683f9bea0ea43",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/DocumentSellerSnapshotEntrypointTests.cs",
+          "status": "A ",
+          "bytes": 14558,
+          "sha256": "96cb7b74732ae53495e644019dd267ce4b06d83a14793da3e45f030a09ee8149",
+          "blob": "a01bd63210b9b94f1e93e2ba5ac008f7c9ec8bd0",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/DocumentSellerSnapshotPolicyTests.cs",
+          "status": "A ",
+          "bytes": 17732,
+          "sha256": "0cca3de406949905cbf4daf659744fcfa572782dd634fe9bc5f97fcddc87b623",
+          "blob": "92613b968f5de56ab134cbe7242c1dbf56dbb43d",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/GeneratedFinancialPrintCaptureTests.cs",
+          "status": "M ",
+          "bytes": 8774,
+          "sha256": "d95ff949784bafaa20fdb3ca6d3c0fb41001f02197792b5036bbef1057374ecd",
+          "blob": "0307ce2233f48f1f543748f500b070abef0487b9",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/MoneyOperationsControllerTests.cs",
+          "status": "M ",
+          "bytes": 281018,
+          "sha256": "0e03d3c968fe0a59780c5e7188d2f2e27affec0f43db0a4337f364786207f6ce",
+          "blob": "67641acb6d9826d8f061078e0169f3c2a4bfd910",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/MoneyOperationsInvoiceScopeTests.cs",
+          "status": "M ",
+          "bytes": 16230,
+          "sha256": "41be16f471e37889ba953521f907df04dad627b33e81e74941426f01573dc8df",
+          "blob": "2d73e74b76b132aa97f9d3c509cac78fb86d74a7",
+          "equals_main": false,
+          "blob_in_main_history": false
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/ProviderSpecificSqlTests.cs",
+          "status": "M ",
+          "bytes": 31827,
+          "sha256": "8307acbbb2e70f9d0d00105c3a387083a101f458d3ea935706fba4319cac0ec3",
+          "blob": "1a7699b84baaec956c5def5940778cb812992b16",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/SpreadsheetImportSellerSnapshotTests.cs",
+          "status": "A ",
+          "bytes": 8468,
+          "sha256": "33001635c04e03b3c769fe94e87b169b47c8021cdafa61e68ee2c9ed364abd30",
+          "blob": "cbad1f2ab127975c96003e5ed9715bfdb0cc0447",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/StorageStageWriterProcessTests.cs",
+          "status": " M",
+          "bytes": 21538,
+          "sha256": "bff50317ea04319347e4f60c2878b5fdc49a507cee3bdcababde9a76f644410e",
+          "blob": "f71d2fe4cebbdc9509c9c3520b5657d6a4c6e007",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/SyntheticWritableBackendProcess.cs",
+          "status": "M ",
+          "bytes": 43773,
+          "sha256": "41527fde41470d808548a162953977c5b68cde332e3363049eeca3a8847857b7",
+          "blob": "637bca82e0d01c0003bae577fe7b195d9ca1a0fa",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/TaskBulkBillingConcurrencyTests.cs",
+          "status": "M ",
+          "bytes": 34398,
+          "sha256": "ebb9ddacdbe13027757530da29bba413c3bde6774ee2116930abd621d8768236",
+          "blob": "5dc90140866ede52f5c5f6496c3c9d6735213ac8",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/TaskBulkBillingTests.cs",
+          "status": "M ",
+          "bytes": 71836,
+          "sha256": "1f93ff993a20b0c79e1154101da10d471fc10a8017dfd25e3e628c6f7d91396e",
+          "blob": "e5f27a9a056cdbc2b41323f95ea232d0e824d593",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/Banking/BankStatementImportRules.cs",
+          "status": "M ",
+          "bytes": 55223,
+          "sha256": "521e8d5b07641d32737e47764ead0cb583dc003c13756b2288a95a7d3cdcb9b3",
+          "blob": "cc19ac54e4ce5c8e6cc7d6ef4944d84ecfd37a65",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/Companies/CompanyBrandImageVersionStore.cs",
+          "status": "A ",
+          "bytes": 3775,
+          "sha256": "237e3961fe4915f2feb1878ea1b8e4faf5214923db73abd2457f0352572a4ce3",
+          "blob": "3fdd3c87a22fc8782fc142629d90be8846b60247",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/Companies/DocumentSellerLease.cs",
+          "status": "A ",
+          "bytes": 14333,
+          "sha256": "2a4bd751dc962452444900ed7d59b4e2583f32597c7c3240b2f43bdbbc14281e",
+          "blob": "5749c2122b9f6973ff6e77a1ded1093140117dcb",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/Companies/DocumentSellerService.cs",
+          "status": "M ",
+          "bytes": 32262,
+          "sha256": "3e45ca330b5a7b7cb4968d6c545939e736302526d1a3348d703de750c4c82bcb",
+          "blob": "dbe10500163c8d7943449ad52703cd10ebfa4955",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/Companies/OwnCompanyRegistry.cs",
+          "status": "M ",
+          "bytes": 4046,
+          "sha256": "8995a1706b3662bb805912fc38a079e079c0f71bc416da93068709471be16dd9",
+          "blob": "dc046ecdcd559d9064b16511e271dd3481684c39",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/DatabaseImportService.CopyHelpers.cs",
+          "status": "M ",
+          "bytes": 21590,
+          "sha256": "273ad988d89029ea46925a9fcca6cd119c82a632e88664018560cc74dd193bf4",
+          "blob": "348965befd862e5d50ac29f0bf098b562a3a240f",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/DatabaseImportService.SellerSafety.cs",
+          "status": "A ",
+          "bytes": 8379,
+          "sha256": "91e34a47bb70bc8b71cf456981a68201db61e6295b5a41fb517ac8ece3c09e50",
+          "blob": "0392529d03c0291b45c57ca83089bdd45873304b",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/DatabaseImportService.cs",
+          "status": "M ",
+          "bytes": 42528,
+          "sha256": "08e480723e1cb24cf60b2a369ffd50b82671f2df78320b350dc6c8c159a93c7d",
+          "blob": "c79975ea34b4d9f2ae150249fab74cc715cbd4ee",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/SpreadsheetImportService.Apply.cs",
+          "status": "M ",
+          "bytes": 24233,
+          "sha256": "897e232a02093522514c5816c3387326d9aab0d6b31cabb4ca85515bbd3c60d7",
+          "blob": "eaa8df925ce739d41024e23d974457dc3db52ed8",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/SpreadsheetImportService.ApplyShared.cs",
+          "status": "M ",
+          "bytes": 14579,
+          "sha256": "fa0ebfe4049c287a450faedb11f59976f8458e379c458be141dc6fafd1b1510c",
+          "blob": "595bde3765816d81ab8b6d67e5caf00d5ffd1c97",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/SpreadsheetImportService.Core.cs",
+          "status": "M ",
+          "bytes": 15553,
+          "sha256": "618648d101d77fa6c5f690aadec8d4dbc3c6d6f552b81acfc0802d8fa6cef012",
+          "blob": "78697e902512fb1c9f48112a0eb647c7c1b1a22b",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/Storage/GeneratedFinancialDocumentPublication.cs",
+          "status": "M ",
+          "bytes": 15675,
+          "sha256": "a88b9b9f90872994f83fa1efb0760f3416ab79c79ae2dc0e080b66d3f6bbd030",
+          "blob": "f86285973bd4205df950149922cafe39aeee4fe6",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/Storage/GeneratedFinancialDocumentRegistry.cs",
+          "status": "M ",
+          "bytes": 24962,
+          "sha256": "97796d0c14d98dcafb7c26b4a85df943824ba0441546ab9c9b7a25e7d0957ce7",
+          "blob": "e672e0ce7bff816dfc412e88892bac22d2f38551",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/batch-operations-audit-coverage-2026-06-10.md",
+          "status": "M ",
+          "bytes": 75418,
+          "sha256": "7b537c2ab9e25ee22fe0aec3d437079fe21edb170d9226d65c439027056e8d67",
+          "blob": "bcc0177ad646f998594618d4094b7218debfdcd3",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/deployment-manual-2026-10-25.md",
+          "status": "A ",
+          "bytes": 8071,
+          "sha256": "76ad86c579449cf8a90483bde5b1cfe70b01732ec7581cc8cd0b2f4a709d8b6f",
+          "blob": "2d3957453b68e7581234ee39b76f73312c4f8b25",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/development-settings-verification-2026-10-25.md",
+          "status": "A ",
+          "bytes": 37373,
+          "sha256": "96d0cfe096807a7c0f7fe93670a4423c5d5d743c4a851add497acdb1a1dc140b",
+          "blob": "c511746b1388144ce991a138e764c5edd29211c0",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/development-xsenus-runner-2026-10-21.md",
+          "status": "M ",
+          "bytes": 17886,
+          "sha256": "c937e1a322b4534f74603e464c191eca3ccec04a118c8fc99744cbfd9d129fcf",
+          "blob": "252347f8e3d0744194df1ef81a5b25e3373d7218",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-bank-roadmap-2026-10-14.md",
+          "status": "M ",
+          "bytes": 155976,
+          "sha256": "8d3324a429fa767ad6f35283727d360a383f7786fd1758a4a42a495fa1de0a27",
+          "blob": "9987e5e8bf1972623f8fe9c6c1101277c27c628f",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-calendar-roadmap-2026-10-14.md",
+          "status": "M ",
+          "bytes": 43648,
+          "sha256": "aa20c68c22fb16eeee6038e3f257b5b834b811d89ab2fca276a25e280869ebec",
+          "blob": "ece9be4583fe6424f7524bcfd784b983b73bb51d",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-company-roadmap-2026-10-14.md",
+          "status": "M ",
+          "bytes": 23052,
+          "sha256": "0a90ee5335f55d13c4af2c56c103fee3057dfdfa45e9f7ddf712b61c4fbc9e1b",
+          "blob": "fb4dea1477648b0abd277fef9c387c72bc720db6",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-financial-documents-roadmap-2026-10-14.md",
+          "status": "M ",
+          "bytes": 90989,
+          "sha256": "8079a72fbabf3ee3e7d49b1cc3a37c82fa940714f9c6dab62b2e299c2ba4fd1a",
+          "blob": "09dd43a39cc209450e6d14f63f3c5ebd59f25571",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-handoff-2026-10-21.md",
+          "status": "MM",
+          "bytes": 100105,
+          "sha256": "234b833d0d09fedbdb84a2266b7f9f163d910ef037a2592b26566e07e6dc0937",
+          "blob": "d99cde2105e85fe3f83b15a9387bef6c8f4e8c0f",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-messenger-roadmap-2026-10-14.md",
+          "status": "M ",
+          "bytes": 63973,
+          "sha256": "a920332a88e7119fa419f4c12c55ba56c5628bc3ac7fb38250cf2dbf18e895ca",
+          "blob": "e95198175db86bde2e608c6927e40e52264bba61",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+          "status": "MM",
+          "bytes": 127211,
+          "sha256": "cee3828a3e1361775e065930f40334ff2ea3df49561b890441652ea02cd426f1",
+          "blob": "ae50967976e392d406b55e0c3d165386dbbe8a31",
+          "equals_main": false,
+          "blob_in_main_history": false
+        },
+        {
+          "path": "docs/payplanner-requests-roadmap-2026-10-14.md",
+          "status": "M ",
+          "bytes": 25465,
+          "sha256": "1358d9d5cf06a1ea450cd9f7f38c5ea12a42c2cc032cd136c0c55b71ecbbc0a6",
+          "blob": "03ff9d0508970024b91af76d5019c5b69573a56e",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-settings-decisions-2026-10-24.md",
+          "status": "A ",
+          "bytes": 7069,
+          "sha256": "04f6cc780368dc42f85731e944b078a8e4138d1ab3ace774c68d05778476af0f",
+          "blob": "32175033d3ae55a81d3fb173a8853ab48bc94e2e",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-ui-roadmap-2026-10-14.md",
+          "status": "M ",
+          "bytes": 62688,
+          "sha256": "36e6202ab738f2eb7fcf0b0a2929e6e86ed5a40e2189a08fac93393ebce0a0ad",
+          "blob": "4966b3c7057e850f1268c6adbc68ade5c67c5f9a",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-unified-roadmap-2026-10-14.md",
+          "status": "M ",
+          "bytes": 67779,
+          "sha256": "9644a09551b7eaa554fe1e881710ac292660157d24d8b4b879a2f7e19cbc6369",
+          "blob": "9566ce553f250688c4b0bbc4059dd5c8659ebc87",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-work-order-2026-10-21.md",
+          "status": "MM",
+          "bytes": 60395,
+          "sha256": "b4701f9130ee483e4106e882e0458d4dbf37c4f7a902c8a8b0556be1f23c7688",
+          "blob": "40dd6a32d33859e358d9634441356b7f9681142a",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/system-surface-inventory.generated.md",
+          "status": "MM",
+          "bytes": 287537,
+          "sha256": "ed65085a17340422d84eff74e211da4b8be3bd1b3afc72d2f38cb408d9367206",
+          "blob": "3c22c50d329c96a8e7c87ab7d498202d70eee3ad",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "scripts/case-retirement-production-bundle.mjs",
+          "status": "A ",
+          "bytes": 14517,
+          "sha256": "652afe9471ac24e784002c40251ff56d13554960f216891bc194ff77019bd928",
+          "blob": "05167a6121720f69874b83b60aed3a11114b4ba4",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "scripts/case-retirement-production-bundle.node-tests.mjs",
+          "status": "A ",
+          "bytes": 8814,
+          "sha256": "eba3d61f996e0f606bd3dda94365e898d1f1a131171d3fc68383b47e0e0a59bc",
+          "blob": "65852bd8003652420689a3b732d0b41066c5cc48",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "scripts/check-case-retirement-live-browser.mjs",
+          "status": "MM",
+          "bytes": 38285,
+          "sha256": "b686b3619910fad7e5046b93b0303384c3666907487db8b3b0609019ba932f7d",
+          "blob": "b166dcb63b6caa47cd0c09f02a11cb97fceea368",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "scripts/check-storage-capacity-visual.mjs",
+          "status": "M ",
+          "bytes": 14439,
+          "sha256": "9f583dd4982b70690d8be88514dd59648af8abe9c79edc9746d981338581cc40",
+          "blob": "33f1f585f0d48119a554a49543f7ff55a1778da3",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Accounts/InvoiceModal.integration.test.tsx",
+          "status": "M ",
+          "bytes": 118381,
+          "sha256": "492e87da931b1770ac71b0b0f253f0df775f62aa8620ede4c62ead11d8471d2f",
+          "blob": "5a0e7549a7a52f75ef95158ca955c966d4f00887",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Accounts/InvoiceModal.tsx",
+          "status": "M ",
+          "bytes": 285210,
+          "sha256": "12ab6c62927eb6f29ef67f327253f17baa74ec105b8789eeace5c4b63cdbad29",
+          "blob": "17606d33dd8a17b10407a89480b03dbe538efad7",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Acts/ActDetailPage.tsx",
+          "status": "M ",
+          "bytes": 63264,
+          "sha256": "118316e1eaf5e24f70e16063c1d1c99f9d4612d0df0df1925079c6d7a3c65a44",
+          "blob": "02a4fe221edddbd1c7a9fc18b1948b4155b3a444",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Acts/ActModal.integration.test.tsx",
+          "status": "M ",
+          "bytes": 50411,
+          "sha256": "3aed77209ed061278f12e3d430c363178c46a9d6636312d2f7cf1d41106baf58",
+          "blob": "ecb2fda65ee16e81c87933b9a0356b8bcdda6718",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Acts/ActModal.tsx",
+          "status": "M ",
+          "bytes": 108613,
+          "sha256": "2b33f0901242819ab961647b3d346f466bc6d3431d375dd7e6d8ac9283aed1fa",
+          "blob": "222020219c0b2962ee9e7edbfa42d14deb37be5d",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Cases/CaseDetailPage.test.tsx",
+          "status": "M ",
+          "bytes": 272931,
+          "sha256": "9ff3e8f081708e703a754c07558b910b1e1e3d59ce9fbb348358e87165959a31",
+          "blob": "5afc58abcc89b17fdf73b3a63e1dae3dda143855",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Cases/CaseTaskActions.test.tsx",
+          "status": "M ",
+          "bytes": 15250,
+          "sha256": "90a1901d13ebae4753af844cd8630fd05188820de356a23ee594ad2da8c1813e",
+          "blob": "351de0fa74570684486dd7178f779c62ce1af1bd",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Contracts/ContractCreatePage.tsx",
+          "status": "M ",
+          "bytes": 25217,
+          "sha256": "ef43db23854b4d5cc860be31a8c228c91e585dd20d7c5f5606ec9a04b84100b3",
+          "blob": "8cc6034b7f0a7b6a3bab4eef8464525c3b4cf7ef",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Contracts/ContractDetailPage.tsx",
+          "status": "M ",
+          "bytes": 96654,
+          "sha256": "b60f393ec25a1b81ce97b7a14500953856210de20658548682668f309fce550a",
+          "blob": "a13668e49cc388ef9330a3f433a6b30056f7d41f",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Contracts/ContractModal.integration.test.tsx",
+          "status": "M ",
+          "bytes": 3865,
+          "sha256": "7029ec6dec8d0bf12940ccc5fd47d12fe54e6772cfd68a53001d24a4bbf90051",
+          "blob": "44cafe2519fa0cc417140515b42748bf6ca6a47b",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Contracts/ContractModal.tsx",
+          "status": "M ",
+          "bytes": 25720,
+          "sha256": "adac4a66757064050fda48a155fbbc0abc17da10a66eefba7448c3e6bf696601",
+          "blob": "8e7ab1c11d9a9ba888c16e964e1af03f2e9c89d7",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Documents/DocumentSellerPicker.test.tsx",
+          "status": "M ",
+          "bytes": 7644,
+          "sha256": "3cc9044582d0c5198723827be17ee975427b4a94c4026b38665407f8bf7f42e6",
+          "blob": "5ad2e1521483c13fdf636c0e91bf070ca41b6538",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Documents/DocumentSellerPicker.tsx",
+          "status": "M ",
+          "bytes": 6731,
+          "sha256": "99c945f71d6fa66a7a78f20d2122ca8e9513565643b7c82ddfe9461364516e43",
+          "blob": "4b1abaea0201820c035688eb6983e34dcd8531bb",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Money/MoneyOperations.integration.test.tsx",
+          "status": "M ",
+          "bytes": 176116,
+          "sha256": "1456e3406e4234ac655932ef0b2247e579dce4ccf0e5d815e058198e7de2642e",
+          "blob": "eefa1b31caa1b0201b45bd4c0fd7a6044833ab89",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Money/MoneyOperations.tsx",
+          "status": "M ",
+          "bytes": 280953,
+          "sha256": "025c11427683edf9b737263eb2a2e5c2704f9862f989ded6985c2777a9a1e7ae",
+          "blob": "ba47d0c22d8ac7b9c77bf73fb7bc0f548218d6ae",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Settings/MainCompanySettings.test.tsx",
+          "status": "A ",
+          "bytes": 3601,
+          "sha256": "88a519af353725c796b02497ee6111d49ef270b4e8d8530c49ed8cc7b4b47185",
+          "blob": "18a7c5a8b43bd45cbe4b5c3730e76d84cf3673e7",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Settings/MainCompanySettings.tsx",
+          "status": "M ",
+          "bytes": 17412,
+          "sha256": "a698a3fae6568b76dcf254d817a748c5d5f90b4626898dea357b4687b4dca3b0",
+          "blob": "f8b0e197a9a10f249168c6accc97260e59eb2051",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Settings/TaskJournalSettings.test.tsx",
+          "status": "M ",
+          "bytes": 34655,
+          "sha256": "cdefb42e41d0d219b8f8cd6a885bbe69ed5d7c026a4454e9bff05211e6816e05",
+          "blob": "e6f266e1f57330232096ba9bc49b42cd01e60572",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Settings/TaskJournalSettings.tsx",
+          "status": "M ",
+          "bytes": 83756,
+          "sha256": "ed63d143c4e851f00c9e671b402a6e7454272e8fa5918299bb01117e81b2fe3e",
+          "blob": "2e38c2cab3ad3636df3b42eb773040ddb4686fce",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/TaskBulkBillingDialog.tsx",
+          "status": "M ",
+          "bytes": 8915,
+          "sha256": "b2037043aad6e94139ab7c0490cb7cb74468cfb125e0117afa79a50dbe15abb4",
+          "blob": "24597e486ac377546812d3f9b5645587a5d5118e",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/TaskJournal.actions.test.tsx",
+          "status": " M",
+          "bytes": 38719,
+          "sha256": "df7889fb34d3e56d153bc234d959195a155798b8338166620add1b34dab82924",
+          "blob": "becd4766ab57fb4af12ed20463fdcecdcce64ae0",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/TaskJournal.billing.test.tsx",
+          "status": " M",
+          "bytes": 31475,
+          "sha256": "9ee20f54e86aa4d4d69735f730a6ff28c40a3fe89ecadd77c4a20af78ea910c4",
+          "blob": "bb0e7b4142baa285ddf2c8e744bf17296409475b",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/TaskJournal.tsx",
+          "status": "M ",
+          "bytes": 748722,
+          "sha256": "7bad3e6ce1e7e0fe5aedf37f320f6d1522f47d3992ec3fe943a1e91240b2dd50",
+          "blob": "e29fd296736af8bf7d5240064e90a3261c37df1b",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/taskBulkBilling.test.ts",
+          "status": "M ",
+          "bytes": 15873,
+          "sha256": "41a6a09d1dcd4a4e056513ae734f270d6f60770f75f2f22143b8626dae97ffdd",
+          "blob": "33a85eb46dfd2633be379e6c41eeb18a2b25b81d",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/taskBulkBilling.ts",
+          "status": "M ",
+          "bytes": 8637,
+          "sha256": "1e9fb435afc1880ec5b923305a4234b6fb05ec910c579ed171936d83b0ffaad8",
+          "blob": "4dcadfc1bf15d1f9653b0b6e006aa9c37294f340",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/useTaskBulkBilling.integration.test.tsx",
+          "status": "M ",
+          "bytes": 4979,
+          "sha256": "6544e09e616945ba01c267442d82e50fe4e740917d3af4a516d916457be947e2",
+          "blob": "bf557ea9bf9a3ef84403223cd8ec0665c3779ae7",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/useTaskBulkBilling.test.tsx",
+          "status": "M ",
+          "bytes": 24257,
+          "sha256": "a823ae6250a9a40367c0fc4e587d074fc4dfca68dfb83922f008e02d1b50cfe1",
+          "blob": "00967d5f6219d134fc9677db86f93b8501566a60",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/useTaskBulkBilling.tsx",
+          "status": "M ",
+          "bytes": 17261,
+          "sha256": "e83bcc9236b879367be3dd55c729e6949ec14276a394cfaa201086662d33630f",
+          "blob": "758f21d49460670f0cc2ab016b455af641216ead",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/services/api.documentSellerPolicy.test.ts",
+          "status": "A ",
+          "bytes": 1112,
+          "sha256": "ded214193f54b4a9d040eca013d28469ac0a3326f3b389feff6aca92b4e6ab17",
+          "blob": "858e463014591a2ad62401cf3600e706379038ba",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/services/api.taskBillingSettings.test.ts",
+          "status": "A ",
+          "bytes": 5657,
+          "sha256": "31b7bec608a5c7aa7ed52e1f3d8f1cda5acbaf400a924f5eb179422d96a2235e",
+          "blob": "78ea6956a8b25ae3a0633455e483d161010f63dc",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/services/api.test.ts",
+          "status": "M ",
+          "bytes": 164319,
+          "sha256": "e0de7f07dd46337487e99f0f9cfb3046cfd84b4b56986fa281e5d4ad555e9cf5",
+          "blob": "d7c07fcded99e79997f3ecab582d4dc17dfb380b",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/services/api.ts",
+          "status": "M ",
+          "bytes": 314814,
+          "sha256": "b9587ea0766a9b3d7c6b2e16406482215357f3e7a6fd6e813211b7a86ae05224",
+          "blob": "f1674c1deac45a8fc4ce716dee5a4cee22dd6354",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/types/index.ts",
+          "status": "M ",
+          "bytes": 112975,
+          "sha256": "de9ec307100fd6ec51a258e6b9bb4bf4859502754474cf9e469b090acfbeeff3",
+          "blob": "9385198b21b55398d66452898a94f5405aa3d7f3",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/utils/invoiceEditorBridge.seller.test.ts",
+          "status": "A ",
+          "bytes": 1415,
+          "sha256": "258a72766e3f43270e850ce144a52b7eb11519ba5a6b46a48c3c0799fbc67aa4",
+          "blob": "7f8d41cbb8dff9ee68c542ded6b015dac1815d7a",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/utils/invoiceEditorBridge.ts",
+          "status": "M ",
+          "bytes": 10676,
+          "sha256": "e3692aeed47c0b2f19287e7b090f9277cf01b65fe5d34090066705b01d884c9a",
+          "blob": "9131b22955ec0371684c50e0ca8f1041108c8960",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/utils/taskJournalStore.ts",
+          "status": "M ",
+          "bytes": 16879,
+          "sha256": "19cf84b4bc5f18fabff170606a56d61d4c912e82240ea356c30fff365c07894a",
+          "blob": "0ec822410f4bce2f6ed71f92a75da9899244de66",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "tools/PayPlanner.TestShards/BoundedBatchScheduler.cs",
+          "status": " M",
+          "bytes": 5172,
+          "sha256": "9383545a9e353b7c96665d63a2bf6a54fe5f466ac329bb10c9cfbe78d46fdbcc",
+          "blob": "1c9e08796e02aba9d0b384c45d71389378c5cf0d",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "tools/PayPlanner.TestShards/BoundedTestRunner.cs",
+          "status": " M",
+          "bytes": 10050,
+          "sha256": "265c511705e9f41bfcc41e4a41e04f6edb99c2a459979bafd6ee5f9c3fa8916b",
+          "blob": "b288775a4bce291b10fd6ec289e61815a6c1a37b",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "tools/PayPlanner.TestShards/ExecutionScheduling.cs",
+          "status": " M",
+          "bytes": 12044,
+          "sha256": "379b994ded50b6229af81f145bf5e589b98168af56e200716fc6705ba2ff5b6c",
+          "blob": "04d9a497d8686dc6b34c1412d87c2281c1cbf82b",
+          "equals_main": false,
+          "blob_in_main_history": false
+        },
+        {
+          "path": "tools/PayPlanner.TestShards/Program.cs",
+          "status": "M ",
+          "bytes": 18366,
+          "sha256": "4b3678ad9ac1898e23fef2ae92775a1e7e48ec661cf7c263027334b62d55f44b",
+          "blob": "9494011b0108c6d6bdb6167a4ae65a3b8f9e6b95",
+          "equals_main": false,
+          "blob_in_main_history": true
+        }
+      ]
+    },
+    {
+      "path": "C:\\Users\\User16\\.codex\\worktrees\\payplanner-ci-no-deploy\\PayPlanner",
+      "snapshot": "payplanner-ci-no-deploy",
+      "head": "7cd89d840b52827e79146696bc53fafd57244ddd",
+      "files": [
+        {
+          "path": ".github/workflows/deploy.yml",
+          "status": " M",
+          "bytes": 44897,
+          "sha256": "2edc83bc555b13c405d814cc858908b021489e57bb193686d7612bdc51bb46d7",
+          "blob": "0d38ae545be902d8bc78456569d96ebd25f96569",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/AppReleases/releases.json",
+          "status": " M",
+          "bytes": 2062694,
+          "sha256": "a14b2bbeb03f3bf339a9b55f0656f387b41c78d01ea1fecd833257429bab0c83",
+          "blob": "94ea66c8db70c7d8c3288091442bc0865ca7fe99",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/ActsController.cs",
+          "status": " M",
+          "bytes": 104813,
+          "sha256": "bf83e320ad0de0228fc3a9d0fe6bb0a2b62f4b5bf9263f33c62d896d434e3a76",
+          "blob": "ed471bdea3ebd26e3bfb6fd09c2971f565a9d11f",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/ContractsController.cs",
+          "status": " M",
+          "bytes": 127548,
+          "sha256": "655956f46b3615a46f9a92408e0d565e11adcfca440cda1072ff32d365d038df",
+          "blob": "38a21f5ad1b598d65b810efbd44e87debe0a65f4",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/DatabaseAdminController.cs",
+          "status": " M",
+          "bytes": 24315,
+          "sha256": "106b3723bf965997fc84e93617a7af3e517fde95c04006c7b4bb352736c72e13",
+          "blob": "4d6823c8cb60bd75a641ff26714af6c3b32bed88",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/InvoicesController.cs",
+          "status": " M",
+          "bytes": 307869,
+          "sha256": "7336fea3fdd28fbab11196ae9c7fb9ce769c50a6ea4ce4d7b4fad816bf8937cd",
+          "blob": "15e7388397487032212e4033b85ea6dd4b8b8301",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/LegalEntitiesController.cs",
+          "status": " M",
+          "bytes": 117336,
+          "sha256": "485c5af9b4777b957ffdef867cb85470c5aa2bd3d97649840dc6da0596ad7532",
+          "blob": "736d650016160bd1572c13eba8d4a0d778895684",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/OwnCompaniesController.cs",
+          "status": " M",
+          "bytes": 4712,
+          "sha256": "c49fa41e3f8c0b8be95598663f98294a646e7bea449421b260434754c6be5ad1",
+          "blob": "fbd8b9118d87201befdd745a3b8d202fecc132f2",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/TasksController.cs",
+          "status": " M",
+          "bytes": 432954,
+          "sha256": "4e185cce0d3cae452eda7bc94a60d56d1f3c5c2f4cad9f20e2f282d60cb209e9",
+          "blob": "62517675b9fa92f6848c2ec52ad09b97bd496165",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/V2/CasesV2Controller.FinancialCapture.cs",
+          "status": " M",
+          "bytes": 12799,
+          "sha256": "61fac464413ac457ecd473f028b3394ba663e6516381a949ef8ce09fd158710d",
+          "blob": "413ffd0360166376cd1cb65ad49d5785d580e124",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Controllers/V2/CasesV2Controller.cs",
+          "status": " M",
+          "bytes": 742599,
+          "sha256": "05aa4cef53c1213c604a450de483fb14c439f27c5e99fecc8c77d35d0490b89f",
+          "blob": "c98fa866d080caa1c084919869567c4eb2993596",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Data/PaymentContext.cs",
+          "status": " M",
+          "bytes": 295404,
+          "sha256": "c7b52d5e6a7ee5b43669fb07635c46bfb251c24b85b50707740ceac199c6bb27",
+          "blob": "a2403d530d7ccefafdd0b058008c742fceed5f6c",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Extensions/DataVisibilityQueryExtensions.cs",
+          "status": " M",
+          "bytes": 28283,
+          "sha256": "0b8b0d818ed9d290b755671c091a586f38a62a70e8f0266a2fa07299615cc377",
+          "blob": "7ddb197b27f6e355bfe70cbcfb98c661b3349965",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Act.cs",
+          "status": " M",
+          "bytes": 2717,
+          "sha256": "b7296043f0e696b14d121631161e0c9d4da37fbad1b25adab85bd4b429b96fa9",
+          "blob": "058e93e18f13c341c55de9fbdafd04ff0e5c74fe",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Contract.cs",
+          "status": " M",
+          "bytes": 5140,
+          "sha256": "dbd275482ca22757603bf7af857df2c4dd1050605e0fe50f722f58e4fc5c980f",
+          "blob": "80adc426237a2fce8dc233bf9441d6aa0efcb3d5",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Payment.cs",
+          "status": " M",
+          "bytes": 14586,
+          "sha256": "ca32785c7f213c01509ac4b01181d79fbdfd4c93334073af6303e0b10cacc8fe",
+          "blob": "43e3736fc4df8bc0f29eb38b47bc4bea0ab27655",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Requests/DocumentSellerRequest.cs",
+          "status": " M",
+          "bytes": 558,
+          "sha256": "def5e490aa8932cc9fa039af6e18b3a8900166211c16669bac5ac8ed40b0c67c",
+          "blob": "3b965d3b6283aa1b68579d069bcf5aa6bdd5d1aa",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Requests/TaskJournalSettingsRequest.cs",
+          "status": " M",
+          "bytes": 1851,
+          "sha256": "a8354bf0f30260d86559cee726a8522fe7e1363e3330d1b082c7a61b1adbbc1a",
+          "blob": "34af8a11714aee16e5ec5230dca6793da9a2bd85",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Requests/UpdateMainCompanySettingsRequest.cs",
+          "status": " M",
+          "bytes": 372,
+          "sha256": "5d6d1e55a374f3dbb66d22978c077c05c1b779945ceb71b61899a5967dea7b12",
+          "blob": "0fa022218b357f7dfa66970f4618a361b079db5c",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Requests/UpsertActRequest.cs",
+          "status": " M",
+          "bytes": 2074,
+          "sha256": "aacfffdb4f8aa107abf3caabf48900c63ee420d717a436a756a19e092a436317",
+          "blob": "2cfc5edcad184d15f2123a67ff2633db2d075e97",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Requests/UpsertContractRequest.cs",
+          "status": " M",
+          "bytes": 2237,
+          "sha256": "d6fee57ed2be59f6c67b25b7421986a0addb5721d2ad7d1b0c58d804208ecf67",
+          "blob": "f46c1bcc694c80454c6cc340c65c50941ec84366",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Requests/UpsertInvoiceRequest.cs",
+          "status": " M",
+          "bytes": 3277,
+          "sha256": "88d816441b835b0ccd7123967e7c76bb09d2a48203348bdae0172a6f7df2b64f",
+          "blob": "435b0f621a6ba2ba2cd14ef4472f4754436e757d",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Requests/UpsertTaskJournalItemRequest.cs",
+          "status": " M",
+          "bytes": 3612,
+          "sha256": "66b152c71d3cfc46c7d90614c01f335c11ec371a36afcd74665f74e625f4a0fb",
+          "blob": "820bb65d438e7dc64a6662cf9f5dc5d2010934a7",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Responses/ActDto.cs",
+          "status": " M",
+          "bytes": 3364,
+          "sha256": "c3b3ea83463c13945877eac6cc6a64ebfa6c8d484d57590f6de6f42dad348596",
+          "blob": "e69f6638dd7f35a5053d7fa87c16e28560a8500f",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Responses/ContractDto.cs",
+          "status": " M",
+          "bytes": 3383,
+          "sha256": "50e9c6d6f4814482f3048d93cb410d11ca59d451d38bf1c6584abe7bc7105535",
+          "blob": "f87ac8d8134dd0e86f6430b9f27ac618e66547a5",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Responses/InvoiceDto.cs",
+          "status": " M",
+          "bytes": 5701,
+          "sha256": "3444c2d186eefd146171db14edab720c09a270c65efffbca17229e5a0e832afa",
+          "blob": "b85d1d45acbafb14bcd1c1aa4d89a55891de3c39",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Responses/LegalEntityDto.cs",
+          "status": " M",
+          "bytes": 6360,
+          "sha256": "d07c2467ce63b9cabbb701534d0ae08a563f4dc5e7183625e3d8bc53ccff5c1d",
+          "blob": "5d117c8a03666fb4cab558fd9497ce0392327623",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/Responses/TaskJournalDtos.cs",
+          "status": " M",
+          "bytes": 17781,
+          "sha256": "a5eedca8536fdb959928bfea2dcb3fac0787adc0f052923847058e623b4ce3c3",
+          "blob": "3797d42767ffc2a5d897734a30c13758d1e3ad51",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Migrations/Migrations/PaymentContextModelSnapshot.cs",
+          "status": " M",
+          "bytes": 602268,
+          "sha256": "5622587fbff6070081cae1c26389bdacf1e985f22cee99e6740633008a4ebdc7",
+          "blob": "801ea402f14cce31e0125554fcd68c526aa858ef",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/PostgreSqlPaymentContextModelSnapshot.cs",
+          "status": " M",
+          "bytes": 646345,
+          "sha256": "29cbfffaa80526a3b5e1838542c0080f8a0b79651e97e0618b61da81e693c74e",
+          "blob": "ea6fbda7be03b8ad25ba0263d2d2526a4719b171",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/ActsControllerTests.cs",
+          "status": " M",
+          "bytes": 164858,
+          "sha256": "2237d2cb87a987fc7647e36e07c2afc2682479bb01136ae0235871d358f27249",
+          "blob": "4fbbaf0df30d671f3864264eddb4563bab850326",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/BankImportProvenanceMigrationTests.cs",
+          "status": " M",
+          "bytes": 20569,
+          "sha256": "8a76316e81b227225380e9dfac194ce837f811eabbf5a6c93c70d798f9124628",
+          "blob": "515eb44b3db71728406fdd22ea36cdfef88657af",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/BatchOperationAuditCoverageTests.cs",
+          "status": " M",
+          "bytes": 2454,
+          "sha256": "86a3fac402130ec8383c4f92596aa7c4442d0b4d2165e6c3ab404e95a0dc1f6f",
+          "blob": "b2ad19456f502a6ab26e05fbbd26f81ef6918cf7",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs",
+          "status": " M",
+          "bytes": 14696,
+          "sha256": "cffee58e347eb0c726b0ef2386cc74c84ea990a5c233d58f831e411f4c70ffba",
+          "blob": "da3e23756ad1d7b51ba1da7aede81a33cd757a50",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs",
+          "status": " M",
+          "bytes": 23059,
+          "sha256": "1cbec49037951fa29034004c9c09a24c5d4ef47515cacec297e55e8b8c3dd700",
+          "blob": "fe4fcee824edba6325577f82c4c9ded7f17a1181",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/CancelledInvoiceBillingMigrationTests.cs",
+          "status": " M",
+          "bytes": 10984,
+          "sha256": "d34612c7bc06dc090e056267643a919557663f490d025330d336e1a71bae9a18",
+          "blob": "9f494a826974acb280b68baecc9ae755fe2b011c",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/CaseDocumentRetirementBrowserTests.cs",
+          "status": " M",
+          "bytes": 14600,
+          "sha256": "7ef842de4b2e1b52759d20eefacb31b7a278d770938030fc258a1d91b051dc8b",
+          "blob": "abc04c197f82e9b0d2286c1557e82273c4109f96",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/CasesV2ControllerTests.cs",
+          "status": " M",
+          "bytes": 745169,
+          "sha256": "ae9f610c808f2582927f7ac663fd54fb751561f4a9cc1d7673fdc4b9d3bbc564",
+          "blob": "6116e17a7428004a2483a3ba23f741a94bcfdcee",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/GeneratedFinancialPrintCaptureTests.cs",
+          "status": " M",
+          "bytes": 8774,
+          "sha256": "d95ff949784bafaa20fdb3ca6d3c0fb41001f02197792b5036bbef1057374ecd",
+          "blob": "0307ce2233f48f1f543748f500b070abef0487b9",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/LegacyStorageBackfillTests.cs",
+          "status": " M",
+          "bytes": 65811,
+          "sha256": "bccf5e0221ac3c28e384f83bac8f124f72edf6eec61798164c6836d1f24697d7",
+          "blob": "8c478438634814adcf2ad2dc0043abd093a991f5",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/MoneyOperationsControllerTests.cs",
+          "status": " M",
+          "bytes": 281018,
+          "sha256": "0e03d3c968fe0a59780c5e7188d2f2e27affec0f43db0a4337f364786207f6ce",
+          "blob": "67641acb6d9826d8f061078e0169f3c2a4bfd910",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/MoneyOperationsInvoiceScopeTests.cs",
+          "status": " M",
+          "bytes": 16244,
+          "sha256": "f44117f84f20ca4b9c0a0ff5a93ae4e3b8c87dc8cd6f70aaa035bf1bd060d475",
+          "blob": "bcbc83c6b8e098f23b71a263d3bef1be4146ed36",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/ProviderSpecificSqlTests.cs",
+          "status": " M",
+          "bytes": 31827,
+          "sha256": "8307acbbb2e70f9d0d00105c3a387083a101f458d3ea935706fba4319cac0ec3",
+          "blob": "1a7699b84baaec956c5def5940778cb812992b16",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/StorageStageWriterProcessTests.cs",
+          "status": " M",
+          "bytes": 21538,
+          "sha256": "bff50317ea04319347e4f60c2878b5fdc49a507cee3bdcababde9a76f644410e",
+          "blob": "f71d2fe4cebbdc9509c9c3520b5657d6a4c6e007",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/SyntheticWritableBackendProcess.cs",
+          "status": " M",
+          "bytes": 43773,
+          "sha256": "41527fde41470d808548a162953977c5b68cde332e3363049eeca3a8847857b7",
+          "blob": "637bca82e0d01c0003bae577fe7b195d9ca1a0fa",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/TaskBulkBillingConcurrencyTests.cs",
+          "status": " M",
+          "bytes": 34398,
+          "sha256": "ebb9ddacdbe13027757530da29bba413c3bde6774ee2116930abd621d8768236",
+          "blob": "5dc90140866ede52f5c5f6496c3c9d6735213ac8",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/TaskBulkBillingTests.cs",
+          "status": " M",
+          "bytes": 71836,
+          "sha256": "1f93ff993a20b0c79e1154101da10d471fc10a8017dfd25e3e628c6f7d91396e",
+          "blob": "e5f27a9a056cdbc2b41323f95ea232d0e824d593",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/Banking/BankStatementImportRules.cs",
+          "status": " M",
+          "bytes": 55223,
+          "sha256": "521e8d5b07641d32737e47764ead0cb583dc003c13756b2288a95a7d3cdcb9b3",
+          "blob": "cc19ac54e4ce5c8e6cc7d6ef4944d84ecfd37a65",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/Companies/DocumentSellerService.cs",
+          "status": " M",
+          "bytes": 32262,
+          "sha256": "3e45ca330b5a7b7cb4968d6c545939e736302526d1a3348d703de750c4c82bcb",
+          "blob": "dbe10500163c8d7943449ad52703cd10ebfa4955",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/Companies/OwnCompanyRegistry.cs",
+          "status": " M",
+          "bytes": 4046,
+          "sha256": "8995a1706b3662bb805912fc38a079e079c0f71bc416da93068709471be16dd9",
+          "blob": "dc046ecdcd559d9064b16511e271dd3481684c39",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/DatabaseImportService.CopyHelpers.cs",
+          "status": " M",
+          "bytes": 21590,
+          "sha256": "273ad988d89029ea46925a9fcca6cd119c82a632e88664018560cc74dd193bf4",
+          "blob": "348965befd862e5d50ac29f0bf098b562a3a240f",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/DatabaseImportService.cs",
+          "status": " M",
+          "bytes": 42528,
+          "sha256": "08e480723e1cb24cf60b2a369ffd50b82671f2df78320b350dc6c8c159a93c7d",
+          "blob": "c79975ea34b4d9f2ae150249fab74cc715cbd4ee",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/SpreadsheetImportService.Apply.cs",
+          "status": " M",
+          "bytes": 24233,
+          "sha256": "897e232a02093522514c5816c3387326d9aab0d6b31cabb4ca85515bbd3c60d7",
+          "blob": "eaa8df925ce739d41024e23d974457dc3db52ed8",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/SpreadsheetImportService.ApplyShared.cs",
+          "status": " M",
+          "bytes": 14579,
+          "sha256": "fa0ebfe4049c287a450faedb11f59976f8458e379c458be141dc6fafd1b1510c",
+          "blob": "595bde3765816d81ab8b6d67e5caf00d5ffd1c97",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/SpreadsheetImportService.Core.cs",
+          "status": " M",
+          "bytes": 15553,
+          "sha256": "618648d101d77fa6c5f690aadec8d4dbc3c6d6f552b81acfc0802d8fa6cef012",
+          "blob": "78697e902512fb1c9f48112a0eb647c7c1b1a22b",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/Storage/GeneratedFinancialDocumentPublication.cs",
+          "status": " M",
+          "bytes": 15675,
+          "sha256": "a88b9b9f90872994f83fa1efb0760f3416ab79c79ae2dc0e080b66d3f6bbd030",
+          "blob": "f86285973bd4205df950149922cafe39aeee4fe6",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/Storage/GeneratedFinancialDocumentRegistry.cs",
+          "status": " M",
+          "bytes": 24962,
+          "sha256": "97796d0c14d98dcafb7c26b4a85df943824ba0441546ab9c9b7a25e7d0957ce7",
+          "blob": "e672e0ce7bff816dfc412e88892bac22d2f38551",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/batch-operations-audit-coverage-2026-06-10.md",
+          "status": " M",
+          "bytes": 75418,
+          "sha256": "7b537c2ab9e25ee22fe0aec3d437079fe21edb170d9226d65c439027056e8d67",
+          "blob": "bcc0177ad646f998594618d4094b7218debfdcd3",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/development-xsenus-runner-2026-10-21.md",
+          "status": " M",
+          "bytes": 17886,
+          "sha256": "c937e1a322b4534f74603e464c191eca3ccec04a118c8fc99744cbfd9d129fcf",
+          "blob": "252347f8e3d0744194df1ef81a5b25e3373d7218",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-bank-roadmap-2026-10-14.md",
+          "status": " M",
+          "bytes": 155976,
+          "sha256": "8d3324a429fa767ad6f35283727d360a383f7786fd1758a4a42a495fa1de0a27",
+          "blob": "9987e5e8bf1972623f8fe9c6c1101277c27c628f",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-calendar-roadmap-2026-10-14.md",
+          "status": " M",
+          "bytes": 43648,
+          "sha256": "aa20c68c22fb16eeee6038e3f257b5b834b811d89ab2fca276a25e280869ebec",
+          "blob": "ece9be4583fe6424f7524bcfd784b983b73bb51d",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-company-roadmap-2026-10-14.md",
+          "status": " M",
+          "bytes": 23052,
+          "sha256": "0a90ee5335f55d13c4af2c56c103fee3057dfdfa45e9f7ddf712b61c4fbc9e1b",
+          "blob": "fb4dea1477648b0abd277fef9c387c72bc720db6",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-financial-documents-roadmap-2026-10-14.md",
+          "status": " M",
+          "bytes": 90989,
+          "sha256": "8079a72fbabf3ee3e7d49b1cc3a37c82fa940714f9c6dab62b2e299c2ba4fd1a",
+          "blob": "09dd43a39cc209450e6d14f63f3c5ebd59f25571",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-handoff-2026-10-21.md",
+          "status": " M",
+          "bytes": 100105,
+          "sha256": "234b833d0d09fedbdb84a2266b7f9f163d910ef037a2592b26566e07e6dc0937",
+          "blob": "d99cde2105e85fe3f83b15a9387bef6c8f4e8c0f",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-messenger-roadmap-2026-10-14.md",
+          "status": " M",
+          "bytes": 63973,
+          "sha256": "a920332a88e7119fa419f4c12c55ba56c5628bc3ac7fb38250cf2dbf18e895ca",
+          "blob": "e95198175db86bde2e608c6927e40e52264bba61",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+          "status": " M",
+          "bytes": 137994,
+          "sha256": "903e34ef63df74b81715e225a74fbd80f02263ec4659fd787f98c4b7ef4884e3",
+          "blob": "691dd06bc78b07f02530934c90148c95b1e62e7c",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-requests-roadmap-2026-10-14.md",
+          "status": " M",
+          "bytes": 25465,
+          "sha256": "1358d9d5cf06a1ea450cd9f7f38c5ea12a42c2cc032cd136c0c55b71ecbbc0a6",
+          "blob": "03ff9d0508970024b91af76d5019c5b69573a56e",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-ui-roadmap-2026-10-14.md",
+          "status": " M",
+          "bytes": 62688,
+          "sha256": "36e6202ab738f2eb7fcf0b0a2929e6e86ed5a40e2189a08fac93393ebce0a0ad",
+          "blob": "4966b3c7057e850f1268c6adbc68ade5c67c5f9a",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-unified-roadmap-2026-10-14.md",
+          "status": " M",
+          "bytes": 67779,
+          "sha256": "9644a09551b7eaa554fe1e881710ac292660157d24d8b4b879a2f7e19cbc6369",
+          "blob": "9566ce553f250688c4b0bbc4059dd5c8659ebc87",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-work-order-2026-10-21.md",
+          "status": " M",
+          "bytes": 60395,
+          "sha256": "b4701f9130ee483e4106e882e0458d4dbf37c4f7a902c8a8b0556be1f23c7688",
+          "blob": "40dd6a32d33859e358d9634441356b7f9681142a",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/system-surface-inventory.generated.md",
+          "status": " M",
+          "bytes": 287537,
+          "sha256": "ed65085a17340422d84eff74e211da4b8be3bd1b3afc72d2f38cb408d9367206",
+          "blob": "3c22c50d329c96a8e7c87ab7d498202d70eee3ad",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "scripts/check-case-retirement-live-browser.mjs",
+          "status": " M",
+          "bytes": 38285,
+          "sha256": "b686b3619910fad7e5046b93b0303384c3666907487db8b3b0609019ba932f7d",
+          "blob": "b166dcb63b6caa47cd0c09f02a11cb97fceea368",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "scripts/check-storage-capacity-visual.mjs",
+          "status": " M",
+          "bytes": 14439,
+          "sha256": "9f583dd4982b70690d8be88514dd59648af8abe9c79edc9746d981338581cc40",
+          "blob": "33f1f585f0d48119a554a49543f7ff55a1778da3",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "scripts/validate-deploy-workflow.mjs",
+          "status": " M",
+          "bytes": 36307,
+          "sha256": "60a9909de8c2b2c0ab2f98936586547471a6ab2b090a717b0cc7d3e9233b72da",
+          "blob": "e4a0feba689ba13280faf7f7ef231a01bf3784ad",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "scripts/validate-deploy-workflow.test.ts",
+          "status": " M",
+          "bytes": 33034,
+          "sha256": "84133e114f594cd84d22db4012f78c8a87df635d7aafd03400b862bf6dc62479",
+          "blob": "8752270e889b53e4b9fe10963af32543d2b63a15",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Accounts/InvoiceModal.integration.test.tsx",
+          "status": " M",
+          "bytes": 118381,
+          "sha256": "492e87da931b1770ac71b0b0f253f0df775f62aa8620ede4c62ead11d8471d2f",
+          "blob": "5a0e7549a7a52f75ef95158ca955c966d4f00887",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Accounts/InvoiceModal.tsx",
+          "status": " M",
+          "bytes": 285210,
+          "sha256": "12ab6c62927eb6f29ef67f327253f17baa74ec105b8789eeace5c4b63cdbad29",
+          "blob": "17606d33dd8a17b10407a89480b03dbe538efad7",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Acts/ActDetailPage.tsx",
+          "status": " M",
+          "bytes": 63264,
+          "sha256": "118316e1eaf5e24f70e16063c1d1c99f9d4612d0df0df1925079c6d7a3c65a44",
+          "blob": "02a4fe221edddbd1c7a9fc18b1948b4155b3a444",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Acts/ActModal.integration.test.tsx",
+          "status": " M",
+          "bytes": 50411,
+          "sha256": "3aed77209ed061278f12e3d430c363178c46a9d6636312d2f7cf1d41106baf58",
+          "blob": "ecb2fda65ee16e81c87933b9a0356b8bcdda6718",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Acts/ActModal.tsx",
+          "status": " M",
+          "bytes": 108613,
+          "sha256": "2b33f0901242819ab961647b3d346f466bc6d3431d375dd7e6d8ac9283aed1fa",
+          "blob": "222020219c0b2962ee9e7edbfa42d14deb37be5d",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Cases/CaseDetailPage.test.tsx",
+          "status": " M",
+          "bytes": 272931,
+          "sha256": "9ff3e8f081708e703a754c07558b910b1e1e3d59ce9fbb348358e87165959a31",
+          "blob": "5afc58abcc89b17fdf73b3a63e1dae3dda143855",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Cases/CaseTaskActions.test.tsx",
+          "status": " M",
+          "bytes": 15250,
+          "sha256": "90a1901d13ebae4753af844cd8630fd05188820de356a23ee594ad2da8c1813e",
+          "blob": "351de0fa74570684486dd7178f779c62ce1af1bd",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Contracts/ContractCreatePage.tsx",
+          "status": " M",
+          "bytes": 25217,
+          "sha256": "ef43db23854b4d5cc860be31a8c228c91e585dd20d7c5f5606ec9a04b84100b3",
+          "blob": "8cc6034b7f0a7b6a3bab4eef8464525c3b4cf7ef",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Contracts/ContractDetailPage.tsx",
+          "status": " M",
+          "bytes": 96654,
+          "sha256": "b60f393ec25a1b81ce97b7a14500953856210de20658548682668f309fce550a",
+          "blob": "a13668e49cc388ef9330a3f433a6b30056f7d41f",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Contracts/ContractModal.integration.test.tsx",
+          "status": " M",
+          "bytes": 3865,
+          "sha256": "7029ec6dec8d0bf12940ccc5fd47d12fe54e6772cfd68a53001d24a4bbf90051",
+          "blob": "44cafe2519fa0cc417140515b42748bf6ca6a47b",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Contracts/ContractModal.tsx",
+          "status": " M",
+          "bytes": 25720,
+          "sha256": "adac4a66757064050fda48a155fbbc0abc17da10a66eefba7448c3e6bf696601",
+          "blob": "8e7ab1c11d9a9ba888c16e964e1af03f2e9c89d7",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Documents/DocumentSellerPicker.test.tsx",
+          "status": " M",
+          "bytes": 7644,
+          "sha256": "3cc9044582d0c5198723827be17ee975427b4a94c4026b38665407f8bf7f42e6",
+          "blob": "5ad2e1521483c13fdf636c0e91bf070ca41b6538",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Documents/DocumentSellerPicker.tsx",
+          "status": " M",
+          "bytes": 6731,
+          "sha256": "99c945f71d6fa66a7a78f20d2122ca8e9513565643b7c82ddfe9461364516e43",
+          "blob": "4b1abaea0201820c035688eb6983e34dcd8531bb",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Money/MoneyOperations.integration.test.tsx",
+          "status": " M",
+          "bytes": 176116,
+          "sha256": "1456e3406e4234ac655932ef0b2247e579dce4ccf0e5d815e058198e7de2642e",
+          "blob": "eefa1b31caa1b0201b45bd4c0fd7a6044833ab89",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Money/MoneyOperations.tsx",
+          "status": " M",
+          "bytes": 280953,
+          "sha256": "025c11427683edf9b737263eb2a2e5c2704f9862f989ded6985c2777a9a1e7ae",
+          "blob": "ba47d0c22d8ac7b9c77bf73fb7bc0f548218d6ae",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Settings/MainCompanySettings.tsx",
+          "status": " M",
+          "bytes": 17412,
+          "sha256": "a698a3fae6568b76dcf254d817a748c5d5f90b4626898dea357b4687b4dca3b0",
+          "blob": "f8b0e197a9a10f249168c6accc97260e59eb2051",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Settings/TaskJournalSettings.test.tsx",
+          "status": " M",
+          "bytes": 34655,
+          "sha256": "cdefb42e41d0d219b8f8cd6a885bbe69ed5d7c026a4454e9bff05211e6816e05",
+          "blob": "e6f266e1f57330232096ba9bc49b42cd01e60572",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Settings/TaskJournalSettings.tsx",
+          "status": " M",
+          "bytes": 83756,
+          "sha256": "ed63d143c4e851f00c9e671b402a6e7454272e8fa5918299bb01117e81b2fe3e",
+          "blob": "2e38c2cab3ad3636df3b42eb773040ddb4686fce",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/TaskBulkBillingDialog.tsx",
+          "status": " M",
+          "bytes": 8915,
+          "sha256": "b2037043aad6e94139ab7c0490cb7cb74468cfb125e0117afa79a50dbe15abb4",
+          "blob": "24597e486ac377546812d3f9b5645587a5d5118e",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/TaskJournal.actions.test.tsx",
+          "status": " M",
+          "bytes": 38719,
+          "sha256": "df7889fb34d3e56d153bc234d959195a155798b8338166620add1b34dab82924",
+          "blob": "becd4766ab57fb4af12ed20463fdcecdcce64ae0",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/TaskJournal.billing.test.tsx",
+          "status": " M",
+          "bytes": 31475,
+          "sha256": "9ee20f54e86aa4d4d69735f730a6ff28c40a3fe89ecadd77c4a20af78ea910c4",
+          "blob": "bb0e7b4142baa285ddf2c8e744bf17296409475b",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/TaskJournal.tsx",
+          "status": " M",
+          "bytes": 748722,
+          "sha256": "7bad3e6ce1e7e0fe5aedf37f320f6d1522f47d3992ec3fe943a1e91240b2dd50",
+          "blob": "e29fd296736af8bf7d5240064e90a3261c37df1b",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/taskBulkBilling.test.ts",
+          "status": " M",
+          "bytes": 15873,
+          "sha256": "41a6a09d1dcd4a4e056513ae734f270d6f60770f75f2f22143b8626dae97ffdd",
+          "blob": "33a85eb46dfd2633be379e6c41eeb18a2b25b81d",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/taskBulkBilling.ts",
+          "status": " M",
+          "bytes": 8637,
+          "sha256": "1e9fb435afc1880ec5b923305a4234b6fb05ec910c579ed171936d83b0ffaad8",
+          "blob": "4dcadfc1bf15d1f9653b0b6e006aa9c37294f340",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/useTaskBulkBilling.integration.test.tsx",
+          "status": " M",
+          "bytes": 4979,
+          "sha256": "6544e09e616945ba01c267442d82e50fe4e740917d3af4a516d916457be947e2",
+          "blob": "bf557ea9bf9a3ef84403223cd8ec0665c3779ae7",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/useTaskBulkBilling.test.tsx",
+          "status": " M",
+          "bytes": 24257,
+          "sha256": "a823ae6250a9a40367c0fc4e587d074fc4dfca68dfb83922f008e02d1b50cfe1",
+          "blob": "00967d5f6219d134fc9677db86f93b8501566a60",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Tasks/useTaskBulkBilling.tsx",
+          "status": " M",
+          "bytes": 17261,
+          "sha256": "e83bcc9236b879367be3dd55c729e6949ec14276a394cfaa201086662d33630f",
+          "blob": "758f21d49460670f0cc2ab016b455af641216ead",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/services/api.test.ts",
+          "status": " M",
+          "bytes": 164319,
+          "sha256": "e0de7f07dd46337487e99f0f9cfb3046cfd84b4b56986fa281e5d4ad555e9cf5",
+          "blob": "d7c07fcded99e79997f3ecab582d4dc17dfb380b",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/services/api.ts",
+          "status": " M",
+          "bytes": 314814,
+          "sha256": "b9587ea0766a9b3d7c6b2e16406482215357f3e7a6fd6e813211b7a86ae05224",
+          "blob": "f1674c1deac45a8fc4ce716dee5a4cee22dd6354",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/types/index.ts",
+          "status": " M",
+          "bytes": 112975,
+          "sha256": "de9ec307100fd6ec51a258e6b9bb4bf4859502754474cf9e469b090acfbeeff3",
+          "blob": "9385198b21b55398d66452898a94f5405aa3d7f3",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/utils/invoiceEditorBridge.ts",
+          "status": " M",
+          "bytes": 10676,
+          "sha256": "e3692aeed47c0b2f19287e7b090f9277cf01b65fe5d34090066705b01d884c9a",
+          "blob": "9131b22955ec0371684c50e0ca8f1041108c8960",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/utils/taskJournalStore.ts",
+          "status": " M",
+          "bytes": 16879,
+          "sha256": "19cf84b4bc5f18fabff170606a56d61d4c912e82240ea356c30fff365c07894a",
+          "blob": "0ec822410f4bce2f6ed71f92a75da9899244de66",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "tools/PayPlanner.TestShards/BoundedBatchScheduler.cs",
+          "status": " M",
+          "bytes": 5172,
+          "sha256": "9383545a9e353b7c96665d63a2bf6a54fe5f466ac329bb10c9cfbe78d46fdbcc",
+          "blob": "1c9e08796e02aba9d0b384c45d71389378c5cf0d",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "tools/PayPlanner.TestShards/BoundedTestRunner.cs",
+          "status": " M",
+          "bytes": 10050,
+          "sha256": "265c511705e9f41bfcc41e4a41e04f6edb99c2a459979bafd6ee5f9c3fa8916b",
+          "blob": "b288775a4bce291b10fd6ec289e61815a6c1a37b",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "tools/PayPlanner.TestShards/ExecutionScheduling.cs",
+          "status": " M",
+          "bytes": 12851,
+          "sha256": "95c3f34a50458d46a09dbdadb782f27e46aecfcc542d89394dbc1de3e710c9c8",
+          "blob": "488f87dcccb3c5319b61a5c75b9067a099510548",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "tools/PayPlanner.TestShards/Program.cs",
+          "status": " M",
+          "bytes": 18366,
+          "sha256": "4b3678ad9ac1898e23fef2ae92775a1e7e48ec661cf7c263027334b62d55f44b",
+          "blob": "9494011b0108c6d6bdb6167a4ae65a3b8f9e6b95",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "tools/PayPlanner.TestShards/ShardPlan.cs",
+          "status": " M",
+          "bytes": 9804,
+          "sha256": "ea9f916b4f5717b1b9b4040ee2a109c83e3a5aa88683eef3493b011e1e0148c9",
+          "blob": "29529612614b5614c6d2cd83420149b305595038",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Filters/DocumentSellerExceptionFilterAttribute.cs",
+          "status": "??",
+          "bytes": 1011,
+          "sha256": "350f5c6c87dda1d7a97527ece46ef01f8db658ec968e2b6353401e932eaefe11",
+          "blob": "ad31af7d5772958d39c543ec0810cc8011a838c8",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Models/DocumentSellerSnapshotPolicy.cs",
+          "status": "??",
+          "bytes": 770,
+          "sha256": "898a17042c00399ca031657d5e74c19212dce3ecf971d4bd114862e66eb6dcc8",
+          "blob": "d4ac6b9d49961896cc15429f53ea01daa168dfd4",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Migrations/Migrations/20261024110000_AddDocumentSellerSnapshotPolicy.Designer.cs",
+          "status": "??",
+          "bytes": 602376,
+          "sha256": "fc2820203135d14d862d32905b9c3f7c776c13f8949ca0dcaa4fda02e97c1bce",
+          "blob": "1fea6fc5f412b8b454c14565c0063bab87160ec8",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Migrations/Migrations/20261024110000_AddDocumentSellerSnapshotPolicy.cs",
+          "status": "??",
+          "bytes": 1102,
+          "sha256": "6cd4c65597e6232172f355766b35adcc44dfc60f23a10825d3dccd5431982beb",
+          "blob": "bef6ec88c9c305fac8f9e755f57f91aaba4dd7a5",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/20261024110001_AddDocumentSellerSnapshotPolicyPostgres.Designer.cs",
+          "status": "??",
+          "bytes": 646459,
+          "sha256": "4ad56c072b83f36b02533a61244a54beec6ad1deb0c1ebc1a860e9ce0dc0e642",
+          "blob": "0c958c08cfeb981c01237502d1b86fb9ab90ea54",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/20261024110001_AddDocumentSellerSnapshotPolicyPostgres.cs",
+          "status": "??",
+          "bytes": 1172,
+          "sha256": "c4477a3cbb9339d97e633fc683befec85bafc7ba1d3e34310b700201cb672a95",
+          "blob": "ebe03070fbf537cbf6c1c6b4f04a4d4b9e276b5b",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/CaseCalendarRequestPrivacyTests.cs",
+          "status": "??",
+          "bytes": 14797,
+          "sha256": "705f1a9e9860480a6cc5d3fa7ff928d7dd605f2d37d64b561c706ae00944848b",
+          "blob": "a94b3f1a4a4e0c3bfced81e9ffd00a43be105a82",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/CaseRetirementBrowserBundle.cs",
+          "status": "??",
+          "bytes": 9008,
+          "sha256": "652e1906923f6285194d8bcbc2185578fc1fe55dde2e4f37139d20652ffac970",
+          "blob": "60d579dcae329c23030025e65f2ebd5d6b42a1e9",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/CaseRetirementBrowserBundleTests.cs",
+          "status": "??",
+          "bytes": 3959,
+          "sha256": "8a7770fa06e3278df2ef83325a00a84404b03734b803247f7a813d41a438da07",
+          "blob": "6c6a983024388e66bcc52bddf6db653cb9591b0b",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/DatabaseImportCompanySettingsTests.cs",
+          "status": "??",
+          "bytes": 11813,
+          "sha256": "044792ac823491b67c7567c94f595ccbdfbce4f0b6b6f77df8ec65e9406e3964",
+          "blob": "c1803b4e5a805c402365631e3db9bd3cbff3f7eb",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/DatabaseImportSellerSnapshotTests.cs",
+          "status": "??",
+          "bytes": 11786,
+          "sha256": "493b139da17e007f497b43ce12e0ac79e626b68a4fb68d38cef9bdc22ce7c5a7",
+          "blob": "eb7795230dfe52ccb132f513b3f0801897ce7ac5",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/DocumentSellerModulePermissionTests.cs",
+          "status": "??",
+          "bytes": 7572,
+          "sha256": "2e5c1bf018d00e44dffdeb6032b8e3b76be5cc686867d90877f0b0c786c9fe61",
+          "blob": "05c8c25a149a391057377acf5c0302f151057f56",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/DocumentSellerPolicyMigrationTests.cs",
+          "status": "??",
+          "bytes": 5193,
+          "sha256": "6bba7c6fe50850b902c5e9e53aac6934784e9e71d9e96a023766c5e1d7ba7f29",
+          "blob": "e76208ba7d226ceda0e6e63e7a826a8d8d9bc849",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/DocumentSellerSnapshotConcurrencyTests.cs",
+          "status": "??",
+          "bytes": 16603,
+          "sha256": "9478542730ca0cc4748cb42a7d94457fe446a2a7d4873ceb646a5ceb6a864053",
+          "blob": "fb942838fc2c13d510d1fd92a6c683f9bea0ea43",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/DocumentSellerSnapshotEntrypointTests.cs",
+          "status": "??",
+          "bytes": 14558,
+          "sha256": "96cb7b74732ae53495e644019dd267ce4b06d83a14793da3e45f030a09ee8149",
+          "blob": "a01bd63210b9b94f1e93e2ba5ac008f7c9ec8bd0",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/DocumentSellerSnapshotPolicyTests.cs",
+          "status": "??",
+          "bytes": 17732,
+          "sha256": "0cca3de406949905cbf4daf659744fcfa572782dd634fe9bc5f97fcddc87b623",
+          "blob": "92613b968f5de56ab134cbe7242c1dbf56dbb43d",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/SpreadsheetImportSellerSnapshotTests.cs",
+          "status": "??",
+          "bytes": 8468,
+          "sha256": "33001635c04e03b3c769fe94e87b169b47c8021cdafa61e68ee2c9ed364abd30",
+          "blob": "cbad1f2ab127975c96003e5ed9715bfdb0cc0447",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/Companies/CompanyBrandImageVersionStore.cs",
+          "status": "??",
+          "bytes": 3775,
+          "sha256": "237e3961fe4915f2feb1878ea1b8e4faf5214923db73abd2457f0352572a4ce3",
+          "blob": "3fdd3c87a22fc8782fc142629d90be8846b60247",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/Companies/DocumentSellerLease.cs",
+          "status": "??",
+          "bytes": 14333,
+          "sha256": "2a4bd751dc962452444900ed7d59b4e2583f32597c7c3240b2f43bdbbc14281e",
+          "blob": "5749c2122b9f6973ff6e77a1ded1093140117dcb",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/Services/DatabaseImportService.SellerSafety.cs",
+          "status": "??",
+          "bytes": 8379,
+          "sha256": "91e34a47bb70bc8b71cf456981a68201db61e6295b5a41fb517ac8ece3c09e50",
+          "blob": "0392529d03c0291b45c57ca83089bdd45873304b",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/deployment-manual-2026-10-25.md",
+          "status": "??",
+          "bytes": 8071,
+          "sha256": "76ad86c579449cf8a90483bde5b1cfe70b01732ec7581cc8cd0b2f4a709d8b6f",
+          "blob": "2d3957453b68e7581234ee39b76f73312c4f8b25",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/development-settings-verification-2026-10-25.md",
+          "status": "??",
+          "bytes": 37373,
+          "sha256": "96d0cfe096807a7c0f7fe93670a4423c5d5d743c4a851add497acdb1a1dc140b",
+          "blob": "c511746b1388144ce991a138e764c5edd29211c0",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-settings-decisions-2026-10-24.md",
+          "status": "??",
+          "bytes": 7069,
+          "sha256": "04f6cc780368dc42f85731e944b078a8e4138d1ab3ace774c68d05778476af0f",
+          "blob": "32175033d3ae55a81d3fb173a8853ab48bc94e2e",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "scripts/case-retirement-production-bundle.mjs",
+          "status": "??",
+          "bytes": 14517,
+          "sha256": "652afe9471ac24e784002c40251ff56d13554960f216891bc194ff77019bd928",
+          "blob": "05167a6121720f69874b83b60aed3a11114b4ba4",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "scripts/case-retirement-production-bundle.node-tests.mjs",
+          "status": "??",
+          "bytes": 8814,
+          "sha256": "eba3d61f996e0f606bd3dda94365e898d1f1a131171d3fc68383b47e0e0a59bc",
+          "blob": "65852bd8003652420689a3b732d0b41066c5cc48",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/components/Settings/MainCompanySettings.test.tsx",
+          "status": "??",
+          "bytes": 3601,
+          "sha256": "88a519af353725c796b02497ee6111d49ef270b4e8d8530c49ed8cc7b4b47185",
+          "blob": "18a7c5a8b43bd45cbe4b5c3730e76d84cf3673e7",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/services/api.documentSellerPolicy.test.ts",
+          "status": "??",
+          "bytes": 1112,
+          "sha256": "ded214193f54b4a9d040eca013d28469ac0a3326f3b389feff6aca92b4e6ab17",
+          "blob": "858e463014591a2ad62401cf3600e706379038ba",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/services/api.taskBillingSettings.test.ts",
+          "status": "??",
+          "bytes": 5657,
+          "sha256": "31b7bec608a5c7aa7ed52e1f3d8f1cda5acbaf400a924f5eb179422d96a2235e",
+          "blob": "78ea6956a8b25ae3a0633455e483d161010f63dc",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "src/utils/invoiceEditorBridge.seller.test.ts",
+          "status": "??",
+          "bytes": 1415,
+          "sha256": "258a72766e3f43270e850ce144a52b7eb11519ba5a6b46a48c3c0799fbc67aa4",
+          "blob": "7f8d41cbb8dff9ee68c542ded6b015dac1815d7a",
+          "equals_main": true,
+          "blob_in_main_history": true
+        }
+      ]
+    },
+    {
+      "path": "C:\\Users\\User16\\.codex\\worktrees\\payplanner-release-ci-recovery\\PayPlanner",
+      "snapshot": "payplanner-release-ci-recovery",
+      "head": "6a4488dadcf5dd9d6ae2953800294889cef9c967",
+      "files": [
+        {
+          "path": "docs/development-roadmap-release-integration-2026-10-28.md",
+          "status": " M",
+          "bytes": 195889,
+          "sha256": "6be91618b03ec10154906f6775190ad4ca19756cd6b74bbfd09a625956c06b6a",
+          "blob": "ffc5c23d23a1cff651f9d788afb138666708e728",
+          "equals_main": false,
+          "blob_in_main_history": false
+        },
+        {
+          "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+          "status": " M",
+          "bytes": 246475,
+          "sha256": "a6702a4eb0354a05621b4b53f3e065176b6f26082afb0300f47273eaacc3ef4f",
+          "blob": "18d6f121a64704e14ab722b7c35cd36d9b710a27",
+          "equals_main": false,
+          "blob_in_main_history": false
+        },
+        {
+          "path": "docs/system-surface-inventory.generated.md",
+          "status": " M",
+          "bytes": 295099,
+          "sha256": "4e7bb3f3b61b5de275b865486e9f5b89e7a656dda111227427f8b418941081cc",
+          "blob": "6a24bb2edd129f504bab9f626a05851ae686e8fb",
+          "equals_main": false,
+          "blob_in_main_history": false
+        }
+      ]
+    },
+    {
+      "path": "C:\\Users\\User16\\.codex\\worktrees\\sqlite-fixture-speed\\PayPlanner",
+      "snapshot": "sqlite-fixture-speed",
+      "head": "7cd89d840b52827e79146696bc53fafd57244ddd",
+      "files": [
+        {
+          "path": "backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs",
+          "status": " M",
+          "bytes": 14696,
+          "sha256": "cffee58e347eb0c726b0ef2386cc74c84ea990a5c233d58f831e411f4c70ffba",
+          "blob": "da3e23756ad1d7b51ba1da7aede81a33cd757a50",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs",
+          "status": " M",
+          "bytes": 20872,
+          "sha256": "f02743781283228c61b4bbe784b2eb142c34442a53f94412dbfbf68db1cef99f",
+          "blob": "c9aa46646727fd949c2d356008c49c6c0404ef3f",
+          "equals_main": false,
+          "blob_in_main_history": false
+        },
+        {
+          "path": "backend/PayPlanner.Api.Tests/StorageStageWriterProcessTests.cs",
+          "status": " M",
+          "bytes": 21538,
+          "sha256": "bff50317ea04319347e4f60c2878b5fdc49a507cee3bdcababde9a76f644410e",
+          "blob": "f71d2fe4cebbdc9509c9c3520b5657d6a4c6e007",
+          "equals_main": true,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+          "status": " M",
+          "bytes": 106980,
+          "sha256": "a837e7b7518954d9ad74e77a69779381a3f7ca2eb03c94ad79e117332e9083e9",
+          "blob": "319b9e5368dce9a316d269664fc45c14a8a4e01d",
+          "equals_main": false,
+          "blob_in_main_history": false
+        },
+        {
+          "path": "tools/PayPlanner.TestShards/BoundedBatchScheduler.cs",
+          "status": " M",
+          "bytes": 5172,
+          "sha256": "9383545a9e353b7c96665d63a2bf6a54fe5f466ac329bb10c9cfbe78d46fdbcc",
+          "blob": "1c9e08796e02aba9d0b384c45d71389378c5cf0d",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "tools/PayPlanner.TestShards/BoundedTestRunner.cs",
+          "status": " M",
+          "bytes": 10050,
+          "sha256": "265c511705e9f41bfcc41e4a41e04f6edb99c2a459979bafd6ee5f9c3fa8916b",
+          "blob": "b288775a4bce291b10fd6ec289e61815a6c1a37b",
+          "equals_main": false,
+          "blob_in_main_history": true
+        },
+        {
+          "path": "tools/PayPlanner.TestShards/ExecutionScheduling.cs",
+          "status": " M",
+          "bytes": 12044,
+          "sha256": "379b994ded50b6229af81f145bf5e589b98168af56e200716fc6705ba2ff5b6c",
+          "blob": "04d9a497d8686dc6b34c1412d87c2281c1cbf82b",
+          "equals_main": false,
+          "blob_in_main_history": false
+        }
+      ]
+    }
+  ]
+}

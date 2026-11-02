@@ -1,0 +1,2680 @@
+[
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/AppReleases/releases.json",
+    "blob": "94ea66c8db70c7d8c3288091442bc0865ca7fe99",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/AppReleases/releases.json",
+    "blob": "8d6d02e8544a1e6f54525240ba684afb50ada259",
+    "classification": "review-required",
+    "comparison": "de4bec144f77d8b5",
+    "merge_exit": 2
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Controllers/ActsController.cs",
+    "blob": "ed471bdea3ebd26e3bfb6fd09c2971f565a9d11f",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Controllers/ActsController.cs",
+    "blob": "ed471bdea3ebd26e3bfb6fd09c2971f565a9d11f",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Controllers/ContractsController.cs",
+    "blob": "38a21f5ad1b598d65b810efbd44e87debe0a65f4",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Controllers/ContractsController.cs",
+    "blob": "38a21f5ad1b598d65b810efbd44e87debe0a65f4",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Controllers/DatabaseAdminController.cs",
+    "blob": "4d6823c8cb60bd75a641ff26714af6c3b32bed88",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Controllers/DatabaseAdminController.cs",
+    "blob": "4d6823c8cb60bd75a641ff26714af6c3b32bed88",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Controllers/InvoicesController.cs",
+    "blob": "15e7388397487032212e4033b85ea6dd4b8b8301",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Controllers/InvoicesController.cs",
+    "blob": "15e7388397487032212e4033b85ea6dd4b8b8301",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Controllers/LegalEntitiesController.cs",
+    "blob": "736d650016160bd1572c13eba8d4a0d778895684",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Controllers/LegalEntitiesController.cs",
+    "blob": "736d650016160bd1572c13eba8d4a0d778895684",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Controllers/OwnCompaniesController.cs",
+    "blob": "fbd8b9118d87201befdd745a3b8d202fecc132f2",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Controllers/OwnCompaniesController.cs",
+    "blob": "fbd8b9118d87201befdd745a3b8d202fecc132f2",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Controllers/TasksController.cs",
+    "blob": "62517675b9fa92f6848c2ec52ad09b97bd496165",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Controllers/TasksController.cs",
+    "blob": "62517675b9fa92f6848c2ec52ad09b97bd496165",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Controllers/V2/CasesV2Controller.FinancialCapture.cs",
+    "blob": "413ffd0360166376cd1cb65ad49d5785d580e124",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Controllers/V2/CasesV2Controller.FinancialCapture.cs",
+    "blob": "413ffd0360166376cd1cb65ad49d5785d580e124",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Controllers/V2/CasesV2Controller.cs",
+    "blob": "c98fa866d080caa1c084919869567c4eb2993596",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Controllers/V2/CasesV2Controller.cs",
+    "blob": "c98fa866d080caa1c084919869567c4eb2993596",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Data/PaymentContext.cs",
+    "blob": "a2403d530d7ccefafdd0b058008c742fceed5f6c",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Data/PaymentContext.cs",
+    "blob": "a2403d530d7ccefafdd0b058008c742fceed5f6c",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Extensions/DataVisibilityQueryExtensions.cs",
+    "blob": "7ddb197b27f6e355bfe70cbcfb98c661b3349965",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Extensions/DataVisibilityQueryExtensions.cs",
+    "blob": "7ddb197b27f6e355bfe70cbcfb98c661b3349965",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Filters/DocumentSellerExceptionFilterAttribute.cs",
+    "blob": "ad31af7d5772958d39c543ec0810cc8011a838c8",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Filters/DocumentSellerExceptionFilterAttribute.cs",
+    "blob": "ad31af7d5772958d39c543ec0810cc8011a838c8",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Models/Act.cs",
+    "blob": "058e93e18f13c341c55de9fbdafd04ff0e5c74fe",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Models/Act.cs",
+    "blob": "058e93e18f13c341c55de9fbdafd04ff0e5c74fe",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Models/Contract.cs",
+    "blob": "80adc426237a2fce8dc233bf9441d6aa0efcb3d5",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Models/Contract.cs",
+    "blob": "80adc426237a2fce8dc233bf9441d6aa0efcb3d5",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Models/DocumentSellerSnapshotPolicy.cs",
+    "blob": "d4ac6b9d49961896cc15429f53ea01daa168dfd4",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Models/DocumentSellerSnapshotPolicy.cs",
+    "blob": "d4ac6b9d49961896cc15429f53ea01daa168dfd4",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Models/Payment.cs",
+    "blob": "43e3736fc4df8bc0f29eb38b47bc4bea0ab27655",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Models/Payment.cs",
+    "blob": "43e3736fc4df8bc0f29eb38b47bc4bea0ab27655",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Models/Requests/DocumentSellerRequest.cs",
+    "blob": "3b965d3b6283aa1b68579d069bcf5aa6bdd5d1aa",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Models/Requests/DocumentSellerRequest.cs",
+    "blob": "3b965d3b6283aa1b68579d069bcf5aa6bdd5d1aa",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Models/Requests/TaskJournalSettingsRequest.cs",
+    "blob": "34af8a11714aee16e5ec5230dca6793da9a2bd85",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Models/Requests/TaskJournalSettingsRequest.cs",
+    "blob": "34af8a11714aee16e5ec5230dca6793da9a2bd85",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Models/Requests/UpdateMainCompanySettingsRequest.cs",
+    "blob": "0fa022218b357f7dfa66970f4618a361b079db5c",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Models/Requests/UpdateMainCompanySettingsRequest.cs",
+    "blob": "0fa022218b357f7dfa66970f4618a361b079db5c",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Models/Requests/UpsertActRequest.cs",
+    "blob": "2cfc5edcad184d15f2123a67ff2633db2d075e97",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Models/Requests/UpsertActRequest.cs",
+    "blob": "2cfc5edcad184d15f2123a67ff2633db2d075e97",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Models/Requests/UpsertContractRequest.cs",
+    "blob": "f46c1bcc694c80454c6cc340c65c50941ec84366",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Models/Requests/UpsertContractRequest.cs",
+    "blob": "f46c1bcc694c80454c6cc340c65c50941ec84366",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Models/Requests/UpsertInvoiceRequest.cs",
+    "blob": "435b0f621a6ba2ba2cd14ef4472f4754436e757d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Models/Requests/UpsertInvoiceRequest.cs",
+    "blob": "435b0f621a6ba2ba2cd14ef4472f4754436e757d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Models/Requests/UpsertTaskJournalItemRequest.cs",
+    "blob": "820bb65d438e7dc64a6662cf9f5dc5d2010934a7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Models/Requests/UpsertTaskJournalItemRequest.cs",
+    "blob": "820bb65d438e7dc64a6662cf9f5dc5d2010934a7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Models/Responses/ActDto.cs",
+    "blob": "e69f6638dd7f35a5053d7fa87c16e28560a8500f",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Models/Responses/ActDto.cs",
+    "blob": "e69f6638dd7f35a5053d7fa87c16e28560a8500f",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Models/Responses/ContractDto.cs",
+    "blob": "f87ac8d8134dd0e86f6430b9f27ac618e66547a5",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Models/Responses/ContractDto.cs",
+    "blob": "f87ac8d8134dd0e86f6430b9f27ac618e66547a5",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Models/Responses/InvoiceDto.cs",
+    "blob": "b85d1d45acbafb14bcd1c1aa4d89a55891de3c39",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Models/Responses/InvoiceDto.cs",
+    "blob": "b85d1d45acbafb14bcd1c1aa4d89a55891de3c39",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Models/Responses/LegalEntityDto.cs",
+    "blob": "5d117c8a03666fb4cab558fd9497ce0392327623",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Models/Responses/LegalEntityDto.cs",
+    "blob": "5d117c8a03666fb4cab558fd9497ce0392327623",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Models/Responses/TaskJournalDtos.cs",
+    "blob": "3797d42767ffc2a5d897734a30c13758d1e3ad51",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Models/Responses/TaskJournalDtos.cs",
+    "blob": "3797d42767ffc2a5d897734a30c13758d1e3ad51",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/20261024110000_AddDocumentSellerSnapshotPolicy.Designer.cs",
+    "blob": "1fea6fc5f412b8b454c14565c0063bab87160ec8",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/20261024110000_AddDocumentSellerSnapshotPolicy.Designer.cs",
+    "blob": "1fea6fc5f412b8b454c14565c0063bab87160ec8",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/20261024110000_AddDocumentSellerSnapshotPolicy.cs",
+    "blob": "bef6ec88c9c305fac8f9e755f57f91aaba4dd7a5",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/20261024110000_AddDocumentSellerSnapshotPolicy.cs",
+    "blob": "bef6ec88c9c305fac8f9e755f57f91aaba4dd7a5",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/PaymentContextModelSnapshot.cs",
+    "blob": "801ea402f14cce31e0125554fcd68c526aa858ef",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/PaymentContextModelSnapshot.cs",
+    "blob": "801ea402f14cce31e0125554fcd68c526aa858ef",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/20261024110001_AddDocumentSellerSnapshotPolicyPostgres.Designer.cs",
+    "blob": "0c958c08cfeb981c01237502d1b86fb9ab90ea54",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/20261024110001_AddDocumentSellerSnapshotPolicyPostgres.Designer.cs",
+    "blob": "0c958c08cfeb981c01237502d1b86fb9ab90ea54",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/20261024110001_AddDocumentSellerSnapshotPolicyPostgres.cs",
+    "blob": "ebe03070fbf537cbf6c1c6b4f04a4d4b9e276b5b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/20261024110001_AddDocumentSellerSnapshotPolicyPostgres.cs",
+    "blob": "ebe03070fbf537cbf6c1c6b4f04a4d4b9e276b5b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/PostgreSqlPaymentContextModelSnapshot.cs",
+    "blob": "ea6fbda7be03b8ad25ba0263d2d2526a4719b171",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/PostgreSqlPaymentContextModelSnapshot.cs",
+    "blob": "ea6fbda7be03b8ad25ba0263d2d2526a4719b171",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/ActsControllerTests.cs",
+    "blob": "4fbbaf0df30d671f3864264eddb4563bab850326",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/ActsControllerTests.cs",
+    "blob": "4fbbaf0df30d671f3864264eddb4563bab850326",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/BankImportProvenanceMigrationTests.cs",
+    "blob": "515eb44b3db71728406fdd22ea36cdfef88657af",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/BankImportProvenanceMigrationTests.cs",
+    "blob": "515eb44b3db71728406fdd22ea36cdfef88657af",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/BatchOperationAuditCoverageTests.cs",
+    "blob": "b2ad19456f502a6ab26e05fbbd26f81ef6918cf7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/BatchOperationAuditCoverageTests.cs",
+    "blob": "b2ad19456f502a6ab26e05fbbd26f81ef6918cf7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs",
+    "blob": "da3e23756ad1d7b51ba1da7aede81a33cd757a50",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs",
+    "blob": "c9aa46646727fd949c2d356008c49c6c0404ef3f",
+    "classification": "contained-by-main",
+    "comparison": "a5dee9e7c6393c61",
+    "merge_exit": 0
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/CancelledInvoiceBillingMigrationTests.cs",
+    "blob": "9f494a826974acb280b68baecc9ae755fe2b011c",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/CancelledInvoiceBillingMigrationTests.cs",
+    "blob": "9f494a826974acb280b68baecc9ae755fe2b011c",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/CaseCalendarRequestPrivacyTests.cs",
+    "blob": "a94b3f1a4a4e0c3bfced81e9ffd00a43be105a82",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/CaseCalendarRequestPrivacyTests.cs",
+    "blob": "a94b3f1a4a4e0c3bfced81e9ffd00a43be105a82",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/CaseDocumentRetirementBrowserTests.cs",
+    "blob": "9fa5a87cf608245c9215a4ca1ab25fc91d424088",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/CaseDocumentRetirementBrowserTests.cs",
+    "blob": "9fa5a87cf608245c9215a4ca1ab25fc91d424088",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/CaseRetirementBrowserBundle.cs",
+    "blob": "60d579dcae329c23030025e65f2ebd5d6b42a1e9",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/CaseRetirementBrowserBundle.cs",
+    "blob": "60d579dcae329c23030025e65f2ebd5d6b42a1e9",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/CaseRetirementBrowserBundleTests.cs",
+    "blob": "6c6a983024388e66bcc52bddf6db653cb9591b0b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/CaseRetirementBrowserBundleTests.cs",
+    "blob": "6c6a983024388e66bcc52bddf6db653cb9591b0b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/CasesV2ControllerTests.cs",
+    "blob": "6116e17a7428004a2483a3ba23f741a94bcfdcee",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/CasesV2ControllerTests.cs",
+    "blob": "6116e17a7428004a2483a3ba23f741a94bcfdcee",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/DatabaseImportCompanySettingsTests.cs",
+    "blob": "c1803b4e5a805c402365631e3db9bd3cbff3f7eb",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/DatabaseImportCompanySettingsTests.cs",
+    "blob": "c1803b4e5a805c402365631e3db9bd3cbff3f7eb",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/DatabaseImportSellerSnapshotTests.cs",
+    "blob": "eb7795230dfe52ccb132f513b3f0801897ce7ac5",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/DatabaseImportSellerSnapshotTests.cs",
+    "blob": "eb7795230dfe52ccb132f513b3f0801897ce7ac5",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/DocumentSellerModulePermissionTests.cs",
+    "blob": "05c8c25a149a391057377acf5c0302f151057f56",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/DocumentSellerModulePermissionTests.cs",
+    "blob": "05c8c25a149a391057377acf5c0302f151057f56",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/DocumentSellerPolicyMigrationTests.cs",
+    "blob": "e76208ba7d226ceda0e6e63e7a826a8d8d9bc849",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/DocumentSellerPolicyMigrationTests.cs",
+    "blob": "e76208ba7d226ceda0e6e63e7a826a8d8d9bc849",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/DocumentSellerSnapshotConcurrencyTests.cs",
+    "blob": "fb942838fc2c13d510d1fd92a6c683f9bea0ea43",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/DocumentSellerSnapshotConcurrencyTests.cs",
+    "blob": "fb942838fc2c13d510d1fd92a6c683f9bea0ea43",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/DocumentSellerSnapshotEntrypointTests.cs",
+    "blob": "a01bd63210b9b94f1e93e2ba5ac008f7c9ec8bd0",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/DocumentSellerSnapshotEntrypointTests.cs",
+    "blob": "a01bd63210b9b94f1e93e2ba5ac008f7c9ec8bd0",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/DocumentSellerSnapshotPolicyTests.cs",
+    "blob": "92613b968f5de56ab134cbe7242c1dbf56dbb43d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/DocumentSellerSnapshotPolicyTests.cs",
+    "blob": "92613b968f5de56ab134cbe7242c1dbf56dbb43d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/GeneratedFinancialPrintCaptureTests.cs",
+    "blob": "0307ce2233f48f1f543748f500b070abef0487b9",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/GeneratedFinancialPrintCaptureTests.cs",
+    "blob": "0307ce2233f48f1f543748f500b070abef0487b9",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/MoneyOperationsControllerTests.cs",
+    "blob": "67641acb6d9826d8f061078e0169f3c2a4bfd910",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/MoneyOperationsControllerTests.cs",
+    "blob": "67641acb6d9826d8f061078e0169f3c2a4bfd910",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/MoneyOperationsInvoiceScopeTests.cs",
+    "blob": "2d73e74b76b132aa97f9d3c509cac78fb86d74a7",
+    "classification": "review-required",
+    "comparison": "3de0d20521738112",
+    "merge_exit": 2
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/MoneyOperationsInvoiceScopeTests.cs",
+    "blob": "2d73e74b76b132aa97f9d3c509cac78fb86d74a7",
+    "classification": "review-required",
+    "comparison": "c103aa9e794609a2",
+    "merge_exit": 2
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/ProviderSpecificSqlTests.cs",
+    "blob": "1a7699b84baaec956c5def5940778cb812992b16",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/ProviderSpecificSqlTests.cs",
+    "blob": "1a7699b84baaec956c5def5940778cb812992b16",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/SpreadsheetImportSellerSnapshotTests.cs",
+    "blob": "cbad1f2ab127975c96003e5ed9715bfdb0cc0447",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/SpreadsheetImportSellerSnapshotTests.cs",
+    "blob": "cbad1f2ab127975c96003e5ed9715bfdb0cc0447",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/StorageStageWriterProcessTests.cs",
+    "blob": "f71d2fe4cebbdc9509c9c3520b5657d6a4c6e007",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/SyntheticWritableBackendProcess.cs",
+    "blob": "637bca82e0d01c0003bae577fe7b195d9ca1a0fa",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/SyntheticWritableBackendProcess.cs",
+    "blob": "637bca82e0d01c0003bae577fe7b195d9ca1a0fa",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/TaskBulkBillingConcurrencyTests.cs",
+    "blob": "5dc90140866ede52f5c5f6496c3c9d6735213ac8",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/TaskBulkBillingConcurrencyTests.cs",
+    "blob": "5dc90140866ede52f5c5f6496c3c9d6735213ac8",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/PayPlanner.Api.Tests/TaskBulkBillingTests.cs",
+    "blob": "e5f27a9a056cdbc2b41323f95ea232d0e824d593",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/PayPlanner.Api.Tests/TaskBulkBillingTests.cs",
+    "blob": "e5f27a9a056cdbc2b41323f95ea232d0e824d593",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Services/Banking/BankStatementImportRules.cs",
+    "blob": "cc19ac54e4ce5c8e6cc7d6ef4944d84ecfd37a65",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Services/Banking/BankStatementImportRules.cs",
+    "blob": "cc19ac54e4ce5c8e6cc7d6ef4944d84ecfd37a65",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Services/Companies/CompanyBrandImageVersionStore.cs",
+    "blob": "3fdd3c87a22fc8782fc142629d90be8846b60247",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Services/Companies/CompanyBrandImageVersionStore.cs",
+    "blob": "3fdd3c87a22fc8782fc142629d90be8846b60247",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Services/Companies/DocumentSellerLease.cs",
+    "blob": "5749c2122b9f6973ff6e77a1ded1093140117dcb",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Services/Companies/DocumentSellerLease.cs",
+    "blob": "5749c2122b9f6973ff6e77a1ded1093140117dcb",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Services/Companies/DocumentSellerService.cs",
+    "blob": "dbe10500163c8d7943449ad52703cd10ebfa4955",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Services/Companies/DocumentSellerService.cs",
+    "blob": "dbe10500163c8d7943449ad52703cd10ebfa4955",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Services/Companies/OwnCompanyRegistry.cs",
+    "blob": "dc046ecdcd559d9064b16511e271dd3481684c39",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Services/Companies/OwnCompanyRegistry.cs",
+    "blob": "dc046ecdcd559d9064b16511e271dd3481684c39",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Services/DatabaseImportService.CopyHelpers.cs",
+    "blob": "348965befd862e5d50ac29f0bf098b562a3a240f",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Services/DatabaseImportService.CopyHelpers.cs",
+    "blob": "348965befd862e5d50ac29f0bf098b562a3a240f",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Services/DatabaseImportService.SellerSafety.cs",
+    "blob": "0392529d03c0291b45c57ca83089bdd45873304b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Services/DatabaseImportService.SellerSafety.cs",
+    "blob": "0392529d03c0291b45c57ca83089bdd45873304b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Services/DatabaseImportService.cs",
+    "blob": "c79975ea34b4d9f2ae150249fab74cc715cbd4ee",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Services/DatabaseImportService.cs",
+    "blob": "c79975ea34b4d9f2ae150249fab74cc715cbd4ee",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Services/SpreadsheetImportService.Apply.cs",
+    "blob": "eaa8df925ce739d41024e23d974457dc3db52ed8",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Services/SpreadsheetImportService.Apply.cs",
+    "blob": "eaa8df925ce739d41024e23d974457dc3db52ed8",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Services/SpreadsheetImportService.ApplyShared.cs",
+    "blob": "595bde3765816d81ab8b6d67e5caf00d5ffd1c97",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Services/SpreadsheetImportService.ApplyShared.cs",
+    "blob": "595bde3765816d81ab8b6d67e5caf00d5ffd1c97",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Services/SpreadsheetImportService.Core.cs",
+    "blob": "78697e902512fb1c9f48112a0eb647c7c1b1a22b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Services/SpreadsheetImportService.Core.cs",
+    "blob": "78697e902512fb1c9f48112a0eb647c7c1b1a22b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Services/Storage/GeneratedFinancialDocumentPublication.cs",
+    "blob": "f86285973bd4205df950149922cafe39aeee4fe6",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Services/Storage/GeneratedFinancialDocumentPublication.cs",
+    "blob": "f86285973bd4205df950149922cafe39aeee4fe6",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "backend/Services/Storage/GeneratedFinancialDocumentRegistry.cs",
+    "blob": "e672e0ce7bff816dfc412e88892bac22d2f38551",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "backend/Services/Storage/GeneratedFinancialDocumentRegistry.cs",
+    "blob": "e672e0ce7bff816dfc412e88892bac22d2f38551",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "docs/batch-operations-audit-coverage-2026-06-10.md",
+    "blob": "bcc0177ad646f998594618d4094b7218debfdcd3",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "docs/batch-operations-audit-coverage-2026-06-10.md",
+    "blob": "bcc0177ad646f998594618d4094b7218debfdcd3",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "docs/deployment-manual-2026-10-25.md",
+    "blob": "2d3957453b68e7581234ee39b76f73312c4f8b25",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "docs/deployment-manual-2026-10-25.md",
+    "blob": "2d3957453b68e7581234ee39b76f73312c4f8b25",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "docs/development-settings-verification-2026-10-25.md",
+    "blob": "c511746b1388144ce991a138e764c5edd29211c0",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "docs/development-settings-verification-2026-10-25.md",
+    "blob": "c511746b1388144ce991a138e764c5edd29211c0",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "docs/development-xsenus-runner-2026-10-21.md",
+    "blob": "252347f8e3d0744194df1ef81a5b25e3373d7218",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "docs/development-xsenus-runner-2026-10-21.md",
+    "blob": "252347f8e3d0744194df1ef81a5b25e3373d7218",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "docs/payplanner-bank-roadmap-2026-10-14.md",
+    "blob": "9987e5e8bf1972623f8fe9c6c1101277c27c628f",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "docs/payplanner-bank-roadmap-2026-10-14.md",
+    "blob": "9987e5e8bf1972623f8fe9c6c1101277c27c628f",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "docs/payplanner-calendar-roadmap-2026-10-14.md",
+    "blob": "ece9be4583fe6424f7524bcfd784b983b73bb51d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "docs/payplanner-calendar-roadmap-2026-10-14.md",
+    "blob": "ece9be4583fe6424f7524bcfd784b983b73bb51d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "docs/payplanner-company-roadmap-2026-10-14.md",
+    "blob": "fb4dea1477648b0abd277fef9c387c72bc720db6",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "docs/payplanner-company-roadmap-2026-10-14.md",
+    "blob": "fb4dea1477648b0abd277fef9c387c72bc720db6",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "docs/payplanner-financial-documents-roadmap-2026-10-14.md",
+    "blob": "09dd43a39cc209450e6d14f63f3c5ebd59f25571",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "docs/payplanner-financial-documents-roadmap-2026-10-14.md",
+    "blob": "09dd43a39cc209450e6d14f63f3c5ebd59f25571",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "docs/payplanner-handoff-2026-10-21.md",
+    "blob": "d99cde2105e85fe3f83b15a9387bef6c8f4e8c0f",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "docs/payplanner-handoff-2026-10-21.md",
+    "blob": "895e6041e0957f5d8df37fa8db8acb4a08ebf6dc",
+    "classification": "review-required",
+    "comparison": "dfa1c9bec949b903",
+    "merge_exit": 1
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "docs/payplanner-messenger-roadmap-2026-10-14.md",
+    "blob": "e95198175db86bde2e608c6927e40e52264bba61",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "docs/payplanner-messenger-roadmap-2026-10-14.md",
+    "blob": "e95198175db86bde2e608c6927e40e52264bba61",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+    "blob": "ae50967976e392d406b55e0c3d165386dbbe8a31",
+    "classification": "review-required",
+    "comparison": "d362d2859ad76ac2",
+    "merge_exit": 3
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+    "blob": "66fc6eb4706607bc5fe77a465a55bad357b2d50c",
+    "classification": "review-required",
+    "comparison": "3754a19faabf1e0e",
+    "merge_exit": 4
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "docs/payplanner-requests-roadmap-2026-10-14.md",
+    "blob": "03ff9d0508970024b91af76d5019c5b69573a56e",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "docs/payplanner-requests-roadmap-2026-10-14.md",
+    "blob": "03ff9d0508970024b91af76d5019c5b69573a56e",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "docs/payplanner-settings-decisions-2026-10-24.md",
+    "blob": "32175033d3ae55a81d3fb173a8853ab48bc94e2e",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "docs/payplanner-settings-decisions-2026-10-24.md",
+    "blob": "32175033d3ae55a81d3fb173a8853ab48bc94e2e",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "docs/payplanner-ui-roadmap-2026-10-14.md",
+    "blob": "4966b3c7057e850f1268c6adbc68ade5c67c5f9a",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "docs/payplanner-ui-roadmap-2026-10-14.md",
+    "blob": "4966b3c7057e850f1268c6adbc68ade5c67c5f9a",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "docs/payplanner-unified-roadmap-2026-10-14.md",
+    "blob": "9566ce553f250688c4b0bbc4059dd5c8659ebc87",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "docs/payplanner-unified-roadmap-2026-10-14.md",
+    "blob": "9566ce553f250688c4b0bbc4059dd5c8659ebc87",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "docs/payplanner-work-order-2026-10-21.md",
+    "blob": "40dd6a32d33859e358d9634441356b7f9681142a",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "docs/payplanner-work-order-2026-10-21.md",
+    "blob": "028e7ee38c29b2da5ad37821166e6b9a345c4853",
+    "classification": "review-required",
+    "comparison": "a1accd121b8ac07f",
+    "merge_exit": 2
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "docs/system-surface-inventory.generated.md",
+    "blob": "3c22c50d329c96a8e7c87ab7d498202d70eee3ad",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "docs/system-surface-inventory.generated.md",
+    "blob": "fc157c6796dd655a8f6bcc5ad30ddbc50707b96f",
+    "classification": "review-required",
+    "comparison": "1aaaa2126274564b",
+    "merge_exit": 11
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "scripts/case-retirement-production-bundle.mjs",
+    "blob": "05167a6121720f69874b83b60aed3a11114b4ba4",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "scripts/case-retirement-production-bundle.mjs",
+    "blob": "05167a6121720f69874b83b60aed3a11114b4ba4",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "scripts/case-retirement-production-bundle.node-tests.mjs",
+    "blob": "65852bd8003652420689a3b732d0b41066c5cc48",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "scripts/case-retirement-production-bundle.node-tests.mjs",
+    "blob": "65852bd8003652420689a3b732d0b41066c5cc48",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "scripts/check-case-retirement-live-browser.mjs",
+    "blob": "b166dcb63b6caa47cd0c09f02a11cb97fceea368",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "scripts/check-case-retirement-live-browser.mjs",
+    "blob": "12ae7d0fed9d645353fbda5ed9ee13e9c8b885c8",
+    "classification": "review-required",
+    "comparison": "a3247414ecf2cd66",
+    "merge_exit": 3
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "scripts/check-storage-capacity-visual.mjs",
+    "blob": "33f1f585f0d48119a554a49543f7ff55a1778da3",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "scripts/check-storage-capacity-visual.mjs",
+    "blob": "33f1f585f0d48119a554a49543f7ff55a1778da3",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Accounts/InvoiceModal.integration.test.tsx",
+    "blob": "5a0e7549a7a52f75ef95158ca955c966d4f00887",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Accounts/InvoiceModal.integration.test.tsx",
+    "blob": "5a0e7549a7a52f75ef95158ca955c966d4f00887",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Accounts/InvoiceModal.tsx",
+    "blob": "17606d33dd8a17b10407a89480b03dbe538efad7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Accounts/InvoiceModal.tsx",
+    "blob": "17606d33dd8a17b10407a89480b03dbe538efad7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Acts/ActDetailPage.tsx",
+    "blob": "02a4fe221edddbd1c7a9fc18b1948b4155b3a444",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Acts/ActDetailPage.tsx",
+    "blob": "02a4fe221edddbd1c7a9fc18b1948b4155b3a444",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Acts/ActModal.integration.test.tsx",
+    "blob": "ecb2fda65ee16e81c87933b9a0356b8bcdda6718",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Acts/ActModal.integration.test.tsx",
+    "blob": "ecb2fda65ee16e81c87933b9a0356b8bcdda6718",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Acts/ActModal.tsx",
+    "blob": "222020219c0b2962ee9e7edbfa42d14deb37be5d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Acts/ActModal.tsx",
+    "blob": "222020219c0b2962ee9e7edbfa42d14deb37be5d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Cases/CaseDetailPage.test.tsx",
+    "blob": "5afc58abcc89b17fdf73b3a63e1dae3dda143855",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Cases/CaseDetailPage.test.tsx",
+    "blob": "5afc58abcc89b17fdf73b3a63e1dae3dda143855",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Cases/CaseTaskActions.test.tsx",
+    "blob": "351de0fa74570684486dd7178f779c62ce1af1bd",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Cases/CaseTaskActions.test.tsx",
+    "blob": "351de0fa74570684486dd7178f779c62ce1af1bd",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Contracts/ContractCreatePage.tsx",
+    "blob": "8cc6034b7f0a7b6a3bab4eef8464525c3b4cf7ef",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Contracts/ContractCreatePage.tsx",
+    "blob": "8cc6034b7f0a7b6a3bab4eef8464525c3b4cf7ef",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Contracts/ContractDetailPage.tsx",
+    "blob": "a13668e49cc388ef9330a3f433a6b30056f7d41f",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Contracts/ContractDetailPage.tsx",
+    "blob": "a13668e49cc388ef9330a3f433a6b30056f7d41f",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Contracts/ContractModal.integration.test.tsx",
+    "blob": "44cafe2519fa0cc417140515b42748bf6ca6a47b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Contracts/ContractModal.integration.test.tsx",
+    "blob": "44cafe2519fa0cc417140515b42748bf6ca6a47b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Contracts/ContractModal.tsx",
+    "blob": "8e7ab1c11d9a9ba888c16e964e1af03f2e9c89d7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Contracts/ContractModal.tsx",
+    "blob": "8e7ab1c11d9a9ba888c16e964e1af03f2e9c89d7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Documents/DocumentSellerPicker.test.tsx",
+    "blob": "5ad2e1521483c13fdf636c0e91bf070ca41b6538",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Documents/DocumentSellerPicker.test.tsx",
+    "blob": "5ad2e1521483c13fdf636c0e91bf070ca41b6538",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Documents/DocumentSellerPicker.tsx",
+    "blob": "4b1abaea0201820c035688eb6983e34dcd8531bb",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Documents/DocumentSellerPicker.tsx",
+    "blob": "4b1abaea0201820c035688eb6983e34dcd8531bb",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Money/MoneyOperations.integration.test.tsx",
+    "blob": "eefa1b31caa1b0201b45bd4c0fd7a6044833ab89",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Money/MoneyOperations.integration.test.tsx",
+    "blob": "eefa1b31caa1b0201b45bd4c0fd7a6044833ab89",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Money/MoneyOperations.tsx",
+    "blob": "ba47d0c22d8ac7b9c77bf73fb7bc0f548218d6ae",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Money/MoneyOperations.tsx",
+    "blob": "ba47d0c22d8ac7b9c77bf73fb7bc0f548218d6ae",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Settings/MainCompanySettings.test.tsx",
+    "blob": "18a7c5a8b43bd45cbe4b5c3730e76d84cf3673e7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Settings/MainCompanySettings.test.tsx",
+    "blob": "18a7c5a8b43bd45cbe4b5c3730e76d84cf3673e7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Settings/MainCompanySettings.tsx",
+    "blob": "f8b0e197a9a10f249168c6accc97260e59eb2051",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Settings/MainCompanySettings.tsx",
+    "blob": "f8b0e197a9a10f249168c6accc97260e59eb2051",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Settings/TaskJournalSettings.test.tsx",
+    "blob": "e6f266e1f57330232096ba9bc49b42cd01e60572",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Settings/TaskJournalSettings.test.tsx",
+    "blob": "e6f266e1f57330232096ba9bc49b42cd01e60572",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Settings/TaskJournalSettings.tsx",
+    "blob": "2e38c2cab3ad3636df3b42eb773040ddb4686fce",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Settings/TaskJournalSettings.tsx",
+    "blob": "2e38c2cab3ad3636df3b42eb773040ddb4686fce",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Tasks/TaskBulkBillingDialog.tsx",
+    "blob": "24597e486ac377546812d3f9b5645587a5d5118e",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Tasks/TaskBulkBillingDialog.tsx",
+    "blob": "24597e486ac377546812d3f9b5645587a5d5118e",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Tasks/TaskJournal.actions.test.tsx",
+    "blob": "becd4766ab57fb4af12ed20463fdcecdcce64ae0",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Tasks/TaskJournal.billing.test.tsx",
+    "blob": "bb0e7b4142baa285ddf2c8e744bf17296409475b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Tasks/TaskJournal.tsx",
+    "blob": "e29fd296736af8bf7d5240064e90a3261c37df1b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Tasks/TaskJournal.tsx",
+    "blob": "e29fd296736af8bf7d5240064e90a3261c37df1b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Tasks/taskBulkBilling.test.ts",
+    "blob": "33a85eb46dfd2633be379e6c41eeb18a2b25b81d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Tasks/taskBulkBilling.test.ts",
+    "blob": "33a85eb46dfd2633be379e6c41eeb18a2b25b81d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Tasks/taskBulkBilling.ts",
+    "blob": "4dcadfc1bf15d1f9653b0b6e006aa9c37294f340",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Tasks/taskBulkBilling.ts",
+    "blob": "4dcadfc1bf15d1f9653b0b6e006aa9c37294f340",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Tasks/useTaskBulkBilling.integration.test.tsx",
+    "blob": "bf557ea9bf9a3ef84403223cd8ec0665c3779ae7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Tasks/useTaskBulkBilling.integration.test.tsx",
+    "blob": "bf557ea9bf9a3ef84403223cd8ec0665c3779ae7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Tasks/useTaskBulkBilling.test.tsx",
+    "blob": "00967d5f6219d134fc9677db86f93b8501566a60",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Tasks/useTaskBulkBilling.test.tsx",
+    "blob": "00967d5f6219d134fc9677db86f93b8501566a60",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/components/Tasks/useTaskBulkBilling.tsx",
+    "blob": "758f21d49460670f0cc2ab016b455af641216ead",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/components/Tasks/useTaskBulkBilling.tsx",
+    "blob": "758f21d49460670f0cc2ab016b455af641216ead",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/services/api.documentSellerPolicy.test.ts",
+    "blob": "858e463014591a2ad62401cf3600e706379038ba",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/services/api.documentSellerPolicy.test.ts",
+    "blob": "858e463014591a2ad62401cf3600e706379038ba",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/services/api.taskBillingSettings.test.ts",
+    "blob": "78ea6956a8b25ae3a0633455e483d161010f63dc",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/services/api.taskBillingSettings.test.ts",
+    "blob": "78ea6956a8b25ae3a0633455e483d161010f63dc",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/services/api.test.ts",
+    "blob": "d7c07fcded99e79997f3ecab582d4dc17dfb380b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/services/api.test.ts",
+    "blob": "d7c07fcded99e79997f3ecab582d4dc17dfb380b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/services/api.ts",
+    "blob": "f1674c1deac45a8fc4ce716dee5a4cee22dd6354",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/services/api.ts",
+    "blob": "f1674c1deac45a8fc4ce716dee5a4cee22dd6354",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/types/index.ts",
+    "blob": "9385198b21b55398d66452898a94f5405aa3d7f3",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/types/index.ts",
+    "blob": "9385198b21b55398d66452898a94f5405aa3d7f3",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/utils/invoiceEditorBridge.seller.test.ts",
+    "blob": "7f8d41cbb8dff9ee68c542ded6b015dac1815d7a",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/utils/invoiceEditorBridge.seller.test.ts",
+    "blob": "7f8d41cbb8dff9ee68c542ded6b015dac1815d7a",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/utils/invoiceEditorBridge.ts",
+    "blob": "9131b22955ec0371684c50e0ca8f1041108c8960",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/utils/invoiceEditorBridge.ts",
+    "blob": "9131b22955ec0371684c50e0ca8f1041108c8960",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "src/utils/taskJournalStore.ts",
+    "blob": "0ec822410f4bce2f6ed71f92a75da9899244de66",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "src/utils/taskJournalStore.ts",
+    "blob": "0ec822410f4bce2f6ed71f92a75da9899244de66",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "tools/PayPlanner.TestShards/BoundedBatchScheduler.cs",
+    "blob": "1c9e08796e02aba9d0b384c45d71389378c5cf0d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "tools/PayPlanner.TestShards/BoundedTestRunner.cs",
+    "blob": "b288775a4bce291b10fd6ec289e61815a6c1a37b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "tools/PayPlanner.TestShards/ExecutionScheduling.cs",
+    "blob": "04d9a497d8686dc6b34c1412d87c2281c1cbf82b",
+    "classification": "review-required",
+    "comparison": "72525eae6fbcd8d5",
+    "merge_exit": 1
+  },
+  {
+    "origin": "payplanner-candidate-integration/working",
+    "path": "tools/PayPlanner.TestShards/Program.cs",
+    "blob": "9494011b0108c6d6bdb6167a4ae65a3b8f9e6b95",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-candidate-integration/index",
+    "path": "tools/PayPlanner.TestShards/Program.cs",
+    "blob": "9494011b0108c6d6bdb6167a4ae65a3b8f9e6b95",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": ".github/workflows/deploy.yml",
+    "blob": "0d38ae545be902d8bc78456569d96ebd25f96569",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/AppReleases/releases.json",
+    "blob": "94ea66c8db70c7d8c3288091442bc0865ca7fe99",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Controllers/ActsController.cs",
+    "blob": "ed471bdea3ebd26e3bfb6fd09c2971f565a9d11f",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Controllers/ContractsController.cs",
+    "blob": "38a21f5ad1b598d65b810efbd44e87debe0a65f4",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Controllers/DatabaseAdminController.cs",
+    "blob": "4d6823c8cb60bd75a641ff26714af6c3b32bed88",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Controllers/InvoicesController.cs",
+    "blob": "15e7388397487032212e4033b85ea6dd4b8b8301",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Controllers/LegalEntitiesController.cs",
+    "blob": "736d650016160bd1572c13eba8d4a0d778895684",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Controllers/OwnCompaniesController.cs",
+    "blob": "fbd8b9118d87201befdd745a3b8d202fecc132f2",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Controllers/TasksController.cs",
+    "blob": "62517675b9fa92f6848c2ec52ad09b97bd496165",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Controllers/V2/CasesV2Controller.FinancialCapture.cs",
+    "blob": "413ffd0360166376cd1cb65ad49d5785d580e124",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Controllers/V2/CasesV2Controller.cs",
+    "blob": "c98fa866d080caa1c084919869567c4eb2993596",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Data/PaymentContext.cs",
+    "blob": "a2403d530d7ccefafdd0b058008c742fceed5f6c",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Extensions/DataVisibilityQueryExtensions.cs",
+    "blob": "7ddb197b27f6e355bfe70cbcfb98c661b3349965",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Models/Act.cs",
+    "blob": "058e93e18f13c341c55de9fbdafd04ff0e5c74fe",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Models/Contract.cs",
+    "blob": "80adc426237a2fce8dc233bf9441d6aa0efcb3d5",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Models/Payment.cs",
+    "blob": "43e3736fc4df8bc0f29eb38b47bc4bea0ab27655",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Models/Requests/DocumentSellerRequest.cs",
+    "blob": "3b965d3b6283aa1b68579d069bcf5aa6bdd5d1aa",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Models/Requests/TaskJournalSettingsRequest.cs",
+    "blob": "34af8a11714aee16e5ec5230dca6793da9a2bd85",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Models/Requests/UpdateMainCompanySettingsRequest.cs",
+    "blob": "0fa022218b357f7dfa66970f4618a361b079db5c",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Models/Requests/UpsertActRequest.cs",
+    "blob": "2cfc5edcad184d15f2123a67ff2633db2d075e97",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Models/Requests/UpsertContractRequest.cs",
+    "blob": "f46c1bcc694c80454c6cc340c65c50941ec84366",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Models/Requests/UpsertInvoiceRequest.cs",
+    "blob": "435b0f621a6ba2ba2cd14ef4472f4754436e757d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Models/Requests/UpsertTaskJournalItemRequest.cs",
+    "blob": "820bb65d438e7dc64a6662cf9f5dc5d2010934a7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Models/Responses/ActDto.cs",
+    "blob": "e69f6638dd7f35a5053d7fa87c16e28560a8500f",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Models/Responses/ContractDto.cs",
+    "blob": "f87ac8d8134dd0e86f6430b9f27ac618e66547a5",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Models/Responses/InvoiceDto.cs",
+    "blob": "b85d1d45acbafb14bcd1c1aa4d89a55891de3c39",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Models/Responses/LegalEntityDto.cs",
+    "blob": "5d117c8a03666fb4cab558fd9497ce0392327623",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Models/Responses/TaskJournalDtos.cs",
+    "blob": "3797d42767ffc2a5d897734a30c13758d1e3ad51",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/PaymentContextModelSnapshot.cs",
+    "blob": "801ea402f14cce31e0125554fcd68c526aa858ef",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/PostgreSqlPaymentContextModelSnapshot.cs",
+    "blob": "ea6fbda7be03b8ad25ba0263d2d2526a4719b171",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/ActsControllerTests.cs",
+    "blob": "4fbbaf0df30d671f3864264eddb4563bab850326",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/BankImportProvenanceMigrationTests.cs",
+    "blob": "515eb44b3db71728406fdd22ea36cdfef88657af",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/BatchOperationAuditCoverageTests.cs",
+    "blob": "b2ad19456f502a6ab26e05fbbd26f81ef6918cf7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs",
+    "blob": "da3e23756ad1d7b51ba1da7aede81a33cd757a50",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs",
+    "blob": "fe4fcee824edba6325577f82c4c9ded7f17a1181",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/CancelledInvoiceBillingMigrationTests.cs",
+    "blob": "9f494a826974acb280b68baecc9ae755fe2b011c",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/CaseDocumentRetirementBrowserTests.cs",
+    "blob": "abc04c197f82e9b0d2286c1557e82273c4109f96",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/CasesV2ControllerTests.cs",
+    "blob": "6116e17a7428004a2483a3ba23f741a94bcfdcee",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/GeneratedFinancialPrintCaptureTests.cs",
+    "blob": "0307ce2233f48f1f543748f500b070abef0487b9",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/LegacyStorageBackfillTests.cs",
+    "blob": "8c478438634814adcf2ad2dc0043abd093a991f5",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/MoneyOperationsControllerTests.cs",
+    "blob": "67641acb6d9826d8f061078e0169f3c2a4bfd910",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/MoneyOperationsInvoiceScopeTests.cs",
+    "blob": "bcbc83c6b8e098f23b71a263d3bef1be4146ed36",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/ProviderSpecificSqlTests.cs",
+    "blob": "1a7699b84baaec956c5def5940778cb812992b16",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/StorageStageWriterProcessTests.cs",
+    "blob": "f71d2fe4cebbdc9509c9c3520b5657d6a4c6e007",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/SyntheticWritableBackendProcess.cs",
+    "blob": "637bca82e0d01c0003bae577fe7b195d9ca1a0fa",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/TaskBulkBillingConcurrencyTests.cs",
+    "blob": "5dc90140866ede52f5c5f6496c3c9d6735213ac8",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/TaskBulkBillingTests.cs",
+    "blob": "e5f27a9a056cdbc2b41323f95ea232d0e824d593",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Services/Banking/BankStatementImportRules.cs",
+    "blob": "cc19ac54e4ce5c8e6cc7d6ef4944d84ecfd37a65",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Services/Companies/DocumentSellerService.cs",
+    "blob": "dbe10500163c8d7943449ad52703cd10ebfa4955",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Services/Companies/OwnCompanyRegistry.cs",
+    "blob": "dc046ecdcd559d9064b16511e271dd3481684c39",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Services/DatabaseImportService.CopyHelpers.cs",
+    "blob": "348965befd862e5d50ac29f0bf098b562a3a240f",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Services/DatabaseImportService.cs",
+    "blob": "c79975ea34b4d9f2ae150249fab74cc715cbd4ee",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Services/SpreadsheetImportService.Apply.cs",
+    "blob": "eaa8df925ce739d41024e23d974457dc3db52ed8",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Services/SpreadsheetImportService.ApplyShared.cs",
+    "blob": "595bde3765816d81ab8b6d67e5caf00d5ffd1c97",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Services/SpreadsheetImportService.Core.cs",
+    "blob": "78697e902512fb1c9f48112a0eb647c7c1b1a22b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Services/Storage/GeneratedFinancialDocumentPublication.cs",
+    "blob": "f86285973bd4205df950149922cafe39aeee4fe6",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Services/Storage/GeneratedFinancialDocumentRegistry.cs",
+    "blob": "e672e0ce7bff816dfc412e88892bac22d2f38551",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "docs/batch-operations-audit-coverage-2026-06-10.md",
+    "blob": "bcc0177ad646f998594618d4094b7218debfdcd3",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "docs/development-xsenus-runner-2026-10-21.md",
+    "blob": "252347f8e3d0744194df1ef81a5b25e3373d7218",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "docs/payplanner-bank-roadmap-2026-10-14.md",
+    "blob": "9987e5e8bf1972623f8fe9c6c1101277c27c628f",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "docs/payplanner-calendar-roadmap-2026-10-14.md",
+    "blob": "ece9be4583fe6424f7524bcfd784b983b73bb51d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "docs/payplanner-company-roadmap-2026-10-14.md",
+    "blob": "fb4dea1477648b0abd277fef9c387c72bc720db6",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "docs/payplanner-financial-documents-roadmap-2026-10-14.md",
+    "blob": "09dd43a39cc209450e6d14f63f3c5ebd59f25571",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "docs/payplanner-handoff-2026-10-21.md",
+    "blob": "d99cde2105e85fe3f83b15a9387bef6c8f4e8c0f",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "docs/payplanner-messenger-roadmap-2026-10-14.md",
+    "blob": "e95198175db86bde2e608c6927e40e52264bba61",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+    "blob": "691dd06bc78b07f02530934c90148c95b1e62e7c",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "docs/payplanner-requests-roadmap-2026-10-14.md",
+    "blob": "03ff9d0508970024b91af76d5019c5b69573a56e",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "docs/payplanner-ui-roadmap-2026-10-14.md",
+    "blob": "4966b3c7057e850f1268c6adbc68ade5c67c5f9a",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "docs/payplanner-unified-roadmap-2026-10-14.md",
+    "blob": "9566ce553f250688c4b0bbc4059dd5c8659ebc87",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "docs/payplanner-work-order-2026-10-21.md",
+    "blob": "40dd6a32d33859e358d9634441356b7f9681142a",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "docs/system-surface-inventory.generated.md",
+    "blob": "3c22c50d329c96a8e7c87ab7d498202d70eee3ad",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "scripts/check-case-retirement-live-browser.mjs",
+    "blob": "b166dcb63b6caa47cd0c09f02a11cb97fceea368",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "scripts/check-storage-capacity-visual.mjs",
+    "blob": "33f1f585f0d48119a554a49543f7ff55a1778da3",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "scripts/validate-deploy-workflow.mjs",
+    "blob": "e4a0feba689ba13280faf7f7ef231a01bf3784ad",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "scripts/validate-deploy-workflow.test.ts",
+    "blob": "8752270e889b53e4b9fe10963af32543d2b63a15",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Accounts/InvoiceModal.integration.test.tsx",
+    "blob": "5a0e7549a7a52f75ef95158ca955c966d4f00887",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Accounts/InvoiceModal.tsx",
+    "blob": "17606d33dd8a17b10407a89480b03dbe538efad7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Acts/ActDetailPage.tsx",
+    "blob": "02a4fe221edddbd1c7a9fc18b1948b4155b3a444",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Acts/ActModal.integration.test.tsx",
+    "blob": "ecb2fda65ee16e81c87933b9a0356b8bcdda6718",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Acts/ActModal.tsx",
+    "blob": "222020219c0b2962ee9e7edbfa42d14deb37be5d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Cases/CaseDetailPage.test.tsx",
+    "blob": "5afc58abcc89b17fdf73b3a63e1dae3dda143855",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Cases/CaseTaskActions.test.tsx",
+    "blob": "351de0fa74570684486dd7178f779c62ce1af1bd",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Contracts/ContractCreatePage.tsx",
+    "blob": "8cc6034b7f0a7b6a3bab4eef8464525c3b4cf7ef",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Contracts/ContractDetailPage.tsx",
+    "blob": "a13668e49cc388ef9330a3f433a6b30056f7d41f",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Contracts/ContractModal.integration.test.tsx",
+    "blob": "44cafe2519fa0cc417140515b42748bf6ca6a47b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Contracts/ContractModal.tsx",
+    "blob": "8e7ab1c11d9a9ba888c16e964e1af03f2e9c89d7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Documents/DocumentSellerPicker.test.tsx",
+    "blob": "5ad2e1521483c13fdf636c0e91bf070ca41b6538",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Documents/DocumentSellerPicker.tsx",
+    "blob": "4b1abaea0201820c035688eb6983e34dcd8531bb",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Money/MoneyOperations.integration.test.tsx",
+    "blob": "eefa1b31caa1b0201b45bd4c0fd7a6044833ab89",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Money/MoneyOperations.tsx",
+    "blob": "ba47d0c22d8ac7b9c77bf73fb7bc0f548218d6ae",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Settings/MainCompanySettings.tsx",
+    "blob": "f8b0e197a9a10f249168c6accc97260e59eb2051",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Settings/TaskJournalSettings.test.tsx",
+    "blob": "e6f266e1f57330232096ba9bc49b42cd01e60572",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Settings/TaskJournalSettings.tsx",
+    "blob": "2e38c2cab3ad3636df3b42eb773040ddb4686fce",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Tasks/TaskBulkBillingDialog.tsx",
+    "blob": "24597e486ac377546812d3f9b5645587a5d5118e",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Tasks/TaskJournal.actions.test.tsx",
+    "blob": "becd4766ab57fb4af12ed20463fdcecdcce64ae0",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Tasks/TaskJournal.billing.test.tsx",
+    "blob": "bb0e7b4142baa285ddf2c8e744bf17296409475b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Tasks/TaskJournal.tsx",
+    "blob": "e29fd296736af8bf7d5240064e90a3261c37df1b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Tasks/taskBulkBilling.test.ts",
+    "blob": "33a85eb46dfd2633be379e6c41eeb18a2b25b81d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Tasks/taskBulkBilling.ts",
+    "blob": "4dcadfc1bf15d1f9653b0b6e006aa9c37294f340",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Tasks/useTaskBulkBilling.integration.test.tsx",
+    "blob": "bf557ea9bf9a3ef84403223cd8ec0665c3779ae7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Tasks/useTaskBulkBilling.test.tsx",
+    "blob": "00967d5f6219d134fc9677db86f93b8501566a60",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Tasks/useTaskBulkBilling.tsx",
+    "blob": "758f21d49460670f0cc2ab016b455af641216ead",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/services/api.test.ts",
+    "blob": "d7c07fcded99e79997f3ecab582d4dc17dfb380b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/services/api.ts",
+    "blob": "f1674c1deac45a8fc4ce716dee5a4cee22dd6354",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/types/index.ts",
+    "blob": "9385198b21b55398d66452898a94f5405aa3d7f3",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/utils/invoiceEditorBridge.ts",
+    "blob": "9131b22955ec0371684c50e0ca8f1041108c8960",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/utils/taskJournalStore.ts",
+    "blob": "0ec822410f4bce2f6ed71f92a75da9899244de66",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "tools/PayPlanner.TestShards/BoundedBatchScheduler.cs",
+    "blob": "1c9e08796e02aba9d0b384c45d71389378c5cf0d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "tools/PayPlanner.TestShards/BoundedTestRunner.cs",
+    "blob": "b288775a4bce291b10fd6ec289e61815a6c1a37b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "tools/PayPlanner.TestShards/ExecutionScheduling.cs",
+    "blob": "488f87dcccb3c5319b61a5c75b9067a099510548",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "tools/PayPlanner.TestShards/Program.cs",
+    "blob": "9494011b0108c6d6bdb6167a4ae65a3b8f9e6b95",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "tools/PayPlanner.TestShards/ShardPlan.cs",
+    "blob": "29529612614b5614c6d2cd83420149b305595038",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Filters/DocumentSellerExceptionFilterAttribute.cs",
+    "blob": "ad31af7d5772958d39c543ec0810cc8011a838c8",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Models/DocumentSellerSnapshotPolicy.cs",
+    "blob": "d4ac6b9d49961896cc15429f53ea01daa168dfd4",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/20261024110000_AddDocumentSellerSnapshotPolicy.Designer.cs",
+    "blob": "1fea6fc5f412b8b454c14565c0063bab87160ec8",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/20261024110000_AddDocumentSellerSnapshotPolicy.cs",
+    "blob": "bef6ec88c9c305fac8f9e755f57f91aaba4dd7a5",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/20261024110001_AddDocumentSellerSnapshotPolicyPostgres.Designer.cs",
+    "blob": "0c958c08cfeb981c01237502d1b86fb9ab90ea54",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/20261024110001_AddDocumentSellerSnapshotPolicyPostgres.cs",
+    "blob": "ebe03070fbf537cbf6c1c6b4f04a4d4b9e276b5b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/CaseCalendarRequestPrivacyTests.cs",
+    "blob": "a94b3f1a4a4e0c3bfced81e9ffd00a43be105a82",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/CaseRetirementBrowserBundle.cs",
+    "blob": "60d579dcae329c23030025e65f2ebd5d6b42a1e9",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/CaseRetirementBrowserBundleTests.cs",
+    "blob": "6c6a983024388e66bcc52bddf6db653cb9591b0b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/DatabaseImportCompanySettingsTests.cs",
+    "blob": "c1803b4e5a805c402365631e3db9bd3cbff3f7eb",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/DatabaseImportSellerSnapshotTests.cs",
+    "blob": "eb7795230dfe52ccb132f513b3f0801897ce7ac5",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/DocumentSellerModulePermissionTests.cs",
+    "blob": "05c8c25a149a391057377acf5c0302f151057f56",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/DocumentSellerPolicyMigrationTests.cs",
+    "blob": "e76208ba7d226ceda0e6e63e7a826a8d8d9bc849",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/DocumentSellerSnapshotConcurrencyTests.cs",
+    "blob": "fb942838fc2c13d510d1fd92a6c683f9bea0ea43",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/DocumentSellerSnapshotEntrypointTests.cs",
+    "blob": "a01bd63210b9b94f1e93e2ba5ac008f7c9ec8bd0",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/DocumentSellerSnapshotPolicyTests.cs",
+    "blob": "92613b968f5de56ab134cbe7242c1dbf56dbb43d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/PayPlanner.Api.Tests/SpreadsheetImportSellerSnapshotTests.cs",
+    "blob": "cbad1f2ab127975c96003e5ed9715bfdb0cc0447",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Services/Companies/CompanyBrandImageVersionStore.cs",
+    "blob": "3fdd3c87a22fc8782fc142629d90be8846b60247",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Services/Companies/DocumentSellerLease.cs",
+    "blob": "5749c2122b9f6973ff6e77a1ded1093140117dcb",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "backend/Services/DatabaseImportService.SellerSafety.cs",
+    "blob": "0392529d03c0291b45c57ca83089bdd45873304b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "docs/deployment-manual-2026-10-25.md",
+    "blob": "2d3957453b68e7581234ee39b76f73312c4f8b25",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "docs/development-settings-verification-2026-10-25.md",
+    "blob": "c511746b1388144ce991a138e764c5edd29211c0",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "docs/payplanner-settings-decisions-2026-10-24.md",
+    "blob": "32175033d3ae55a81d3fb173a8853ab48bc94e2e",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "scripts/case-retirement-production-bundle.mjs",
+    "blob": "05167a6121720f69874b83b60aed3a11114b4ba4",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "scripts/case-retirement-production-bundle.node-tests.mjs",
+    "blob": "65852bd8003652420689a3b732d0b41066c5cc48",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/components/Settings/MainCompanySettings.test.tsx",
+    "blob": "18a7c5a8b43bd45cbe4b5c3730e76d84cf3673e7",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/services/api.documentSellerPolicy.test.ts",
+    "blob": "858e463014591a2ad62401cf3600e706379038ba",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/services/api.taskBillingSettings.test.ts",
+    "blob": "78ea6956a8b25ae3a0633455e483d161010f63dc",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-ci-no-deploy/working",
+    "path": "src/utils/invoiceEditorBridge.seller.test.ts",
+    "blob": "7f8d41cbb8dff9ee68c542ded6b015dac1815d7a",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "payplanner-release-ci-recovery/working",
+    "path": "docs/development-roadmap-release-integration-2026-10-28.md",
+    "blob": "ffc5c23d23a1cff651f9d788afb138666708e728",
+    "classification": "review-required",
+    "comparison": "0272f9c576c34582",
+    "merge_exit": 0
+  },
+  {
+    "origin": "payplanner-release-ci-recovery/working",
+    "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+    "blob": "18d6f121a64704e14ab722b7c35cd36d9b710a27",
+    "classification": "review-required",
+    "comparison": "1de1dcf0941108da",
+    "merge_exit": 0
+  },
+  {
+    "origin": "payplanner-release-ci-recovery/working",
+    "path": "docs/system-surface-inventory.generated.md",
+    "blob": "6a24bb2edd129f504bab9f626a05851ae686e8fb",
+    "classification": "review-required",
+    "comparison": "c87eeb7b828dc3b5",
+    "merge_exit": 0
+  },
+  {
+    "origin": "sqlite-fixture-speed/working",
+    "path": "backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs",
+    "blob": "da3e23756ad1d7b51ba1da7aede81a33cd757a50",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "sqlite-fixture-speed/working",
+    "path": "backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs",
+    "blob": "c9aa46646727fd949c2d356008c49c6c0404ef3f",
+    "classification": "contained-by-main",
+    "comparison": "da527517e045c0a4",
+    "merge_exit": 0
+  },
+  {
+    "origin": "sqlite-fixture-speed/working",
+    "path": "backend/PayPlanner.Api.Tests/StorageStageWriterProcessTests.cs",
+    "blob": "f71d2fe4cebbdc9509c9c3520b5657d6a4c6e007",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "sqlite-fixture-speed/working",
+    "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+    "blob": "319b9e5368dce9a316d269664fc45c14a8a4e01d",
+    "classification": "review-required",
+    "comparison": "6f0f5785a62e8080",
+    "merge_exit": 1
+  },
+  {
+    "origin": "sqlite-fixture-speed/working",
+    "path": "tools/PayPlanner.TestShards/BoundedBatchScheduler.cs",
+    "blob": "1c9e08796e02aba9d0b384c45d71389378c5cf0d",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "sqlite-fixture-speed/working",
+    "path": "tools/PayPlanner.TestShards/BoundedTestRunner.cs",
+    "blob": "b288775a4bce291b10fd6ec289e61815a6c1a37b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "sqlite-fixture-speed/working",
+    "path": "tools/PayPlanner.TestShards/ExecutionScheduling.cs",
+    "blob": "04d9a497d8686dc6b34c1412d87c2281c1cbf82b",
+    "classification": "review-required",
+    "comparison": "f538e5a583cfe5f3",
+    "merge_exit": 1
+  },
+  {
+    "origin": "stash-0/working",
+    "path": "scripts/xsenus-artifact-store.test.ts",
+    "blob": "75c61f8ad20a44142d76485fc9f0c9b83fef2bef",
+    "classification": "review-required",
+    "comparison": "266cd3ea70ea61cc",
+    "merge_exit": 3
+  },
+  {
+    "origin": "stash-0/working",
+    "path": "src/components/Tasks/TaskJournal.automation.test.tsx",
+    "blob": "3c46800acd76d22ccf32e2fcdb5cb5de50df7c6b",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "stash-0/working",
+    "path": "src/components/Tasks/TaskJournal.filters.test.tsx",
+    "blob": "e65b76ece72b8ff3978510f062a91482e3659fe9",
+    "classification": "contained-by-main",
+    "comparison": "3092c7e43b75c426",
+    "merge_exit": 0
+  },
+  {
+    "origin": "stash-0/working",
+    "path": "src/components/Tasks/TaskJournal.journal.test.tsx",
+    "blob": "068375547421a858924092ed97ae5d4cef64f6ff",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "stash-0/working",
+    "path": "src/services/api.test.ts",
+    "blob": "e0d580554d5e74da5e450c45a54835ec7b007908",
+    "classification": "review-required",
+    "comparison": "69cd0d11f0d2d6ab",
+    "merge_exit": 1
+  },
+  {
+    "origin": "stash-0/working",
+    "path": "src/services/caseDocumentPublicationRecovery.test.ts",
+    "blob": "66414298420783b3e0ee2b4fd151e526bf91b4ea",
+    "classification": "review-required",
+    "comparison": "d6bf83bded9e9a8d",
+    "merge_exit": 0
+  },
+  {
+    "origin": "stash-0/working",
+    "path": "src/services/caseDocumentUploadAttempts.test.ts",
+    "blob": "2fbfe4489f3b8642ea83b7b1712960e3a7c1ac75",
+    "classification": "review-required",
+    "comparison": "190143e3923bbe3f",
+    "merge_exit": 1
+  },
+  {
+    "origin": "stash-1/working",
+    "path": ".gitignore",
+    "blob": "cd8f974e35b546a45a86d8cb4cb9c99b3b3b1496",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "stash-1/working",
+    "path": "AGENTS.md",
+    "blob": "b6c50f49d70f797ab3726bef86ade7024a13d573",
+    "classification": "contained-by-main",
+    "comparison": "75766b07efe4168e",
+    "merge_exit": 0
+  },
+  {
+    "origin": "stash-1/working",
+    "path": "docs/payplanner-unified-roadmap-2026-10-14.md",
+    "blob": "31feb72d1e9af2a630b857301743c8a9bd062805",
+    "classification": "review-required",
+    "comparison": "f2e72f122899b2cb",
+    "merge_exit": 2
+  },
+  {
+    "origin": "stash-1^3",
+    "path": "docs/payplanner-handoff-2026-10-21.md",
+    "blob": "bd51dc2553f66ca389fe2f07593bc5e1c5f09e21",
+    "classification": "review-required",
+    "comparison": "158a923627cf1901",
+    "merge_exit": 1
+  },
+  {
+    "origin": "stash-1^3",
+    "path": "docs/payplanner-work-order-2026-10-21.md",
+    "blob": "32e845835e6931104c48fac428c0fd2f1645889e",
+    "classification": "review-required",
+    "comparison": "0a3976ec2fffad6d",
+    "merge_exit": 1
+  },
+  {
+    "origin": "stash-1^3",
+    "path": "docs/yougile-sources/2026-10-21/verification.json",
+    "blob": "d9b5955657b10baf5658915a1b342ae08b0a51f0",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "stash-1^3",
+    "path": "docs/yougile-sources/2026-10-21/verification.md",
+    "blob": "977d21a6aa9e65b7f1e3543a7310c3754294a839",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "stash-2/working",
+    "path": "AGENTS.md",
+    "blob": "39dba4440d6a460783f21b70e0567af0a0d9b53e",
+    "classification": "contained-by-main",
+    "comparison": "7f3b53b741ed3aca",
+    "merge_exit": 0
+  },
+  {
+    "origin": "browser-proof-commit",
+    "path": "backend/PayPlanner.Api.Tests/BoundedBatchSchedulerTests.cs",
+    "blob": "b6e68d1478878e36f091dfb39e9f5dea07ea77ac",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "browser-proof-commit",
+    "path": "backend/PayPlanner.Api.Tests/BoundedTestExecutionTests.cs",
+    "blob": "fa212d63834a8b1bb9c05a997bb36bbcc617ecbd",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "browser-proof-commit",
+    "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+    "blob": "222dd1d9d80ed4a2841cf7f6ca4a64567e651ee6",
+    "classification": "review-required",
+    "comparison": "7243da5326026c35",
+    "merge_exit": 1
+  },
+  {
+    "origin": "browser-proof-commit",
+    "path": "scripts/report-backend-execution.mjs",
+    "blob": "a5fa6552529b950c283b9518995d666a67b21be3",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "browser-proof-commit",
+    "path": "scripts/report-backend-execution.node-tests.mjs",
+    "blob": "a28d8ab135c4ed5712867c5b041c8e4ca25bd11a",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "browser-proof-commit",
+    "path": "tools/PayPlanner.TestShards/BoundedBatchScheduler.cs",
+    "blob": "2ba84d0077c62976690b92d171f29403c56d0f50",
+    "classification": "exact-published-history"
+  },
+  {
+    "origin": "browser-proof-commit",
+    "path": "tools/PayPlanner.TestShards/ExecutionScheduling.cs",
+    "blob": "5483e897aacdec7925e090562eb357ad7dddd9c3",
+    "classification": "exact-published-history"
+  }
+]

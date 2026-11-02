@@ -1,0 +1,237 @@
+{
+  "8d6d02e8544a1e6f54525240ba684afb50ada259": {
+    "path": "backend/AppReleases/releases.json",
+    "bytes": 2062815,
+    "sha256": "d481ce703431c7a094a8039912338dee3646aa6c6e5f548b131ecc6b2aa3b2e8"
+  },
+  "2d73e74b76b132aa97f9d3c509cac78fb86d74a7": {
+    "path": "backend/PayPlanner.Api.Tests/MoneyOperationsInvoiceScopeTests.cs",
+    "bytes": 16230,
+    "sha256": "41be16f471e37889ba953521f907df04dad627b33e81e74941426f01573dc8df"
+  },
+  "895e6041e0957f5d8df37fa8db8acb4a08ebf6dc": {
+    "path": "docs/payplanner-handoff-2026-10-21.md",
+    "bytes": 99890,
+    "sha256": "2ed3471c8b20530341e84e32265c5ca2b3a753982a12377c1e9164eb3feb0c03"
+  },
+  "ae50967976e392d406b55e0c3d165386dbbe8a31": {
+    "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+    "bytes": 127211,
+    "sha256": "cee3828a3e1361775e065930f40334ff2ea3df49561b890441652ea02cd426f1"
+  },
+  "66fc6eb4706607bc5fe77a465a55bad357b2d50c": {
+    "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+    "bytes": 118329,
+    "sha256": "d3e4af8786c5d3de24edf2989375259d125e8feee11f74f5720b213f3860f948"
+  },
+  "028e7ee38c29b2da5ad37821166e6b9a345c4853": {
+    "path": "docs/payplanner-work-order-2026-10-21.md",
+    "bytes": 60180,
+    "sha256": "cdf5e761de55789ade62481ac4dab10489044318b8511ec03947c0937bc65403"
+  },
+  "fc157c6796dd655a8f6bcc5ad30ddbc50707b96f": {
+    "path": "docs/system-surface-inventory.generated.md",
+    "bytes": 296276,
+    "sha256": "f8924f6fe66ca711493353e5b9d404fa908a886703b063da3a4c9910a817e2ae"
+  },
+  "12ae7d0fed9d645353fbda5ed9ee13e9c8b885c8": {
+    "path": "scripts/check-case-retirement-live-browser.mjs",
+    "bytes": 39902,
+    "sha256": "bf668e2cbd3c2ea9ababf4ca3fd20c94044c21e16de20f5aa37c77af4c948653"
+  },
+  "04d9a497d8686dc6b34c1412d87c2281c1cbf82b": {
+    "path": "tools/PayPlanner.TestShards/ExecutionScheduling.cs",
+    "bytes": 12044,
+    "sha256": "379b994ded50b6229af81f145bf5e589b98168af56e200716fc6705ba2ff5b6c"
+  },
+  "ffc5c23d23a1cff651f9d788afb138666708e728": {
+    "path": "docs/development-roadmap-release-integration-2026-10-28.md",
+    "bytes": 195889,
+    "sha256": "6be91618b03ec10154906f6775190ad4ca19756cd6b74bbfd09a625956c06b6a"
+  },
+  "18d6f121a64704e14ab722b7c35cd36d9b710a27": {
+    "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+    "bytes": 246475,
+    "sha256": "a6702a4eb0354a05621b4b53f3e065176b6f26082afb0300f47273eaacc3ef4f"
+  },
+  "6a24bb2edd129f504bab9f626a05851ae686e8fb": {
+    "path": "docs/system-surface-inventory.generated.md",
+    "bytes": 295099,
+    "sha256": "4e7bb3f3b61b5de275b865486e9f5b89e7a656dda111227427f8b418941081cc"
+  },
+  "319b9e5368dce9a316d269664fc45c14a8a4e01d": {
+    "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+    "bytes": 106980,
+    "sha256": "a837e7b7518954d9ad74e77a69779381a3f7ca2eb03c94ad79e117332e9083e9"
+  },
+  "75c61f8ad20a44142d76485fc9f0c9b83fef2bef": {
+    "path": "scripts/xsenus-artifact-store.test.ts",
+    "bytes": 5735,
+    "sha256": "569ace1e6323e2e1476cf1a336d4599414f37f59a63094a3e3723ecf98a71adf"
+  },
+  "e0d580554d5e74da5e450c45a54835ec7b007908": {
+    "path": "src/services/api.test.ts",
+    "bytes": 174086,
+    "sha256": "93d58de131ae556556a75c5d1a9ebc07acf710e25b6ecfd41d902468e432abbd"
+  },
+  "66414298420783b3e0ee2b4fd151e526bf91b4ea": {
+    "path": "src/services/caseDocumentPublicationRecovery.test.ts",
+    "bytes": 10365,
+    "sha256": "718b94efcfaac752b4b6c5e4108064ed25cfdb596b7c02e09907306c3849fb57"
+  },
+  "2fbfe4489f3b8642ea83b7b1712960e3a7c1ac75": {
+    "path": "src/services/caseDocumentUploadAttempts.test.ts",
+    "bytes": 51956,
+    "sha256": "a83b9a61abcd2f18a2875b45c0361e950fd83731ba2d7816f481d9c28784abdf"
+  },
+  "31feb72d1e9af2a630b857301743c8a9bd062805": {
+    "path": "docs/payplanner-unified-roadmap-2026-10-14.md",
+    "bytes": 60492,
+    "sha256": "41710d130fea37e28a687124196e8e9d70ba54573b0e6c5a96789cc059b45c41"
+  },
+  "bd51dc2553f66ca389fe2f07593bc5e1c5f09e21": {
+    "path": "docs/payplanner-handoff-2026-10-21.md",
+    "bytes": 12410,
+    "sha256": "0505f9f3dedceecbcc63071c68ed68a56305a08882e27fb85e219c2d8b12bec7"
+  },
+  "32e845835e6931104c48fac428c0fd2f1645889e": {
+    "path": "docs/payplanner-work-order-2026-10-21.md",
+    "bytes": 43269,
+    "sha256": "9e1efce4d4b52211a9981175088972c118a78a74db565ec11d5b3811c81c50ca"
+  },
+  "222dd1d9d80ed4a2841cf7f6ca4a64567e651ee6": {
+    "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+    "bytes": 142169,
+    "sha256": "c286a85381696bb9e7bbf7887a0022cd00ad2c9da23d02412c5a006239c011f6"
+  },
+  "9a3caddc71a635c070d2a406cbfe22ab421310fd": {
+    "path": ".github/workflows/visual-smoke.yml",
+    "bytes": 9073,
+    "sha256": "c7653bbb75c0faaf88868002cf11eab22fa5aad369f48315c6d6a816ae6975a8"
+  },
+  "8edde05881ccd8198b68a6bb8796bf93f403b91a": {
+    "path": "docs/development-roadmap-release-integration-2026-10-28.md",
+    "bytes": 27867,
+    "sha256": "fd51a830e623a3922792a95241ceaff8055818c94b6cf290e173a7610cff6db4"
+  },
+  "bba8eef21400ff09830f0a7665b311708091b6e5": {
+    "path": "docs/payplanner-release-roadmap-2026-10-14.md",
+    "bytes": 145786,
+    "sha256": "61836c90a05a03428ce8f319125067afbb541faed9b401df347d3ad855b71cac"
+  },
+  "bde29ee1313fa8d65780fc0fad0b5db683f5255e": {
+    "path": "src/components/Navigation/Navigation.test.tsx",
+    "bytes": 42068,
+    "sha256": "290e49c63f5a6058dbfa6010f78681ad3abf22175556812d5d87db11fd1c96a8"
+  },
+  "757b539c1d8a0cb071899128a81dec28d5193ef3": {
+    "path": "src/components/Tasks/TaskJournal.test.tsx",
+    "bytes": 90694,
+    "sha256": "92d2b2aba9f9ae643589eed4e6475bffcfc527d3e604bd36dfa54c3da12aa45e"
+  },
+  "71da57f91c2bf0141e53f3789c4aca00f717a5bb": {
+    "path": "src/components/Tasks/TaskJournal.tsx",
+    "bytes": 284226,
+    "sha256": "c9b73e8469c08c079795ff7cee988e98a3500ee3e399b22f02d94ff0136517db"
+  },
+  "eaf5224188da5334474147f5a05422ccc98658ee": {
+    "path": "backend/AppReleases/releases.json",
+    "bytes": 185417,
+    "sha256": "4a12ace6c60c3aeba433fbee031f2d292a9c66215c1409110efd1d89f53d99f9"
+  },
+  "8b66e533e2db2de1190f7dc31ac8eece429907b0": {
+    "path": "src/components/Tasks/TaskJournal.test.tsx",
+    "bytes": 89563,
+    "sha256": "85fcb1b95b4922b6734376b2a4aaf833e4c8f3f875aa9d551723370ad2d667ba"
+  },
+  "b49cb21b7879a732ad0c824c0a324707aafe61a2": {
+    "path": "src/components/Tasks/TaskJournal.tsx",
+    "bytes": 284242,
+    "sha256": "80d5b96f727bfa7293bfc00eaad90846b4ab8add0fdaf80991ecab12d01b7986"
+  },
+  "11982af8bc84e2194bdab5987be25ad83dbec728": {
+    "path": "src/components/Tasks/TaskJournal.test.tsx",
+    "bytes": 88614,
+    "sha256": "a9deffd8a503f10861fc58e65bea54d8fa3b48a07e36591eadccde3e4bbde42d"
+  },
+  "e36e55520b84ca9161add7489b57203bcfd453ff": {
+    "path": "src/components/Tasks/TaskJournal.tsx",
+    "bytes": 284269,
+    "sha256": "2585c82519c87b45f0dd147aadd20b1edb4175077f205abe7767545a3ba7ddca"
+  },
+  "e599be379933c2c4c2935387c553f5c6faf3dea8": {
+    "path": "backend/AppReleases/releases.json",
+    "bytes": 185324,
+    "sha256": "cba8903cf614b9e35d4f9215e94a67cccc55189e920e1fd4d9bf1535c1d48566"
+  },
+  "7780ae27395ada1c0e4faf4a81f28a206bf79c68": {
+    "path": "backend/Controllers/TasksController.cs",
+    "bytes": 180485,
+    "sha256": "9d17684cb7275e641f953681fb103c134620688acd0ae5fc0dd768a1ac37a953"
+  },
+  "e9191111ab911ae3882a1d9b8215800287fce414": {
+    "path": "backend/PayPlanner.Api.Tests/TasksControllerTests.cs",
+    "bytes": 144227,
+    "sha256": "c58b2cc04ad40fef2e3ee78f797a2afb961ee1372cf6b5b40d65be9eab73c067"
+  },
+  "7f02c789bb9bed366fd73c87367bac67d490e025": {
+    "path": "src/components/Tasks/TaskJournal.test.tsx",
+    "bytes": 88656,
+    "sha256": "8253a2481f8916f244685dc61cb1e09b2a16d4a583f6fc0876147e16e4d75b7f"
+  },
+  "de4dd26d22848ad2b1ca21d278e4903e4a8bce5a": {
+    "path": "src/components/Tasks/TaskJournal.tsx",
+    "bytes": 284538,
+    "sha256": "200682cfa4e1c08e8de953332f369fdb918a8fb9cb7f5444a3a86c10ad165223"
+  },
+  "07d47e42a8e09b3d4b398e3c86daa44774c3588d": {
+    "path": "src/components/Clients/ClientReconciliationAct.tsx",
+    "bytes": 49289,
+    "sha256": "a6c078d268d82e9b43c194a7d30aa1ef674990c8801091df02122dd891acd15f"
+  },
+  "5c552ee22c07cedaecbd2d34843c1bb43ae0c43d": {
+    "path": "backend/Controllers/CashOrdersController.cs",
+    "bytes": 69614,
+    "sha256": "a982e461ba7b405b6dcfe2a84cbd31c5d3d5bd20e693b98af3a36e1526d87b01"
+  },
+  "ac596a09ad7558822cb2fee7f302d1765bb63a72": {
+    "path": "backend/PayPlanner.Api.Tests/MoneyOperationsControllerTests.cs",
+    "bytes": 221072,
+    "sha256": "ad8d4b3e2ff89f633a564bf0f43fdf2e778693ba0bebf67baee6e6bc7e205df6"
+  },
+  "3e6e5f61fd3e8c0da22d6644244fe88a96a1052e": {
+    "path": "src/components/Accounts/InvoiceModal.integration.test.tsx",
+    "bytes": 72280,
+    "sha256": "98478dbc7df3c7d1e0355ab3185e73c7865a9315c8ff8862b02572be9f7335b6"
+  },
+  "c5fb10732d56a9064207aacda51cae07f42bec06": {
+    "path": "src/components/Accounts/Accounts.tsx",
+    "bytes": 61866,
+    "sha256": "9e9bdd4044dfff5f7161c86eaa749fceb41618b9c8d914f6cddb46b26752f877"
+  },
+  "e23784577c0cfdc08f3e11b31f658040eccc2496": {
+    "path": "src/components/Acts/ActModal.tsx",
+    "bytes": 15485,
+    "sha256": "245a2d7cc366d44d79a7a3b67ac68da6557516ab081faf68b6b5f463eaffca97"
+  },
+  "12f60e39e2535a4132b7455f025e800f8ec5b420": {
+    "path": "src/locales/ru.ts",
+    "bytes": 32249,
+    "sha256": "f31954b596fed4d116c3cbf58b126377d7308fac3a303a265b29d60dc1ce8d2d"
+  },
+  "d82a2a32f5e9fc146dd4d23d572dafa5050925bf": {
+    "path": "src/components/Accounts/Accounts.tsx",
+    "bytes": 38611,
+    "sha256": "770b484b384073b929875e9ec4cb903518ee2a2b60dd85e213b9beeb67626b74"
+  },
+  "dae2328577b6cb7ace68011758e5a4c46344f6f9": {
+    "path": "src/components/Acts/ActModal.tsx",
+    "bytes": 15583,
+    "sha256": "db2987c464977d3db0df63dd504bd5d6339a61b210e8de30a7eb31efac37fed2"
+  },
+  "35d5534c3809f1e620b4642979f3dd36321d7637": {
+    "path": "src/locales/ru.ts",
+    "bytes": 30409,
+    "sha256": "664671c402bb1db6f19b2d45f20d9fdadebeee2a19d98562c4def1811bfef0a1"
+  }
+}

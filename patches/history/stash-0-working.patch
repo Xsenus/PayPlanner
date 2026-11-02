@@ -1,0 +1,233 @@
+diff --git a/scripts/xsenus-artifact-store.test.ts b/scripts/xsenus-artifact-store.test.ts
+index 02f022d199b86b23a50b892bbb111541b0b24d37..75c61f8ad20a44142d76485fc9f0c9b83fef2bef 100644
+--- a/scripts/xsenus-artifact-store.test.ts
++++ b/scripts/xsenus-artifact-store.test.ts
+@@ -14,22 +14,27 @@ const context = (change: Record<string, string | undefined> = {}) => ({
+   PAYPLANNER_CI_ARTIFACT_ROOT: productionStoreRoot, ...change,
+ });
+ 
+-describe('main artifact transport caller and matrix bindings', () => {
+-  it.each(['0', '1', '2', '3'])('derives canonical shard %s from the actual matrix job without mutating its environment', shard => {
+-    const env = context({ GITHUB_JOB: 'backend-test', ARTIFACT_SHARD: shard });
++describe('main artifact transport caller and shard bindings', () => {
++  it.each(['0', '1', '2', '3'])('derives canonical shard %s from its actual worker job without mutating its environment', shard => {
++    const env = context({ GITHUB_JOB: `backend-test-${shard}`, ARTIFACT_SHARD: shard });
+     const result = contextFromEnvironment(env, 'win32');
+     expect(result.producerJob).toBe(`backend-test-${shard}`);
+-    expect(env.GITHUB_JOB).toBe('backend-test');
++    expect(env.GITHUB_JOB).toBe(`backend-test-${shard}`);
+     expect(env.ARTIFACT_SHARD).toBe(shard);
++    expect(contextFromEnvironment(context({ GITHUB_JOB: `backend-test-${shard}` }), 'win32').producerJob).toBe(`backend-test-${shard}`);
+   });
+-  it.each([undefined, '', '-1', '4', '01', '0 ', '1,2'])('rejects a missing or noncanonical matrix shard %s', shard => {
+-    expect(() => contextFromEnvironment(context({ GITHUB_JOB: 'backend-test', ARTIFACT_SHARD: shard }), 'win32')).toThrow();
++  it.each([undefined, '', 'backend-test--1', 'backend-test-4', 'backend-test-01', 'backend-test-0 ', 'backend-test-1,2'])('rejects a missing or noncanonical worker job %s', job => {
++    expect(() => contextFromEnvironment(context({ GITHUB_JOB: job }), 'win32')).toThrow();
+   });
+-  it.each(['backend-test-0', 'backend-test-3', 'unknown'])('rejects a fabricated actual job %s', job => {
++  it.each(['backend-test-4', 'backend-test-00', 'unknown'])('rejects a fabricated actual job %s', job => {
+     expect(() => contextFromEnvironment(context({ GITHUB_JOB: job }), 'win32')).toThrow();
+   });
+   it('rejects a shard claimed by a nonmatrix job', () => {
+     expect(() => contextFromEnvironment(context({ ARTIFACT_SHARD: '0' }), 'win32')).toThrow();
++    expect(() => contextFromEnvironment(context({ GITHUB_JOB: 'backend-test', ARTIFACT_SHARD: '0' }), 'win32')).toThrow();
++  });
++  it.each(['', '-1', '4', '01', '0 ', '1,2', '1'])('rejects a shard override %s that does not match actual worker zero', shard => {
++    expect(() => contextFromEnvironment(context({ GITHUB_JOB: 'backend-test-0', ARTIFACT_SHARD: shard }), 'win32')).toThrow();
+   });
+   it('rejects the former prototype ref and root even when its old host guard permits dispatch', () => {
+     expect(() => contextFromEnvironment(context({ GITHUB_REF: 'refs/heads/claude/practical-bardeen-pglcf3',
+@@ -37,12 +42,16 @@ describe('main artifact transport caller and matrix bindings', () => {
+       GITHUB_WORKFLOW_REF: 'Xsenus/PayPlanner/.github/workflows/deploy.yml@refs/heads/claude/practical-bardeen-pglcf3' }), 'win32')).toThrow();
+     expect(() => contextFromEnvironment(context({ PAYPLANNER_CI_ARTIFACT_ROOT: 'D:\\PayPlannerCIArtifacts\\store' }), 'win32')).toThrow();
+   });
+-  it.each([0, 1, 2, 3])('uses needs.backend-test.outputs.shard_%s_id rather than an invented needs job', shard => {
++  it.each([0, 1, 2, 3])('binds shard %s to exact direct or forwarded needs outputs', shard => {
+     const ctx = { needs: { 'backend-test': { result: 'success', outputs: { [`shard_${shard}_id`]: id } } } };
+     expect(() => need(ctx, `backend-test-${shard}`, 'qualified-artifact-id', id)).not.toThrow();
+     expect(() => need({ needs: { [`backend-test-${shard}`]: { result: 'success', outputs: { 'qualified-artifact-id': id } } } },
+-      `backend-test-${shard}`, 'qualified-artifact-id', id)).toThrow();
++      `backend-test-${shard}`, 'qualified-artifact-id', id)).not.toThrow();
+     expect(() => need(ctx, `backend-test-${shard}`, 'qualified-artifact-id', 'xsenus-local-v1:' + 'd'.repeat(64))).toThrow();
++    expect(() => need({ needs: { [`backend-test-${shard}`]: { result: 'success', outputs: { 'qualified-artifact-id': id } } } },
++      `backend-test-${shard}`, 'qualified-artifact-id', 'xsenus-local-v1:' + 'd'.repeat(64))).toThrow();
++    expect(() => need({ needs: { [`backend-test-${shard}`]: { result: 'failure', outputs: { 'qualified-artifact-id': id } } } },
++      `backend-test-${shard}`, 'qualified-artifact-id', id)).toThrow();
+   });
+   it.each(['failure', 'cancelled', 'skipped'])('does not consume a %s matrix producer', result => {
+     expect(() => need({ needs: { 'backend-test': { result, outputs: { shard_0_id: id } } } },
+diff --git a/src/components/Tasks/TaskJournal.automation.test.tsx b/src/components/Tasks/TaskJournal.automation.test.tsx
+index 0ee1f10b13f0d13f55239e6bbb7c9cc70220f904..3c46800acd76d22ccf32e2fcdb5cb5de50df7c6b 100644
+--- a/src/components/Tasks/TaskJournal.automation.test.tsx
++++ b/src/components/Tasks/TaskJournal.automation.test.tsx
+@@ -185,7 +185,7 @@ describe('TaskJournal', () => {
+     await renderJournal([], { waitForTitle: null });
+     apiMock.getTaskJournalCaseAutomationCandidates.mockClear();
+ 
+-    const searchInput = screen.getByRole('textbox') as HTMLInputElement;
++    const searchInput = screen.getByRole('textbox', { name: 'Поиск по контрагенту, делу или наименованию задачи' }) as HTMLInputElement;
+     fireEvent.change(searchInput, { target: { value: 'ДРУГОЙ КЛИЕНТ' } });
+ 
+     expect(apiMock.getTaskJournalCaseAutomationCandidates).not.toHaveBeenCalled();
+diff --git a/src/components/Tasks/TaskJournal.filters.test.tsx b/src/components/Tasks/TaskJournal.filters.test.tsx
+index dc82de139006bb1cadc0a780565db168fe8984ff..e65b76ece72b8ff3978510f062a91482e3659fe9 100644
+--- a/src/components/Tasks/TaskJournal.filters.test.tsx
++++ b/src/components/Tasks/TaskJournal.filters.test.tsx
+@@ -248,7 +248,7 @@ describe('TaskJournal', () => {
+       }),
+     ], { withRoute: true });
+ 
+-    const searchInput = screen.getByRole('textbox') as HTMLInputElement;
++    const searchInput = screen.getByRole('textbox', { name: 'Поиск по контрагенту, делу или наименованию задачи' }) as HTMLInputElement;
+     fireEvent.change(searchInput, { target: { value: 'EGOROV' } });
+ 
+     expect(await screen.findByText('Egor task')).toBeTruthy();
+@@ -265,7 +265,7 @@ describe('TaskJournal', () => {
+ 
+     fireEvent.click(screen.getByRole('button', { name: 'Журнал задач' }));
+ 
+-    const restoredSearchInput = await screen.findByRole('textbox') as HTMLInputElement;
++    const restoredSearchInput = await screen.findByRole('textbox', { name: 'Поиск по контрагенту, делу или наименованию задачи' }) as HTMLInputElement;
+     expect(restoredSearchInput.value).toBe('EGOROV');
+     expect(screen.getByText('Egor task')).toBeTruthy();
+     expect(screen.queryByText('Other task')).toBeNull();
+@@ -302,7 +302,7 @@ describe('TaskJournal', () => {
+       }),
+     ]);
+ 
+-    const searchInput = screen.getByRole('textbox') as HTMLInputElement;
++    const searchInput = screen.getByRole('textbox', { name: 'Поиск по контрагенту, делу или наименованию задачи' }) as HTMLInputElement;
+     fireEvent.change(searchInput, { target: { value: 'ЕГОРОВА' } });
+ 
+     expect(await screen.findByText('ЕГОРОВА - счет 94')).toBeTruthy();
+@@ -985,7 +985,7 @@ describe('TaskJournal', () => {
+ 
+     fireEvent.click(screen.getByRole('button', { name: /Просрочены/i }));
+ 
+-    expect(screen.getByText('Overdue task')).toBeTruthy();
++    expect(await screen.findByText('Overdue task')).toBeTruthy();
+     await waitFor(() => expect(screen.queryByText('Future task')).toBeNull());
+   });
+ 
+diff --git a/src/components/Tasks/TaskJournal.journal.test.tsx b/src/components/Tasks/TaskJournal.journal.test.tsx
+index 4d8cb3e4c94be796266d57f0a3b0cb2666815ff3..068375547421a858924092ed97ae5d4cef64f6ff 100644
+--- a/src/components/Tasks/TaskJournal.journal.test.tsx
++++ b/src/components/Tasks/TaskJournal.journal.test.tsx
+@@ -333,7 +333,7 @@ describe('TaskJournal', () => {
+     await waitFor(() => {
+       expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({
+         calendarView: true,
+-      }));
++      }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+       expect(apiMock.getTaskJournalAssignees).toHaveBeenCalledWith({ calendarView: true });
+     });
+   });
+diff --git a/src/services/api.test.ts b/src/services/api.test.ts
+index 94cc99b09155846886837e65363f1a53c433f563..e0d580554d5e74da5e450c45a54835ec7b007908 100644
+--- a/src/services/api.test.ts
++++ b/src/services/api.test.ts
+@@ -299,7 +299,7 @@ describe('apiService object audit', () => {
+     expect(String(url)).toContain('searchAliases=PhoneNumber');
+     expect(String(url)).toContain('page=2');
+     expect(options?.signal).toBe(controller.signal);
+-    expect(new Headers(options?.headers).get('X-PayPlanner-Currency-Contract')).toBe('1');
++    expect(new Headers(options?.headers).get('X-PayPlanner-Currency-Contract')).toBeNull();
+   });
+ });
+ 
+diff --git a/src/services/caseDocumentPublicationRecovery.test.ts b/src/services/caseDocumentPublicationRecovery.test.ts
+index 56ca03c9eb8314e2a75d767eb75a5d29c917bf0b..66414298420783b3e0ee2b4fd151e526bf91b4ea 100644
+--- a/src/services/caseDocumentPublicationRecovery.test.ts
++++ b/src/services/caseDocumentPublicationRecovery.test.ts
+@@ -3,6 +3,7 @@ import { webcrypto } from 'node:crypto';
+ import { apiService, type CaseDocumentUploadState } from './api';
+ import { API_BASE_URL } from './apiBaseUrl';
+ import { beginCaseDocumentGeneration, getUnconfirmedCaseDocumentUploadKeys } from './caseDocumentUploadAttempts';
++import { AuthSessionChangedError } from './authService';
+ 
+ const token = (id = 1, iat = 1) => `header.${btoa(JSON.stringify({ sub: String(id), iss: 'owned-fixture', iat }))}.signature`;
+ const scope = (kind = 'invoice', caseId = 7, api = API_BASE_URL, hash = 'b'.repeat(64)) => JSON.stringify(['financial', api, caseId, kind, hash]);
+@@ -82,13 +83,26 @@ describe('published local case attempt recovery', () => {
+       return response([ready(own.key)]);
+     }); vi.stubGlobal('fetch', fetchMock);
+     const result = apiService.getPendingCaseDocumentUploads(7, undefined, controller.signal);
+-    if (change === 'different-actor') await expect(result).rejects.toThrow('403');
++    if (change === 'different-actor') await expect(result).rejects.toBeInstanceOf(AuthSessionChangedError);
+     else if (change === 'abort') await result.catch(() => null);
+     else expect(await result).toEqual({ ...empty, localPublicationConfirmed: true });
+     if (change !== 'same-actor-refresh') expect(beginCaseDocumentGeneration(scope(), token())).toEqual(own);
+     else expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBeNull();
+   });
+ 
++  it('preserves a local attempt when proof is forbidden in the unchanged session', async () => {
++    beginCaseDocumentGeneration(scope(), token());
++    const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
++    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(response(empty)).mockResolvedValueOnce(
++      new Response(JSON.stringify({ message: 'HTTP 403: forbidden' }), { status: 403, headers: { 'content-type': 'application/json' } }),
++    );
++    vi.stubGlobal('fetch', fetchMock);
++    await expect(apiService.getPendingCaseDocumentUploads(7)).rejects.toThrow('403');
++    expect(fetchMock).toHaveBeenCalledTimes(2);
++    expect(fetchMock.mock.calls.every(([, options]) => (options?.method ?? 'GET') === 'GET' && options?.body === undefined)).toBe(true);
++    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
++  });
++
+   it('reads sixty unresolved keys in two bounded batches without history or writes', async () => {
+     for (let i = 0; i < 60; i++) beginCaseDocumentGeneration(scope('contract', 7, API_BASE_URL, i.toString(16).padStart(64, '0')), token());
+     const sizes: number[] = [];
+@@ -106,9 +120,10 @@ describe('published local case attempt recovery', () => {
+     const pendingKey = crypto.randomUUID();
+     const page = { items: [{ ...ready(pendingKey), status: 'waiting', documentId: null, version: null }], nextCursor: null };
+     sessionStorage.setItem('pp.case-document-upload-attempts.v1', '{broken');
++    const getItem = Storage.prototype.getItem;
+     if (change === 'denied') vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key) {
+       if (this === sessionStorage) throw new Error('storage denied');
+-      return key === 'pp_token' ? token() : null;
++      return getItem.call(this, key);
+     });
+     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response(page)); vi.stubGlobal('fetch', fetchMock);
+     expect(getUnconfirmedCaseDocumentUploadKeys(7, API_BASE_URL, token())).toEqual([]);
+diff --git a/src/services/caseDocumentUploadAttempts.test.ts b/src/services/caseDocumentUploadAttempts.test.ts
+index 87485a2993002178a523185d7d17351f7364e228..2fbfe4489f3b8642ea83b7b1712960e3a7c1ac75 100644
+--- a/src/services/caseDocumentUploadAttempts.test.ts
++++ b/src/services/caseDocumentUploadAttempts.test.ts
+@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+ import { beginCaseDocumentGeneration, beginCaseDocumentUpload, confirmCaseDocumentUpload, confirmPublishedCaseDocumentUploads, confirmRetiredCaseDocumentUpload } from './caseDocumentUploadAttempts';
+ import { API_BASE_URL } from './apiBaseUrl';
+ import { ApiService } from './api';
+-import { authService } from './authService';
++import { authService, AuthSessionChangedError } from './authService';
+ import { createHash, webcrypto } from 'node:crypto';
+ import { Buffer } from 'node:buffer';
+ 
+@@ -598,6 +598,21 @@ describe('background publication attempt acknowledgement', () => {
+   const versionScope = (api = API_BASE_URL) => JSON.stringify(['version', api, 18, 'Документ', 'Подготовлен']);
+   const receipt = (key: string) => ({ uploadKey: key, status: 'uploaded', documentId: 19, version: 2 });
+ 
++  it.each(['discovery', 'status'])('retains the local attempt after a forbidden %s response in the same session', async (mode) => {
++    localStorage.setItem('pp_token', token(1));
++    const own = beginCaseDocumentUpload(caseScope(), file(), token(1));
++    const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
++    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(
++      JSON.stringify({ message: 'HTTP 403: forbidden' }), { status: 403, headers: { 'content-type': 'application/json' } },
++    ));
++    vi.stubGlobal('fetch', fetchMock);
++    const api = new ApiService();
++    await expect(mode === 'discovery' ? api.getPendingCaseDocumentUploads(15) : api.getCaseDocumentUploadStates(15, [own.key]))
++      .rejects.toThrow('HTTP 403');
++    expect(fetchMock).toHaveBeenCalledTimes(1);
++    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
++  });
++
+   it.each(['discovery', 'status'])('rejects late sensitive %s data after an actor switch', async (mode) => {
+     localStorage.setItem('pp_token', token(1));
+     const own = beginCaseDocumentUpload(caseScope(), file(), token(1));
+@@ -609,7 +624,7 @@ describe('background publication attempt acknowledgement', () => {
+     }));
+     const api = new ApiService();
+     await expect(mode === 'discovery' ? api.getPendingCaseDocumentUploads(15) : api.getCaseDocumentUploadStates(15, [own.key]))
+-      .rejects.toThrow('HTTP 403');
++      .rejects.toBeInstanceOf(AuthSessionChangedError);
+     expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+   });
+ 

@@ -1,0 +1,145 @@
+# Temporary read-only diagnostic branch: do not merge into main.
+# The scheduled Visual Smoke on main is unchanged.
+name: PayPlanner Runner Read-only Memory Diagnostics
+run-name: Read-only memory diagnostics on XSENUS
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: payplanner-runner-memory-readonly
+  cancel-in-progress: false
+
+jobs:
+  runner-memory-readonly:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/xsenus/runner-memory-readonly-20261031' }}
+    runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
+    timeout-minutes: 5
+    steps:
+      - name: Read bounded memory and process ownership snapshots
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          function Get-NameHash([string]$Value) {
+              $hasher = [Security.Cryptography.SHA256]::Create()
+              try { return ([BitConverter]::ToString($hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($Value.ToLowerInvariant())))).Replace('-', '').ToLowerInvariant() }
+              finally { $hasher.Dispose() }
+          }
+
+          function Get-Category([string]$Name) {
+              switch ($Name.ToLowerInvariant()) {
+                  'dotnet.exe' { return 'managed-tool' }
+                  'testhost.exe' { return 'managed-tool' }
+                  'node.exe' { return 'node-tool' }
+                  'postgres.exe' { return 'shared-postgresql' }
+                  'sqlservr.exe' { return 'other-database' }
+                  'mysqld.exe' { return 'other-database' }
+                  'chrome.exe' { return 'browser' }
+                  'msedge.exe' { return 'browser' }
+                  'firefox.exe' { return 'browser' }
+                  'vmware-vmx.exe' { return 'virtualization' }
+                  'vmmem' { return 'virtualization' }
+                  'vmmemwsl' { return 'virtualization' }
+                  'runner.worker.exe' { return 'runner-worker' }
+                  'runner.listener.exe' { return 'runner-listener' }
+                  'conhost.exe' { return 'console-host' }
+                  default { return 'other' }
+              }
+          }
+
+          try {
+              $os = Get-CimInstance Win32_OperatingSystem -Property CSName, FreePhysicalMemory, TotalVisibleMemorySize, LastBootUpTime
+              if ($os.CSName -ine 'XSENUS' -or $env:RUNNER_NAME -ine 'PayPlanner-XSENUS') { throw [InvalidOperationException]::new('DIAGNOSTIC_HOST_IDENTITY_MISMATCH') }
+              for ($sample = 0; $sample -lt 5; $sample++) {
+                  if ($sample -gt 0) { Start-Sleep -Seconds 30 }
+                  $os = Get-CimInstance Win32_OperatingSystem -Property CSName, FreePhysicalMemory, TotalVisibleMemorySize, LastBootUpTime
+                  $processes = @(Get-CimInstance Win32_Process -Property Name, ProcessId, ParentProcessId, WorkingSetSize, PrivatePageCount, CreationDate)
+                  $byId = @{}
+                  foreach ($process in $processes) { $byId[[uint32]$process.ProcessId] = $process }
+                  $currentWorker = $null
+                  $ancestor = [uint32]$PID
+                  $ancestors = [Collections.Generic.HashSet[uint32]]::new()
+                  for ($depth = 0; $depth -lt 48 -and $byId.ContainsKey($ancestor) -and $ancestors.Add($ancestor); $depth++) {
+                      $process = $byId[$ancestor]
+                      if ($process.Name -ieq 'Runner.Worker.exe') { $currentWorker = [uint32]$process.ProcessId; break }
+                      $ancestor = [uint32]$process.ParentProcessId
+                  }
+                  if ($null -eq $currentWorker) { throw [InvalidOperationException]::new('DIAGNOSTIC_WORKER_ANCESTRY_UNAVAILABLE') }
+                  $owned = [Collections.Generic.HashSet[uint32]]::new()
+                  [void]$owned.Add($currentWorker)
+                  do {
+                      $added = $false
+                      foreach ($process in $processes) {
+                          if ($owned.Contains([uint32]$process.ParentProcessId) -and $owned.Add([uint32]$process.ProcessId)) { $added = $true }
+                      }
+                  } while ($added)
+                  $rows = @(
+                      foreach ($process in $processes) {
+                          $category = Get-Category ([string]$process.Name)
+                          $isOwned = $owned.Contains([uint32]$process.ProcessId)
+                          $group = if ($isOwned) { 'diagnostic-worker-owned' } elseif ($category -eq 'shared-postgresql') { 'shared-postgresql-outside-worker' } else { 'outside-diagnostic-worker' }
+                          [pscustomobject]@{
+                              processId = [uint32]$process.ProcessId
+                              parentProcessId = [uint32]$process.ParentProcessId
+                              parentPresent = $byId.ContainsKey([uint32]$process.ParentProcessId)
+                              currentDiagnosticWorkerOwned = $isOwned
+                              group = $group
+                              category = $category
+                              nameSha256 = Get-NameHash ([string]$process.Name)
+                              createdUtc = if ($null -ne $process.CreationDate) { $process.CreationDate.ToUniversalTime().ToString('o') } else { $null }
+                              privateBytes = if ($null -ne $process.PrivatePageCount) { [uint64]$process.PrivatePageCount } else { $null }
+                              workingSetBytes = if ($null -ne $process.WorkingSetSize) { [uint64]$process.WorkingSetSize } else { $null }
+                          }
+                      }
+                  )
+                  $groups = @($rows | Group-Object group | ForEach-Object {
+                      [ordered]@{
+                          group = $_.Name
+                          processCount = $_.Count
+                          measuredPrivateCount = @($_.Group | Where-Object { $null -ne $_.privateBytes }).Count
+                          measuredWorkingSetCount = @($_.Group | Where-Object { $null -ne $_.workingSetBytes }).Count
+                          sumPrivateBytes = ($_.Group | Measure-Object privateBytes -Sum).Sum
+                          sumWorkingSetBytes = ($_.Group | Measure-Object workingSetBytes -Sum).Sum
+                      }
+                  })
+                  $record = [ordered]@{
+                      kind = 'runner-memory-diagnostic'
+                      schema = 1
+                      sample = $sample
+                      observedUtc = [DateTime]::UtcNow.ToString('o')
+                      hostIdentityVerified = $true
+                      currentDiagnosticWorkerPid = $currentWorker
+                      lastBootUtc = $os.LastBootUpTime.ToUniversalTime().ToString('o')
+                      totalPhysicalBytes = [uint64]$os.TotalVisibleMemorySize * 1024
+                      freePhysicalBytes = [uint64]$os.FreePhysicalMemory * 1024
+                      groups = $groups
+                      topPrivateProcesses = @($rows | Sort-Object privateBytes -Descending | Select-Object -First 20)
+                      processCount = $rows.Count
+                      rawProcessNamesReturned = $false
+                      commandLinesOrEnvironmentQueried = $false
+                      remoteMutations = $false
+                      databaseConnections = 0
+                      userApplicationsStopped = 0
+                      testWorkloadRunningInThisJob = $false
+                      currentTestPeakMeasured = $false
+                      privateBytesAreCommittedNotResident = $true
+                      summedWorkingSetsMayDoubleCountSharedPages = $true
+                  }
+                  Write-Output ($record | ConvertTo-Json -Depth 9 -Compress)
+              }
+              try {
+                  $events = @(Get-WinEvent -FilterHashtable @{ ProviderName = 'Microsoft-Windows-Resource-Exhaustion-Detector'; StartTime = (Get-Date).AddHours(-8) } -MaxEvents 20 -ErrorAction Stop)
+                  $metadata = @($events | ForEach-Object { [ordered]@{ id = $_.Id; createdUtc = $_.TimeCreated.ToUniversalTime().ToString('o'); recordId = $_.RecordId; messageReturned = $false } })
+                  Write-Output (@{ kind = 'resource-exhaustion-event-metadata'; available = $true; boundedLastEightHours = $true; maxEntries = 20; events = $metadata } | ConvertTo-Json -Depth 5 -Compress)
+              } catch {
+                  Write-Output (@{ kind = 'resource-exhaustion-event-metadata'; available = $false; errorKind = $_.Exception.GetType().FullName; rawMessageReturned = $false; missingIsNotZero = $true } | ConvertTo-Json -Compress)
+              }
+              Write-Output '{"kind":"runner-memory-diagnostic-complete","samples":5,"mutations":false,"fullCiQualified":false,"deployed":false}'
+          } catch {
+              Write-Output (@{ kind = 'runner-memory-diagnostic-failure'; errorKind = $_.Exception.GetType().FullName; rawMessageReturned = $false; mutations = $false; fullCiQualified = $false; deployed = $false } | ConvertTo-Json -Compress)
+              exit 1
+          }
