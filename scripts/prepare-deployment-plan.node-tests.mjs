@@ -28,14 +28,9 @@ function fixture(t, candidate = false) {
   mkdirSync(join(root, 'out/be/AppReleases'), { recursive: true });
   mkdirSync(join(root, 'out/fe'), { recursive: true });
   const baseline = JSON.parse(readFileSync(resolve('scripts/deployment-baseline.json'), 'utf8'));
-  // New inactive notes do not change the already reviewed historical candidate.
-  // Reconstruct its exact catalog and retain the production hash check.
   let releases = Buffer.from('[{"releaseId":"published"}]');
   if (candidate) {
-    const current = JSON.parse(readFileSync(resolve('backend/AppReleases/releases.json'), 'utf8'));
-    const start = current.findIndex(entry => entry.releaseId === baseline.expectedReleaseSeeds[0].releaseId);
-    assert.ok(start >= 0, 'Reviewed historical catalog is still present');
-    releases = Buffer.from(JSON.stringify(current.slice(start), null, 2) + '\n');
+    releases = readFileSync(resolve('backend/AppReleases/releases.json'));
     assert.equal(sha256(releases), reviewedCandidate(root).releaseCatalogSha256);
   }
   if (!candidate) { baseline.expectedMigration = null; baseline.expectedReleaseSeeds = []; }
@@ -79,15 +74,15 @@ test('binds qualified needs, exact package maps, current history, source pins an
   assert.equal(plan.rollbackAfterStartup, 'halt-for-manual-review');
 });
 
-test('qualifies exactly the reviewed eleven-migration candidate and all 249 release insertions', t => {
+test('qualifies exactly the reviewed sixteen-migration candidate and all 513 release insertions', t => {
   const input = fixture(t, true);
   const { plan, qualificationRaw } = createPlan(input);
   const review = reviewedCandidate(input.root);
   assert.equal(plan.expectedMigration, review.migrationIds.join('+'));
-  assert.equal(plan.expectedReleaseSeeds.length, 249);
-  assert.deepEqual(plan.expectedReleaseSeeds.slice(0, 5).map(entry => entry.version), ['1.14.391', '1.14.390', '1.14.389', '1.14.388', '1.14.387']);
-  assert.ok(plan.expectedReleaseSeeds.slice(0, 5).every(entry => entry.isActive === false));
-  assert.deepEqual(plan.expectedReleaseSeeds, JSON.parse(readFileSync(join(input.root, 'out/be/AppReleases/releases.json'), 'utf8')).slice(0, 249));
+  assert.equal(plan.expectedReleaseSeeds.length, 513);
+  assert.deepEqual(plan.expectedReleaseSeeds.slice(0, 5).map(entry => entry.version), ['1.14.655', '1.14.654', '1.14.653', '1.14.652', '1.14.651']);
+  assert.ok(plan.expectedReleaseSeeds.slice(0, 5).every(entry => entry.isActive === true));
+  assert.deepEqual(plan.expectedReleaseSeeds, JSON.parse(readFileSync(join(input.root, 'out/be/AppReleases/releases.json'), 'utf8')).slice(0, 513));
   assert.equal(plan.expectedReleaseCatalogSha256, review.releaseCatalogSha256);
   assert.deepEqual(JSON.parse(qualificationRaw).expectedReleaseSeeds, plan.expectedReleaseSeeds);
 });
@@ -96,7 +91,7 @@ test('new catalog additions do not inherit the historical candidate admission', 
   const input = fixture(t, true);
   const path = join(input.root, 'scripts/deployment-baseline.json');
   const baseline = JSON.parse(readFileSync(path, 'utf8'));
-  baseline.expectedReleaseCatalogSha256 = sha256(readFileSync(resolve('backend/AppReleases/releases.json')));
+  baseline.expectedReleaseCatalogSha256 = sha256(Buffer.concat([readFileSync(resolve('backend/AppReleases/releases.json')), Buffer.from('\n')]));
   assert.notEqual(baseline.expectedReleaseCatalogSha256, reviewedCandidate(input.root).releaseCatalogSha256);
   writeFileSync(path, JSON.stringify(baseline));
   assert.throws(() => createPlan(input), /Reviewed candidate catalog differs/);

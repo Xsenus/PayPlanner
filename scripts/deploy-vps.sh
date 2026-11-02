@@ -82,7 +82,7 @@ need(q['backendPackageFiles'] and len(q['frontendRawFiles'])==c['expectedFronten
 need('deploy-revision.txt' not in q['frontendRawFiles'],'Revision is bound separately')
 need(admitted_ids==proof.reviewed_migration_ids(c['expectedMigration']) and c['expectedAddedProtectedTables']==[],'Unreviewed database migration or protected table rejected')
 need(q['expectedReleaseSeeds']==c['expectedReleaseSeeds'],'Only the reviewed new release entries may be inserted')
-if len(admitted_ids)==11:
+if len(admitted_ids)==16:
     need(q.get('activeReleaseJsonSha256')==c['expectedReleaseCatalogSha256'] and q['backendPackageFiles'].get('AppReleases/releases.json')==c['expectedReleaseCatalogSha256'],'Qualified candidate catalog binding differs')
 if phase=='install':pin(c['offsiteReceipt'])
 print('|'.join([rev,old,c['backupUtc'],c['archive']['sha256'],str(c['archive']['bytes']),c['expectedApiSha256'],c['expectedPreviousApiSha256'],c['expectedMigrationsSha256'],str(c['minimumRemainingBytes']),c['expectedPreviousMigrationsSha256']]))

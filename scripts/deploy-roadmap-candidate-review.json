@@ -12,10 +12,15 @@
     "20261028050010_AddTaskStatusNotificationOutbox",
     "20261028060010_AddTaskStatusTransitionToken",
     "20261028070010_BindApprovalNotificationStage",
-    "20261028080010_CashInventoryAccountIdentityPostgreSql"
+    "20261028080010_CashInventoryAccountIdentityPostgreSql",
+    "20261030224445_AddBalanceApplicationReceiptsPostgreSql",
+    "20261030232554_FenceCancelledBalanceApplicationsPostgreSql",
+    "20261031125252_AddPaymentOverdueNotificationOutboxPostgreSql",
+    "20261031233007_AddCompanyBankAccountBindingsPostgreSql",
+    "20261101000834_IndexCompanyBankBindingHistoryPostgreSql"
   ],
-  "schemaDeltaSha256": "c85888f1459247224ec6be1f9eb81d28ed92b87600f1dc86c414433c3956b790",
-  "releaseCatalogSha256": "14b1e40029c97eeea37e95198c514c2a0198d04ee6093d8b8e0aacad6b3a3a20",
-  "releaseSeedsCount": 249,
-  "releaseSeedsSha256": "7d40d36968e77c6cd4e344c6a88ce21d06c50b2831e366efb32dbb02859a5ad6"
+  "schemaDeltaSha256": "4fb1c00412a05098046ae7b8ace822a6e744be0ce78ac3b4686d759c678112e5",
+  "releaseCatalogSha256": "1cfb1a93bc99ca930d9359ad6bf6913d45d6e7888507ddf3dae32b4bf63f0756",
+  "releaseSeedsCount": 513,
+  "releaseSeedsSha256": "cd931aa6275abd7f193e31c1196693de10a4b68d6651925d3e684c7895f20284"
 }

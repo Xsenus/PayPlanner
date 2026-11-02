@@ -25,6 +25,28 @@
       },
       {
         "collation": "pg_catalog.\"default\"",
+        "default": "'Committed'::character varying",
+        "generated": "",
+        "identity": "",
+        "name": "State",
+        "nullable": false,
+        "position": 11,
+        "table": "BalanceApplicationReceipts",
+        "type": "character varying(16)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "AccountNumber",
+        "nullable": false,
+        "position": 8,
+        "table": "CompanyBankAccountBindings",
+        "type": "character varying(34)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
         "default": null,
         "generated": "",
         "identity": "",
@@ -39,10 +61,98 @@
         "default": null,
         "generated": "",
         "identity": "",
+        "name": "Bik",
+        "nullable": false,
+        "position": 9,
+        "table": "CompanyBankAccountBindings",
+        "type": "character varying(16)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CommandSha256",
+        "nullable": true,
+        "position": 3,
+        "table": "BalanceApplicationReceipts",
+        "type": "character varying(64)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CommandVersion",
+        "nullable": false,
+        "position": 4,
+        "table": "BalanceApplicationReceipts",
+        "type": "character varying(32)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ConfirmedMatchVersion",
+        "nullable": false,
+        "position": 11,
+        "table": "CompanyBankAccountBindings",
+        "type": "character varying(128)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CreatedByUserName",
+        "nullable": true,
+        "position": 13,
+        "table": "CompanyBankAccountBindings",
+        "type": "character varying(200)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Currency",
+        "nullable": false,
+        "position": 10,
+        "table": "CompanyBankAccountBindings",
+        "type": "character varying(8)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "EventKey",
+        "nullable": false,
+        "position": 3,
+        "table": "PaymentOverdueNotificationOutboxes",
+        "type": "character varying(160)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
         "name": "EventKey",
         "nullable": false,
         "position": 3,
         "table": "TaskStatusNotificationOutboxes",
+        "type": "character varying(160)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "EventKey",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_PaymentOverdueOutbox_EventKey",
         "type": "character varying(160)"
       },
       {
@@ -72,6 +182,17 @@
         "default": null,
         "generated": "",
         "identity": "",
+        "name": "ExternalAccountId",
+        "nullable": false,
+        "position": 7,
+        "table": "CompanyBankAccountBindings",
+        "type": "character varying(128)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
         "name": "IdentityVersion",
         "nullable": false,
         "position": 8,
@@ -94,6 +215,17 @@
         "default": null,
         "generated": "",
         "identity": "",
+        "name": "LeaseToken",
+        "nullable": true,
+        "position": 12,
+        "table": "PaymentOverdueNotificationOutboxes",
+        "type": "character varying(32)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
         "name": "Operation",
         "nullable": false,
         "position": 3,
@@ -105,11 +237,66 @@
         "default": null,
         "generated": "",
         "identity": "",
+        "name": "OverdueNotificationToken",
+        "nullable": true,
+        "position": 63,
+        "table": "Payments",
+        "type": "character varying(32)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
         "name": "PayloadIdentity",
         "nullable": true,
         "position": 9,
         "table": "PaymentCreateAttempts",
         "type": "character varying(64)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ProfileAccountId",
+        "nullable": false,
+        "position": 3,
+        "table": "CompanyBankAccountBindings",
+        "type": "character varying(16000)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ProfileAccountKey",
+        "nullable": false,
+        "position": 4,
+        "table": "CompanyBankAccountBindings",
+        "type": "character varying(64)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ProfileAccountKey",
+        "nullable": true,
+        "position": 2,
+        "table": "IX_CompanyBankBinding_ActiveProfile",
+        "type": "character varying(64)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Provider",
+        "nullable": false,
+        "position": 6,
+        "table": "CompanyBankAccountBindings",
+        "type": "character varying(16)"
       },
       {
         "collation": "pg_catalog.\"default\"",
@@ -138,11 +325,44 @@
         "default": null,
         "generated": "",
         "identity": "",
+        "name": "RevocationMatchVersion",
+        "nullable": true,
+        "position": 18,
+        "table": "CompanyBankAccountBindings",
+        "type": "character varying(128)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "RevokedByUserName",
+        "nullable": true,
+        "position": 16,
+        "table": "CompanyBankAccountBindings",
+        "type": "character varying(200)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
         "name": "State",
         "nullable": false,
         "position": 7,
         "table": "PaymentCreateAttempts",
         "type": "character varying(16)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "TransitionToken",
+        "nullable": false,
+        "position": 4,
+        "table": "PaymentOverdueNotificationOutboxes",
+        "type": "character varying(32)"
       },
       {
         "collation": "pg_catalog.\"default\"",
@@ -196,6 +416,17 @@
         "name": "ActorUserId",
         "nullable": false,
         "position": 2,
+        "table": "BalanceApplicationReceipts",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ActorUserId",
+        "nullable": false,
+        "position": 2,
         "table": "PaymentCreateAttempts",
         "type": "integer"
       },
@@ -218,8 +449,30 @@
         "name": "ActorUserId",
         "nullable": true,
         "position": 1,
+        "table": "IX_BalanceApplicationReceipts_ActorUserId",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ActorUserId",
+        "nullable": true,
+        "position": 1,
         "table": "IX_PaymentCreateAttempts_ActorUserId",
         "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "AppliedAmount",
+        "nullable": false,
+        "position": 8,
+        "table": "BalanceApplicationReceipts",
+        "type": "numeric(18,2)"
       },
       {
         "collation": null,
@@ -250,8 +503,63 @@
         "identity": "",
         "name": "Attempts",
         "nullable": false,
+        "position": 10,
+        "table": "PaymentOverdueNotificationOutboxes",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Attempts",
+        "nullable": false,
         "position": 9,
         "table": "TaskStatusNotificationOutboxes",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Balance",
+        "nullable": false,
+        "position": 9,
+        "table": "BalanceApplicationReceipts",
+        "type": "numeric(18,2)"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "BankConnectionAccountId",
+        "nullable": false,
+        "position": 5,
+        "table": "CompanyBankAccountBindings",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "BankConnectionAccountId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_CompanyBankBinding_ActiveBank",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "BankConnectionAccountId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_CompanyBankBinding_Bank_History",
         "type": "integer"
       },
       {
@@ -274,6 +582,17 @@
         "nullable": true,
         "position": 10,
         "table": "PaymentCreateAttempts",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ClientId",
+        "nullable": true,
+        "position": 5,
+        "table": "BalanceApplicationReceipts",
         "type": "integer"
       },
       {
@@ -339,7 +658,29 @@
         "name": "CompletedAt",
         "nullable": true,
         "position": 1,
+        "table": "IX_PaymentOverdueOutbox_Due",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CompletedAt",
+        "nullable": true,
+        "position": 1,
         "table": "IX_TaskStatusNotificationOutboxes_CompletedAt_LeaseUntil_Id",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CompletedAt",
+        "nullable": true,
+        "position": 8,
+        "table": "PaymentOverdueNotificationOutboxes",
         "type": "timestamp without time zone"
       },
       {
@@ -372,7 +713,29 @@
         "name": "CreatedAt",
         "nullable": false,
         "position": 7,
+        "table": "PaymentOverdueNotificationOutboxes",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CreatedAt",
+        "nullable": false,
+        "position": 7,
         "table": "TaskStatusNotificationOutboxes",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CreatedAtUtc",
+        "nullable": false,
+        "position": 10,
+        "table": "BalanceApplicationReceipts",
         "type": "timestamp without time zone"
       },
       {
@@ -393,9 +756,42 @@
         "identity": "",
         "name": "CreatedAtUtc",
         "nullable": false,
+        "position": 14,
+        "table": "CompanyBankAccountBindings",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CreatedAtUtc",
+        "nullable": false,
         "position": 6,
         "table": "TaskTimeCorrections",
         "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CreatedByUserId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_CompanyBankAccountBindings_CreatedByUserId",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CreatedByUserId",
+        "nullable": true,
+        "position": 12,
+        "table": "CompanyBankAccountBindings",
+        "type": "integer"
       },
       {
         "collation": null,
@@ -418,6 +814,28 @@
         "position": 3,
         "table": "IX_CashInventories_Company_Account_Date",
         "type": "date"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "DocumentKind",
+        "nullable": false,
+        "position": 5,
+        "table": "PaymentOverdueNotificationOutboxes",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "DueDate",
+        "nullable": false,
+        "position": 6,
+        "table": "PaymentOverdueNotificationOutboxes",
+        "type": "timestamp without time zone"
       },
       {
         "collation": null,
@@ -493,8 +911,30 @@
         "name": "Id",
         "nullable": true,
         "position": 1,
+        "table": "PK_CompanyBankAccountBindings",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Id",
+        "nullable": true,
+        "position": 1,
         "table": "PK_PaymentCreateAttempts",
         "type": "uuid"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Id",
+        "nullable": true,
+        "position": 1,
+        "table": "PK_PaymentOverdueNotificationOutboxes",
+        "type": "bigint"
       },
       {
         "collation": null,
@@ -528,6 +968,28 @@
         "position": 1,
         "table": "PK_TaskTimeEntries",
         "type": "uuid"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Id",
+        "nullable": true,
+        "position": 2,
+        "table": "IX_CompanyBankBinding_Company_History",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Id",
+        "nullable": true,
+        "position": 2,
+        "table": "IX_PaymentOverdueOutbox_Payment",
+        "type": "bigint"
       },
       {
         "collation": null,
@@ -581,8 +1043,41 @@
         "name": "Id",
         "nullable": true,
         "position": 4,
+        "table": "IX_PaymentOverdueOutbox_Due",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Id",
+        "nullable": true,
+        "position": 4,
         "table": "IX_TaskTimeEntries_TaskId_UserId_StartedAtUtc_Id",
         "type": "uuid"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "LastAttemptAt",
+        "nullable": true,
+        "position": 3,
+        "table": "IX_PaymentOverdueOutbox_Due",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "LastAttemptAt",
+        "nullable": true,
+        "position": 9,
+        "table": "PaymentOverdueNotificationOutboxes",
+        "type": "timestamp without time zone"
       },
       {
         "collation": null,
@@ -602,9 +1097,75 @@
         "identity": "",
         "name": "LeaseUntil",
         "nullable": true,
+        "position": 11,
+        "table": "PaymentOverdueNotificationOutboxes",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "LeaseUntil",
+        "nullable": true,
+        "position": 2,
+        "table": "IX_PaymentOverdueOutbox_Due",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "LeaseUntil",
+        "nullable": true,
         "position": 2,
         "table": "IX_TaskStatusNotificationOutboxes_CompletedAt_LeaseUntil_Id",
         "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "LegalEntityId",
+        "nullable": false,
+        "position": 2,
+        "table": "CompanyBankAccountBindings",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "LegalEntityId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_CompanyBankBinding_ActiveProfile",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "LegalEntityId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_CompanyBankBinding_Company_History",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "LegalEntityId",
+        "nullable": true,
+        "position": 6,
+        "table": "BalanceApplicationReceipts",
+        "type": "integer"
       },
       {
         "collation": null,
@@ -677,6 +1238,39 @@
         "default": null,
         "generated": "",
         "identity": "",
+        "name": "PaymentId",
+        "nullable": false,
+        "position": 2,
+        "table": "PaymentOverdueNotificationOutboxes",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "PaymentId",
+        "nullable": false,
+        "position": 7,
+        "table": "BalanceApplicationReceipts",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "PaymentId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_PaymentOverdueOutbox_Payment",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
         "name": "PreviousSeconds",
         "nullable": true,
         "position": 3,
@@ -693,6 +1287,28 @@
         "position": 6,
         "table": "PaymentCreateAttempts",
         "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "RequestId",
+        "nullable": false,
+        "position": 1,
+        "table": "BalanceApplicationReceipts",
+        "type": "uuid"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "RequestId",
+        "nullable": true,
+        "position": 1,
+        "table": "PK_BalanceApplicationReceipts",
+        "type": "uuid"
       },
       {
         "collation": null,
@@ -736,6 +1352,39 @@
         "nullable": false,
         "position": 8,
         "table": "TaskTimeEntries",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "RevokedAtUtc",
+        "nullable": true,
+        "position": 17,
+        "table": "CompanyBankAccountBindings",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "RevokedByUserId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_CompanyBankAccountBindings_RevokedByUserId",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "RevokedByUserId",
+        "nullable": true,
+        "position": 15,
+        "table": "CompanyBankAccountBindings",
         "type": "integer"
       },
       {
@@ -911,6 +1560,28 @@
         "name": "is_called",
         "nullable": false,
         "position": 3,
+        "table": "CompanyBankAccountBindings_Id_seq",
+        "type": "boolean"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "is_called",
+        "nullable": false,
+        "position": 3,
+        "table": "PaymentOverdueNotificationOutboxes_Id_seq",
+        "type": "boolean"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "is_called",
+        "nullable": false,
+        "position": 3,
         "table": "TaskStatusNotificationOutboxes_Id_seq",
         "type": "boolean"
       },
@@ -933,6 +1604,28 @@
         "name": "last_value",
         "nullable": false,
         "position": 1,
+        "table": "CompanyBankAccountBindings_Id_seq",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "last_value",
+        "nullable": false,
+        "position": 1,
+        "table": "PaymentOverdueNotificationOutboxes_Id_seq",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "last_value",
+        "nullable": false,
+        "position": 1,
         "table": "TaskStatusNotificationOutboxes_Id_seq",
         "type": "bigint"
       },
@@ -955,6 +1648,28 @@
         "name": "log_cnt",
         "nullable": false,
         "position": 2,
+        "table": "CompanyBankAccountBindings_Id_seq",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "log_cnt",
+        "nullable": false,
+        "position": 2,
+        "table": "PaymentOverdueNotificationOutboxes_Id_seq",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "log_cnt",
+        "nullable": false,
+        "position": 2,
         "table": "TaskStatusNotificationOutboxes_Id_seq",
         "type": "bigint"
       },
@@ -967,6 +1682,28 @@
         "nullable": false,
         "position": 2,
         "table": "TaskTimeCorrections_Id_seq",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "d",
+        "name": "Id",
+        "nullable": false,
+        "position": 1,
+        "table": "CompanyBankAccountBindings",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "d",
+        "name": "Id",
+        "nullable": false,
+        "position": 1,
+        "table": "PaymentOverdueNotificationOutboxes",
         "type": "bigint"
       },
       {
@@ -1039,12 +1776,54 @@
       {
         "MigrationId": "20261028080010_CashInventoryAccountIdentityPostgreSql",
         "ProductVersion": "9.0.9"
+      },
+      {
+        "MigrationId": "20261030224445_AddBalanceApplicationReceiptsPostgreSql",
+        "ProductVersion": "9.0.9"
+      },
+      {
+        "MigrationId": "20261030232554_FenceCancelledBalanceApplicationsPostgreSql",
+        "ProductVersion": "9.0.9"
+      },
+      {
+        "MigrationId": "20261031125252_AddPaymentOverdueNotificationOutboxPostgreSql",
+        "ProductVersion": "9.0.9"
+      },
+      {
+        "MigrationId": "20261031233007_AddCompanyBankAccountBindingsPostgreSql",
+        "ProductVersion": "9.0.9"
+      },
+      {
+        "MigrationId": "20261101000834_IndexCompanyBankBindingHistoryPostgreSql",
+        "ProductVersion": "9.0.9"
       }
     ],
     "removed": []
   },
   "relations": {
     "added": [
+      {
+        "forceRowSecurity": false,
+        "kind": "S",
+        "name": "CompanyBankAccountBindings_Id_seq",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "S",
+        "name": "PaymentOverdueNotificationOutboxes_Id_seq",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
       {
         "forceRowSecurity": false,
         "kind": "S",
@@ -1060,6 +1839,17 @@
         "forceRowSecurity": false,
         "kind": "S",
         "name": "TaskTimeCorrections_Id_seq",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_BalanceApplicationReceipts_ActorUserId",
         "options": null,
         "owner": "__migration_owner__",
         "partition": null,
@@ -1114,7 +1904,106 @@
       {
         "forceRowSecurity": false,
         "kind": "i",
+        "name": "IX_CompanyBankAccountBindings_CreatedByUserId",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_CompanyBankAccountBindings_RevokedByUserId",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_CompanyBankBinding_ActiveBank",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_CompanyBankBinding_ActiveProfile",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_CompanyBankBinding_Bank_History",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_CompanyBankBinding_Company_History",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
         "name": "IX_PaymentCreateAttempts_ActorUserId",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_PaymentOverdueOutbox_Due",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_PaymentOverdueOutbox_EventKey",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_PaymentOverdueOutbox_Payment",
         "options": null,
         "owner": "__migration_owner__",
         "partition": null,
@@ -1224,7 +2113,40 @@
       {
         "forceRowSecurity": false,
         "kind": "i",
+        "name": "PK_BalanceApplicationReceipts",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "PK_CompanyBankAccountBindings",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
         "name": "PK_PaymentCreateAttempts",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "PK_PaymentOverdueNotificationOutboxes",
         "options": null,
         "owner": "__migration_owner__",
         "partition": null,
@@ -1268,7 +2190,40 @@
       {
         "forceRowSecurity": false,
         "kind": "r",
+        "name": "BalanceApplicationReceipts",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "r",
+        "name": "CompanyBankAccountBindings",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "r",
         "name": "PaymentCreateAttempts",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "r",
+        "name": "PaymentOverdueNotificationOutboxes",
         "options": null,
         "owner": "__migration_owner__",
         "partition": null,
@@ -1333,6 +2288,22 @@
       {
         "deferrable": false,
         "deferred": false,
+        "definition": "CHECK (\"ActorUserId\" > 0 AND \"PaymentId\" > 0 AND (\"State\"::text = 'Committed'::text AND \"AppliedAmount\" > 0::numeric AND \"CommandSha256\" IS NOT NULL AND length(\"CommandSha256\"::text) = 64 OR \"State\"::text = 'Cancelled'::text AND \"AppliedAmount\" = 0::numeric AND \"Balance\" = 0::numeric AND \"CommandSha256\" IS NULL))",
+        "name": "CK_BalanceApplicationReceipts_Outcome",
+        "table": "BalanceApplicationReceipts",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "CHECK (\"ClientId\" IS NOT NULL AND \"LegalEntityId\" IS NULL OR \"ClientId\" IS NULL AND \"LegalEntityId\" IS NOT NULL)",
+        "name": "CK_BalanceApplicationReceipts_Owner",
+        "table": "BalanceApplicationReceipts",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
         "definition": "CHECK (\"NewSeconds\" >= 0 AND (\"PreviousSeconds\" IS NULL OR \"PreviousSeconds\" >= 0))",
         "name": "CK_TaskTimeCorrections_NonNegative",
         "table": "TaskTimeCorrections",
@@ -1344,6 +2315,14 @@
         "definition": "CHECK (\"Operation\"::text = 'primary'::text AND \"PrimaryPaymentId\" IS NULL OR \"Operation\"::text = 'remainder'::text AND \"PrimaryPaymentId\" IS NOT NULL AND \"PrimaryPaymentId\" > 0)",
         "name": "CK_PaymentCreateAttempts_Operation",
         "table": "PaymentCreateAttempts",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "CHECK (\"RevokedAtUtc\" IS NULL AND \"RevocationMatchVersion\" IS NULL AND \"RevokedByUserId\" IS NULL AND \"RevokedByUserName\" IS NULL OR \"RevokedAtUtc\" IS NOT NULL AND \"RevokedAtUtc\" >= \"CreatedAtUtc\" AND \"RevocationMatchVersion\" IS NOT NULL)",
+        "name": "CK_CompanyBankBinding_RevocationTime",
+        "table": "CompanyBankAccountBindings",
         "validated": true
       },
       {
@@ -1381,6 +2360,14 @@
       {
         "deferrable": false,
         "deferred": false,
+        "definition": "FOREIGN KEY (\"BankConnectionAccountId\") REFERENCES \"BankConnectionAccounts\"(\"Id\") ON DELETE RESTRICT",
+        "name": "FK_CompanyBankAccountBindings_BankConnectionAccounts_BankConne~",
+        "table": "CompanyBankAccountBindings",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
         "definition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")",
         "name": "FK_CashInventories_LegalEntities_CompanyId",
         "table": "CashInventories",
@@ -1397,9 +2384,25 @@
       {
         "deferrable": false,
         "deferred": false,
+        "definition": "FOREIGN KEY (\"CreatedByUserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL",
+        "name": "FK_CompanyBankAccountBindings_Users_CreatedByUserId",
+        "table": "CompanyBankAccountBindings",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
         "definition": "FOREIGN KEY (\"EntryId\") REFERENCES \"TaskTimeEntries\"(\"Id\") ON DELETE RESTRICT",
         "name": "FK_TaskTimeCorrections_TaskTimeEntries_EntryId",
         "table": "TaskTimeCorrections",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "FOREIGN KEY (\"LegalEntityId\") REFERENCES \"LegalEntities\"(\"Id\") ON DELETE RESTRICT",
+        "name": "FK_CompanyBankAccountBindings_LegalEntities_LegalEntityId",
+        "table": "CompanyBankAccountBindings",
         "validated": true
       },
       {
@@ -1416,6 +2419,22 @@
         "definition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")",
         "name": "FK_CashOrders_MoneyAccounts_MoneyAccountId",
         "table": "CashOrders",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "FOREIGN KEY (\"PaymentId\") REFERENCES \"Payments\"(\"Id\") ON DELETE CASCADE",
+        "name": "FK_PaymentOverdueNotificationOutboxes_Payments_PaymentId",
+        "table": "PaymentOverdueNotificationOutboxes",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "FOREIGN KEY (\"RevokedByUserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL",
+        "name": "FK_CompanyBankAccountBindings_Users_RevokedByUserId",
+        "table": "CompanyBankAccountBindings",
         "validated": true
       },
       {
@@ -1446,8 +2465,24 @@
         "deferrable": false,
         "deferred": false,
         "definition": "PRIMARY KEY (\"Id\")",
+        "name": "PK_CompanyBankAccountBindings",
+        "table": "CompanyBankAccountBindings",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "PRIMARY KEY (\"Id\")",
         "name": "PK_PaymentCreateAttempts",
         "table": "PaymentCreateAttempts",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "PRIMARY KEY (\"Id\")",
+        "name": "PK_PaymentOverdueNotificationOutboxes",
+        "table": "PaymentOverdueNotificationOutboxes",
         "validated": true
       },
       {
@@ -1473,12 +2508,28 @@
         "name": "PK_TaskTimeEntries",
         "table": "TaskTimeEntries",
         "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "PRIMARY KEY (\"RequestId\")",
+        "name": "PK_BalanceApplicationReceipts",
+        "table": "BalanceApplicationReceipts",
+        "validated": true
       }
     ],
     "removed": []
   },
   "indexes": {
     "added": [
+      {
+        "definition": "CREATE INDEX \"IX_BalanceApplicationReceipts_ActorUserId\" ON public.\"BalanceApplicationReceipts\" USING btree (\"ActorUserId\")",
+        "live": true,
+        "name": "IX_BalanceApplicationReceipts_ActorUserId",
+        "ready": true,
+        "table": "BalanceApplicationReceipts",
+        "valid": true
+      },
       {
         "definition": "CREATE INDEX \"IX_CashInventories_Company_Account_Date\" ON public.\"CashInventories\" USING btree (\"CompanyId\", \"MoneyAccountId\", \"Date\")",
         "live": true,
@@ -1512,11 +2563,59 @@
         "valid": true
       },
       {
+        "definition": "CREATE INDEX \"IX_CompanyBankAccountBindings_CreatedByUserId\" ON public.\"CompanyBankAccountBindings\" USING btree (\"CreatedByUserId\")",
+        "live": true,
+        "name": "IX_CompanyBankAccountBindings_CreatedByUserId",
+        "ready": true,
+        "table": "CompanyBankAccountBindings",
+        "valid": true
+      },
+      {
+        "definition": "CREATE INDEX \"IX_CompanyBankAccountBindings_RevokedByUserId\" ON public.\"CompanyBankAccountBindings\" USING btree (\"RevokedByUserId\")",
+        "live": true,
+        "name": "IX_CompanyBankAccountBindings_RevokedByUserId",
+        "ready": true,
+        "table": "CompanyBankAccountBindings",
+        "valid": true
+      },
+      {
+        "definition": "CREATE INDEX \"IX_CompanyBankBinding_Bank_History\" ON public.\"CompanyBankAccountBindings\" USING btree (\"BankConnectionAccountId\")",
+        "live": true,
+        "name": "IX_CompanyBankBinding_Bank_History",
+        "ready": true,
+        "table": "CompanyBankAccountBindings",
+        "valid": true
+      },
+      {
+        "definition": "CREATE INDEX \"IX_CompanyBankBinding_Company_History\" ON public.\"CompanyBankAccountBindings\" USING btree (\"LegalEntityId\", \"Id\")",
+        "live": true,
+        "name": "IX_CompanyBankBinding_Company_History",
+        "ready": true,
+        "table": "CompanyBankAccountBindings",
+        "valid": true
+      },
+      {
         "definition": "CREATE INDEX \"IX_PaymentCreateAttempts_ActorUserId\" ON public.\"PaymentCreateAttempts\" USING btree (\"ActorUserId\")",
         "live": true,
         "name": "IX_PaymentCreateAttempts_ActorUserId",
         "ready": true,
         "table": "PaymentCreateAttempts",
+        "valid": true
+      },
+      {
+        "definition": "CREATE INDEX \"IX_PaymentOverdueOutbox_Due\" ON public.\"PaymentOverdueNotificationOutboxes\" USING btree (\"CompletedAt\", \"LeaseUntil\", \"LastAttemptAt\", \"Id\")",
+        "live": true,
+        "name": "IX_PaymentOverdueOutbox_Due",
+        "ready": true,
+        "table": "PaymentOverdueNotificationOutboxes",
+        "valid": true
+      },
+      {
+        "definition": "CREATE INDEX \"IX_PaymentOverdueOutbox_Payment\" ON public.\"PaymentOverdueNotificationOutboxes\" USING btree (\"PaymentId\", \"Id\")",
+        "live": true,
+        "name": "IX_PaymentOverdueOutbox_Payment",
+        "ready": true,
+        "table": "PaymentOverdueNotificationOutboxes",
         "valid": true
       },
       {
@@ -1576,6 +2675,30 @@
         "valid": true
       },
       {
+        "definition": "CREATE UNIQUE INDEX \"IX_CompanyBankBinding_ActiveBank\" ON public.\"CompanyBankAccountBindings\" USING btree (\"BankConnectionAccountId\") WHERE (\"RevokedAtUtc\" IS NULL)",
+        "live": true,
+        "name": "IX_CompanyBankBinding_ActiveBank",
+        "ready": true,
+        "table": "CompanyBankAccountBindings",
+        "valid": true
+      },
+      {
+        "definition": "CREATE UNIQUE INDEX \"IX_CompanyBankBinding_ActiveProfile\" ON public.\"CompanyBankAccountBindings\" USING btree (\"LegalEntityId\", \"ProfileAccountKey\") WHERE (\"RevokedAtUtc\" IS NULL)",
+        "live": true,
+        "name": "IX_CompanyBankBinding_ActiveProfile",
+        "ready": true,
+        "table": "CompanyBankAccountBindings",
+        "valid": true
+      },
+      {
+        "definition": "CREATE UNIQUE INDEX \"IX_PaymentOverdueOutbox_EventKey\" ON public.\"PaymentOverdueNotificationOutboxes\" USING btree (\"EventKey\")",
+        "live": true,
+        "name": "IX_PaymentOverdueOutbox_EventKey",
+        "ready": true,
+        "table": "PaymentOverdueNotificationOutboxes",
+        "valid": true
+      },
+      {
         "definition": "CREATE UNIQUE INDEX \"IX_TaskStatusNotificationOutboxes_EventKey\" ON public.\"TaskStatusNotificationOutboxes\" USING btree (\"EventKey\")",
         "live": true,
         "name": "IX_TaskStatusNotificationOutboxes_EventKey",
@@ -1592,11 +2715,35 @@
         "valid": true
       },
       {
+        "definition": "CREATE UNIQUE INDEX \"PK_BalanceApplicationReceipts\" ON public.\"BalanceApplicationReceipts\" USING btree (\"RequestId\")",
+        "live": true,
+        "name": "PK_BalanceApplicationReceipts",
+        "ready": true,
+        "table": "BalanceApplicationReceipts",
+        "valid": true
+      },
+      {
+        "definition": "CREATE UNIQUE INDEX \"PK_CompanyBankAccountBindings\" ON public.\"CompanyBankAccountBindings\" USING btree (\"Id\")",
+        "live": true,
+        "name": "PK_CompanyBankAccountBindings",
+        "ready": true,
+        "table": "CompanyBankAccountBindings",
+        "valid": true
+      },
+      {
         "definition": "CREATE UNIQUE INDEX \"PK_PaymentCreateAttempts\" ON public.\"PaymentCreateAttempts\" USING btree (\"Id\")",
         "live": true,
         "name": "PK_PaymentCreateAttempts",
         "ready": true,
         "table": "PaymentCreateAttempts",
+        "valid": true
+      },
+      {
+        "definition": "CREATE UNIQUE INDEX \"PK_PaymentOverdueNotificationOutboxes\" ON public.\"PaymentOverdueNotificationOutboxes\" USING btree (\"Id\")",
+        "live": true,
+        "name": "PK_PaymentOverdueNotificationOutboxes",
+        "ready": true,
+        "table": "PaymentOverdueNotificationOutboxes",
         "valid": true
       },
       {
@@ -1629,436 +2776,676 @@
   "triggers": {
     "added": [
       {
+        "constraintDefinition": "FOREIGN KEY (\"ApprovalParticipantId\") REFERENCES \"TaskJournalParticipants\"(\"Id\") ON DELETE SET NULL",
+        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalParticipants_Appro",
+        "constraintReferencedTable": "TaskJournalParticipants",
+        "constraintTable": "TaskStatusNotificationOutboxes",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"TaskJournalParticipants\" FROM \"TaskStatusNotificationOutboxes\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_setnull_del\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "TaskJournalParticipants",
         "internal": true,
-        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalParticipants_Appro",
-        "constraintType": "f",
-        "constraintTable": "TaskStatusNotificationOutboxes",
-        "constraintReferencedTable": "TaskJournalParticipants",
-        "constraintDefinition": "FOREIGN KEY (\"ApprovalParticipantId\") REFERENCES \"TaskJournalParticipants\"(\"Id\") ON DELETE SET NULL"
+        "name": "__internal_fk_trigger_a__",
+        "table": "TaskJournalParticipants"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"ApprovalParticipantId\") REFERENCES \"TaskJournalParticipants\"(\"Id\") ON DELETE SET NULL",
+        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalParticipants_Appro",
+        "constraintReferencedTable": "TaskJournalParticipants",
+        "constraintTable": "TaskStatusNotificationOutboxes",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"TaskJournalParticipants\" FROM \"TaskStatusNotificationOutboxes\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "TaskJournalParticipants",
         "internal": true,
-        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalParticipants_Appro",
-        "constraintType": "f",
-        "constraintTable": "TaskStatusNotificationOutboxes",
-        "constraintReferencedTable": "TaskJournalParticipants",
-        "constraintDefinition": "FOREIGN KEY (\"ApprovalParticipantId\") REFERENCES \"TaskJournalParticipants\"(\"Id\") ON DELETE SET NULL"
+        "name": "__internal_fk_trigger_a__",
+        "table": "TaskJournalParticipants"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"ApprovalParticipantId\") REFERENCES \"TaskJournalParticipants\"(\"Id\") ON DELETE SET NULL",
+        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalParticipants_Appro",
+        "constraintReferencedTable": "TaskJournalParticipants",
+        "constraintTable": "TaskStatusNotificationOutboxes",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"TaskStatusNotificationOutboxes\" FROM \"TaskJournalParticipants\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "TaskStatusNotificationOutboxes",
         "internal": true,
-        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalParticipants_Appro",
-        "constraintType": "f",
-        "constraintTable": "TaskStatusNotificationOutboxes",
-        "constraintReferencedTable": "TaskJournalParticipants",
-        "constraintDefinition": "FOREIGN KEY (\"ApprovalParticipantId\") REFERENCES \"TaskJournalParticipants\"(\"Id\") ON DELETE SET NULL"
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskStatusNotificationOutboxes"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"ApprovalParticipantId\") REFERENCES \"TaskJournalParticipants\"(\"Id\") ON DELETE SET NULL",
+        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalParticipants_Appro",
+        "constraintReferencedTable": "TaskJournalParticipants",
+        "constraintTable": "TaskStatusNotificationOutboxes",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"TaskStatusNotificationOutboxes\" FROM \"TaskJournalParticipants\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "TaskStatusNotificationOutboxes",
         "internal": true,
-        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalParticipants_Appro",
-        "constraintType": "f",
-        "constraintTable": "TaskStatusNotificationOutboxes",
-        "constraintReferencedTable": "TaskJournalParticipants",
-        "constraintDefinition": "FOREIGN KEY (\"ApprovalParticipantId\") REFERENCES \"TaskJournalParticipants\"(\"Id\") ON DELETE SET NULL"
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskStatusNotificationOutboxes"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"BankConnectionAccountId\") REFERENCES \"BankConnectionAccounts\"(\"Id\") ON DELETE RESTRICT",
+        "constraintName": "FK_CompanyBankAccountBindings_BankConnectionAccounts_BankConne~",
+        "constraintReferencedTable": "BankConnectionAccounts",
+        "constraintTable": "CompanyBankAccountBindings",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"BankConnectionAccounts\" FROM \"CompanyBankAccountBindings\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_restrict_del\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_a__",
+        "table": "BankConnectionAccounts"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"BankConnectionAccountId\") REFERENCES \"BankConnectionAccounts\"(\"Id\") ON DELETE RESTRICT",
+        "constraintName": "FK_CompanyBankAccountBindings_BankConnectionAccounts_BankConne~",
+        "constraintReferencedTable": "BankConnectionAccounts",
+        "constraintTable": "CompanyBankAccountBindings",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"BankConnectionAccounts\" FROM \"CompanyBankAccountBindings\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_a__",
+        "table": "BankConnectionAccounts"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"BankConnectionAccountId\") REFERENCES \"BankConnectionAccounts\"(\"Id\") ON DELETE RESTRICT",
+        "constraintName": "FK_CompanyBankAccountBindings_BankConnectionAccounts_BankConne~",
+        "constraintReferencedTable": "BankConnectionAccounts",
+        "constraintTable": "CompanyBankAccountBindings",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"CompanyBankAccountBindings\" FROM \"BankConnectionAccounts\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_c__",
+        "table": "CompanyBankAccountBindings"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"BankConnectionAccountId\") REFERENCES \"BankConnectionAccounts\"(\"Id\") ON DELETE RESTRICT",
+        "constraintName": "FK_CompanyBankAccountBindings_BankConnectionAccounts_BankConne~",
+        "constraintReferencedTable": "BankConnectionAccounts",
+        "constraintTable": "CompanyBankAccountBindings",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"CompanyBankAccountBindings\" FROM \"BankConnectionAccounts\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_c__",
+        "table": "CompanyBankAccountBindings"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")",
+        "constraintName": "FK_CashInventories_LegalEntities_CompanyId",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintTable": "CashInventories",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"LegalEntities\" FROM \"CashInventories\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_del\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "LegalEntities",
         "internal": true,
-        "constraintName": "FK_CashInventories_LegalEntities_CompanyId",
-        "constraintType": "f",
-        "constraintTable": "CashInventories",
-        "constraintReferencedTable": "LegalEntities",
-        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")"
+        "name": "__internal_fk_trigger_a__",
+        "table": "LegalEntities"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")",
+        "constraintName": "FK_CashInventories_LegalEntities_CompanyId",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintTable": "CashInventories",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"LegalEntities\" FROM \"CashInventories\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "LegalEntities",
         "internal": true,
-        "constraintName": "FK_CashInventories_LegalEntities_CompanyId",
-        "constraintType": "f",
-        "constraintTable": "CashInventories",
-        "constraintReferencedTable": "LegalEntities",
-        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")"
+        "name": "__internal_fk_trigger_a__",
+        "table": "LegalEntities"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")",
+        "constraintName": "FK_CashInventories_LegalEntities_CompanyId",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintTable": "CashInventories",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"CashInventories\" FROM \"LegalEntities\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "CashInventories",
         "internal": true,
-        "constraintName": "FK_CashInventories_LegalEntities_CompanyId",
-        "constraintType": "f",
-        "constraintTable": "CashInventories",
-        "constraintReferencedTable": "LegalEntities",
-        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")"
+        "name": "__internal_fk_trigger_c__",
+        "table": "CashInventories"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")",
+        "constraintName": "FK_CashInventories_LegalEntities_CompanyId",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintTable": "CashInventories",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"CashInventories\" FROM \"LegalEntities\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "CashInventories",
         "internal": true,
-        "constraintName": "FK_CashInventories_LegalEntities_CompanyId",
-        "constraintType": "f",
-        "constraintTable": "CashInventories",
-        "constraintReferencedTable": "LegalEntities",
-        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")"
+        "name": "__internal_fk_trigger_c__",
+        "table": "CashInventories"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")",
+        "constraintName": "FK_CashOrders_LegalEntities_CompanyId",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintTable": "CashOrders",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"LegalEntities\" FROM \"CashOrders\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_del\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "LegalEntities",
         "internal": true,
-        "constraintName": "FK_CashOrders_LegalEntities_CompanyId",
-        "constraintType": "f",
-        "constraintTable": "CashOrders",
-        "constraintReferencedTable": "LegalEntities",
-        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")"
+        "name": "__internal_fk_trigger_a__",
+        "table": "LegalEntities"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")",
+        "constraintName": "FK_CashOrders_LegalEntities_CompanyId",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintTable": "CashOrders",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"LegalEntities\" FROM \"CashOrders\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "LegalEntities",
         "internal": true,
-        "constraintName": "FK_CashOrders_LegalEntities_CompanyId",
-        "constraintType": "f",
-        "constraintTable": "CashOrders",
-        "constraintReferencedTable": "LegalEntities",
-        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")"
+        "name": "__internal_fk_trigger_a__",
+        "table": "LegalEntities"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")",
+        "constraintName": "FK_CashOrders_LegalEntities_CompanyId",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintTable": "CashOrders",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"CashOrders\" FROM \"LegalEntities\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "CashOrders",
         "internal": true,
-        "constraintName": "FK_CashOrders_LegalEntities_CompanyId",
-        "constraintType": "f",
-        "constraintTable": "CashOrders",
-        "constraintReferencedTable": "LegalEntities",
-        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")"
+        "name": "__internal_fk_trigger_c__",
+        "table": "CashOrders"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")",
+        "constraintName": "FK_CashOrders_LegalEntities_CompanyId",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintTable": "CashOrders",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"CashOrders\" FROM \"LegalEntities\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "CashOrders",
         "internal": true,
-        "constraintName": "FK_CashOrders_LegalEntities_CompanyId",
-        "constraintType": "f",
-        "constraintTable": "CashOrders",
-        "constraintReferencedTable": "LegalEntities",
-        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")"
+        "name": "__internal_fk_trigger_c__",
+        "table": "CashOrders"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"CreatedByUserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL",
+        "constraintName": "FK_CompanyBankAccountBindings_Users_CreatedByUserId",
+        "constraintReferencedTable": "Users",
+        "constraintTable": "CompanyBankAccountBindings",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"Users\" FROM \"CompanyBankAccountBindings\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_setnull_del\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_a__",
+        "table": "Users"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"CreatedByUserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL",
+        "constraintName": "FK_CompanyBankAccountBindings_Users_CreatedByUserId",
+        "constraintReferencedTable": "Users",
+        "constraintTable": "CompanyBankAccountBindings",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"Users\" FROM \"CompanyBankAccountBindings\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_a__",
+        "table": "Users"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"CreatedByUserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL",
+        "constraintName": "FK_CompanyBankAccountBindings_Users_CreatedByUserId",
+        "constraintReferencedTable": "Users",
+        "constraintTable": "CompanyBankAccountBindings",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"CompanyBankAccountBindings\" FROM \"Users\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_c__",
+        "table": "CompanyBankAccountBindings"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"CreatedByUserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL",
+        "constraintName": "FK_CompanyBankAccountBindings_Users_CreatedByUserId",
+        "constraintReferencedTable": "Users",
+        "constraintTable": "CompanyBankAccountBindings",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"CompanyBankAccountBindings\" FROM \"Users\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_c__",
+        "table": "CompanyBankAccountBindings"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"EntryId\") REFERENCES \"TaskTimeEntries\"(\"Id\") ON DELETE RESTRICT",
+        "constraintName": "FK_TaskTimeCorrections_TaskTimeEntries_EntryId",
+        "constraintReferencedTable": "TaskTimeEntries",
+        "constraintTable": "TaskTimeCorrections",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"TaskTimeEntries\" FROM \"TaskTimeCorrections\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_restrict_del\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "TaskTimeEntries",
         "internal": true,
-        "constraintName": "FK_TaskTimeCorrections_TaskTimeEntries_EntryId",
-        "constraintType": "f",
-        "constraintTable": "TaskTimeCorrections",
-        "constraintReferencedTable": "TaskTimeEntries",
-        "constraintDefinition": "FOREIGN KEY (\"EntryId\") REFERENCES \"TaskTimeEntries\"(\"Id\") ON DELETE RESTRICT"
+        "name": "__internal_fk_trigger_a__",
+        "table": "TaskTimeEntries"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"EntryId\") REFERENCES \"TaskTimeEntries\"(\"Id\") ON DELETE RESTRICT",
+        "constraintName": "FK_TaskTimeCorrections_TaskTimeEntries_EntryId",
+        "constraintReferencedTable": "TaskTimeEntries",
+        "constraintTable": "TaskTimeCorrections",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"TaskTimeEntries\" FROM \"TaskTimeCorrections\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "TaskTimeEntries",
         "internal": true,
-        "constraintName": "FK_TaskTimeCorrections_TaskTimeEntries_EntryId",
-        "constraintType": "f",
-        "constraintTable": "TaskTimeCorrections",
-        "constraintReferencedTable": "TaskTimeEntries",
-        "constraintDefinition": "FOREIGN KEY (\"EntryId\") REFERENCES \"TaskTimeEntries\"(\"Id\") ON DELETE RESTRICT"
+        "name": "__internal_fk_trigger_a__",
+        "table": "TaskTimeEntries"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"EntryId\") REFERENCES \"TaskTimeEntries\"(\"Id\") ON DELETE RESTRICT",
+        "constraintName": "FK_TaskTimeCorrections_TaskTimeEntries_EntryId",
+        "constraintReferencedTable": "TaskTimeEntries",
+        "constraintTable": "TaskTimeCorrections",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"TaskTimeCorrections\" FROM \"TaskTimeEntries\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "TaskTimeCorrections",
         "internal": true,
-        "constraintName": "FK_TaskTimeCorrections_TaskTimeEntries_EntryId",
-        "constraintType": "f",
-        "constraintTable": "TaskTimeCorrections",
-        "constraintReferencedTable": "TaskTimeEntries",
-        "constraintDefinition": "FOREIGN KEY (\"EntryId\") REFERENCES \"TaskTimeEntries\"(\"Id\") ON DELETE RESTRICT"
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskTimeCorrections"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"EntryId\") REFERENCES \"TaskTimeEntries\"(\"Id\") ON DELETE RESTRICT",
+        "constraintName": "FK_TaskTimeCorrections_TaskTimeEntries_EntryId",
+        "constraintReferencedTable": "TaskTimeEntries",
+        "constraintTable": "TaskTimeCorrections",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"TaskTimeCorrections\" FROM \"TaskTimeEntries\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "TaskTimeCorrections",
         "internal": true,
-        "constraintName": "FK_TaskTimeCorrections_TaskTimeEntries_EntryId",
-        "constraintType": "f",
-        "constraintTable": "TaskTimeCorrections",
-        "constraintReferencedTable": "TaskTimeEntries",
-        "constraintDefinition": "FOREIGN KEY (\"EntryId\") REFERENCES \"TaskTimeEntries\"(\"Id\") ON DELETE RESTRICT"
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskTimeCorrections"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"LegalEntityId\") REFERENCES \"LegalEntities\"(\"Id\") ON DELETE RESTRICT",
+        "constraintName": "FK_CompanyBankAccountBindings_LegalEntities_LegalEntityId",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintTable": "CompanyBankAccountBindings",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"LegalEntities\" FROM \"CompanyBankAccountBindings\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_restrict_del\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_a__",
+        "table": "LegalEntities"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"LegalEntityId\") REFERENCES \"LegalEntities\"(\"Id\") ON DELETE RESTRICT",
+        "constraintName": "FK_CompanyBankAccountBindings_LegalEntities_LegalEntityId",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintTable": "CompanyBankAccountBindings",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"LegalEntities\" FROM \"CompanyBankAccountBindings\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_a__",
+        "table": "LegalEntities"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"LegalEntityId\") REFERENCES \"LegalEntities\"(\"Id\") ON DELETE RESTRICT",
+        "constraintName": "FK_CompanyBankAccountBindings_LegalEntities_LegalEntityId",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintTable": "CompanyBankAccountBindings",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"CompanyBankAccountBindings\" FROM \"LegalEntities\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_c__",
+        "table": "CompanyBankAccountBindings"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"LegalEntityId\") REFERENCES \"LegalEntities\"(\"Id\") ON DELETE RESTRICT",
+        "constraintName": "FK_CompanyBankAccountBindings_LegalEntities_LegalEntityId",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintTable": "CompanyBankAccountBindings",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"CompanyBankAccountBindings\" FROM \"LegalEntities\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_c__",
+        "table": "CompanyBankAccountBindings"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")",
+        "constraintName": "FK_CashInventories_MoneyAccounts_MoneyAccountId",
+        "constraintReferencedTable": "MoneyAccounts",
+        "constraintTable": "CashInventories",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"MoneyAccounts\" FROM \"CashInventories\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_del\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "MoneyAccounts",
         "internal": true,
-        "constraintName": "FK_CashInventories_MoneyAccounts_MoneyAccountId",
-        "constraintType": "f",
-        "constraintTable": "CashInventories",
-        "constraintReferencedTable": "MoneyAccounts",
-        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")"
+        "name": "__internal_fk_trigger_a__",
+        "table": "MoneyAccounts"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")",
+        "constraintName": "FK_CashInventories_MoneyAccounts_MoneyAccountId",
+        "constraintReferencedTable": "MoneyAccounts",
+        "constraintTable": "CashInventories",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"MoneyAccounts\" FROM \"CashInventories\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "MoneyAccounts",
         "internal": true,
-        "constraintName": "FK_CashInventories_MoneyAccounts_MoneyAccountId",
-        "constraintType": "f",
-        "constraintTable": "CashInventories",
-        "constraintReferencedTable": "MoneyAccounts",
-        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")"
+        "name": "__internal_fk_trigger_a__",
+        "table": "MoneyAccounts"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")",
+        "constraintName": "FK_CashInventories_MoneyAccounts_MoneyAccountId",
+        "constraintReferencedTable": "MoneyAccounts",
+        "constraintTable": "CashInventories",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"CashInventories\" FROM \"MoneyAccounts\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "CashInventories",
         "internal": true,
-        "constraintName": "FK_CashInventories_MoneyAccounts_MoneyAccountId",
-        "constraintType": "f",
-        "constraintTable": "CashInventories",
-        "constraintReferencedTable": "MoneyAccounts",
-        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")"
+        "name": "__internal_fk_trigger_c__",
+        "table": "CashInventories"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")",
+        "constraintName": "FK_CashInventories_MoneyAccounts_MoneyAccountId",
+        "constraintReferencedTable": "MoneyAccounts",
+        "constraintTable": "CashInventories",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"CashInventories\" FROM \"MoneyAccounts\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "CashInventories",
         "internal": true,
-        "constraintName": "FK_CashInventories_MoneyAccounts_MoneyAccountId",
-        "constraintType": "f",
-        "constraintTable": "CashInventories",
-        "constraintReferencedTable": "MoneyAccounts",
-        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")"
+        "name": "__internal_fk_trigger_c__",
+        "table": "CashInventories"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")",
+        "constraintName": "FK_CashOrders_MoneyAccounts_MoneyAccountId",
+        "constraintReferencedTable": "MoneyAccounts",
+        "constraintTable": "CashOrders",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"MoneyAccounts\" FROM \"CashOrders\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_del\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "MoneyAccounts",
         "internal": true,
-        "constraintName": "FK_CashOrders_MoneyAccounts_MoneyAccountId",
-        "constraintType": "f",
-        "constraintTable": "CashOrders",
-        "constraintReferencedTable": "MoneyAccounts",
-        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")"
+        "name": "__internal_fk_trigger_a__",
+        "table": "MoneyAccounts"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")",
+        "constraintName": "FK_CashOrders_MoneyAccounts_MoneyAccountId",
+        "constraintReferencedTable": "MoneyAccounts",
+        "constraintTable": "CashOrders",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"MoneyAccounts\" FROM \"CashOrders\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "MoneyAccounts",
         "internal": true,
-        "constraintName": "FK_CashOrders_MoneyAccounts_MoneyAccountId",
-        "constraintType": "f",
-        "constraintTable": "CashOrders",
-        "constraintReferencedTable": "MoneyAccounts",
-        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")"
+        "name": "__internal_fk_trigger_a__",
+        "table": "MoneyAccounts"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")",
+        "constraintName": "FK_CashOrders_MoneyAccounts_MoneyAccountId",
+        "constraintReferencedTable": "MoneyAccounts",
+        "constraintTable": "CashOrders",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"CashOrders\" FROM \"MoneyAccounts\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "CashOrders",
         "internal": true,
-        "constraintName": "FK_CashOrders_MoneyAccounts_MoneyAccountId",
-        "constraintType": "f",
-        "constraintTable": "CashOrders",
-        "constraintReferencedTable": "MoneyAccounts",
-        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")"
+        "name": "__internal_fk_trigger_c__",
+        "table": "CashOrders"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")",
+        "constraintName": "FK_CashOrders_MoneyAccounts_MoneyAccountId",
+        "constraintReferencedTable": "MoneyAccounts",
+        "constraintTable": "CashOrders",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"CashOrders\" FROM \"MoneyAccounts\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "CashOrders",
         "internal": true,
-        "constraintName": "FK_CashOrders_MoneyAccounts_MoneyAccountId",
-        "constraintType": "f",
-        "constraintTable": "CashOrders",
-        "constraintReferencedTable": "MoneyAccounts",
-        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")"
+        "name": "__internal_fk_trigger_c__",
+        "table": "CashOrders"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"PaymentId\") REFERENCES \"Payments\"(\"Id\") ON DELETE CASCADE",
+        "constraintName": "FK_PaymentOverdueNotificationOutboxes_Payments_PaymentId",
+        "constraintReferencedTable": "Payments",
+        "constraintTable": "PaymentOverdueNotificationOutboxes",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"Payments\" FROM \"PaymentOverdueNotificationOutboxes\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_cascade_del\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_a__",
+        "table": "Payments"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"PaymentId\") REFERENCES \"Payments\"(\"Id\") ON DELETE CASCADE",
+        "constraintName": "FK_PaymentOverdueNotificationOutboxes_Payments_PaymentId",
+        "constraintReferencedTable": "Payments",
+        "constraintTable": "PaymentOverdueNotificationOutboxes",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"Payments\" FROM \"PaymentOverdueNotificationOutboxes\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_a__",
+        "table": "Payments"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"PaymentId\") REFERENCES \"Payments\"(\"Id\") ON DELETE CASCADE",
+        "constraintName": "FK_PaymentOverdueNotificationOutboxes_Payments_PaymentId",
+        "constraintReferencedTable": "Payments",
+        "constraintTable": "PaymentOverdueNotificationOutboxes",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"PaymentOverdueNotificationOutboxes\" FROM \"Payments\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_c__",
+        "table": "PaymentOverdueNotificationOutboxes"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"PaymentId\") REFERENCES \"Payments\"(\"Id\") ON DELETE CASCADE",
+        "constraintName": "FK_PaymentOverdueNotificationOutboxes_Payments_PaymentId",
+        "constraintReferencedTable": "Payments",
+        "constraintTable": "PaymentOverdueNotificationOutboxes",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"PaymentOverdueNotificationOutboxes\" FROM \"Payments\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_c__",
+        "table": "PaymentOverdueNotificationOutboxes"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"RevokedByUserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL",
+        "constraintName": "FK_CompanyBankAccountBindings_Users_RevokedByUserId",
+        "constraintReferencedTable": "Users",
+        "constraintTable": "CompanyBankAccountBindings",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"Users\" FROM \"CompanyBankAccountBindings\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_setnull_del\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_a__",
+        "table": "Users"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"RevokedByUserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL",
+        "constraintName": "FK_CompanyBankAccountBindings_Users_RevokedByUserId",
+        "constraintReferencedTable": "Users",
+        "constraintTable": "CompanyBankAccountBindings",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"Users\" FROM \"CompanyBankAccountBindings\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_a__",
+        "table": "Users"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"RevokedByUserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL",
+        "constraintName": "FK_CompanyBankAccountBindings_Users_RevokedByUserId",
+        "constraintReferencedTable": "Users",
+        "constraintTable": "CompanyBankAccountBindings",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"CompanyBankAccountBindings\" FROM \"Users\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_c__",
+        "table": "CompanyBankAccountBindings"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"RevokedByUserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL",
+        "constraintName": "FK_CompanyBankAccountBindings_Users_RevokedByUserId",
+        "constraintReferencedTable": "Users",
+        "constraintTable": "CompanyBankAccountBindings",
+        "constraintType": "f",
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"CompanyBankAccountBindings\" FROM \"Users\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
+        "enabled": "O",
+        "internal": true,
+        "name": "__internal_fk_trigger_c__",
+        "table": "CompanyBankAccountBindings"
+      },
+      {
+        "constraintDefinition": "FOREIGN KEY (\"TaskId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE RESTRICT",
+        "constraintName": "FK_TaskTimeEntries_TaskJournalItems_TaskId",
+        "constraintReferencedTable": "TaskJournalItems",
+        "constraintTable": "TaskTimeEntries",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"TaskJournalItems\" FROM \"TaskTimeEntries\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_restrict_del\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "TaskJournalItems",
         "internal": true,
-        "constraintName": "FK_TaskTimeEntries_TaskJournalItems_TaskId",
-        "constraintType": "f",
-        "constraintTable": "TaskTimeEntries",
-        "constraintReferencedTable": "TaskJournalItems",
-        "constraintDefinition": "FOREIGN KEY (\"TaskId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE RESTRICT"
+        "name": "__internal_fk_trigger_a__",
+        "table": "TaskJournalItems"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"TaskId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE RESTRICT",
+        "constraintName": "FK_TaskTimeEntries_TaskJournalItems_TaskId",
+        "constraintReferencedTable": "TaskJournalItems",
+        "constraintTable": "TaskTimeEntries",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"TaskJournalItems\" FROM \"TaskTimeEntries\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "TaskJournalItems",
         "internal": true,
-        "constraintName": "FK_TaskTimeEntries_TaskJournalItems_TaskId",
-        "constraintType": "f",
-        "constraintTable": "TaskTimeEntries",
-        "constraintReferencedTable": "TaskJournalItems",
-        "constraintDefinition": "FOREIGN KEY (\"TaskId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE RESTRICT"
+        "name": "__internal_fk_trigger_a__",
+        "table": "TaskJournalItems"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"TaskId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE RESTRICT",
+        "constraintName": "FK_TaskTimeEntries_TaskJournalItems_TaskId",
+        "constraintReferencedTable": "TaskJournalItems",
+        "constraintTable": "TaskTimeEntries",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"TaskTimeEntries\" FROM \"TaskJournalItems\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "TaskTimeEntries",
         "internal": true,
-        "constraintName": "FK_TaskTimeEntries_TaskJournalItems_TaskId",
-        "constraintType": "f",
-        "constraintTable": "TaskTimeEntries",
-        "constraintReferencedTable": "TaskJournalItems",
-        "constraintDefinition": "FOREIGN KEY (\"TaskId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE RESTRICT"
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskTimeEntries"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"TaskId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE RESTRICT",
+        "constraintName": "FK_TaskTimeEntries_TaskJournalItems_TaskId",
+        "constraintReferencedTable": "TaskJournalItems",
+        "constraintTable": "TaskTimeEntries",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"TaskTimeEntries\" FROM \"TaskJournalItems\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "TaskTimeEntries",
         "internal": true,
-        "constraintName": "FK_TaskTimeEntries_TaskJournalItems_TaskId",
-        "constraintType": "f",
-        "constraintTable": "TaskTimeEntries",
-        "constraintReferencedTable": "TaskJournalItems",
-        "constraintDefinition": "FOREIGN KEY (\"TaskId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE RESTRICT"
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskTimeEntries"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"TaskJournalItemId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE CASCADE",
+        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalItems_TaskJournal~",
+        "constraintReferencedTable": "TaskJournalItems",
+        "constraintTable": "TaskStatusNotificationOutboxes",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"TaskJournalItems\" FROM \"TaskStatusNotificationOutboxes\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_cascade_del\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "TaskJournalItems",
         "internal": true,
-        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalItems_TaskJournal~",
-        "constraintType": "f",
-        "constraintTable": "TaskStatusNotificationOutboxes",
-        "constraintReferencedTable": "TaskJournalItems",
-        "constraintDefinition": "FOREIGN KEY (\"TaskJournalItemId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE CASCADE"
+        "name": "__internal_fk_trigger_a__",
+        "table": "TaskJournalItems"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"TaskJournalItemId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE CASCADE",
+        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalItems_TaskJournal~",
+        "constraintReferencedTable": "TaskJournalItems",
+        "constraintTable": "TaskStatusNotificationOutboxes",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"TaskJournalItems\" FROM \"TaskStatusNotificationOutboxes\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "TaskJournalItems",
         "internal": true,
-        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalItems_TaskJournal~",
-        "constraintType": "f",
-        "constraintTable": "TaskStatusNotificationOutboxes",
-        "constraintReferencedTable": "TaskJournalItems",
-        "constraintDefinition": "FOREIGN KEY (\"TaskJournalItemId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE CASCADE"
+        "name": "__internal_fk_trigger_a__",
+        "table": "TaskJournalItems"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"TaskJournalItemId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE CASCADE",
+        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalItems_TaskJournal~",
+        "constraintReferencedTable": "TaskJournalItems",
+        "constraintTable": "TaskStatusNotificationOutboxes",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"TaskStatusNotificationOutboxes\" FROM \"TaskJournalItems\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "TaskStatusNotificationOutboxes",
         "internal": true,
-        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalItems_TaskJournal~",
-        "constraintType": "f",
-        "constraintTable": "TaskStatusNotificationOutboxes",
-        "constraintReferencedTable": "TaskJournalItems",
-        "constraintDefinition": "FOREIGN KEY (\"TaskJournalItemId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE CASCADE"
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskStatusNotificationOutboxes"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"TaskJournalItemId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE CASCADE",
+        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalItems_TaskJournal~",
+        "constraintReferencedTable": "TaskJournalItems",
+        "constraintTable": "TaskStatusNotificationOutboxes",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"TaskStatusNotificationOutboxes\" FROM \"TaskJournalItems\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "TaskStatusNotificationOutboxes",
         "internal": true,
-        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalItems_TaskJournal~",
-        "constraintType": "f",
-        "constraintTable": "TaskStatusNotificationOutboxes",
-        "constraintReferencedTable": "TaskJournalItems",
-        "constraintDefinition": "FOREIGN KEY (\"TaskJournalItemId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE CASCADE"
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskStatusNotificationOutboxes"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"UserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL",
+        "constraintName": "FK_TaskTimeEntries_Users_UserId",
+        "constraintReferencedTable": "Users",
+        "constraintTable": "TaskTimeEntries",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"Users\" FROM \"TaskTimeEntries\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_setnull_del\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "Users",
         "internal": true,
-        "constraintName": "FK_TaskTimeEntries_Users_UserId",
-        "constraintType": "f",
-        "constraintTable": "TaskTimeEntries",
-        "constraintReferencedTable": "Users",
-        "constraintDefinition": "FOREIGN KEY (\"UserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL"
+        "name": "__internal_fk_trigger_a__",
+        "table": "Users"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"UserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL",
+        "constraintName": "FK_TaskTimeEntries_Users_UserId",
+        "constraintReferencedTable": "Users",
+        "constraintTable": "TaskTimeEntries",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"Users\" FROM \"TaskTimeEntries\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_a__",
-        "table": "Users",
         "internal": true,
-        "constraintName": "FK_TaskTimeEntries_Users_UserId",
-        "constraintType": "f",
-        "constraintTable": "TaskTimeEntries",
-        "constraintReferencedTable": "Users",
-        "constraintDefinition": "FOREIGN KEY (\"UserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL"
+        "name": "__internal_fk_trigger_a__",
+        "table": "Users"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"UserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL",
+        "constraintName": "FK_TaskTimeEntries_Users_UserId",
+        "constraintReferencedTable": "Users",
+        "constraintTable": "TaskTimeEntries",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"TaskTimeEntries\" FROM \"Users\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "TaskTimeEntries",
         "internal": true,
-        "constraintName": "FK_TaskTimeEntries_Users_UserId",
-        "constraintType": "f",
-        "constraintTable": "TaskTimeEntries",
-        "constraintReferencedTable": "Users",
-        "constraintDefinition": "FOREIGN KEY (\"UserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL"
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskTimeEntries"
       },
       {
+        "constraintDefinition": "FOREIGN KEY (\"UserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL",
+        "constraintName": "FK_TaskTimeEntries_Users_UserId",
+        "constraintReferencedTable": "Users",
+        "constraintTable": "TaskTimeEntries",
+        "constraintType": "f",
         "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"TaskTimeEntries\" FROM \"Users\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
         "enabled": "O",
-        "name": "__internal_fk_trigger_c__",
-        "table": "TaskTimeEntries",
         "internal": true,
-        "constraintName": "FK_TaskTimeEntries_Users_UserId",
-        "constraintType": "f",
-        "constraintTable": "TaskTimeEntries",
-        "constraintReferencedTable": "Users",
-        "constraintDefinition": "FOREIGN KEY (\"UserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL"
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskTimeEntries"
       }
     ],
     "removed": []
@@ -2069,6 +3456,26 @@
   },
   "sequences": {
     "added": [
+      {
+        "cache": 1,
+        "cycle": false,
+        "increment": 1,
+        "max": 2147483647,
+        "min": 1,
+        "name": "CompanyBankAccountBindings_Id_seq",
+        "start": 1,
+        "type": "integer"
+      },
+      {
+        "cache": 1,
+        "cycle": false,
+        "increment": 1,
+        "max": 9223372036854775807,
+        "min": 1,
+        "name": "PaymentOverdueNotificationOutboxes_Id_seq",
+        "start": 1,
+        "type": "bigint"
+      },
       {
         "cache": 1,
         "cycle": false,
@@ -2103,7 +3510,34 @@
         "default": null,
         "enumLabels": null,
         "kind": "b",
+        "name": "_BalanceApplicationReceipts",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      },
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "b",
+        "name": "_CompanyBankAccountBindings",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      },
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "b",
         "name": "_PaymentCreateAttempts",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      },
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "b",
+        "name": "_PaymentOverdueNotificationOutboxes",
         "notNull": false,
         "owner": "__migration_owner__"
       },
@@ -2139,7 +3573,34 @@
         "default": null,
         "enumLabels": null,
         "kind": "c",
+        "name": "BalanceApplicationReceipts",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      },
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "c",
+        "name": "CompanyBankAccountBindings",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      },
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "c",
         "name": "PaymentCreateAttempts",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      },
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "c",
+        "name": "PaymentOverdueNotificationOutboxes",
         "notNull": false,
         "owner": "__migration_owner__"
       },
