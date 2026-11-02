@@ -6997,8 +6997,10 @@ export class ApiService {
     });
   }
 
-  async getCurrentCaseAppealDecision(caseId: number, options?: { signal?: AbortSignal }) {
-    const decision = await this.request<CaseAppealDecision | undefined>(`/v2/cases/${caseId}/appeal-decision`, { signal: options?.signal });
+  async getCurrentCaseAppealDecision(caseId: number, options?: { signal?: AbortSignal; expectedCourtDecisionAt?: string; expectedAppealDeadlineAt?: string }) {
+    options?.signal?.throwIfAborted();
+    const query = buildQuery({ expectedCourtDecisionAt: options?.expectedCourtDecisionAt, expectedAppealDeadlineAt: options?.expectedAppealDeadlineAt });
+    const decision = await this.request<CaseAppealDecision | undefined>(`/v2/cases/${caseId}/appeal-decision${query}`, { signal: options?.signal, cache: 'no-store' });
     return decision ?? null;
   }
 

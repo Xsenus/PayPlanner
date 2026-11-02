@@ -4329,7 +4329,7 @@ export function CaseDetailPage({
                 ) : null}
                 {caseItem.positionReviewedAt ? <p className="mt-1 text-xs text-slate-500">Если изменить текст позиции, подтверждение сбросится.</p> : null}
               </section>
-              <CaseAppealDecisionAction clientCase={caseItem} canEdit={canEdit} onTaskCreated={() => setReloadToken((value) => value + 1)} onOpenTask={canViewTasks ? onOpenTask : undefined} />
+              <CaseAppealDecisionAction actionOwner={childCaseOwner} clientCase={caseItem} canEdit={canEdit} onTaskCreated={() => setReloadToken((value) => value + 1)} onOpenTask={canViewTasks ? onOpenTask : undefined} />
               <TextBlock title="Документы" value={caseItem.documentsSummary || 'Сводка документов пока не заполнена.'} />
             </div>
           ) : null}
@@ -4538,6 +4538,7 @@ export function CaseDetailPage({
           {activeTab === 'court' ? (
             <div className="space-y-3">
             <CasePreHearingActions
+              actionOwner={childCaseOwner}
               caseItem={caseItem}
               timeZoneId={caseTimeZoneId}
               canCreateTask={canCreateCaseTask}

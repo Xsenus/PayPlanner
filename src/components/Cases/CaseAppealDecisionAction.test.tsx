@@ -1,3 +1,9 @@
+import { documentCopyTestSession } from '../../test/documentCopySession';
+import { afterEach as restoreAfterEach, beforeEach as setupBeforeEach } from 'vitest';
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 7, role: { id: 4 } } }) }));
+let session: ReturnType<typeof documentCopyTestSession>;
+setupBeforeEach(() => { session = documentCopyTestSession(); });
+restoreAfterEach(() => session.restore());
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 

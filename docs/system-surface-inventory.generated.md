@@ -1304,9 +1304,9 @@
 | PUT | api/v1/payments/{id:int} | PaymentsV1Controller | Update | backend/Controllers/V1/PaymentsV1Controller.cs:129 | [Authorize] | да | нет |
 | DELETE | api/v1/payments/{id:int} | PaymentsV1Controller | Delete | backend/Controllers/V1/PaymentsV1Controller.cs:191 | [Authorize] | да | нет |
 | GET | {id:int}/appeal-decision | CasesV2Controller | GetCurrentCaseAppealDecision | backend/Controllers/V2/CasesV2Controller.Appeal.cs:45 | не задано | да | нет |
-| GET | appeal-deadlines/expiring | CasesV2Controller | GetExpiringCaseAppeals | backend/Controllers/V2/CasesV2Controller.Appeal.cs:99 | не задано | да | нет |
-| POST | {id:int}/appeal-decision | CasesV2Controller | DecideCaseAppeal | backend/Controllers/V2/CasesV2Controller.Appeal.cs:193 | не задано | да | нет |
-| POST | {id:int}/appeal-reminder | CasesV2Controller | RemindCaseAppealAssignee | backend/Controllers/V2/CasesV2Controller.Appeal.cs:393 | не задано | да | нет |
+| GET | appeal-deadlines/expiring | CasesV2Controller | GetExpiringCaseAppeals | backend/Controllers/V2/CasesV2Controller.Appeal.cs:112 | не задано | да | нет |
+| POST | {id:int}/appeal-decision | CasesV2Controller | DecideCaseAppeal | backend/Controllers/V2/CasesV2Controller.Appeal.cs:206 | не задано | да | нет |
+| POST | {id:int}/appeal-reminder | CasesV2Controller | RemindCaseAppealAssignee | backend/Controllers/V2/CasesV2Controller.Appeal.cs:406 | не задано | да | нет |
 | GET | {id:int}/court-recoveries | CasesV2Controller | GetCourtRecoveries | backend/Controllers/V2/CasesV2Controller.CourtRecoveries.cs:32 | не задано | да | нет |
 | PUT | {id:int}/court-recoveries/{paymentId:int} | CasesV2Controller | SetCourtRecoveryPayment | backend/Controllers/V2/CasesV2Controller.CourtRecoveries.cs:113 | не задано | да | нет |
 | DELETE | {id:int}/court-recoveries/{paymentId:int} | CasesV2Controller | RemoveCourtRecoveryPayment | backend/Controllers/V2/CasesV2Controller.CourtRecoveries.cs:190 | не задано | да | нет |

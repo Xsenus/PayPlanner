@@ -1,3 +1,9 @@
+import { documentCopyTestSession } from '../../test/documentCopySession';
+import { afterEach as restoreAfterEach, beforeEach as setupBeforeEach } from 'vitest';
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 7, role: { id: 4 } } }) }));
+let session: ReturnType<typeof documentCopyTestSession>;
+setupBeforeEach(() => { session = documentCopyTestSession(); });
+restoreAfterEach(() => session.restore());
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -21,7 +27,7 @@ const caseItem = {
 describe('CasePreHearingActions', () => {
   beforeEach(() => {
     vi.mocked(apiService.createTaskJournalItem).mockReset();
-    vi.mocked(apiService.createTaskJournalItem).mockResolvedValue({ id: 91 } as never);
+    vi.mocked(apiService.createTaskJournalItem).mockResolvedValue({ id: 91, clientCaseId: 42 } as never);
   });
 
   it('creates a linked task and offers direct navigation', async () => {

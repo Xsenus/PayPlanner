@@ -5293,4 +5293,25 @@ describe('CaseDetailPage', () => {
     let finish!:(value:ClientCase)=>void;vi.mocked(apiService.updateCaseV2).mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));vi.mocked(apiService.getCaseV2).mockImplementation(async id=>createCase({id,title:id===16?'Следующее дело':'ЗЕМЦОВ - банкротство'}));const props={caseId:15,onBack:vi.fn(),canEdit:true};const view=render(<CaseDetailPage {...props}/>);await screen.findByText('ЗЕМЦОВ - банкротство');fireEvent.click(screen.getByRole('button',{name:'Редактировать дело'}));fireEvent.click((await screen.findAllByRole('button',{name:/Сохранить дело/}))[0]);await waitFor(()=>expect(apiService.updateCaseV2).toHaveBeenCalledOnce());view.rerender(<CaseDetailPage {...props} caseId={16}/>);await act(async()=>{});await act(async()=>finish(createCase({title:'ПРЕЖНИЙ ОТВЕТ СОХРАНЕНИЯ'})));expect(document.body.textContent).not.toContain('ПРЕЖНИЙ ОТВЕТ СОХРАНЕНИЯ');expect(screen.queryByText('Карточка дела обновлена.')).toBeNull();
   });
 
+  it.each(['hearing', 'appeal'] as const)('task child bridge: %s ignores completion after the parent access key changes', async kind => {
+    let finish!: (value: never) => void; const pending = new Promise<never>(resolve => { finish = resolve; });
+    if (kind === 'hearing') vi.mocked(apiService.createTaskJournalItem).mockReturnValueOnce(pending);
+    else vi.mocked(apiService.createCaseAppealTask).mockReturnValueOnce(pending);
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ nextHearingAt: '2099-10-20T15:00:00Z', courtDecisionAt: '2026-09-20', appealDeadlineAt: '2099-10-20' }));
+    const props = { caseId: 15, onBack: vi.fn(), canEdit: true, canViewTasks: true, canCreateTasks: true, taskAccessKey: 'before', onOpenTask: vi.fn() };
+    const view = render(<CaseDetailPage {...props} />); await screen.findByText('ЗЕМЦОВ - банкротство');
+    if (kind === 'hearing') fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    fireEvent.click(await screen.findByRole('button', { name: kind === 'hearing' ? 'Запланировать командировку' : 'Обжаловать — создать задачу' }));
+    view.rerender(<CaseDetailPage {...props} taskAccessKey="after" canViewTasks={false} canCreateTasks={false} canEdit={false} />); await act(async () => {});
+    const reads = vi.mocked(apiService.getCaseV2).mock.calls.length;
+    await act(async () => finish((kind === 'hearing' ? { id: 91, clientCaseId: 15 } : { id: 8, caseId: 15, choice: 'appeal', taskId: 91, decidedAt: '2026-11-02T00:00:00Z' }) as never));
+    expect(apiService.getCaseV2).toHaveBeenCalledTimes(reads); expect(screen.queryByRole('button', { name: 'Открыть задачу' })).toBeNull();
+  });
+  it('task child bridge: appeal remains available with case edit but without generic task creation', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ courtDecisionAt: '2026-09-20', appealDeadlineAt: '2099-10-20' }));
+    vi.mocked(apiService.createCaseAppealTask).mockResolvedValue({ id: 8, caseId: 15, choice: 'appeal', taskId: 91, decidedAt: '2026-11-02T00:00:00Z' });
+    const open = vi.fn(); render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit canViewTasks={false} canCreateTasks={false} onOpenTask={open} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Обжаловать — создать задачу' })); await screen.findByText(/Решено обжаловать/); expect(apiService.createCaseAppealTask).toHaveBeenCalledOnce(); expect(screen.queryByRole('button', { name: 'Открыть задачу' })).toBeNull(); expect(open).not.toHaveBeenCalled();
+  });
+
 });

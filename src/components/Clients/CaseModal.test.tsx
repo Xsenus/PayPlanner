@@ -250,7 +250,7 @@ describe('CaseModal', () => {
     vi.mocked(apiService.getCurrentCaseAppealDecision).mockResolvedValue(null);
     vi.mocked(apiService.createCaseAppealTask).mockReset();
     vi.mocked(apiService.createTaskJournalItem).mockReset();
-    vi.mocked(apiService.createTaskJournalItem).mockResolvedValue({ id: 91 } as never);
+    vi.mocked(apiService.createTaskJournalItem).mockResolvedValue({ id: 91, clientCaseId: 1 } as never);
     vi.mocked(apiService.getTaskJournalItems).mockReset();
     vi.mocked(apiService.getTaskJournalItems).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 });
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockReset();
@@ -1301,6 +1301,24 @@ describe('CaseModal', () => {
   });
   it('nested modal template: closed parent rejects late template creation',async()=>{
     vi.mocked(apiService.createCasePositionTemplate).mockReset();const pending=deferred<Awaited<ReturnType<typeof apiService.createCasePositionTemplate>>>();vi.mocked(apiService.createCasePositionTemplate).mockReturnValueOnce(pending.promise);render(<CaseModal isOpen caseData={createCase({strategy:'Позиция'})} onClose={vi.fn()} onSave={vi.fn()}/>);await act(async()=>{});fireEvent.click(screen.getByRole('button',{name:'Новый шаблон'}));fireEvent.change(screen.getByLabelText('Название шаблона позиции'),{target:{value:'Закрытый шаблон'}});fireEvent.click(screen.getByRole('button',{name:'Сохранить шаблон'}));await waitFor(()=>expect(apiService.createCasePositionTemplate).toHaveBeenCalledOnce());fireEvent.click(screen.getByRole('button',{name:'Закрыть'}));await act(async()=>pending.resolve({id:402,title:'Закрытый шаблон',text:'Позиция',scope:'personal',canManage:true,updatedAt:'2026-11-02T00:00:00Z'}));expect(document.body.textContent).not.toContain('Закрытый шаблон');
+  });
+
+  it.each(['hearing', 'appeal'] as const)('task child bridge: %s holds parent save and drops completion after rights change', async kind => {
+    const pending = deferred<never>();
+    if (kind === 'hearing') vi.mocked(apiService.createTaskJournalItem).mockReturnValueOnce(pending.promise);
+    else vi.mocked(apiService.createCaseAppealTask).mockReturnValueOnce(pending.promise);
+    const props = { isOpen: true, caseData: createCase({ nextHearingAt: '2099-10-20T15:00:00Z', responsibleUserId: 7, courtDecisionAt: '2026-09-20', appealDeadlineAt: '2099-10-20' }), onClose: vi.fn(), onSave: vi.fn(), canCreateTasks: true, allowEdit: true, onOpenTask: vi.fn() };
+    const view = render(<CaseModal {...props} />); fireEvent.click(await screen.findByRole('button', { name: kind === 'hearing' ? 'Запросить доверенность' : 'Обжаловать — создать задачу' }));
+    expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveProperty('disabled', true);
+    fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true }); expect(props.onSave).not.toHaveBeenCalled();
+    view.rerender(<CaseModal {...props} allowEdit={false} canCreateTasks={false} />); await act(async () => {}); const reads = vi.mocked(apiService.getTaskJournalItems).mock.calls.length;
+    await act(async () => pending.resolve((kind === 'hearing' ? { id: 91, clientCaseId: 1 } : { id: 8, caseId: 1, choice: 'appeal', taskId: 91, decidedAt: '2026-11-02T00:00:00Z' }) as never));
+    expect(apiService.getTaskJournalItems).toHaveBeenCalledTimes(reads); expect(screen.queryByRole('button', { name: 'Открыть задачу' })).toBeNull();
+  });
+  it('task child bridge: changing the responsible disables authority until saving', async () => {
+    render(<CaseModal isOpen caseData={createCase({ nextHearingAt: '2099-10-20T15:00:00Z', responsibleUserId: 7 })} onClose={vi.fn()} onSave={vi.fn()} canCreateTasks responsibles={[{ id: 7, fullName: 'Сотрудник 7' }, { id: 8, fullName: 'Сотрудник 8' }]} />);
+    fireEvent.change(document.querySelector('select[aria-label="Ответственный"]')!, { target: { value: '8' } });
+    expect(screen.getByRole('button', { name: 'Запросить доверенность' })).toHaveProperty('disabled', true); expect(apiService.createTaskJournalItem).not.toHaveBeenCalled();
   });
 
 });

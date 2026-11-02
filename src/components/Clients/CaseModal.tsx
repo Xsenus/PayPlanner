@@ -1632,11 +1632,12 @@ export function CaseModal({
 
           <div className="md:col-span-2">
             <CasePreHearingActions
+              actionOwner={caseActionOwner}
               caseItem={caseData}
               timeZoneId={timeZoneId}
               canCreateTask={canCreateTasks}
               datesSaved={nextHearingAt === toDateTimeInput(caseData.nextHearingAt, timeZoneId) && responsibleUserId === String(caseData.responsibleUserId ?? '')}
-              onTaskCreated={() => void refreshCaseTasks()}
+              onTaskCreated={() => refreshCaseTasks()}
               onOpenTask={onOpenTask}
             />
           </div>
@@ -1774,10 +1775,11 @@ export function CaseModal({
           {caseData.id > 0 && caseData.courtDecisionAt && caseData.appealDeadlineAt ? (
             <div className="md:col-span-2">
               <CaseAppealDecisionAction
+                actionOwner={caseActionOwner}
                 clientCase={caseData}
                 canEdit={allowEdit}
                 datesSaved={courtDecisionAt === toDateInput(caseData.courtDecisionAt) && appealDeadlineAt === toDateInput(caseData.appealDeadlineAt)}
-                onTaskCreated={() => void refreshCaseTasks()}
+                onTaskCreated={() => refreshCaseTasks()}
                 onOpenTask={onOpenTask}
               />
             </div>

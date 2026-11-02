@@ -43,7 +43,8 @@ public partial class CasesV2Controller
 
     /// <summary>Only the choice tied to the current court decision is shown; older choices stay in history.</summary>
     [HttpGet("{id:int}/appeal-decision")]
-    public async Task<ActionResult<CaseAppealDecisionDto?>> GetCurrentCaseAppealDecision(int id, CancellationToken ct)
+    public async Task<ActionResult<CaseAppealDecisionDto?>> GetCurrentCaseAppealDecision(int id, CancellationToken ct,
+        [FromQuery] DateTime? expectedCourtDecisionAt = null, [FromQuery] DateTime? expectedAppealDeadlineAt = null)
     {
         if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
         {
@@ -58,11 +59,23 @@ public partial class CasesV2Controller
         var clientCase = await _db.ClientCases.AsNoTracking()
             .ApplyClientCaseVisibility(visibility)
             .Where(item => item.Id == id)
-            .Select(item => new { item.CourtDecisionAt })
+            .Select(item => new { item.CourtDecisionAt, item.AppealDeadlineAt })
             .FirstOrDefaultAsync(ct);
         if (clientCase is null)
         {
             return NotFound();
+        }
+        // Check the visible judicial act before returning even an empty decision.
+        // Legacy readers may omit both dates; new readers bind the result to their card.
+        if (expectedCourtDecisionAt.HasValue != expectedAppealDeadlineAt.HasValue)
+        {
+            return BadRequest("Передайте обе даты судебного акта для проверки.");
+        }
+        if (expectedCourtDecisionAt.HasValue &&
+            (clientCase.CourtDecisionAt?.Date != expectedCourtDecisionAt.Value.Date ||
+             clientCase.AppealDeadlineAt?.Date != expectedAppealDeadlineAt!.Value.Date))
+        {
+            return Conflict("Даты судебного акта изменились. Обновите карточку дела.");
         }
         if (!clientCase.CourtDecisionAt.HasValue)
         {
