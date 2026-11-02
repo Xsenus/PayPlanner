@@ -1,10 +1,14 @@
 using System;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using PayPlanner.Api.Data;
 
 #nullable disable
 
 namespace PayPlanner.Api.Migrations.PostgreSql
 {
+    [DbContext(typeof(PostgreSqlPaymentContext))]
+    [Migration("20260521190030_AddTaskContractorPaymentsPostgres")]
     public partial class AddTaskContractorPaymentsPostgres : Migration
     {
         protected override void Up(MigrationBuilder migrationBuilder)
