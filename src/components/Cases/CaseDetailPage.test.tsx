@@ -2575,7 +2575,8 @@ describe('CaseDetailPage', () => {
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
       stage: 'Апелляция',
       cassationDeadlineAt: null,
-    }));
+    })).mockResolvedValueOnce(createCase({ stage: 'Апелляция', cassationDeadlineAt: null }));
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ stage: 'Кассация', cassationDeadlineAt: null }));
 
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
 
@@ -5433,6 +5434,393 @@ describe('CaseDetailPage', () => {
     view.rerender(<CaseDetailPage caseId={15} onBack={vi.fn()} caseAccessKey="second" />);
     await screen.findByText('ЗЕМЦОВ - банкротство');
     await waitFor(() => expect(apiService.markCaseActivity).toHaveBeenCalledTimes(2));
+  });
+
+  it('header owner baseline: readonly fields and Save/Archive cannot issue a mutation', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit={false} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    expect(screen.getByRole('button', { name: /^Сохранить$/u })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: /^Архив$/u })).toHaveProperty('disabled', true);
+    expect(screen.getByLabelText('Стадия дела')).toHaveProperty('disabled', true);
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/u }));
+    fireEvent.click(screen.getByRole('button', { name: /^Архив$/u }));
+    expect(apiService.bulkUpdateCases).not.toHaveBeenCalled();
+  });
+
+  it('header owner baseline: reserves a write synchronously before a second click', async () => {
+    vi.mocked(apiService.bulkUpdateCases).mockReturnValue(new Promise(() => {}));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    const save = screen.getByRole('button', { name: /^Сохранить$/u });
+    act(() => { fireEvent.click(save); fireEvent.click(save); });
+    expect(apiService.bulkUpdateCases).toHaveBeenCalledTimes(1);
+  });
+
+  it('header owner baseline: a header write excludes review and editor actions', async () => {
+    vi.mocked(apiService.bulkUpdateCases).mockReturnValue(new Promise(() => {}));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/u }));
+    fireEvent.click(screen.getByRole('button', { name: 'Подтвердить проверку позиции' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    expect(apiService.reviewCasePosition).not.toHaveBeenCalled();
+    expect(screen.queryByRole('heading', { name: 'Редактирование дела' })).toBeNull();
+  });
+
+  it('header owner baseline: old access prompt cannot send for a previous page', async () => {
+    vi.mocked(apiService.getCaseV2).mockRejectedValue(new Error('Дело скрыто'));
+    let finish!: (value: string | null) => void;
+    dialogMock.prompt.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const props = { caseId: 15, onBack: vi.fn() };
+    const view = render(<CaseDetailPage {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Запросить доступ/u }));
+    view.rerender(<CaseDetailPage {...props} caseId={16} />);
+    await act(async () => finish('Причина старого дела'));
+    expect(apiService.requestCaseAccess).not.toHaveBeenCalled();
+  });
+
+  it('header owner baseline: blank access reason is not sent', async () => {
+    vi.mocked(apiService.getCaseV2).mockRejectedValue(new Error('Дело скрыто'));
+    dialogMock.prompt.mockResolvedValue('   ');
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Запросить доступ/u }));
+    await act(async () => {});
+    expect(apiService.requestCaseAccess).not.toHaveBeenCalled();
+  });
+
+  it('header owner baseline: unavailable clipboard does not report a copied link', async () => {
+    const old = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    onTestFinished(() => { if (old) Object.defineProperty(navigator, 'clipboard', old); else Reflect.deleteProperty(navigator, 'clipboard'); });
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Ссылка' }));
+    await act(async () => {});
+    expect(screen.queryByRole('button', { name: 'Ссылка скопирована' })).toBeNull();
+  });
+
+  it('header owner: keeps one reservation through the authoritative post-write GET', async () => {
+    let finish!: (value: ClientCase) => void;
+    vi.mocked(apiService.getCaseV2).mockResolvedValueOnce(createCase()).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/u }));
+    await waitFor(() => expect(apiService.getCaseV2).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('button', { name: /^Сохранить$/u })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: /^Архив$/u })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Обновить' })).toHaveProperty('disabled', true);
+    fireEvent.click(screen.getByRole('button', { name: /^Архив$/u }));
+    expect(apiService.bulkUpdateCases).toHaveBeenCalledTimes(1);
+    await act(async () => finish(createCase({ stage: 'Актуальная стадия' })));
+    expect(screen.getByLabelText('Стадия дела')).toHaveProperty('value', 'Актуальная стадия');
+    expect(screen.getByRole('button', { name: /^Сохранить$/u })).toHaveProperty('disabled', false);
+    expect(apiService.getCaseV2).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['write', 'read', 'zero'] as const)('header owner: %s uncertainty requires a read without repeating the write', async kind => {
+    if (kind === 'write') vi.mocked(apiService.bulkUpdateCases).mockRejectedValueOnce(new Error('Ответ сохранения потерян'));
+    if (kind === 'zero') vi.mocked(apiService.bulkUpdateCases).mockResolvedValueOnce({ updated: 0, requested: 1 });
+    if (kind === 'read') vi.mocked(apiService.getCaseV2).mockResolvedValueOnce(createCase()).mockRejectedValueOnce(new Error('Не удалось перечитать дело'));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.change(screen.getByLabelText('Стадия дела'), { target: { value: 'Несохранённый ввод' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/u }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Обновить' })).toHaveProperty('disabled', false));
+    expect(screen.getByRole('button', { name: /^Сохранить$/u })).toHaveProperty('disabled', true);
+    expect(screen.getByLabelText('Стадия дела')).toHaveProperty('value', 'Несохранённый ввод');
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/u }));
+    expect(apiService.bulkUpdateCases).toHaveBeenCalledTimes(1);
+    const reads = vi.mocked(apiService.getCaseV2).mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить' }));
+    await waitFor(() => expect(apiService.getCaseV2).toHaveBeenCalledTimes(reads + 1));
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Сохранить$/u })).toHaveProperty('disabled', false));
+    expect(apiService.bulkUpdateCases).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['case', 'role', 'edit', 'login'] as const)('header owner: an old write cannot refresh after %s changes', async change => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    let finish!: (value: { updated: number; requested: number }) => void;
+    vi.mocked(apiService.bulkUpdateCases).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    vi.mocked(apiService.getCaseV2).mockImplementation(async id => createCase({ id, title: `Дело ${id}` }));
+    const props = { caseId: 15, onBack: vi.fn(), canEdit: true };
+    const view = render(<CaseDetailPage {...props} />);
+    await screen.findByText('Дело 15');
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/u }));
+    if (change === 'role') detailAuth.user = { id: 7, role: { id: 44 } };
+    if (change === 'login') session.replace();
+    if (change !== 'login') { view.rerender(<CaseDetailPage {...props} caseId={change === 'case' ? 16 : 15} canEdit={change !== 'edit'} />); await screen.findByText(change === 'case' ? 'Дело 16' : 'Дело 15'); }
+    const reads = vi.mocked(apiService.getCaseV2).mock.calls.length;
+    await act(async () => finish({ updated: 1, requested: 1 }));
+    expect(apiService.getCaseV2).toHaveBeenCalledTimes(reads);
+    expect(screen.queryByText('Этап дела изменён')).toBeNull();
+  });
+
+  it('header owner: rejects a post-write GET for another case', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValueOnce(createCase()).mockResolvedValue(createCase({ id: 16, title: 'Чужой ответ' }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/u }));
+    await screen.findByText('Не удалось подтвердить данные текущего дела. Обновите карточку.');
+    expect(screen.queryByText('Чужой ответ')).toBeNull();
+    expect(screen.getByRole('button', { name: /^Сохранить$/u })).toHaveProperty('disabled', true);
+  });
+
+  it('header owner: primary reads cannot admit another case or mark its activity', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ id: 16, title: 'Чужой ответ' }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('Не удалось подтвердить данные текущего дела.');
+    expect(screen.queryByText('Чужой ответ')).toBeNull();
+    expect(apiService.markCaseActivity).not.toHaveBeenCalled();
+  });
+
+  it.each(['case', 'role', 'edit', 'login'] as const)('header owner: cancels the inactivity prompt after %s changes', async change => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    let finish!: (reason: string | null) => void;
+    dialogMock.prompt.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    vi.mocked(apiService.getCaseV2).mockImplementation(async id => createCase({ id }));
+    const props = { caseId: 15, onBack: vi.fn(), canEdit: true };
+    const view = render(<CaseDetailPage {...props} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByLabelText('Учитывать дело в автоконтроле'));
+    const signal = dialogMock.prompt.mock.calls[0][0].signal as AbortSignal;
+    expect(signal.aborted).toBe(false);
+    expect(screen.getByRole('button', { name: /^Сохранить$/u })).toHaveProperty('disabled', true);
+    if (change === 'role') detailAuth.user = { id: 7, role: { id: 44 } };
+    if (change === 'login') session.replace();
+    else { view.rerender(<CaseDetailPage {...props} caseId={change === 'case' ? 16 : 15} canEdit={change !== 'edit'} />); await screen.findByText('ЗЕМЦОВ - банкротство'); expect(signal.aborted).toBe(true); }
+    await act(async () => finish('Причина прежнего окна'));
+    expect(screen.queryByText('Причина прежнего окна')).toBeNull();
+    expect(screen.getByLabelText('Учитывать дело в автоконтроле')).toHaveProperty('checked', true);
+    expect(apiService.bulkUpdateCases).not.toHaveBeenCalled();
+  });
+
+  it('header owner: duplicate access clicks share one prompt and trimmed request', async () => {
+    vi.mocked(apiService.getCaseV2).mockRejectedValue(new Error('Дело скрыто'));
+    let finish!: (reason: string | null) => void;
+    dialogMock.prompt.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit={false} />);
+    const button = await screen.findByRole('button', { name: /Запросить доступ/u });
+    act(() => { fireEvent.click(button); fireEvent.click(button); });
+    expect(dialogMock.prompt).toHaveBeenCalledTimes(1);
+    await act(async () => finish('  Нужна проверка сроков  '));
+    expect(apiService.requestCaseAccess).toHaveBeenCalledTimes(1);
+    expect(apiService.requestCaseAccess).toHaveBeenCalledWith(15, { reason: 'Нужна проверка сроков' });
+  });
+
+  it('header owner: full-editor failure requires refresh while preserving its draft', async () => {
+    vi.mocked(apiService.updateCaseV2).mockRejectedValueOnce(new Error('Ответ сохранения потерян'));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Мой сохранённый черновик' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u })[0]);
+    await screen.findByRole('button', { name: 'Обновить данные дела' });
+    for (const button of screen.getAllByRole('button', { name: /Сохранить дело/u })) expect(button).toHaveProperty('disabled', true);
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить данные дела' }));
+    await waitFor(() => expect(screen.getByLabelText('Стратегия и план действий')).toHaveProperty('value', 'Мой сохранённый черновик'));
+    expect(apiService.updateCaseV2).toHaveBeenCalledTimes(1);
+    expect(apiService.getCaseV2).toHaveBeenCalledTimes(2);
+    for (const button of screen.getAllByRole('button', { name: /Сохранить дело/u })) expect(button).toHaveProperty('disabled', false);
+  });
+
+  it.each(['reject', 'missing'] as const)('header owner: %s clipboard outcome never claims a copy', async mode => {
+    const old = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const clipboard = mode === 'reject' ? { writeText: vi.fn().mockRejectedValue(new Error('Копирование запрещено')) } : undefined;
+    Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true });
+    onTestFinished(() => { if (old) Object.defineProperty(navigator, 'clipboard', old); else Reflect.deleteProperty(navigator, 'clipboard'); });
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit={false} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Ссылка' }));
+    await screen.findByText(mode === 'reject' ? 'Копирование запрещено' : 'Буфер обмена недоступен. Скопируйте адрес из строки браузера.');
+    expect(screen.queryByRole('button', { name: 'Ссылка скопирована' })).toBeNull();
+  });
+
+  it.each(['bad-time', 'null-time', 'missing-name'] as const)('header owner: rejects %s review proof without a refresh or notice', async mode => {
+    vi.mocked(apiService.reviewCasePosition).mockResolvedValue({ positionReviewedAt: mode === 'bad-time' ? 'bad' : mode === 'null-time' ? null : '2026-11-03T00:00:00Z', positionReviewedByName: mode === 'missing-name' ? undefined : 'Юрист' } as unknown as Awaited<ReturnType<typeof apiService.reviewCasePosition>>);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Подтвердить проверку позиции' }));
+    await screen.findByText('Не удалось подтвердить сведения о проверке позиции. Обновите карточку.');
+    expect(apiService.getCaseV2).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Позиция по делу отмечена как проверенная.')).toBeNull();
+  });
+
+  it.each(['wrong-hearing', 'null-time', 'missing-name'] as const)('header owner: rejects %s hearing proof', async mode => {
+    const hearing = '2099-11-03T12:00:00Z';
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ nextHearingAt: hearing }));
+    vi.mocked(apiService.confirmNextHearing).mockResolvedValue({ nextHearingConfirmedAt: mode === 'null-time' ? null : '2026-11-03T00:00:00Z', nextHearingConfirmedByName: mode === 'missing-name' ? undefined : 'Юрист', nextHearingConfirmedForAt: mode === 'wrong-hearing' ? '2099-11-04T12:00:00Z' : hearing } as unknown as Awaited<ReturnType<typeof apiService.confirmNextHearing>>);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Подтвердить дату' }));
+    await screen.findByText('Дата заседания изменилась или не подтверждена. Обновите карточку дела.');
+    expect(screen.queryByText('Дата следующего заседания подтверждена.')).toBeNull();
+  });
+
+  it('header owner: uses UTC equivalence for a naive saved hearing and explicit proof', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ nextHearingAt: '2099-11-03T12:00:00' }));
+    vi.mocked(apiService.confirmNextHearing).mockResolvedValue({ nextHearingConfirmedAt: '2026-11-03T00:00:00', nextHearingConfirmedByName: 'Юрист', nextHearingConfirmedForAt: '2099-11-03T12:00:00Z', nextHearingConfirmedByUserId: 7 });
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Подтвердить дату' }));
+    await screen.findByText('Дата следующего заседания подтверждена.');
+    expect(apiService.confirmNextHearing).toHaveBeenCalledTimes(1);
+  });
+
+  it('header owner: an admitted recovery write also blocks the header until its read finishes', async () => {
+    let finish!: () => void;
+    vi.mocked(apiService.setCourtRecoveryPayment).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    vi.mocked(apiService.getCourtRecoveries).mockResolvedValue({ awardedAmount: 100000, receivedAmount: 0, remainingAmount: 100000, linkedPayments: [], availablePayments: [{ paymentId: 7, date: '2026-09-24', description: 'Поступление', paidAmount: 25000, allocatedAmount: null, effectiveAmount: 0, warning: null }], hasMoreAvailablePayments: false, hasCompletePaymentVisibility: true });
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ courtAwardedAmount: 100000 }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Платёж для взыскания' }), { target: { value: '7' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить связь' }));
+    await waitFor(() => expect(apiService.setCourtRecoveryPayment).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: /^Сохранить$/u })).toHaveProperty('disabled', true);
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/u }));
+    expect(apiService.bulkUpdateCases).not.toHaveBeenCalled();
+    await act(async () => finish());
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Сохранить$/u })).toHaveProperty('disabled', false));
+  });
+
+  it('header owner: a reviewed response without a fresh review mark cannot claim success', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Подтвердить проверку позиции' }));
+    await screen.findByText('Не удалось подтвердить актуальную отметку проверки позиции. Обновите карточку.');
+    expect(screen.queryByText('Позиция по делу отмечена как проверенная.')).toBeNull();
+    expect(apiService.reviewCasePosition).toHaveBeenCalledTimes(1);
+    expect(apiService.getCaseV2).toHaveBeenCalledTimes(2);
+  });
+
+  it('header owner: an old successful clipboard write cannot mark a new case', async () => {
+    const old = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    let finish!: () => void;
+    const writeText = vi.fn().mockReturnValue(new Promise<void>(resolve => { finish = resolve; }));
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    onTestFinished(() => { if (old) Object.defineProperty(navigator, 'clipboard', old); else Reflect.deleteProperty(navigator, 'clipboard'); });
+    vi.mocked(apiService.getCaseV2).mockImplementation(async id => createCase({ id, title: `Дело ${id}` }));
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit={false} />);
+    await screen.findByText('Дело 15');
+    fireEvent.click(screen.getByRole('button', { name: 'Ссылка' }));
+    expect(writeText).toHaveBeenCalledWith('http://localhost:3000/cases/15');
+    view.rerender(<CaseDetailPage caseId={16} onBack={vi.fn()} canEdit={false} />);
+    await screen.findByText('Дело 16');
+    await act(async () => finish());
+    expect(screen.queryByRole('button', { name: 'Ссылка скопирована' })).toBeNull();
+  });
+
+  it('header owner: a new login before React renders prevents clipboard dispatch', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    const old = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    onTestFinished(() => { if (old) Object.defineProperty(navigator, 'clipboard', old); else Reflect.deleteProperty(navigator, 'clipboard'); });
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    session.replace();
+    fireEvent.click(screen.getByRole('button', { name: 'Ссылка' }));
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it.each([401, 403, 409, 503])('header owner: handles HTTP%s without replay and hides denied data', async status => {
+    vi.mocked(apiService.bulkUpdateCases).mockRejectedValueOnce(new Error(`HTTP ${status} Error - Изменение не принято`));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/u }));
+    const message = status === 401 ? 'Сессия истекла. Войдите снова.' : status === 403 ? 'Недостаточно прав для выполнения действия.' : 'Изменение не принято';
+    await screen.findByText(message);
+    expect(apiService.bulkUpdateCases).toHaveBeenCalledTimes(1);
+    expect(apiService.getCaseV2).toHaveBeenCalledTimes(1);
+    if (status === 401 || status === 403) expect(screen.queryByText('ЗЕМЦОВ - банкротство')).toBeNull();
+    else expect(screen.getByRole('button', { name: /^Сохранить$/u })).toHaveProperty('disabled', true);
+  });
+
+  it('header owner: archive uses case edit permission even without document deletion permission', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValueOnce(createCase()).mockResolvedValue(createCase({ status: 'Closed' }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit canDelete={false} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Архив' }));
+    await waitFor(() => expect(apiService.getCaseV2).toHaveBeenCalledTimes(2));
+    expect(apiService.bulkUpdateCases).toHaveBeenCalledWith({ ids: [15], status: 'Closed' });
+    expect(screen.getByRole('button', { name: 'Архив' })).toHaveProperty('disabled', true);
+  });
+
+  it('header owner: a header write blocks recovery without losing its selected amount', async () => {
+    let finish!: (result: { updated: number; requested: number }) => void;
+    vi.mocked(apiService.bulkUpdateCases).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    vi.mocked(apiService.getCourtRecoveries).mockResolvedValue({ awardedAmount: 100000, receivedAmount: 0, remainingAmount: 100000, linkedPayments: [], availablePayments: [{ paymentId: 7, date: '2026-09-24', description: 'Поступление', paidAmount: 25000, allocatedAmount: null, effectiveAmount: 0, warning: null }], hasMoreAvailablePayments: false, hasCompletePaymentVisibility: true });
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ courtAwardedAmount: 100000 }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Платёж для взыскания' }), { target: { value: '7' } });
+    fireEvent.change(screen.getByLabelText('Сумма платежа в счёт взыскания'), { target: { value: '123,45' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/u }));
+    expect(screen.getByRole('button', { name: 'Сохранить связь' })).toHaveProperty('disabled', true);
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить связь' }));
+    expect(apiService.setCourtRecoveryPayment).not.toHaveBeenCalled();
+    await act(async () => finish({ updated: 1, requested: 1 }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Сохранить связь' })).toHaveProperty('disabled', false));
+    expect(screen.getByLabelText('Сумма платежа в счёт взыскания')).toHaveProperty('value', '123,45');
+    expect(apiService.getCourtRecoveries).toHaveBeenCalledTimes(1);
+  });
+
+  it('header owner metadata: preserves profile time-zone refresh and a shared read signal', async () => {
+    vi.mocked(apiService.getUserSetting).mockImplementation(async () => ({ key: 'profile.timeZoneId', value: vi.mocked(apiService.getCaseV2).mock.calls.length >= 2 ? 'Asia/Yakutsk' : 'UTC' }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/u }));
+    await waitFor(() => expect(apiService.getCaseV2).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Сохранить$/u })).toHaveProperty('disabled', false));
+    const signal = vi.mocked(apiService.getCaseV2).mock.calls[1][1]?.signal;
+    expect(vi.mocked(apiService.getUserSetting).mock.calls.filter(([, options]) => options?.signal === signal)).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    expect(await screen.findByDisplayValue('2026-05-20T18:30')).toBeTruthy();
+  });
+
+  it('header owner metadata: holds admission until the profile member of the read settles', async () => {
+    let finish!: (value: { key: string; value: string } | null) => void;
+    const pending = new Promise<{ key: string; value: string } | null>(resolve => { finish = resolve; });
+    vi.mocked(apiService.getUserSetting).mockImplementation(() => vi.mocked(apiService.getCaseV2).mock.calls.length >= 2 ? pending : Promise.resolve(null));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/u }));
+    await waitFor(() => expect(apiService.getCaseV2).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('button', { name: /^Сохранить$/u })).toHaveProperty('disabled', true);
+    await act(async () => finish(null));
+    expect(screen.getByRole('button', { name: /^Сохранить$/u })).toHaveProperty('disabled', false);
+    expect(apiService.bulkUpdateCases).toHaveBeenCalledTimes(1);
+  });
+
+  it('header owner metadata: failed case read aborts its pending profile sibling', async () => {
+    vi.mocked(apiService.getUserSetting).mockImplementation(() => vi.mocked(apiService.getCaseV2).mock.calls.length >= 2 ? new Promise(() => {}) : Promise.resolve(null));
+    vi.mocked(apiService.getCaseV2).mockResolvedValueOnce(createCase()).mockRejectedValue(new Error('Повторное чтение дела не удалось'));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/u }));
+    await screen.findByText('Повторное чтение дела не удалось');
+    const signal = vi.mocked(apiService.getCaseV2).mock.calls[1][1]?.signal;
+    expect(signal?.aborted).toBe(true);
+    expect(vi.mocked(apiService.getUserSetting).mock.calls.filter(([, options]) => options?.signal === signal)).toHaveLength(1);
+    expect(screen.getByRole('button', { name: /^Сохранить$/u })).toHaveProperty('disabled', true);
+  });
+
+  it('header time-zone baseline: a restored draft keeps its original hearing instant after profile changes', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ nextHearingAt: '2099-11-03T12:00:00Z' }));
+    vi.mocked(apiService.getUserSetting).mockImplementation(async () => ({ key: 'profile.timeZoneId', value: vi.mocked(apiService.getCaseV2).mock.calls.length >= 2 ? 'Asia/Yakutsk' : 'UTC' }));
+    vi.mocked(apiService.updateCaseV2).mockRejectedValueOnce(new Error('Ответ сохранения потерян'));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    expect(screen.getByLabelText('Заседание')).toHaveProperty('value', '2099-11-03T12:00');
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Обновить данные дела' }));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Сохранить дело/u })[0]).toHaveProperty('disabled', false));
+    expect(screen.getByLabelText('Заседание')).toHaveProperty('value', '2099-11-03T12:00');
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u })[0]);
+    await waitFor(() => expect(apiService.updateCaseV2).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(apiService.updateCaseV2).mock.calls[1][1].nextHearingAt).toBe('2099-11-03T12:00:00.000Z');
+    expect(vi.mocked(apiService.updateCaseV2).mock.calls[1][1]).not.toHaveProperty('timeZoneId');
   });
 
 });

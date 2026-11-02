@@ -17,7 +17,7 @@ import { CourtPartiesReadError, CourtPartiesSummary } from './CourtPartiesSummar
 import { ExecutiveWritDocumentUpload } from './ExecutiveWritDocumentUpload';
 import { CaseDocumentUploadStatusPanel } from './CaseDocumentUploadStatusPanel';
 import { MessengerDocumentDeliveryModal } from './MessengerDocumentDeliveryModal';
-import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
   Archive,
   ArrowDown,
@@ -59,7 +59,7 @@ import {
 
 import { apiService, type ContactDirectoryItemDto } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
-import { useDocumentDeliveryOwner, type DocumentReadOwner } from '../../hooks/useDocumentDeliveryOwner';
+import { useDocumentDeliveryOwner, type DocumentDeliveryOperation } from '../../hooks/useDocumentDeliveryOwner';
 import { captureAuthSessionIdentity } from '../../services/authService';
 import { useDialog } from '../../hooks/useDialog';
 import { useNestedCaseOperationOwner, type CaseOperationParent } from '../../hooks/useNestedCaseOperationOwner';
@@ -94,14 +94,14 @@ import type {
   ProceduralDeadlineCalculationResult,
 } from '../../types';
 import { toRuDate } from '../../utils/dateUtils';
-import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { extractDisplayErrorMessage, isHttpErrorStatus } from '../../utils/errorUtils';
 import { downloadBlob } from '../../utils/downloadBlob';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { courtAmountToInput, hasInvalidCourtAmounts, parseCourtAmountInput } from '../../utils/courtAmounts';
 import { buildCaseTaskPayload, getCaseStageTaskTemplates, isPretrialCaseStage, type CaseStageTaskTemplate } from '../../utils/caseTaskPayload';
 import { buildCourtCaseProcessSummary, buildCourtInstanceStage, type CourtProcessSummaryTone } from '../../utils/courtCaseSummary';
 import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, getEffectiveScheduleTime, parseInstant, toTimeZoneDateKey, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
-import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
+import { normalizeUserTimeZoneId, USER_TIME_ZONE_OPTIONS, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
 
 interface CaseDetailPageProps {
@@ -192,6 +192,7 @@ interface CourtComplaintDraft {
 }
 
 interface CaseEditDraft {
+  timeZoneId: string;
   title: string;
   description: string;
   status: string;
@@ -1241,10 +1242,6 @@ function setActiveCaseTimeZoneId(value?: string | null) {
   activeCaseTimeZoneId = normalizeUserTimeZoneId(value);
 }
 
-function toDateTimeInput(value: string | null | undefined) {
-  return toTimeZoneDateTimeInput(value, activeCaseTimeZoneId);
-}
-
 function fromDateInput(value: string) {
   return value || null;
 }
@@ -1292,8 +1289,9 @@ function buildCourtComplaintDraft(instance = 'first', complaint?: ClientCaseCour
   };
 }
 
-function buildCaseEditDraft(caseItem: ClientCase): CaseEditDraft {
+function buildCaseEditDraft(caseItem: ClientCase, timeZoneId = activeCaseTimeZoneId): CaseEditDraft {
   return {
+    timeZoneId,
     title: caseItem.title ?? '',
     description: caseItem.description ?? '',
     status: caseItem.status ?? 'Open',
@@ -1312,7 +1310,7 @@ function buildCaseEditDraft(caseItem: ClientCase): CaseEditDraft {
     ourCourtRole: caseItem.ourCourtRole ?? '',
     courtCaseNumber: caseItem.courtCaseNumber ?? '',
     courtUrl: caseItem.courtUrl ?? '',
-    nextHearingAt: toDateTimeInput(caseItem.nextHearingAt),
+    nextHearingAt: toTimeZoneDateTimeInput(caseItem.nextHearingAt, timeZoneId),
     claimant: caseItem.claimant ?? '',
     claimantInn: caseItem.claimantInn ?? '',
     claimantOgrn: caseItem.claimantOgrn ?? '',
@@ -1367,7 +1365,7 @@ function buildCasePatchFromEditDraft(draft: CaseEditDraft): Partial<ClientCase> 
     ourCourtRole: draft.ourCourtRole,
     courtCaseNumber: draft.courtCaseNumber.trim(),
     courtUrl: draft.courtUrl.trim(),
-    nextHearingAt: fromDateTimeInput(draft.nextHearingAt),
+    nextHearingAt: draft.nextHearingAt ? fromTimeZoneDateTimeInput(draft.nextHearingAt, draft.timeZoneId) : null,
     claimant: draft.claimant.trim(),
     claimantInn: draft.claimantInn.trim(),
     claimantOgrn: draft.claimantOgrn.trim(),
@@ -1569,7 +1567,7 @@ export function CaseDetailPage(props: CaseDetailPageProps) {
 }
 
 function CaseDetailScreen({
-  screenOwner: { capture: captureScreen },
+  screenOwner,
   markedViewedCaseIdRef,
   caseId,
   onBack,
@@ -1590,8 +1588,9 @@ function CaseDetailScreen({
   canEditTaskBilling = canEditTasks,
   canExportTasks = false,
   canSendMessenger = false,
-}: CaseDetailPageProps & { screenOwner: DocumentReadOwner; markedViewedCaseIdRef: { current: number | null } }) {
+}: CaseDetailPageProps & { screenOwner: CaseOperationParent; markedViewedCaseIdRef: { current: number | null } }) {
   const { confirm, prompt } = useDialog();
+  const { capture: captureScreen, begin: beginScreenOperation, busy: pageBusy } = screenOwner;
   const viewStateActor = useMemo(() => captureAuthSessionIdentity().actor, []);
   const initialViewState = useMemo(() => readCaseDetailViewState(caseId, viewStateActor), [caseId, viewStateActor]);
   const canCreateCaseTask = canViewTasks && canCreateTasks;
@@ -1603,6 +1602,13 @@ function CaseDetailScreen({
       overdueTaskCount: 0, taskProgressPercent: 0, lastTaskAt: null, lastMeaningfulActivityAt: null,
       nextInactivityControlAt: null, inactivityControlExclusionReason: 'Сведения автоконтроля недоступны из-за ограничений доступа' };
   }, [loadedCaseItem, caseItemAccessKey, taskAccessKey]);
+  const currentCase = useRef(caseItem);
+  currentCase.current = caseItem;
+  const caseReadConfirmed = useRef(false);
+  const caseReadSequence = useRef(0);
+  const caseMainRead = useRef<AbortController | null>(null);
+  const headerPrompt = useRef<AbortController | null>(null);
+  useEffect(() => () => { caseMainRead.current?.abort(); headerPrompt.current?.abort(); }, []);
   const [caseTaskBulkBusy, setCaseTaskBulkBusy] = useState(false);
   const [caseTimeZoneId, setCaseTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
@@ -1691,6 +1697,7 @@ function CaseDetailScreen({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [headerReloadToken, setHeaderReloadToken] = useState(0);
   const [documentReloadToken, setDocumentReloadToken] = useState(0);
   const [creatingTask, setCreatingTask] = useState(false);
   const [savingHeader, setSavingHeader] = useState(false);
@@ -1747,7 +1754,12 @@ function CaseDetailScreen({
   const [copiedLink, setCopiedLink] = useState(false);
   const [editPageOpen, setEditPageOpen] = useState(false);
   const [caseEditDraft, setCaseEditDraft] = useState<CaseEditDraft | null>(null);
-  const childCaseOwner = useNestedCaseOperationOwner(JSON.stringify(['case-detail-children', caseId, taskAccessKey, canEdit, canDelete, canViewFinance, canViewTasks, editPageOpen]), undefined, caseItem?.id === caseId);
+  const beginCaseOperation = useCallback((kind: string) => {
+    if (!caseReadConfirmed.current || !caseItem || currentCase.current !== caseItem || caseItem.id !== caseId || caseTaskBulkBusy) return null;
+    return beginScreenOperation(kind);
+  }, [beginScreenOperation, caseId, caseItem, caseTaskBulkBusy]);
+  const childCaseOwner = useNestedCaseOperationOwner(JSON.stringify(['case-detail-children', caseId, taskAccessKey, canEdit, canDelete, canViewFinance, canViewTasks, editPageOpen]),
+    { ...screenOwner, begin: beginCaseOperation }, caseItem?.id === caseId);
   const savingCaseEdit = childCaseOwner.kind === 'case-edit:save';
   const childDocumentRead = useRef<AbortController | null>(null);
   useEffect(() => () => childDocumentRead.current?.abort(), [childCaseOwner.scope]);
@@ -1989,7 +2001,11 @@ function CaseDetailScreen({
     const owner = captureScreen();
     if (!owner) return;
     const readController = new AbortController();
-    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
+    const sequence = ++caseReadSequence.current;
+    caseMainRead.current?.abort();
+    caseMainRead.current = readController;
+    caseReadConfirmed.current = false;
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent() && sequence === caseReadSequence.current;
     setLoading(true);
     setError(null);
 
@@ -2001,6 +2017,9 @@ function CaseDetailScreen({
     ])
       .then(([loadedCase, timeZoneResponse]) => {
         if (!isReadCurrent()) return;
+        if (!loadedCase || loadedCase.id !== caseId) throw new Error('Не удалось подтвердить данные текущего дела.');
+        currentCase.current = loadedCase;
+        caseReadConfirmed.current = true;
         const nextTimeZoneId = normalizeUserTimeZoneId(timeZoneResponse?.value);
         setActiveCaseTimeZoneId(nextTimeZoneId);
         setCaseTimeZoneId(nextTimeZoneId);
@@ -2018,6 +2037,7 @@ function CaseDetailScreen({
 
     return () => {
       readController.abort();
+      if (caseMainRead.current === readController) caseMainRead.current = null;
     };
   }, [captureScreen, caseId, reloadToken, taskAccessKey]);
 
@@ -2173,7 +2193,7 @@ function CaseDetailScreen({
       });
 
     return () => controller.abort();
-  }, [captureScreen, activeTab, canViewTasks, caseId, documentSourceKey, reloadToken]);
+  }, [captureScreen, activeTab, canViewTasks, caseId, documentSourceKey, reloadToken, headerReloadToken]);
 
   useEffect(() => {
     if (activeTab !== 'participants') return;
@@ -2197,7 +2217,7 @@ function CaseDetailScreen({
     return () => {
       readController.abort();
     };
-  }, [captureScreen, activeTab, caseId, reloadToken, showArchivedParties]);
+  }, [captureScreen, activeTab, caseId, reloadToken, headerReloadToken, showArchivedParties]);
 
   useEffect(() => {
     if (activeTab !== 'participants') return;
@@ -2277,7 +2297,7 @@ function CaseDetailScreen({
     return () => {
       readController.abort();
     };
-  }, [captureScreen, activeTab, caseId, documentReloadToken, externalApprovalAvailable, reloadToken]);
+  }, [captureScreen, activeTab, caseId, documentReloadToken, externalApprovalAvailable, reloadToken, headerReloadToken]);
 
   useEffect(() => {
     if (!editPageOpen || activeTab === 'documents' || activeTab === 'court'
@@ -2318,7 +2338,7 @@ function CaseDetailScreen({
     return () => {
       readController.abort();
     };
-  }, [captureScreen, activeTab, caseId, courtPartiesReloadToken, reloadToken]);
+  }, [captureScreen, activeTab, caseId, courtPartiesReloadToken, reloadToken, headerReloadToken]);
 
   useEffect(() => {
     if (activeTab !== 'court' && activeTab !== 'documents') return;
@@ -2342,7 +2362,7 @@ function CaseDetailScreen({
     return () => {
       readController.abort();
     };
-  }, [captureScreen, activeTab, reloadToken]);
+  }, [captureScreen, activeTab, reloadToken, headerReloadToken]);
 
   useEffect(() => {
     if (activeTab !== 'court' && activeTab !== 'documents') return;
@@ -2370,7 +2390,7 @@ function CaseDetailScreen({
     return () => {
       readController.abort();
     };
-  }, [captureScreen, activeTab, caseId, reloadToken]);
+  }, [captureScreen, activeTab, caseId, reloadToken, headerReloadToken]);
 
   useEffect(() => {
     const selected = courtInstances.find((item) => item.instance === activeCourtInstance);
@@ -2410,7 +2430,7 @@ function CaseDetailScreen({
     return () => {
       readController.abort();
     };
-  }, [captureScreen, activeTab, caseId, reloadToken]);
+  }, [captureScreen, activeTab, caseId, reloadToken, headerReloadToken]);
 
   useEffect(() => {
     const owner = captureScreen();
@@ -2436,7 +2456,7 @@ function CaseDetailScreen({
     return () => {
       readController.abort();
     };
-  }, [captureScreen, caseId, reloadToken]);
+  }, [captureScreen, caseId, reloadToken, headerReloadToken]);
 
   useEffect(() => {
     if (caseItem?.id !== caseId) return;
@@ -2479,7 +2499,7 @@ function CaseDetailScreen({
     caseItem?.courtUrl,
     caseItem?.id,
     caseItem?.judicialUid,
-    reloadToken,
+    reloadToken, headerReloadToken,
   ]);
 
   useEffect(() => {
@@ -2509,7 +2529,7 @@ function CaseDetailScreen({
     return () => {
       readController.abort();
     };
-  }, [captureScreen, activeTab, canViewFinance, caseId, reloadToken]);
+  }, [captureScreen, activeTab, canViewFinance, caseId, reloadToken, headerReloadToken]);
 
   useEffect(() => () => { workOrderPublicationRead.current?.abort(); }, [caseId]);
 
@@ -2564,7 +2584,7 @@ function CaseDetailScreen({
     return () => {
       readController.abort();
     };
-  }, [captureScreen, activeTab, caseId, reloadToken]);
+  }, [captureScreen, activeTab, caseId, reloadToken, headerReloadToken]);
 
   useEffect(() => {
     if (!caseItem) return;
@@ -2610,7 +2630,7 @@ function CaseDetailScreen({
     return () => {
       readController.abort();
     };
-  }, [captureScreen, activeTab, caseId, caseItem?.eventHistory, reloadToken]);
+  }, [captureScreen, activeTab, caseId, caseItem?.eventHistory, reloadToken, headerReloadToken]);
 
   useEffect(() => {
     if (activeTab !== 'conversation') return;
@@ -2634,7 +2654,7 @@ function CaseDetailScreen({
     return () => {
       readController.abort();
     };
-  }, [captureScreen, activeTab, caseId, reloadToken]);
+  }, [captureScreen, activeTab, caseId, reloadToken, headerReloadToken]);
 
   useEffect(() => {
     if (!caseItem) return;
@@ -2668,79 +2688,104 @@ function CaseDetailScreen({
     setStageTransitionPrompt(buildStageTransitionPrompt(previousStage, nextCase));
   };
 
-  const saveHeaderChanges = async () => {
-    if (!caseItem) return;
-
-    const previousStage = caseItem.stage;
-    const nextStage = stageDraft.trim();
-    setSavingHeader(true);
-    setError(null);
+  const refreshCaseAfterHeaderWrite = async (operation: DocumentDeliveryOperation) => {
+    const sequence = ++caseReadSequence.current;
+    caseMainRead.current?.abort();
+    const controller = new AbortController(); caseMainRead.current = controller;
+    const current = () => operation.isCurrent() && sequence === caseReadSequence.current && !controller.signal.aborted;
     try {
-      await apiService.bulkUpdateCases({
-        ids: [caseItem.id],
-        status: statusDraft,
-        priority: priorityDraft,
-        stage: stageDraft.trim(),
+      const [updated, timeZoneResponse] = await awaitOwnedUiResult(() => Promise.all([
+        apiService.getCaseV2(caseId, { signal: controller.signal }),
+        typeof apiService.getUserSetting === 'function'
+          ? apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY, { signal: controller.signal }).catch(() => null)
+          : Promise.resolve(null),
+      ]), current);
+      if (!updated || updated.id !== caseId) throw new Error('Не удалось подтвердить данные текущего дела. Обновите карточку.');
+      const nextTimeZoneId = normalizeUserTimeZoneId(timeZoneResponse?.value);
+      setActiveCaseTimeZoneId(nextTimeZoneId); setCaseTimeZoneId(nextTimeZoneId);
+      currentCase.current = updated;
+      caseReadConfirmed.current = true;
+      setCaseItem(updated);
+      setCaseItemAccessKey(taskAccessKey);
+      setHeaderReloadToken(value => value + 1);
+      return updated;
+    } finally { controller.abort(); if (caseMainRead.current === controller) caseMainRead.current = null; }
+  };
+
+  const requestCaseReload = () => {
+    const operation = beginScreenOperation('case:refresh'); if (!operation) return;
+    try { caseReadConfirmed.current = false; setReloadToken(value => value + 1); }
+    finally { operation.finish(); }
+  };
+
+  const reportHeaderError = (error: unknown, fallback: string) => {
+    if (isHttpErrorStatus(error, 401) || isHttpErrorStatus(error, 403)) {
+      caseReadConfirmed.current = false; currentCase.current = null; setCaseItem(null);
+    }
+    setError(extractDisplayErrorMessage(error, fallback));
+  };
+
+  const beginHeaderWrite = (kind: string) => {
+    if (!canEdit || !caseItem || caseItem.id !== caseId) return null;
+    const operation = childCaseOwner.begin(kind);
+    if (operation) caseReadConfirmed.current = false;
+    return operation;
+  };
+
+  const saveHeaderChanges = async () => {
+    const operation = beginHeaderWrite('header:save'); if (!operation || !caseItem) return;
+    const previousStage = caseItem.stage;
+    setSavingHeader(true); setError(null); setNotice(null);
+    try {
+      const result = await awaitOwnedUiResult(() => apiService.bulkUpdateCases({
+        ids: [caseItem.id], status: statusDraft, priority: priorityDraft, stage: stageDraft.trim(),
         responsibleUserId: responsibleDraft ? Number(responsibleDraft) : undefined,
         isHiddenFromExecutor: hiddenFromExecutorDraft,
         inactivityRemindersEnabled: inactivityRemindersDraft,
-        inactivityRemindersDisabledReason: inactivityRemindersDraft
-          ? ''
-          : inactivityRemindersDisabledReasonDraft,
-      });
-      rememberStageTransition(previousStage, { ...caseItem, stage: nextStage });
-      setReloadToken((value) => value + 1);
+        inactivityRemindersDisabledReason: inactivityRemindersDraft ? '' : inactivityRemindersDisabledReasonDraft,
+      }), operation.isCurrent);
+      if (result?.updated !== 1) throw new Error('Не удалось подтвердить сохранение дела. Обновите карточку.');
+      const updated = await refreshCaseAfterHeaderWrite(operation);
+      rememberStageTransition(previousStage, updated);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось сохранить параметры дела.');
-    } finally {
-      setSavingHeader(false);
-    }
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) reportHeaderError(err, 'Не удалось сохранить параметры дела. Обновите карточку перед следующим действием.');
+    } finally { if (captureScreen()) setSavingHeader(false); operation.finish(); }
   };
 
   const changeHeaderInactivityReminders = async (enabled: boolean) => {
-    if (enabled) {
-      setInactivityRemindersDraft(true);
-      setInactivityRemindersDisabledReasonDraft('');
-      return;
-    }
-
-    const reason = await prompt({
-      title: 'Выключить автоконтроль дела',
-      label: 'Причина выключения',
-      defaultValue: inactivityRemindersDisabledReasonDraft,
-      multiline: true,
-      confirmLabel: 'Выключить',
-      cancelLabel: 'Отмена',
-    });
-    if (reason === null) return;
-    if (!reason.trim()) {
-      setError('Укажите причину выключения автоконтроля.');
-      return;
-    }
-
-    setError(null);
-    setInactivityRemindersDisabledReasonDraft(reason.trim());
-    setInactivityRemindersDraft(false);
+    if (!canEdit || !caseItem || caseItem.id !== caseId) return;
+    const operation = childCaseOwner.begin('header:inactivity-prompt'); if (!operation) return;
+    const controller = new AbortController(); headerPrompt.current = controller;
+    try {
+      if (enabled) { setInactivityRemindersDraft(true); setInactivityRemindersDisabledReasonDraft(''); return; }
+      const reason = await awaitOwnedUiResult(() => prompt({
+        title: 'Выключить автоконтроль дела', label: 'Причина выключения',
+        defaultValue: inactivityRemindersDisabledReasonDraft, multiline: true,
+        confirmLabel: 'Выключить', cancelLabel: 'Отмена', signal: controller.signal,
+      }), () => operation.isCurrent() && !controller.signal.aborted);
+      if (reason === null) return;
+      if (!reason.trim()) { setError('Укажите причину выключения автоконтроля.'); return; }
+      setError(null); setInactivityRemindersDisabledReasonDraft(reason.trim()); setInactivityRemindersDraft(false);
+    } catch (err) {
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(extractDisplayErrorMessage(err, 'Не удалось изменить автоконтроль дела.'));
+    } finally { if (headerPrompt.current === controller) headerPrompt.current = null; operation.finish(); }
   };
 
   const archiveCase = async () => {
-    if (!caseItem) return;
-
-    setSavingHeader(true);
-    setError(null);
+    if (caseItem?.status === 'Closed') return;
+    const operation = beginHeaderWrite('header:archive'); if (!operation || !caseItem) return;
+    setSavingHeader(true); setError(null); setNotice(null);
     try {
-      await apiService.bulkUpdateCases({ ids: [caseItem.id], status: 'Closed' });
-      setStatusDraft('Closed');
-      setReloadToken((value) => value + 1);
+      const result = await awaitOwnedUiResult(() => apiService.bulkUpdateCases({ ids: [caseItem.id], status: 'Closed' }), operation.isCurrent);
+      if (result?.updated !== 1) throw new Error('Не удалось подтвердить архивирование дела. Обновите карточку.');
+      await refreshCaseAfterHeaderWrite(operation);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось архивировать дело.');
-    } finally {
-      setSavingHeader(false);
-    }
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) reportHeaderError(err, 'Не удалось архивировать дело. Обновите карточку перед следующим действием.');
+    } finally { if (captureScreen()) setSavingHeader(false); operation.finish(); }
   };
 
   const openCaseEditPage = () => {
-    if (!caseItem || caseTaskBulkBusy) return;
+    if (!caseItem || !canEdit || caseTaskBulkBusy || childCaseOwner.busy || !captureScreen() || !caseReadConfirmed.current) return;
     setCaseEditDraft(buildCaseEditDraft(caseItem));
     setEditPageOpen(true);
     setError(null);
@@ -2778,12 +2823,14 @@ function CaseDetailScreen({
     }
 
     const operation = childCaseOwner.begin('case-edit:save'); if (!operation) return;
+    caseReadConfirmed.current = false;
     setError(null);
     try {
       const previousStage = caseItem.stage;
       const patch = buildCasePatchFromEditDraft(caseEditDraft);
       const updated = await awaitOwnedUiResult(() => apiService.updateCaseV2(caseItem.id, buildCaseUpdatePayload(caseItem, patch)), operation.isCurrent);
       if (!updated || updated.id !== caseItem.id) throw new Error('Не удалось подтвердить сохранение текущего дела.');
+      currentCase.current = updated;
       setCaseItem(updated);
       setCaseEditDraft(buildCaseEditDraft(updated));
       setEditPageOpen(false);
@@ -2791,63 +2838,72 @@ function CaseDetailScreen({
       setNotice('Карточка дела обновлена.');
       setReloadToken((value) => value + 1);
     } catch (err) {
-      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(err instanceof Error ? err.message : 'Не удалось сохранить карточку дела.');
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) reportHeaderError(err, 'Не удалось сохранить карточку дела. Обновите данные перед повторным сохранением.');
     } finally {
       operation.finish();
     }
   };
 
   const reviewPosition = async () => {
-    if (!caseItem || !canEdit || !caseItem.strategy?.trim()) return;
-    setReviewingPosition(true);
-    setError(null);
+    if (!caseItem || !caseItem.strategy?.trim() || caseItem.positionReviewedAt || caseItem.status === 'Closed' || caseItem.status === 'Lost') return;
+    const operation = beginHeaderWrite('header:review'); if (!operation) return;
+    const current = () => operation.isCurrent() && currentCase.current?.strategy === caseItem.strategy && currentCase.current?.status === caseItem.status;
+    setReviewingPosition(true); setError(null); setNotice(null);
     try {
-      const review = await apiService.reviewCasePosition(caseItem.id);
-      setCaseItem((current) => current?.id === caseItem.id ? { ...current, ...review } : current);
+      const review = await awaitOwnedUiResult(() => apiService.reviewCasePosition(caseItem.id), current);
+      if (!review || typeof review.positionReviewedAt !== 'string' || !Number.isFinite(parseInstant(review.positionReviewedAt).getTime()) || typeof review.positionReviewedByName !== 'string')
+        throw new Error('Не удалось подтвердить сведения о проверке позиции. Обновите карточку.');
+      const updated = await refreshCaseAfterHeaderWrite(operation);
+      if (updated.strategy !== caseItem.strategy) { caseReadConfirmed.current = false; throw new Error('Позиция дела изменилась. Проверьте актуальные сведения.'); }
+      if (typeof updated.positionReviewedAt !== 'string' || !Number.isFinite(parseInstant(updated.positionReviewedAt).getTime())) {
+        caseReadConfirmed.current = false;
+        throw new Error('Не удалось подтвердить актуальную отметку проверки позиции. Обновите карточку.');
+      }
       setNotice('Позиция по делу отмечена как проверенная.');
-      setReloadToken((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось подтвердить проверку позиции.');
-    } finally {
-      setReviewingPosition(false);
-    }
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) reportHeaderError(err, 'Не удалось подтвердить проверку позиции. Обновите карточку.');
+    } finally { if (captureScreen()) setReviewingPosition(false); operation.finish(); }
   };
 
   const confirmNextHearing = async () => {
-    if (!caseItem || !canEdit || !caseItem.nextHearingAt) return;
-    setConfirmingNextHearing(true);
-    setError(null);
+    if (!caseItem || !caseItem.nextHearingAt || caseItem.status === 'Closed' || caseItem.status === 'Lost' || !(parseInstant(caseItem.nextHearingAt).getTime() > Date.now())) return;
+    const operation = beginHeaderWrite('header:hearing'); if (!operation) return;
+    const current = () => operation.isCurrent() && currentCase.current?.nextHearingAt === caseItem.nextHearingAt && currentCase.current?.status === caseItem.status;
+    setConfirmingNextHearing(true); setError(null); setNotice(null);
     try {
-      const confirmation = await apiService.confirmNextHearing(caseItem.id);
-      setCaseItem((current) => current?.id === caseItem.id ? { ...current, ...confirmation } : current);
+      const confirmation = await awaitOwnedUiResult(() => apiService.confirmNextHearing(caseItem.id), current);
+      if (!confirmation || typeof confirmation.nextHearingConfirmedAt !== 'string' || typeof confirmation.nextHearingConfirmedForAt !== 'string' || !Number.isFinite(parseInstant(confirmation.nextHearingConfirmedAt).getTime()) || typeof confirmation.nextHearingConfirmedByName !== 'string'
+        || parseInstant(confirmation.nextHearingConfirmedForAt).getTime() !== parseInstant(caseItem.nextHearingAt).getTime())
+        throw new Error('Дата заседания изменилась или не подтверждена. Обновите карточку дела.');
+      const updated = { ...currentCase.current!, ...confirmation };
+      currentCase.current = updated; caseReadConfirmed.current = true; setCaseItem(updated);
       setNotice('Дата следующего заседания подтверждена.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось подтвердить дату следующего заседания.');
-    } finally {
-      setConfirmingNextHearing(false);
-    }
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) reportHeaderError(err, 'Не удалось подтвердить дату следующего заседания. Обновите карточку.');
+    } finally { if (captureScreen()) setConfirmingNextHearing(false); operation.finish(); }
   };
 
   const requestCaseAccess = async () => {
-    setRequestingAccess(true);
-    setError(null);
-    setNotice(null);
+    if (!Number.isSafeInteger(caseId) || caseId <= 0) return;
+    const operation = beginScreenOperation('header:request-access'); if (!operation) return;
+    const controller = new AbortController(); headerPrompt.current = controller;
+    setRequestingAccess(true); setError(null); setNotice(null);
     try {
-      const reason = await prompt({
-        title: 'Запрос доступа к делу',
-        label: 'Причина запроса',
-        defaultValue: 'Нужно посмотреть или продолжить работу по делу.',
-        multiline: true,
-        confirmLabel: 'Отправить',
-        cancelLabel: 'Отмена',
-      });
+      const reason = await awaitOwnedUiResult(() => prompt({
+        title: 'Запрос доступа к делу', label: 'Причина запроса',
+        defaultValue: 'Нужно посмотреть или продолжить работу по делу.', multiline: true,
+        confirmLabel: 'Отправить', cancelLabel: 'Отмена', signal: controller.signal,
+      }), () => operation.isCurrent() && !controller.signal.aborted);
       if (reason === null) return;
-      await apiService.requestCaseAccess(caseId, { reason: reason.trim() });
+      if (!reason.trim()) { setError('Укажите причину запроса доступа.'); return; }
+      await awaitOwnedUiResult(() => apiService.requestCaseAccess(caseId, { reason: reason.trim() }), operation.isCurrent);
       setNotice('Запрос доступа отправлен. Руководитель увидит его в истории дела.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось отправить запрос доступа.');
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(extractDisplayErrorMessage(err, 'Не удалось отправить запрос доступа.'));
     } finally {
-      setRequestingAccess(false);
+      if (headerPrompt.current === controller) headerPrompt.current = null;
+      if (operation.isCurrent()) setRequestingAccess(false);
+      operation.finish();
     }
   };
 
@@ -3967,14 +4023,16 @@ function CaseDetailScreen({
   };
 
   const copyCaseLink = async () => {
-    if (!caseItem) return;
-
+    if (!caseItem || caseItem.id !== caseId) return;
+    const operation = childCaseOwner.begin('header:copy-link'); if (!operation) return;
     const link = `${window.location.origin}/cases/${caseItem.id}`;
     try {
-      await navigator.clipboard?.writeText(link);
-    } finally {
+      if (typeof navigator.clipboard?.writeText !== 'function') throw new Error('Буфер обмена недоступен. Скопируйте адрес из строки браузера.');
+      await awaitOwnedUiResult(() => navigator.clipboard.writeText(link), operation.isCurrent);
       setCopiedLink(true);
-    }
+    } catch (err) {
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(extractDisplayErrorMessage(err, 'Не удалось скопировать ссылку.'));
+    } finally { operation.finish(); }
   };
 
   const createTaskForCase = async () => {
@@ -4061,10 +4119,11 @@ function CaseDetailScreen({
             <button type="button" onClick={() => setReloadToken((value) => value + 1)} className="rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700">
               Повторить загрузку
             </button>
-            <button type="button" onClick={() => void requestCaseAccess()} disabled={requestingAccess} className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-50">
+            <button type="button" onClick={() => void requestCaseAccess()} disabled={requestingAccess || pageBusy} className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-50">
               {requestingAccess ? <Loader2 className="h-4 w-4 animate-spin" /> : <LockKeyhole className="h-4 w-4" />}
               Запросить доступ
             </button>
+            <button type="button" onClick={requestCaseReload} disabled={pageBusy} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Обновить карточку</button>
             <button type="button" onClick={onBack} className="rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700">
               Вернуться к реестру
             </button>
@@ -4108,6 +4167,8 @@ function CaseDetailScreen({
         documents={documents}
         responsibles={responsibles}
         saving={savingCaseEdit || childCaseOwner.busy}
+        requiresRefresh={!caseReadConfirmed.current}
+        onReload={requestCaseReload}
         error={error}
         canViewFinance={canViewFinance}
         onBack={closeCaseEditPage}
@@ -4184,14 +4245,14 @@ function CaseDetailScreen({
 
             <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2 sm:grid-cols-3 xl:justify-end">
               {canEdit ? (
-                <button type="button" onClick={openCaseEditPage} disabled={caseTaskBulkBusy} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700">
+                <button type="button" onClick={openCaseEditPage} disabled={caseTaskBulkBusy || childCaseOwner.busy || !caseReadConfirmed.current} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700">
                   <Pencil className="h-4 w-4" /> Редактировать дело
                 </button>
               ) : null}
-              <button type="button" onClick={() => setReloadToken((value) => value + 1)} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              <button type="button" onClick={requestCaseReload} disabled={pageBusy || caseTaskBulkBusy} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50">
                 <RefreshCw className="h-4 w-4" /> Обновить
               </button>
-              <button type="button" onClick={() => void copyCaseLink()} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              <button type="button" onClick={() => void copyCaseLink()} disabled={childCaseOwner.busy || !caseReadConfirmed.current} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50">
                 {copiedLink ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />} {copiedLink ? 'Ссылка скопирована' : 'Ссылка'}
               </button>
               {canCreateCaseTask ? (
@@ -4213,7 +4274,7 @@ function CaseDetailScreen({
                   <WalletCards className="h-4 w-4" /> Финансы
                 </button>
               ) : null}
-              <button type="button" onClick={() => void archiveCase()} disabled={savingHeader || caseItem.status === 'Closed'} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-amber-200 px-4 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50">
+              <button type="button" onClick={() => void archiveCase()} disabled={!canEdit || savingHeader || childCaseOwner.busy || !caseReadConfirmed.current || caseItem.status === 'Closed'} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-amber-200 px-4 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50">
                 {savingHeader ? <Loader2 className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />} Архив
               </button>
             </div>
@@ -4240,6 +4301,7 @@ function CaseDetailScreen({
               <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Статус</span>
               <SystemSelect
                 aria-label="Статус дела"
+                disabled={!canEdit || childCaseOwner.busy || caseTaskBulkBusy || !caseReadConfirmed.current}
                 value={statusDraft}
                 onChange={(event) => setStatusDraft(event.target.value)}
                 className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
@@ -4252,6 +4314,7 @@ function CaseDetailScreen({
               <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Стадия</span>
               <input
                 aria-label="Стадия дела"
+                disabled={!canEdit || childCaseOwner.busy || caseTaskBulkBusy || !caseReadConfirmed.current}
                 value={stageDraft}
                 onChange={(event) => setStageDraft(event.target.value)}
                 className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
@@ -4262,6 +4325,7 @@ function CaseDetailScreen({
               <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Приоритет</span>
               <SystemSelect
                 aria-label="Приоритет дела"
+                disabled={!canEdit || childCaseOwner.busy || caseTaskBulkBusy || !caseReadConfirmed.current}
                 value={priorityDraft}
                 onChange={(event) => setPriorityDraft(event.target.value)}
                 className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
@@ -4274,6 +4338,7 @@ function CaseDetailScreen({
               <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Ответственный</span>
               <SystemSelect
                 aria-label="Ответственный по делу"
+                disabled={!canEdit || childCaseOwner.busy || caseTaskBulkBusy || !caseReadConfirmed.current}
                 value={responsibleDraft}
                 onChange={(event) => setResponsibleDraft(event.target.value)}
                 className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
@@ -4289,6 +4354,7 @@ function CaseDetailScreen({
                 <SystemCheckbox
                   type="checkbox"
                   aria-label="Скрыть дело от исполнителя"
+                disabled={!canEdit || childCaseOwner.busy || caseTaskBulkBusy || !caseReadConfirmed.current}
                   checked={hiddenFromExecutorDraft}
                   onChange={(event) => setHiddenFromExecutorDraft(event.target.checked)}
                   className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
@@ -4302,6 +4368,7 @@ function CaseDetailScreen({
                 <SystemCheckbox
                   type="checkbox"
                   aria-label="Учитывать дело в автоконтроле"
+                disabled={!canEdit || childCaseOwner.busy || caseTaskBulkBusy || !caseReadConfirmed.current}
                   checked={inactivityRemindersDraft}
                   onChange={(event) => void changeHeaderInactivityReminders(event.target.checked)}
                   className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
@@ -4317,7 +4384,7 @@ function CaseDetailScreen({
             <button
               type="button"
               onClick={() => void saveHeaderChanges()}
-              disabled={savingHeader}
+              disabled={!canEdit || savingHeader || childCaseOwner.busy || !caseReadConfirmed.current}
               className="inline-flex h-full min-h-[58px] items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50">
               {savingHeader ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Сохранить
             </button>
@@ -4414,7 +4481,7 @@ function CaseDetailScreen({
                     : caseItem.strategy?.trim() ? 'Позиция заполнена, но ещё не подтверждена.' : 'Сначала заполните позицию в режиме редактирования.'}
                 </p>
                 {canEdit && caseItem.status !== 'Closed' && caseItem.status !== 'Lost' && !caseItem.positionReviewedAt ? (
-                  <button type="button" onClick={() => void reviewPosition()} disabled={!caseItem.strategy?.trim() || reviewingPosition} className="mt-2 rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-semibold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+                  <button type="button" onClick={() => void reviewPosition()} disabled={!caseItem.strategy?.trim() || reviewingPosition || childCaseOwner.busy || !caseReadConfirmed.current} className="mt-2 rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-semibold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
                     {reviewingPosition ? 'Сохраняем…' : 'Подтвердить проверку позиции'}
                   </button>
                 ) : null}
@@ -4650,7 +4717,7 @@ function CaseDetailScreen({
               caseItem={caseItem}
               canEdit={canEdit}
               canViewTasks={canViewTasks}
-              confirmingNextHearing={confirmingNextHearing}
+              confirmingNextHearing={confirmingNextHearing || childCaseOwner.busy || !caseReadConfirmed.current}
               onConfirmNextHearing={() => void confirmNextHearing()}
               timeZoneId={caseTimeZoneId}
               courtDirectory={courtDirectory}
@@ -5129,6 +5196,8 @@ function CaseEditPage({
   documents,
   responsibles,
   saving,
+  requiresRefresh,
+  onReload,
   error,
   canViewFinance,
   onBack,
@@ -5145,6 +5214,8 @@ function CaseEditPage({
   documents: ClientCaseDocument[];
   responsibles: ActResponsible[];
   saving: boolean;
+  requiresRefresh: boolean;
+  onReload: () => void;
   error: string | null;
   canViewFinance: boolean;
   onBack: () => void;
@@ -5155,6 +5226,8 @@ function CaseEditPage({
   onUploadAttemptSettled: () => void;
   onUploadPublished: (signal: AbortSignal) => Promise<void>;
 }) {
+  const hearingTimeZoneHelpId = useId();
+  const draftTimeZoneLabel = USER_TIME_ZONE_OPTIONS.find(option => option.value === draft.timeZoneId)?.label ?? draft.timeZoneId;
   const setField = <K extends keyof CaseEditDraft>(key: K, value: CaseEditDraft[K]) => {
     onChange({ ...draft, [key]: value });
   };
@@ -5189,7 +5262,7 @@ function CaseEditPage({
               <button
                 type="button"
                 onClick={onSave}
-                disabled={saving}
+                disabled={saving || requiresRefresh}
                 className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Сохранить дело
               </button>
@@ -5198,6 +5271,7 @@ function CaseEditPage({
         </div>
 
         {error ? <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
+        {requiresRefresh && !saving ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Обновите данные дела перед следующим сохранением. Черновик останется в редакторе. <button type="button" onClick={onReload} className="ml-2 font-semibold underline">Обновить данные дела</button></div> : null}
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -5321,7 +5395,8 @@ function CaseEditPage({
             </label>
             <label className="text-sm font-medium text-slate-700">
               Заседание
-              <SystemDateInput type="datetime-local" value={draft.nextHearingAt} onChange={(event) => setField('nextHearingAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+              <SystemDateInput aria-label="Заседание" aria-describedby={hearingTimeZoneHelpId} type="datetime-local" value={draft.nextHearingAt} onChange={(event) => setField('nextHearingAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+              <span id={hearingTimeZoneHelpId} className="mt-1 block text-xs font-normal text-slate-500">Часовой пояс формы: {draftTimeZoneLabel}. Сохраняется до закрытия редактора.</span>
             </label>
             <label className="md:col-span-2 xl:col-span-3 text-sm font-medium text-slate-700">
               Ссылка на источник
@@ -5432,7 +5507,7 @@ function CaseEditPage({
             <button type="button" onClick={onBack} disabled={saving} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
               Отмена
             </button>
-            <button type="button" onClick={onSave} disabled={saving} className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+            <button type="button" onClick={onSave} disabled={saving || requiresRefresh} className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Сохранить дело
             </button>
           </div>
