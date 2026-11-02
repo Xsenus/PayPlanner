@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { preparePackage, sha256 } from './prepare-deployment-package.mjs';
 import { createPlan, qualifiedContext, reviewedCandidate, validateReviewedBaseline } from './prepare-deployment-plan.mjs';
+import { parseWorkflow } from './validate-deploy-workflow.mjs';
 
 const revision = 'a'.repeat(40);
 const env = { COMPUTERNAME: 'XSENUS', GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'Xsenus/PayPlanner',
@@ -25,8 +27,17 @@ function fixture(t, candidate = false) {
   }
   mkdirSync(join(root, 'out/be/AppReleases'), { recursive: true });
   mkdirSync(join(root, 'out/fe'), { recursive: true });
-  const releases = candidate ? readFileSync(resolve('backend/AppReleases/releases.json')) : Buffer.from('[{"releaseId":"published"}]');
   const baseline = JSON.parse(readFileSync(resolve('scripts/deployment-baseline.json'), 'utf8'));
+  // New inactive notes do not change the already reviewed historical candidate.
+  // Reconstruct its exact catalog and retain the production hash check.
+  let releases = Buffer.from('[{"releaseId":"published"}]');
+  if (candidate) {
+    const current = JSON.parse(readFileSync(resolve('backend/AppReleases/releases.json'), 'utf8'));
+    const start = current.findIndex(entry => entry.releaseId === baseline.expectedReleaseSeeds[0].releaseId);
+    assert.ok(start >= 0, 'Reviewed historical catalog is still present');
+    releases = Buffer.from(JSON.stringify(current.slice(start), null, 2) + '\n');
+    assert.equal(sha256(releases), reviewedCandidate(root).releaseCatalogSha256);
+  }
   if (!candidate) { baseline.expectedMigration = null; baseline.expectedReleaseSeeds = []; }
   baseline.expectedReleaseCatalogSha256 = sha256(releases);
   writeFileSync(join(root, 'scripts/deployment-baseline.json'), JSON.stringify(baseline));
@@ -76,9 +87,19 @@ test('qualifies exactly the reviewed eleven-migration candidate and all 249 rele
   assert.equal(plan.expectedReleaseSeeds.length, 249);
   assert.deepEqual(plan.expectedReleaseSeeds.slice(0, 5).map(entry => entry.version), ['1.14.391', '1.14.390', '1.14.389', '1.14.388', '1.14.387']);
   assert.ok(plan.expectedReleaseSeeds.slice(0, 5).every(entry => entry.isActive === false));
-  assert.deepEqual(plan.expectedReleaseSeeds, JSON.parse(readFileSync(resolve('backend/AppReleases/releases.json'), 'utf8')).slice(0, 249));
+  assert.deepEqual(plan.expectedReleaseSeeds, JSON.parse(readFileSync(join(input.root, 'out/be/AppReleases/releases.json'), 'utf8')).slice(0, 249));
   assert.equal(plan.expectedReleaseCatalogSha256, review.releaseCatalogSha256);
   assert.deepEqual(JSON.parse(qualificationRaw).expectedReleaseSeeds, plan.expectedReleaseSeeds);
+});
+
+test('new catalog additions do not inherit the historical candidate admission', t => {
+  const input = fixture(t, true);
+  const path = join(input.root, 'scripts/deployment-baseline.json');
+  const baseline = JSON.parse(readFileSync(path, 'utf8'));
+  baseline.expectedReleaseCatalogSha256 = sha256(readFileSync(resolve('backend/AppReleases/releases.json')));
+  assert.notEqual(baseline.expectedReleaseCatalogSha256, reviewedCandidate(input.root).releaseCatalogSha256);
+  writeFileSync(path, JSON.stringify(baseline));
+  assert.throws(() => createPlan(input), /Reviewed candidate catalog differs/);
 });
 
 test('candidate admission rejects partial/reordered migrations, catalog or seed substitutions', t => {
@@ -153,6 +174,65 @@ test('rejects local context, wrong workflow identity, untrusted host, non-main a
     assert.throws(() => qualifiedContext({ ...env, [key]: value }, revision, 'win32'), undefined, key);
   }
   assert.throws(() => qualifiedContext(env, 'main', 'win32'));
+});
+
+test('missing or non-object producer needs fail closed with a fixed diagnostic', () => {
+  for (const value of [undefined, 'null', '[]', '"not producer results"', 'false', '123']) {
+    assert.throws(() => qualifiedContext({ ...env, ARTIFACT_NEEDS_JSON: value }, revision, 'win32'),
+      /Actual mandatory producer needs are required/);
+  }
+});
+
+test('the actual workflow inventory and archive commands satisfy the exact Linux package consumer', t => {
+  const input = fixture(t);
+  const output = join(input.root, 'out');
+  for (const name of ['deployment-manifest.json', 'SHA256SUMS', 'deployment-files.nul']) rmSync(join(output, name));
+  rmSync(input.archive);
+  mkdirSync(join(output, 'fe/assets'));
+  writeFileSync(join(output, 'fe/assets/русский файл.js'), 'qualified unicode asset');
+  mkdirSync(join(output, 'deploy'));
+  writeFileSync(join(output, 'deploy/unrelated.sh'), 'must stay outside the application archive');
+  for (const name of ['prepare-deployment-package.mjs', 'xsenus-artifact-store.mjs', 'verify-xsenus-runner.mjs']) {
+    writeFileSync(join(input.root, 'scripts', name), readFileSync(resolve('scripts', name)));
+  }
+  const steps = parseWorkflow(readFileSync(resolve('.github/workflows/deploy.yml'), 'utf8')).jobs.deploy.steps;
+  const inventory = steps.find(step => step.name === 'Prepare qualified deployment package');
+  const archive = steps.find(step => step.name === 'Create tarball');
+  assert.ok(inventory, 'The real workflow must prepare its deployment manifest');
+  const expand = script => script.replaceAll('${{ env.OUT_DIR }}', 'out')
+    .replaceAll('${{ env.TAR_NAME }}', 'qualified.tar.gz').replaceAll('${{ github.sha }}', revision);
+  const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash';
+  const run = script => {
+    const result = spawnSync(bash, ['--noprofile', '--norc', '-c', 'set -euo pipefail\n' + script], {
+      cwd: input.root, encoding: 'utf8', timeout: 20000, windowsHide: true,
+    });
+    assert.equal(result.status, 0, result.stderr || result.error?.message);
+    return result;
+  };
+  run(expand(inventory.run) + '\n' + expand(archive.run));
+  const prepared = createPlan(input);
+  writeFileSync(join(input.root, 'installer-plan.json'), JSON.stringify(prepared.plan));
+  writeFileSync(join(input.root, 'ci-qualification.json'), prepared.qualificationRaw);
+  const installer = readFileSync(resolve('scripts/deploy-vps.sh'), 'utf8').replaceAll('\r\n', '\n');
+  const consumer = /package_check\(\) \{\n[^\n]*<<'PY'\n([\s\S]*?)\nPY\n\}/.exec(installer);
+  assert.ok(consumer, 'Exercise the real package admission body without service or database phases');
+  const verify = () => spawnSync('python', ['-B', '-', join(input.root, 'installer-plan.json'),
+    input.root, input.archive, revision], { input: consumer[1], encoding: 'utf8', timeout: 20000, windowsHide: true });
+  const accepted = verify();
+  assert.equal(accepted.status, 0, accepted.stderr || accepted.error?.message);
+  const manifest = JSON.parse(readFileSync(join(output, 'deployment-manifest.json'), 'utf8'));
+  assert.ok(manifest.files.some(file => file.path === 'fe/assets/русский файл.js'));
+  assert.equal(prepared.plan.archive.sha256, sha256(readFileSync(input.archive)));
+  assert.ok(!manifest.files.some(file => file.path.startsWith('deploy/')));
+  // The former workflow's recursive root tar must remain rejected even when
+  // the manifest exists and every individual application byte is qualified.
+  run('tar -czf qualified.tar.gz -C out .');
+  const legacyPlan = { ...prepared.plan, archive: { sha256: sha256(readFileSync(input.archive)), bytes: lstatSync(input.archive).size } };
+  writeFileSync(join(input.root, 'installer-plan.json'), JSON.stringify(legacyPlan));
+  const rejected = verify();
+  assert.equal(rejected.status, 1, rejected.stderr || rejected.error?.message);
+  assert.match(rejected.stderr, /AssertionError/);
+  assert.ok(readdirSync(output).includes('deploy'));
 });
 
 test('failed or cancelled producer jobs cannot authorise deployment', () => {

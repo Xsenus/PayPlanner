@@ -63,6 +63,7 @@ export function qualifiedContext(env, revision, platform = process.platform) {
   assert.equal(env.GITHUB_WORKFLOW_SHA, revision);
   for (const name of ['GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT']) assert.match(env[name] ?? '', /^[1-9][0-9]*$/);
   const needs = JSON.parse(env.ARTIFACT_NEEDS_JSON ?? 'null');
+  assert.ok(needs !== null && typeof needs === 'object' && !Array.isArray(needs), 'Actual mandatory producer needs are required');
   assert.deepEqual(Object.keys(needs).sort(), ['backend', 'backend-format', 'frontend']);
   assert.ok(Object.values(needs).every(job => job.result === 'success'), 'All mandatory producer gates must pass');
   const backendArtifactId = needs.backend.outputs['backend-artifact-id'];

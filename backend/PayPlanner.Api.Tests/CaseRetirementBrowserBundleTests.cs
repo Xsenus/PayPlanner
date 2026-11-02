@@ -1,11 +1,92 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Diagnostics;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
 public sealed class CaseRetirementBrowserBundleTests
 {
+    [Theory]
+    [InlineData("different-temp", "different-tmp")]
+    [InlineData(null, "different-tmp")]
+    [InlineData("different-temp", null)]
+    public async Task NodeTemporaryDirectoryMatchesTheValidatedDotnetOwner(string? temp, string? tmp)
+    {
+        await using var owner = new CaseRetirementBrowserBundle();
+        using var lease = owner.Acquire();
+        var start = new ProcessStartInfo("node")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        var parentTemp = Environment.GetEnvironmentVariable("TEMP");
+        var parentTmp = Environment.GetEnvironmentVariable("TMP");
+        if (temp is null) start.Environment.Remove("TEMP");
+        else start.Environment["TEMP"] = Path.Combine(Path.GetTempPath(), temp);
+        if (tmp is null) start.Environment.Remove("TMP");
+        else start.Environment["TMP"] = Path.Combine(Path.GetTempPath(), tmp);
+        lease.ConfigureNodeTemporaryDirectory(start.Environment);
+        start.ArgumentList.Add("-e");
+        start.ArgumentList.Add("console.log(require('node:path').resolve(require('node:os').tmpdir()))");
+        using var process = Process.Start(start)!;
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+            Assert.True(process.ExitCode == 0, await stderr);
+            Assert.Equal(Path.GetDirectoryName(owner.Root), (await stdout).Trim());
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await process.WaitForExitAsync(cleanup.Token);
+            }
+        }
+        Assert.Equal(parentTemp, Environment.GetEnvironmentVariable("TEMP"));
+        Assert.Equal(parentTmp, Environment.GetEnvironmentVariable("TMP"));
+    }
+
+    [Fact]
+    public async Task ChangedOwnerCannotRedirectTheNodeTemporaryDirectory()
+    {
+        var owner = new CaseRetirementBrowserBundle();
+        var marker = Path.Combine(owner.Root, "owner.json");
+        var original = await File.ReadAllTextAsync(marker);
+        await File.WriteAllTextAsync(marker, "foreign-owner");
+        var environment = new Dictionary<string, string?> { ["TEMP"] = "original-temp", ["TMP"] = "original-tmp" };
+        try
+        {
+            Assert.Throws<IOException>(() => owner.ConfigureNodeTemporaryDirectory(environment));
+            Assert.Equal("original-temp", environment["TEMP"]);
+            Assert.Equal("original-tmp", environment["TMP"]);
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(marker, original);
+            await owner.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ReleasedLeaseCannotRedirectTheNodeTemporaryDirectory()
+    {
+        await using var owner = new CaseRetirementBrowserBundle();
+        var lease = owner.Acquire();
+        lease.Dispose();
+        var environment = new Dictionary<string, string?> { ["TEMP"] = "original-temp", ["TMP"] = "original-tmp" };
+        Assert.Throws<ObjectDisposedException>(() => lease.ConfigureNodeTemporaryDirectory(environment));
+        Assert.Equal("original-temp", environment["TEMP"]);
+        Assert.Equal("original-tmp", environment["TMP"]);
+    }
+
     [Fact]
     public async Task AddressIsExclusiveBetweenFreshRuntimesAndConcurrentAdmissionIsRejected()
     {

@@ -8,6 +8,49 @@ namespace PayPlanner.Api.Tests;
 public sealed class BoundedTestExecutionTests
 {
     [Fact]
+    public async Task ExitedChildWithInheritedStdoutHandleFailsInsteadOfHanging()
+    {
+        var stdout = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var drain = OwnedOutputDrain.WaitAsync(Task.CompletedTask,
+            stdout.Task, Task.CompletedTask,
+            () => throw new InvalidOperationException("An exited child must not be stopped again."),
+            TimeSpan.FromMilliseconds(30));
+        await Assert.ThrowsAsync<TimeoutException>(() => drain.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(drain.IsFaulted, "The outer observation bound cannot substitute for the drain failure.");
+        Assert.False(stdout.Task.IsCompleted);
+        stdout.SetResult();
+    }
+
+    [Fact]
+    public async Task ClosedStdoutDoesNotHideAnInheritedStderrHandle()
+    {
+        var stderr = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var drain = OwnedOutputDrain.WaitAsync(Task.CompletedTask,
+            Task.CompletedTask, stderr.Task,
+            () => throw new InvalidOperationException("An exited child must not be stopped again."),
+            TimeSpan.FromMilliseconds(30));
+        await Assert.ThrowsAsync<TimeoutException>(() => drain.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(drain.IsFaulted, "The outer observation bound cannot substitute for the drain failure.");
+        Assert.False(stderr.Task.IsCompleted);
+        stderr.SetResult();
+    }
+
+    [Fact]
+    public async Task OutputCloseBoundStartsOnlyAfterTheChildExits()
+    {
+        var exited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stdout = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var drain = OwnedOutputDrain.WaitAsync(exited.Task, stdout.Task, Task.CompletedTask,
+            () => throw new InvalidOperationException("A healthy owned child must not be stopped."),
+            TimeSpan.FromMilliseconds(30));
+        await Task.Delay(60);
+        Assert.False(drain.IsCompleted);
+        stdout.SetResult();
+        exited.SetResult();
+        await drain.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task FailedOutputSinkStopsOnlyItsOwnedProcessAndDrainsBothPipes()
     {
         var exited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -188,7 +231,8 @@ public sealed class BoundedTestExecutionTests
         Assert.True(ExecutionScheduling.CanLaunchAdditional(0, 4, 6 * Fixture.Gib));
         Assert.False(ExecutionScheduling.CanLaunchAdditional(0, 4, 6 * Fixture.Gib - 1));
         Assert.True(ExecutionScheduling.CanLaunchAdditional(0, 4, 7 * Fixture.Gib, "exclusive"));
-        Assert.False(ExecutionScheduling.CanLaunchAdditional(0, 4, 7 * Fixture.Gib - 1, "exclusive"));
+        Assert.True(ExecutionScheduling.CanLaunchAdditional(0, 4, 6 * Fixture.Gib, "exclusive"));
+        Assert.False(ExecutionScheduling.CanLaunchAdditional(0, 4, 6 * Fixture.Gib - 1, "exclusive"));
         Assert.False(ExecutionScheduling.CanLaunchAdditional(1, 4, 20 * Fixture.Gib, "exclusive"));
         Assert.Throws<InvalidDataException>(() => ExecutionScheduling.CanLaunchAdditional(0, 1, 20 * Fixture.Gib, "unknown"));
         Assert.True(ExecutionScheduling.CanLaunchAdditional(1, 4, 6 * Fixture.Gib));
@@ -216,6 +260,35 @@ public sealed class BoundedTestExecutionTests
             Assert.Equal("unchanged", environment["KEEP_EXISTING_SETTING"]);
         }
         Assert.Throws<InvalidDataException>(() => ExecutionScheduling.ConfigureWorkerEnvironment(new Dictionary<string, string?>(), "unknown"));
+    }
+
+    [Theory]
+    [InlineData(6, 0, "80000000")]
+    [InlineData(7, -1, "80000000")]
+    [InlineData(7, 0, "C0000000")]
+    [InlineData(20, 0, "C0000000")]
+    public void ExclusiveHeapPreservesTheReserveAndPrefersTheLargerProfile(int gib, int offset, string expected)
+    {
+        var environment = new Dictionary<string, string?>();
+        var available = (ulong)((long)gib * (long)Fixture.Gib + offset);
+        ExecutionScheduling.ConfigureWorkerEnvironment(environment, "exclusive", available);
+        Assert.Equal(expected, environment["DOTNET_GCHeapHardLimit"]);
+        Assert.Equal("2", environment["DOTNET_PROCESSOR_COUNT"]);
+        Assert.Equal("false", environment["Email__Enabled"]);
+        Assert.Equal("false", environment["BackgroundServices__Enabled"]);
+        Assert.False(ExecutionScheduling.CanLaunchAdditional(1, 4, available, "exclusive"));
+    }
+
+    [Theory]
+    [InlineData("fast")]
+    [InlineData("heavy")]
+    [InlineData("exclusive")]
+    public void ALastMomentMemoryDropCannotConfigureAnUnbudgetedHost(string lane)
+    {
+        var environment = new Dictionary<string, string?> { ["KEEP_EXISTING_SETTING"] = "unchanged" };
+        Assert.Throws<InvalidDataException>(() => ExecutionScheduling.ConfigureWorkerEnvironment(environment, lane, 6 * Fixture.Gib - 1));
+        Assert.Single(environment);
+        Assert.Equal("unchanged", environment["KEEP_EXISTING_SETTING"]);
     }
 
     [Theory]

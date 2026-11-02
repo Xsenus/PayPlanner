@@ -168,7 +168,7 @@ jobs:
     env:
       DOTNET_GCHeapHardLimit: "180000000"
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
@@ -395,7 +395,7 @@ jobs:
         run: npm ci
 
       - name: Install browsers for writable and restored CRM verification
-        run: npx playwright install chromium chrome
+        run: node scripts/prepare-ci-browsers.mjs
 
       - name: Install pinned Playwright CLI for writable CRM verification
         run: |
@@ -515,7 +515,7 @@ jobs:
         run: npm ci
 
       - name: Install browsers for writable and restored CRM verification
-        run: npx playwright install chromium chrome
+        run: node scripts/prepare-ci-browsers.mjs
 
       - name: Install pinned Playwright CLI for writable CRM verification
         run: |
@@ -635,7 +635,7 @@ jobs:
         run: npm ci
 
       - name: Install browsers for writable and restored CRM verification
-        run: npx playwright install chromium chrome
+        run: node scripts/prepare-ci-browsers.mjs
 
       - name: Install pinned Playwright CLI for writable CRM verification
         run: |
@@ -755,7 +755,7 @@ jobs:
         run: npm ci
 
       - name: Install browsers for writable and restored CRM verification
-        run: npx playwright install chromium chrome
+        run: node scripts/prepare-ci-browsers.mjs
 
       - name: Install pinned Playwright CLI for writable CRM verification
         run: |
@@ -899,7 +899,7 @@ jobs:
         run: npm ci
 
       - name: Install browsers for writable and restored CRM verification
-        run: npx playwright install chromium chrome
+        run: node scripts/prepare-ci-browsers.mjs
 
       - name: Install pinned Playwright CLI for writable CRM verification
         run: |
@@ -1134,17 +1134,15 @@ jobs:
           test -s "${{ env.OUT_DIR }}/fe/index.html"
           test -s "${{ env.OUT_DIR }}/fe/payplanner-push-worker.js"
 
-      - name: Prepare deploy scripts
-        run: |
-          mkdir -p "${{ env.OUT_DIR }}/deploy"
-          cp scripts/prune-deploy-backups.sh "${{ env.OUT_DIR }}/deploy/"
-          cp scripts/preserve-data-protection-keys.sh "${{ env.OUT_DIR }}/deploy/"
+      - name: Prepare qualified deployment package
+        run: node scripts/prepare-deployment-package.mjs "${{ env.OUT_DIR }}" "${{ github.sha }}"
 
       - name: Create tarball
-        run: tar -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" .
+        run: tar --null --no-recursion -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" -T - < "${{ env.OUT_DIR }}/deployment-files.nul"
 
       - name: Verify Linux filesystem gates and deploy qualified package
         env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
           DEPLOY_SHA: ${{ github.sha }}
           DEPLOY_ARCHIVE_NAME: ${{ env.TAR_NAME }}
           VPS_SSH_HOST_FINGERPRINT: ${{ vars.VPS_SSH_HOST_FINGERPRINT }}

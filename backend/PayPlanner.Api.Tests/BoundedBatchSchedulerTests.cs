@@ -83,41 +83,83 @@ public sealed class BoundedBatchSchedulerTests
     }
 
     [Fact]
-    public async Task ReducedMemoryDelaysPendingWorkWithoutStoppingAnActiveSibling()
+    public Task ReducedMemoryDelaysPendingWorkWithoutStoppingAnActiveSibling()
+        => VerifyPendingWorkAfterBudgetReduction(false);
+
+    [Fact]
+    public Task ReducedBudgetBeforeSiblingCompletionStillDefersPendingWork()
+        => VerifyPendingWorkAfterBudgetReduction(true);
+
+    private static async Task VerifyPendingWorkAfterBudgetReduction(bool waitForReductionBeforeCompletion)
     {
         var available = 12 * Gib;
         var firstTwoStarted = Signal();
         var budgetReduced = Signal();
+        var reducedBudgetRechecked = Signal();
         var thirdStarted = Signal();
         var releaseFirst = Signal();
         var releaseSecond = Signal();
         var releaseThird = Signal();
         var starts = 0;
+        var reduced = 0;
+        var completedSiblingProbes = 0;
+        var running = new ConcurrentDictionary<string, Task>();
+        var reducedAtActive = new ConcurrentBag<int>();
         var completions = new ConcurrentBag<string>();
-        var run = BoundedBatchScheduler.RunAsync(Batches("heavy", 3), "auto", 2,
-            () => new ExecutionResources(Volatile.Read(ref available), 6), async batch =>
+        ExecutionResources Probe()
+        {
+            // A completed sibling can remain in the scheduler's list for one probe.
+            // Two probes after its actual completion exercise the pending-work decision
+            // while the unreleased first sibling is still running.
+            if (Volatile.Read(ref reduced) != 0 && running.TryGetValue("heavy-1", out var second)
+                && second.IsCompletedSuccessfully && Interlocked.Increment(ref completedSiblingProbes) == 2)
+                reducedBudgetRechecked.TrySetResult();
+            return new(Volatile.Read(ref available), 6);
+        }
+        async Task Execute(ExecutionBatch batch)
+        {
+            try
             {
-                if (Interlocked.Increment(ref starts) == 2) firstTwoStarted.TrySetResult();
-                try
-                {
-                    if (batch.Id == "heavy-0") await releaseFirst.Task;
-                    else if (batch.Id == "heavy-1") await releaseSecond.Task;
-                    else { thirdStarted.TrySetResult(); await releaseThird.Task; }
-                }
-                finally { completions.Add(batch.Id); }
-            }, value =>
+                if (batch.Id == "heavy-0") await releaseFirst.Task;
+                else if (batch.Id == "heavy-1") await releaseSecond.Task;
+                else { thirdStarted.TrySetResult(); await releaseThird.Task; }
+            }
+            finally { completions.Add(batch.Id); }
+        }
+        var run = BoundedBatchScheduler.RunAsync(Batches("heavy", 3), "auto", 2, Probe, batch =>
+        {
+            var task = Execute(batch);
+            Assert.True(running.TryAdd(batch.Id, task));
+            if (Interlocked.Increment(ref starts) == 2) firstTwoStarted.TrySetResult();
+            return task;
+        }, value =>
+        {
+            if (value.Kind == "budget-change" && value.Workers == 1)
             {
-                if (value.Kind == "budget-change" && value.Workers == 1 && value.Active == 1) budgetReduced.TrySetResult();
-            }, TimeSpan.FromMilliseconds(20));
+                Assert.InRange(value.Active, 1, 2);
+                reducedAtActive.Add(value.Active);
+                Volatile.Write(ref reduced, 1);
+                budgetReduced.TrySetResult();
+            }
+            if (value.Kind == "launch-budget" && Volatile.Read(ref starts) == 2)
+                Assert.True(running["heavy-0"].IsCompletedSuccessfully,
+                    "Pending work started before the active sibling completed under the reduced budget.");
+        }, TimeSpan.FromMilliseconds(20));
         try
         {
             await firstTwoStarted.Task.WaitAsync(Deadline);
             Volatile.Write(ref available, 7 * Gib);
+            if (waitForReductionBeforeCompletion) await budgetReduced.Task.WaitAsync(Deadline);
             releaseSecond.TrySetResult();
+            await running["heavy-1"].WaitAsync(Deadline);
             await budgetReduced.Task.WaitAsync(Deadline);
+            await reducedBudgetRechecked.Task.WaitAsync(Deadline);
+            if (waitForReductionBeforeCompletion) Assert.Equal(2, Assert.Single(reducedAtActive));
             Assert.Equal(2, Volatile.Read(ref starts));
             Assert.False(thirdStarted.Task.IsCompleted);
             Assert.False(run.IsCompleted);
+            Assert.False(running["heavy-0"].IsCompleted);
+            Assert.Equal(new[] { "heavy-1" }, completions.Order());
             releaseFirst.TrySetResult();
             await thirdStarted.Task.WaitAsync(Deadline);
         }
