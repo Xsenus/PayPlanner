@@ -15,7 +15,8 @@ function container() {
   return { Image: 'test-image-id', Config: { Entrypoint: ['/usr/bin/timeout'], Cmd: ['--signal=KILL', '40s', 'dotnet', '/probe/PayPlanner.CompanyImageProbe.dll'], User: '65532:65532', Labels: { 'payplanner.probe': 'company-image', 'payplanner.probe.run': runId },
     Env: ['PAYPLANNER_IMAGE_PROBE=isolated-linux', 'Email__Enabled=false', 'BackgroundServices__Enabled=false'] },
   HostConfig: { ReadonlyRootfs: true, Privileged: false, NetworkMode: 'none', Memory: memoryBytes, MemorySwap: memoryBytes, NanoCpus: 1_000_000_000,
-    PidsLimit: 64, CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges=true'], IpcMode: 'private', RestartPolicy: { Name: 'no' }, LogConfig: { Type: 'none' }, Tmpfs: { '/tmp': 'rw,noexec,nosuid,nodev,size=16m' } },
+    PidsLimit: 64, CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges=true'], IpcMode: 'private', RestartPolicy: { Name: 'no' }, LogConfig: { Type: 'none' }, Tmpfs: { '/tmp': 'rw,noexec,nosuid,nodev,size=16m' },
+    Ulimits: [{ Name: 'core', Soft: 0, Hard: 0 }, { Name: 'nofile', Soft: 128, Hard: 128 }] },
   Mounts: [{ Type: 'bind', Source: app, Destination: '/probe', RW: false }], State: { ExitCode: 0, OOMKilled: false, Running: false } };
 }
 function fakeDocker({ alter, alterEngine, startError, oom = false } = {}) {
@@ -40,7 +41,7 @@ function fakeDocker({ alter, alterEngine, startError, oom = false } = {}) {
 
 test('plan has one readonly bind, no network/pull/ports/root and bounded resources', () => {
   const args = createArguments({ app, image, runId });
-  for (const flag of ['--pull=never', '--network=none', '--read-only', '--memory=512m', '--memory-swap=512m', '--cpus=1', '--user=65532:65532', '--pids-limit=64']) assert.ok(args.includes(flag));
+  for (const flag of ['--pull=never', '--network=none', '--read-only', '--memory=512m', '--memory-swap=512m', '--cpus=1', '--user=65532:65532', '--pids-limit=64', '--ulimit=core=0:0', '--ulimit=nofile=128:128']) assert.ok(args.includes(flag));
   assert.equal(args.filter(arg => arg.startsWith('--mount=')).length, 1);
   assert.ok(args.find(arg => arg.startsWith('--mount=')).endsWith(',readonly'));
   assert.ok(args.includes('--entrypoint=/usr/bin/timeout'));
@@ -101,6 +102,23 @@ test('foreign ownership prevents both start and cleanup', () => {
   assert.equal(result.status, 'failed');
   assert.ok(result.cleanupError.includes('ownership'));
   assert.ok(!fake.calls.some(args => ['start', 'kill', 'rm'].includes(args[0])));
+});
+
+test('missing or changed file/core limits refuse native start and clean only the owned container', () => {
+  for (const alter of [
+    state => { delete state.HostConfig.Ulimits; },
+    state => { state.HostConfig.Ulimits = []; },
+    state => { state.HostConfig.Ulimits[1].Soft = 64; },
+    state => { state.HostConfig.Ulimits[1].Hard = 256; },
+    state => { state.HostConfig.Ulimits[0].Hard = -1; },
+    state => { state.HostConfig.Ulimits.push({ Name: 'nofile', Soft: 128, Hard: 128 }); },
+  ]) {
+    const fake = fakeDocker({ alter });
+    const result = executeProbe({ app, image, runId, docker: fake.docker });
+    assert.equal(result.status, 'failed');
+    assert.ok(!fake.calls.some(args => args[0] === 'start'));
+    assert.equal(result.ownedContainerRemoved, true);
+  }
 });
 
 async function artifactFixture(t) {
