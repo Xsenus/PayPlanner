@@ -71,6 +71,9 @@ internal sealed class PaymentCreateAttemptLease : IAsyncDisposable
     }
 
     public async Task<PaymentCreateAttempt?> LockAttemptAsync(Guid id, int actorId, CancellationToken ct)
+        => await LockAttemptAsync(db, id, actorId, ct);
+
+    internal static async Task<PaymentCreateAttempt?> LockAttemptAsync(PaymentContext db, Guid id, int actorId, CancellationToken ct)
     {
         if (db.Database.IsNpgsql())
             await db.Database.SqlQuery<Guid>($"SELECT \"Id\" AS \"Value\" FROM \"PaymentCreateAttempts\" WHERE \"Id\" = {id} AND \"ActorUserId\" = {actorId} FOR UPDATE NOWAIT").ToArrayAsync(ct);

@@ -240,12 +240,12 @@ public sealed class VersionedPaymentWriterTests
         if (version == 1)
         {
             var controller = new PaymentsV1Controller(db) { ControllerContext = context };
-            return operation == "create" ? controller.Create(model) : operation == "delete" ? controller.Delete(fixture.PaymentId) : controller.Update(fixture.PaymentId, model);
+            return operation == "create" ? PaymentOperationKeyTestSetup.CreateAsync(controller, db, model) : operation == "delete" ? controller.Delete(fixture.PaymentId) : controller.Update(fixture.PaymentId, model);
         }
         else
         {
             var controller = new PaymentsV2Controller(db) { ControllerContext = context };
-            return operation == "create" ? controller.Create(model) : operation == "delete" ? controller.Delete(fixture.PaymentId) : controller.Update(fixture.PaymentId, model);
+            return operation == "create" ? PaymentOperationKeyTestSetup.CreateAsync(controller, db, model) : operation == "delete" ? controller.Delete(fixture.PaymentId) : controller.Update(fixture.PaymentId, model);
         }
     }
 }

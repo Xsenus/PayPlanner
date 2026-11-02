@@ -212,8 +212,11 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
         await using var db = fixture.Open();
         var actor = await SeedActorAsync(db);
         var controller = Controller(db, actor);
-        var primary = Assert.IsType<Payment>(Assert.IsType<CreatedResult>(await controller.Create(new Payment
-        { Date = DateTime.Today, PlannedDate = DateTime.Today, Amount = 100m, Type = PaymentType.Income, Status = PaymentStatus.Pending }, default)).Value);
+        // Historical source without ownership metadata; creation is fixture setup,
+        // not the key-required route under test in the remainder scenarios.
+        var primary = new Payment
+        { Date = DateTime.Today, PlannedDate = DateTime.Today, Amount = 100m, Type = PaymentType.Income, Status = PaymentStatus.Pending };
+        db.Payments.Add(primary); await db.SaveChangesAsync();
         var attempt = await RegisterAsync(controller, "remainder", primary: primary.Id);
         var hold = new HoldPrimaryDelete();
         await using (var deleter = fixture.Open(hold))
@@ -510,19 +513,14 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
     [InlineData(true)]
     public async Task LegacyKeylessCreate_KeepsAssignmentTail_WithoutRegisteringAttempts(bool postgres)
     {
+        // Preserve the existing catalog ID. The user's mandatory-key decision
+        // replaces keyless success: the notification tail must not execute at all.
         await using var fixture = await CreateFixtureAsync(postgres);
         await using var db = fixture.Open();
         var actor = await SeedActorAsync(db);
         var api = CheckedNotificationProxy.Create();
         var check = (CheckedNotificationProxy)api;
-        check.Before = async method =>
-        {
-            Assert.Equal(nameof(INotificationService.NotifyPaymentAssignedAsync), method);
-            Assert.Null(db.Database.CurrentTransaction);
-            await using var observer = fixture.Open();
-            Assert.Single(await observer.Payments.ToArrayAsync());
-            Assert.Empty(await observer.PaymentCreateAttempts.ToArrayAsync());
-        };
+        check.Before = _ => throw new InvalidOperationException("A keyless request must not dispatch notifications.");
         var payment = new Payment
         {
             Amount = 100m,
@@ -530,11 +528,12 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
             PlannedDate = DateTime.Today,
             Type = PaymentType.Income,
             Status = PaymentStatus.Pending,
-            Responsibles = [new PaymentResponsible { UserId = actor }]
         };
-        Assert.IsType<CreatedResult>(await Controller(db, actor, api).Create(payment, default));
-        Assert.Equal(new[] { nameof(INotificationService.NotifyPaymentAssignedAsync) }, check.Calls);
+        Assert.IsType<BadRequestObjectResult>(await Controller(db, actor, api).Create(payment, default));
+        Assert.Empty(check.Calls);
+        Assert.Empty(await db.Payments.ToArrayAsync());
         Assert.Empty(await db.PaymentCreateAttempts.ToArrayAsync());
+        Assert.Null(db.Database.CurrentTransaction);
     }
 
     [Theory]
@@ -591,8 +590,11 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
         await using var db = fixture.Open();
         var actor = await SeedActorAsync(db);
         var controller = Controller(db, actor);
-        var primary = Assert.IsType<Payment>(Assert.IsType<CreatedResult>(await controller.Create(new Payment
-        { Date = DateTime.Today, PlannedDate = DateTime.Today, Amount = 100m, Type = PaymentType.Income, Status = PaymentStatus.Pending }, default)).Value);
+        // Historical source without ownership metadata; creation is fixture setup,
+        // not the key-required route under test in the remainder scenarios.
+        var primary = new Payment
+        { Date = DateTime.Today, PlannedDate = DateTime.Today, Amount = 100m, Type = PaymentType.Income, Status = PaymentStatus.Pending };
+        db.Payments.Add(primary); await db.SaveChangesAsync();
         var attempt = await RegisterAsync(controller, "remainder", primary: primary.Id);
         if (deleted) Assert.IsType<NoContentResult>(await controller.Delete(primary.Id, default));
         else
@@ -696,8 +698,11 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
         await using var db = fixture.Open();
         var actor = await SeedActorAsync(db);
         var controller = Controller(db, actor);
-        var primary = Assert.IsType<Payment>(Assert.IsType<CreatedResult>(await controller.Create(new Payment
-        { Date = DateTime.Today, PlannedDate = DateTime.Today, Amount = 100m, Type = PaymentType.Income, Status = PaymentStatus.Pending }, default)).Value);
+        // Historical source without ownership metadata; creation is fixture setup,
+        // not the key-required route under test in the remainder scenarios.
+        var primary = new Payment
+        { Date = DateTime.Today, PlannedDate = DateTime.Today, Amount = 100m, Type = PaymentType.Income, Status = PaymentStatus.Pending };
+        db.Payments.Add(primary); await db.SaveChangesAsync();
         // A historical committed remainder can lack a structural pair. Keep
         // exercising its opaque cancel/visibility contract, not a new split of
         // this deliberately unpaid source (now rejected by the financial path).

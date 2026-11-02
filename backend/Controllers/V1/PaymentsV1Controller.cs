@@ -27,8 +27,8 @@ public class PaymentsV1Controller : ControllerBase
         try { await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, payment, now, _notificationService, ct); }
         catch (Exception error) when (!ct.IsCancellationRequested)
         {
-            // V1 has no create-attempt identity: do not hide an already committed
-            // financial result behind a notification failure. The existing monitor
+            // Do not hide an already committed financial result behind a
+            // notification failure. The existing monitor
             // can recover a missing notification without repeating the money write.
             _logger.LogError(error, "Advance review notification failed after V1 payment {PaymentId} was committed.", payment.Id);
         }
@@ -97,7 +97,8 @@ public class PaymentsV1Controller : ControllerBase
     [HttpPost]
     public Task<IActionResult> Create([FromBody] Payment model, CancellationToken ct = default)
         => VersionedPaymentWriteBoundary.RunAsync(this, _db, null, model, creating: true, deleting: false, changesInvoice: false,
-            scope => CreateCoreAsync(model, scope, ct), ct);
+            scope => CreateCoreAsync(model, scope, ct), ct,
+            createProtocol: LegacyPaymentCreateAttempt.V1Protocol, readCreated: GetById);
 
     private async Task<IActionResult> CreateCoreAsync(Payment model, VersionedPaymentWriteBoundary.Scope scope, CancellationToken ct)
     {

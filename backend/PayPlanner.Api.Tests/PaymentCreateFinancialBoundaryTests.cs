@@ -69,12 +69,12 @@ public sealed class PaymentCreateFinancialBoundaryTests
         if (external)
         {
             await using var transaction = await db.Database.BeginTransactionAsync();
-            Assert.IsType<ConflictObjectResult>(await controller.Create(model, default)); Assert.Same(transaction, db.Database.CurrentTransaction); await transaction.RollbackAsync();
+            Assert.IsType<ConflictObjectResult>(await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model)); Assert.Same(transaction, db.Database.CurrentTransaction); await transaction.RollbackAsync();
         }
         else
         {
             var owner = await db.Clients.SingleAsync(); owner.Name = "Unsaved caller edit";
-            Assert.IsType<ConflictObjectResult>(await controller.Create(model, default)); Assert.Equal(EntityState.Modified, db.Entry(owner).State);
+            Assert.IsType<ConflictObjectResult>(await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model)); Assert.Equal(EntityState.Modified, db.Entry(owner).State);
         }
         Assert.Equal(2, await db.Payments.CountAsync());
     }
@@ -219,7 +219,7 @@ public sealed class PaymentCreateFinancialBoundaryTests
     }
     internal static PaymentsController Controller(PaymentContext db, Fixture fixture)
     {
-        var services = new ServiceCollection(); services.AddOptions<JsonOptions>().Configure(o =>
+        var services = new ServiceCollection(); services.AddSingleton(db); services.AddOptions<JsonOptions>().Configure(o =>
         { o.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase; o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()); });
         var controller = BalanceApplicationPaymentWriterTests.Controller(db, fixture);
         controller.HttpContext.RequestServices = services.BuildServiceProvider(); return controller;
@@ -230,7 +230,7 @@ public sealed class PaymentCreateFinancialBoundaryTests
         return Assert.IsType<PaymentCreateAttemptStateDto>(Assert.IsType<CreatedResult>(await controller.RegisterCreateAttempt(body, default)).Value).AttemptId;
     }
     internal static Task<IActionResult> CreateAsync(PaymentsController controller, Payment model, Guid? attempt)
-        => attempt.HasValue ? controller.CommitCreateAttempt(attempt.Value, Command(model), default) : controller.Create(model, default);
+        => attempt.HasValue ? controller.CommitCreateAttempt(attempt.Value, Command(model), default) : PaymentOperationKeyTestSetup.CreateAsync(controller, controller.HttpContext.RequestServices.GetRequiredService<PaymentContext>(), model);
     internal static JsonElement Command(Payment model)
     {
         var value = new JsonObject

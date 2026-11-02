@@ -167,16 +167,18 @@ public sealed class PaymentCreateGraphTests
         client.DefaultRequestHeaders.Add("X-Fixture-User", fixture.ActorId.ToString());
         var model = PaymentFor(fixture); AddGraph(model, "client"); var before = await SnapshotAsync(db);
         var route = api == 0 ? "/api/payments" : $"/api/v{api}/payments";
+        client.DefaultRequestHeaders.Add("Idempotency-Key", (await LegacyPaymentOperationKeyTests.RegisterAsync(db, fixture, model)).ToString("D"));
         using var response = await client.PostAsJsonAsync(route, model);
         Assert.Equal(before, await SnapshotAsync(db)); Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     internal static Task<IActionResult> CreateAsync(PaymentContext db, Fixture fixture, int api, Payment model)
     {
-        var context = BalanceApplicationPaymentWriterTests.Controller(db, fixture).ControllerContext;
-        return api == 0 ? BalanceApplicationPaymentWriterTests.Controller(db, fixture).Create(model, default)
-            : api == 1 ? new PaymentsV1Controller(db) { ControllerContext = context }.Create(model)
-            : new PaymentsV2Controller(db) { ControllerContext = context }.Create(model);
+        var current = BalanceApplicationPaymentWriterTests.Controller(db, fixture);
+        ControllerBase controller = api == 0 ? current
+            : api == 1 ? new PaymentsV1Controller(db) { ControllerContext = current.ControllerContext }
+            : new PaymentsV2Controller(db) { ControllerContext = current.ControllerContext };
+        return PaymentOperationKeyTestSetup.CreateAsync(controller, db, model);
     }
 
     internal static void AddGraph(Payment model, string graph)

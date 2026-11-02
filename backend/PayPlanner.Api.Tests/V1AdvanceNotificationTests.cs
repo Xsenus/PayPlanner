@@ -177,6 +177,7 @@ public sealed class V1AdvanceNotificationTests(PostgreSqlModelTemplate template)
         using var server = PaymentCreateGraphTests.Server(db, fixture, RealNotifications(db)); using var client = server.CreateClient();
         client.DefaultRequestHeaders.Add("X-Fixture-User", fixture.ActorId.ToString());
         var model = await ModelAsync(db, fixture, false);
+        client.DefaultRequestHeaders.Add("Idempotency-Key", (await LegacyPaymentOperationKeyTests.RegisterAsync(db, fixture, model)).ToString("D"));
         using var response = await client.PostAsJsonAsync("/api/v1/payments", model); Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
         var saved = (await response.Content.ReadFromJsonAsync<Payment>(options))!;
@@ -221,7 +222,7 @@ public sealed class V1AdvanceNotificationTests(PostgreSqlModelTemplate template)
         var controller = logger is null ? ActivatorUtilities.CreateInstance<PaymentsV1Controller>(services)
             : ActivatorUtilities.CreateInstance<PaymentsV1Controller>(services, logger);
         controller.ControllerContext = BalanceApplicationPaymentWriterTests.Controller(db, fixture).ControllerContext;
-        return update ? await controller.Update(fixture.PaymentId, model, ct) : await controller.Create(model, ct);
+        return update ? await controller.Update(fixture.PaymentId, model, ct) : await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model, ct);
     }
     private static NotificationService RealNotifications(PaymentContext db)
         => new(db, new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Email:Enabled"] = "false", ["BackgroundServices:Enabled"] = "false" }).Build(),

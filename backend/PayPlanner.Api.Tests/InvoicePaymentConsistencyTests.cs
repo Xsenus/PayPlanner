@@ -687,6 +687,21 @@ public class InvoicePaymentConsistencyTests
         var accountsController = new AccountsController(db);
         var paymentsController = CreatePaymentsController(db);
 
+        // This is an authenticated financial-writer scenario, not an ACL bypass.
+        var adminRole = await db.Roles.SingleOrDefaultAsync(role => role.Name == "admin") ?? new Role { Name = "admin" };
+        var actor = new User
+        {
+            Role = adminRole,
+            Email = "invoice-create-writer@test.local",
+            FullName = "Invoice create administrator",
+            PasswordHash = "unused",
+            IsActive = true,
+            IsApproved = true,
+            IsEmployee = true,
+        };
+        db.Users.Add(actor); await db.SaveChangesAsync();
+        ((ClaimsIdentity)paymentsController.User.Identity!).AddClaim(new Claim(ClaimTypes.NameIdentifier, actor.Id.ToString()));
+
         var createModel = new Payment
         {
             Amount = 3_000m,
@@ -710,7 +725,7 @@ public class InvoicePaymentConsistencyTests
             SystemNotes = string.Empty,
         };
 
-        var createResult = await paymentsController.Create(createModel, CancellationToken.None);
+        var createResult = await PaymentOperationKeyTestSetup.CreateAsync(paymentsController, db, createModel, CancellationToken.None);
 
         var createCreated = Assert.IsType<CreatedResult>(createResult);
         var createdPayment = Assert.IsType<Payment>(createCreated.Value);

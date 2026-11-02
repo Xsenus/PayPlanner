@@ -22,10 +22,19 @@ internal static class VersionedPaymentWriteBoundary
     }
 
     public static async Task<IActionResult> RunAsync(ControllerBase controller, PaymentContext db, int? id, Payment? model,
-        bool creating, bool deleting, bool changesInvoice, Func<Scope, Task<IActionResult>> write, CancellationToken ct, bool deferInvoiceValidation = false)
+        bool creating, bool deleting, bool changesInvoice, Func<Scope, Task<IActionResult>> write, CancellationToken ct, bool deferInvoiceValidation = false,
+        string? createProtocol = null, Func<int, CancellationToken, Task<IActionResult>>? readCreated = null)
     {
         var actorId = controller.User.GetUserId();
         if (controller.User?.Identity?.IsAuthenticated != true || actorId is not > 0) return controller.Unauthorized();
+        Guid operationKey = default;
+        if (creating && !LegacyPaymentCreateAttempt.TryReadKey(controller.Request, out operationKey))
+            return controller.BadRequest(new
+            {
+                code = "payment_operation_key_required",
+                message = "Для создания платежа нужен заголовок Idempotency-Key с ключом ранее зарегистрированной попытки. Получите ключ через POST /api/payments/create-attempts; при повторе передавайте тот же ключ и исходные данные."
+            });
+        LegacyPaymentCreateAttempt? createAttempt = null;
         BalanceApplicationLease? lease = null; Scope? scope = null; IActionResult result;
         try
         {
@@ -40,9 +49,27 @@ internal static class VersionedPaymentWriteBoundary
             if (visibility is null) return controller.Forbid();
             if (creating && model is not null && PaymentCreateInputRules.Validate(db, model) is { } inputError)
                 return controller.BadRequest(new { message = inputError });
+            if (creating)
+            {
+                if (model is null || createProtocol is null || readCreated is null)
+                    throw new InvalidOperationException("Payment creation requires an explicit protocol and canonical reader.");
+                var admitted = await LegacyPaymentCreateAttempt.OpenAsync(controller, db, operationKey, actorId.Value, model, createProtocol, ct);
+                if (admitted.Error is not null) return admitted.Error;
+                createAttempt = admitted.Attempt!;
+            }
             if (creating && model is not null) PaymentCreateInputRules.InitializeServerFields(model);
             if (creating && model is not null && await PaymentCreateInputRules.ValidateSellerSelectionAsync(db, model, ct) is { } sellerError)
                 return controller.BadRequest(new { message = sellerError });
+            if (createAttempt?.IsCommitted == true)
+            {
+                var canonicalId = createAttempt.CanonicalPaymentId!.Value;
+                await lease.LockPaymentAsync(canonicalId, ct);
+                if (!await db.Payments.AsNoTracking().ApplyPaymentVisibility(visibility).ApplyUnambiguousInvoiceLinks()
+                    .AnyAsync(payment => payment.Id == canonicalId, ct)) return controller.NotFound();
+                // Return the current projection through this route's existing ACL.
+                // Never re-run normalization, financial side effects or notification hooks.
+                return await readCreated!(canonicalId, ct);
+            }
             Payment? current = null;
             Payment? original = null;
             if (id.HasValue)
@@ -104,6 +131,13 @@ internal static class VersionedPaymentWriteBoundary
                 if (!await credit.KeepsAppliedCreditAsync(ct)) return controller.BadRequest(new { message = PaymentCreditInvariantScope.RejectionMessage });
                 if (!await PaymentBalanceHistoryRules.KeepsOwnerBalanceAsync(db, balanceBefore, ct))
                     return controller.BadRequest(new { message = "Изменение создало бы отрицательный остаток баланса. Требуется сверка оплаты." });
+                if (createAttempt is not null)
+                {
+                    if (result is not CreatedResult || model is null)
+                        throw new InvalidOperationException("A create operation must return its persisted canonical payment.");
+                    createAttempt.RecordOutcome(controller, model);
+                    await db.SaveChangesAsync(ct);
+                }
                 await lease.CommitAsync(ct);
             }
 
@@ -133,6 +167,8 @@ internal static class VersionedPaymentWriteBoundary
         catch (SellerSelectionException error) { return controller.BadRequest(new { message = error.Message }); }
         catch (SellerSnapshotTooLargeException error) { return controller.BadRequest(new { message = error.Message }); }
         catch (BalanceSourceHistoryException error) { return controller.BadRequest(new { message = error.Message }); }
+        catch (PaymentCreateAttemptExpiredException) when (lease?.CommitStarted != true)
+        { return controller.StatusCode(StatusCodes.Status410Gone, new { code = "payment_operation_expired", message = "Срок попытки сохранения истёк; платёж не сохранён. Сверьте состояние попытки перед новым действием." }); }
         catch (Exception error) when (BalanceApplicationLease.IsConflict(error)
             && (lease?.CommitStarted != true || BalanceApplicationLease.IsDefiniteDatabaseAbort(error)))
         { return controller.Conflict(new { message = "Платёж или права изменились параллельно. Обновите данные и повторите действие." }); }

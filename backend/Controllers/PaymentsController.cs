@@ -654,7 +654,8 @@ public class PaymentsController : ControllerBase
             if (attempt.PrimaryPaymentId is { } sourceId)
             {
                 var ownsPrimary = await _db.PaymentCreateAttempts.AsNoTracking().AnyAsync(primary => primary.ActorUserId == attempt.ActorUserId
-                    && primary.Operation == "primary" && primary.State == PaymentCreateAttempt.Committed && primary.CanonicalPaymentId == sourceId, ct);
+                    && primary.Operation == "primary" && primary.IdentityVersion == PaymentCreateCommand.Version
+                    && primary.State == PaymentCreateAttempt.Committed && primary.CanonicalPaymentId == sourceId, ct);
                 if (!ownsPrimary && !await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, permission => permission.CanEdit, ct))
                     return Forbid();
                 remainderSource = await _db.Payments.SingleAsync(payment => payment.Id == sourceId, ct);
@@ -804,7 +805,8 @@ public class PaymentsController : ControllerBase
     [HttpPost]
     public Task<IActionResult> Create([FromBody] Payment model, CancellationToken ct)
         => VersionedPaymentWriteBoundary.RunAsync(this, _db, null, model, creating: true, deleting: false, changesInvoice: false,
-            scope => CreatePaymentCoreAsync(model, scope, ct), ct, deferInvoiceValidation: true);
+            scope => CreatePaymentCoreAsync(model, scope, ct), ct, deferInvoiceValidation: true,
+            createProtocol: LegacyPaymentCreateAttempt.CurrentProtocol, readCreated: GetById);
 
     private async Task<IActionResult> CreatePaymentCoreAsync(
         Payment model, VersionedPaymentWriteBoundary.Scope scope, CancellationToken ct)

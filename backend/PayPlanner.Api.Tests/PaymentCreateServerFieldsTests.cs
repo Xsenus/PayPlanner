@@ -112,6 +112,7 @@ public sealed class PaymentCreateServerFieldsTests
         var model = PaymentFor(fixture);
         foreach (var group in new[] { "snapshot", "workflow", "review", "audit", "display" }) SetServerFields(model, fixture.ActorId, group);
         using var server = PaymentCreateGraphTests.Server(db, fixture); using var client = server.CreateClient(); client.DefaultRequestHeaders.Add("X-Fixture-User", fixture.ActorId.ToString());
+        client.DefaultRequestHeaders.Add("Idempotency-Key", (await LegacyPaymentOperationKeyTests.RegisterAsync(db, fixture, model)).ToString("D"));
         using var response = await client.PostAsJsonAsync(api == 0 ? "/api/payments" : $"/api/v{api}/payments", model);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var json = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(); var id = json.GetProperty("id").GetInt32();

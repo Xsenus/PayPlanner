@@ -1880,7 +1880,7 @@ public class PaymentsControllerTests
         var expectedLastPaymentDate = model.PaidDate.Value.Date;
 
         await AuthenticatePaymentWriterAsync(db, controller);
-        var actionResult = await controller.Create(model, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(actionResult);
         var payment = Assert.IsType<Payment>(created.Value);
@@ -2129,7 +2129,7 @@ public class PaymentsControllerTests
         linkedPayment.PaidDate = linkedPayment.Date;
         linkedPayment.LastPaymentDate = linkedPayment.Date;
 
-        var actionResult = await controller.Create(linkedPayment, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, linkedPayment, CancellationToken.None);
 
         Assert.IsType<CreatedResult>(actionResult);
         db.ChangeTracker.Clear();
@@ -2486,7 +2486,7 @@ public class PaymentsControllerTests
         model.AccountDate = new DateTime(2026, 4, 18);
 
         await AuthenticatePaymentWriterAsync(db, controller);
-        var actionResult = await controller.Create(model, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(actionResult);
         var payment = Assert.IsType<Payment>(created.Value);
@@ -2527,7 +2527,7 @@ public class PaymentsControllerTests
         model.AccountDate = new DateTime(2026, 4, 20);
 
         await AuthenticatePaymentWriterAsync(db, controller);
-        var actionResult = await controller.Create(model, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(actionResult);
         var payment = Assert.IsType<Payment>(created.Value);
@@ -2572,7 +2572,7 @@ public class PaymentsControllerTests
         model.LegacyAccountDate = invoice.Date;
 
         await AuthenticatePaymentWriterAsync(db, controller);
-        var actionResult = await controller.Create(model, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(actionResult);
         var payment = Assert.IsType<Payment>(created.Value);
@@ -2589,7 +2589,7 @@ public class PaymentsControllerTests
         var model = CreatePayment(new DateTime(2026, 4, 27), 5_000m, "Платеж без объектного аудита");
 
         await AuthenticatePaymentWriterAsync(db, controller);
-        var actionResult = await controller.Create(model, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(actionResult);
         var payment = Assert.IsType<Payment>(created.Value);
@@ -2631,7 +2631,7 @@ public class PaymentsControllerTests
         var controller = new PaymentsController(db, new NoopFormRequirementsService());
 
         await AuthenticatePaymentWriterAsync(db, controller);
-        var actionResult = await controller.Create(model, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(actionResult);
         var payment = Assert.IsType<Payment>(created.Value);
@@ -2679,7 +2679,7 @@ public class PaymentsControllerTests
         var controller = new PaymentsController(db, new NoopFormRequirementsService());
 
         await AuthenticatePaymentWriterAsync(db, controller);
-        var actionResult = await controller.Create(model, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(actionResult);
         var payment = Assert.IsType<Payment>(created.Value);
@@ -2726,7 +2726,7 @@ public class PaymentsControllerTests
 
         var controller = CreatePaymentsController(db, user.Id);
 
-        var actionResult = await controller.Create(model, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model, CancellationToken.None);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
         Assert.Contains("clientCaseId", badRequest.Value?.ToString());
@@ -2823,7 +2823,7 @@ public class PaymentsControllerTests
 
         var controller = CreatePaymentsController(db, user.Id);
 
-        var actionResult = await controller.Create(model, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model, CancellationToken.None);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
         Assert.Contains("clientId", badRequest.Value?.ToString());
@@ -2857,7 +2857,7 @@ public class PaymentsControllerTests
 
         var controller = CreatePaymentsController(db, user.Id);
 
-        var actionResult = await controller.Create(model, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model, CancellationToken.None);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
         Assert.Contains("legalEntityId", badRequest.Value?.ToString());
@@ -2891,7 +2891,7 @@ public class PaymentsControllerTests
 
         var controller = CreatePaymentsV2Controller(db, user.Id);
 
-        var actionResult = await controller.Create(model, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model, CancellationToken.None);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
         Assert.Contains("clientId", badRequest.Value?.ToString());
@@ -2925,7 +2925,7 @@ public class PaymentsControllerTests
 
         var controller = CreatePaymentsV2Controller(db, user.Id);
 
-        var actionResult = await controller.Create(model, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model, CancellationToken.None);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
         Assert.Contains("legalEntityId", badRequest.Value?.ToString());
@@ -2971,7 +2971,7 @@ public class PaymentsControllerTests
 
         var controller = CreatePaymentsV2Controller(db, user.Id);
 
-        var actionResult = await controller.Create(model, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model, CancellationToken.None);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
         Assert.Contains("clientCaseId", badRequest.Value?.ToString());
@@ -3005,7 +3005,7 @@ public class PaymentsControllerTests
 
         var controller = CreatePaymentsV1Controller(db, user.Id);
 
-        var actionResult = await controller.Create(model, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model, CancellationToken.None);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
         Assert.Contains("clientId", badRequest.Value?.ToString());
@@ -3039,7 +3039,7 @@ public class PaymentsControllerTests
 
         var controller = CreatePaymentsV1Controller(db, user.Id);
 
-        var actionResult = await controller.Create(model, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model, CancellationToken.None);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
         Assert.Contains("legalEntityId", badRequest.Value?.ToString());
@@ -3085,7 +3085,7 @@ public class PaymentsControllerTests
 
         var controller = CreatePaymentsV1Controller(db, user.Id);
 
-        var actionResult = await controller.Create(model, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, model, CancellationToken.None);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
         Assert.Contains("clientCaseId", badRequest.Value?.ToString());
@@ -5242,7 +5242,7 @@ public class PaymentsControllerTests
         linkedPayment.LastPaymentDate = linkedPayment.Date;
 
         await AuthenticatePaymentWriterAsync(db, controller);
-        var actionResult = await controller.Create(linkedPayment, CancellationToken.None);
+        var actionResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, linkedPayment, CancellationToken.None);
 
         Assert.IsType<CreatedResult>(actionResult);
         db.ChangeTracker.Clear();
@@ -5277,7 +5277,7 @@ public class PaymentsControllerTests
         payment.PaidDate = payment.Date;
         payment.LastPaymentDate = payment.Date;
 
-        var result = await controller.Create(payment, CancellationToken.None);
+        var result = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, payment, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(result);
         var createdPayment = Assert.IsType<Payment>(created.Value);
@@ -5309,7 +5309,7 @@ public class PaymentsControllerTests
         payment.PaidDate = payment.Date;
         payment.LastPaymentDate = payment.Date;
 
-        var result = await controller.Create(payment, CancellationToken.None);
+        var result = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, payment, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(result);
         var createdPayment = Assert.IsType<Payment>(created.Value);
@@ -5351,7 +5351,7 @@ public class PaymentsControllerTests
         payment.PaidDate = payment.Date;
         payment.LastPaymentDate = payment.Date;
 
-        var createResult = await controller.Create(payment, CancellationToken.None);
+        var createResult = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, payment, CancellationToken.None);
         var createdPayment = Assert.IsType<Payment>(Assert.IsType<CreatedResult>(createResult).Value);
 
         var update = CreatePayment(createdPayment.Date, createdPayment.Amount, "Уточненная оплата без документов");
@@ -5403,7 +5403,7 @@ public class PaymentsControllerTests
         payment.PaidDate = payment.Date;
         payment.LastPaymentDate = payment.Date;
 
-        var result = await controller.Create(payment, CancellationToken.None);
+        var result = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, payment, CancellationToken.None);
 
         Assert.IsType<CreatedResult>(result);
         Assert.Empty(await db.UserNotifications.AsNoTracking().ToListAsync());
@@ -5431,7 +5431,7 @@ public class PaymentsControllerTests
         payment.IsPaid = false;
         payment.LastPaymentDate = payment.Date;
 
-        var result = await controller.Create(payment, CancellationToken.None);
+        var result = await PaymentOperationKeyTestSetup.CreateAsync(controller, db, payment, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(result);
         var createdPayment = Assert.IsType<Payment>(created.Value);
@@ -6176,7 +6176,7 @@ public class PaymentsControllerTests
         await db.SaveChangesAsync();
 
         var paymentsController = CreatePaymentsController(db, user.Id);
-        var createResult = await paymentsController.Create(new Payment
+        var createResult = await PaymentOperationKeyTestSetup.CreateAsync(paymentsController, db, new Payment
         {
             ClientId = client.Id,
             Amount = 3_000m,

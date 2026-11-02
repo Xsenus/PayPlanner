@@ -435,7 +435,8 @@ public class PaymentsV2Controller : ControllerBase
     [HttpPost]
     public Task<IActionResult> Create([FromBody] Payment model, CancellationToken ct = default)
         => VersionedPaymentWriteBoundary.RunAsync(this, _db, null, model, creating: true, deleting: false, changesInvoice: false,
-            scope => CreateCoreAsync(model, scope, ct), ct);
+            scope => CreateCoreAsync(model, scope, ct), ct,
+            createProtocol: LegacyPaymentCreateAttempt.V2Protocol, readCreated: GetById);
 
     private async Task<IActionResult> CreateCoreAsync(Payment model, VersionedPaymentWriteBoundary.Scope scope, CancellationToken ct)
     {

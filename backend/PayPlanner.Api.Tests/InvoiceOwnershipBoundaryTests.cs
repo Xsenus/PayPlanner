@@ -42,7 +42,7 @@ public partial class InvoicesControllerListTests
         Assert.IsType<NotFoundResult>(await controller.Update(seed.First.Id,
             new Payment { Amount = 999, InvoiceId = seed.First.InvoiceId }, CancellationToken.None));
         Assert.IsType<NotFoundResult>(await controller.Delete(seed.First.Id, CancellationToken.None));
-        Assert.IsType<NotFoundResult>(await controller.Create(new Payment
+        Assert.IsType<NotFoundResult>(await PaymentOperationKeyTestSetup.CreateAsync(controller, db, new Payment
         {
             InvoiceId = seed.First.InvoiceId,
             ClientId = seed.First.ClientId,
@@ -77,7 +77,7 @@ public partial class InvoicesControllerListTests
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = BoundaryPrincipal(seed.FirstUser) } },
         };
         var before = await BoundaryMoneySnapshotAsync(db);
-        Assert.IsType<NotFoundResult>(await controller.Create(new Payment
+        Assert.IsType<NotFoundResult>(await PaymentOperationKeyTestSetup.CreateAsync(controller, db, new Payment
         {
             ClientId = seed.Second.ClientId,
             Account = seed.Second.Account,

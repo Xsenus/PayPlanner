@@ -24,6 +24,10 @@ internal static class PaymentCreateInputRules
     private static readonly PropertyInfo[] ServerProperties = typeof(Payment).GetProperties()
         .Where(property => property.CanRead && property.CanWrite && !InputProperties.Contains(property.Name)).ToArray();
 
+    internal static IReadOnlyList<PropertyInfo> LogicalInputProperties { get; } = typeof(Payment).GetProperties()
+        .Where(property => property.CanRead && property.CanWrite && InputProperties.Contains(property.Name))
+        .OrderBy(property => property.Name, StringComparer.Ordinal).ToArray();
+
     public static void InitializeServerFields(Payment model)
     {
         // Keep the model identity used by existing actions, but only permit
