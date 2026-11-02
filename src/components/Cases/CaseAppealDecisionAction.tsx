@@ -31,8 +31,8 @@ function expired(deadline: string, timeZoneId: string) {
 function validateDecision(value: CaseAppealDecision | null, caseId: number, requireTask = false) {
   if (value === null && !requireTask) return null;
   if (!value || value.caseId !== caseId || !Number.isSafeInteger(value.id) || value.id <= 0 || value.choice !== 'appeal'
-    || (value.taskId !== null && (!Number.isSafeInteger(value.taskId) || value.taskId <= 0)) || (requireTask && !value.taskId)) throw new Error('Не удалось подтвердить решение об обжаловании текущего дела. Повторите проверку.');
-  return value;
+    || (value.taskId != null && (!Number.isSafeInteger(value.taskId) || value.taskId <= 0)) || (requireTask && !value.taskId)) throw new Error('Не удалось подтвердить решение об обжаловании текущего дела. Повторите проверку.');
+  return { ...value, taskId: value.taskId ?? null };
 }
 export function CaseAppealDecisionAction(props: Props) {
   const timeZoneId = useUserTimeZone();

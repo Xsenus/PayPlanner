@@ -7176,9 +7176,10 @@ export class ApiService {
     return this.request<ClientCaseFinanceDetail>(`/v2/cases/${caseId}/finance`);
   }
 
-  async getCourtRecoveries(caseId: number, search = '') {
+  async getCourtRecoveries(caseId: number, search = '', options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
     const params = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : '';
-    return this.request<CourtRecoveryOverview>(`/v2/cases/${caseId}/court-recoveries${params}`);
+    return this.request<CourtRecoveryOverview>(`/v2/cases/${caseId}/court-recoveries${params}`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async setCourtRecoveryPayment(caseId: number, paymentId: number, amount: number) {

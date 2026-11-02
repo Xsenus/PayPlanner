@@ -179,3 +179,10 @@ describe('appeal timezone', () => {
     expect(await screen.findByText(/Указанный срок обжалования уже прошёл/)).toBeTruthy(); expect(screen.queryByRole('button', { name: 'Обжаловать — создать задачу' })).toBeNull(); expect(apiService.getCurrentCaseAppealDecision).toHaveBeenCalledOnce(); expect(apiService.createCaseAppealTask).not.toHaveBeenCalled();
   });
 });
+
+describe('appeal omitted task write boundary',()=>{
+ it('still requires a task ID after creating a new appeal task',async()=>{
+  vi.mocked(apiService.createCaseAppealTask).mockResolvedValueOnce({id:8,caseId:42,choice:'appeal',decidedAt:'2026-09-24T00:00:00Z'} as never);
+  const created=vi.fn();render(<Panel kind="appeal" created={created}/>);fireEvent.click(await createButton('appeal'));await screen.findByRole('alert');expect(created).not.toHaveBeenCalled();expect(screen.queryByText(/Решено обжаловать/)).toBeNull();
+ });
+});

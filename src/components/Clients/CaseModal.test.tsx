@@ -45,6 +45,8 @@ vi.mock('../../services/api', () => ({
     getTaskJournalItems: vi.fn(),
     getClientCaseFinanceSummaries: vi.fn(),
     getCourtRecoveries: vi.fn(),
+    setCourtRecoveryPayment: vi.fn(),
+    removeCourtRecoveryPayment: vi.fn(),
     getLegalEntityCaseFinanceSummaries: vi.fn(),
     markCaseActivity: vi.fn(),
     getUserSetting: vi.fn(),
@@ -1319,6 +1321,11 @@ describe('CaseModal', () => {
     render(<CaseModal isOpen caseData={createCase({ nextHearingAt: '2099-10-20T15:00:00Z', responsibleUserId: 7 })} onClose={vi.fn()} onSave={vi.fn()} canCreateTasks responsibles={[{ id: 7, fullName: 'Сотрудник 7' }, { id: 8, fullName: 'Сотрудник 8' }]} />);
     fireEvent.change(document.querySelector('select[aria-label="Ответственный"]')!, { target: { value: '8' } });
     expect(screen.getByRole('button', { name: 'Запросить доверенность' })).toHaveProperty('disabled', true); expect(apiService.createTaskJournalItem).not.toHaveBeenCalled();
+  });
+
+  it('recovery parent bridge: a pending allocation blocks parent save and cannot refresh after finance access is removed',async()=>{
+    const pending=deferred<void>();vi.mocked(apiService.setCourtRecoveryPayment).mockReset().mockReturnValueOnce(pending.promise);vi.mocked(apiService.getCourtRecoveries).mockResolvedValue({awardedAmount:100000,receivedAmount:0,remainingAmount:100000,linkedPayments:[],availablePayments:[{paymentId:7,date:'2026-09-24',description:'Поступление',paidAmount:25000,allocatedAmount:null,effectiveAmount:0,warning:null}],hasMoreAvailablePayments:false,hasCompletePaymentVisibility:true});
+    const props={isOpen:true,caseData:createCase({courtAwardedAmount:100000}),onClose:vi.fn(),onSave:vi.fn(),canViewFinance:true};const view=render(<CaseModal {...props}/>);fireEvent.change(await screen.findByRole('combobox',{name:'Платёж для взыскания'}),{target:{value:'7'}});fireEvent.click(screen.getByRole('button',{name:'Сохранить связь'}));await waitFor(()=>expect(apiService.setCourtRecoveryPayment).toHaveBeenCalledOnce());expect(screen.getByRole('button',{name:'Сохранить'})).toHaveProperty('disabled',true);fireEvent.keyDown(screen.getByLabelText('Название дела'),{key:'Enter',ctrlKey:true});expect(props.onSave).not.toHaveBeenCalled();view.rerender(<CaseModal {...props} canViewFinance={false}/>);await act(async()=>{});const reads=vi.mocked(apiService.getCourtRecoveries).mock.calls.length;await act(async()=>pending.resolve());expect(apiService.getCourtRecoveries).toHaveBeenCalledTimes(reads);expect(screen.queryByText(/Связь с платежом сохранена/)).toBeNull();
   });
 
 });

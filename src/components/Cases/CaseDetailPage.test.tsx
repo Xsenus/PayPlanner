@@ -133,6 +133,8 @@ vi.mock('../../services/api', () => ({
     getCaseTimeline: vi.fn(),
     getCaseFinance: vi.fn(),
     getCourtRecoveries: vi.fn(),
+    setCourtRecoveryPayment: vi.fn(),
+    removeCourtRecoveryPayment: vi.fn(),
     getClientCaseFinanceSummaries: vi.fn(),
     getLegalEntityCaseFinanceSummaries: vi.fn(),
     getCaseWorkOrder: vi.fn(),
@@ -5312,6 +5314,10 @@ describe('CaseDetailPage', () => {
     vi.mocked(apiService.createCaseAppealTask).mockResolvedValue({ id: 8, caseId: 15, choice: 'appeal', taskId: 91, decidedAt: '2026-11-02T00:00:00Z' });
     const open = vi.fn(); render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit canViewTasks={false} canCreateTasks={false} onOpenTask={open} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Обжаловать — создать задачу' })); await screen.findByText(/Решено обжаловать/); expect(apiService.createCaseAppealTask).toHaveBeenCalledOnce(); expect(screen.queryByRole('button', { name: 'Открыть задачу' })).toBeNull(); expect(open).not.toHaveBeenCalled();
+  });
+
+  it('recovery parent bridge: allocation completion cannot refresh a new full-page case',async()=>{
+    let finish!:()=>void;vi.mocked(apiService.setCourtRecoveryPayment).mockReset().mockReturnValueOnce(new Promise<void>(resolve=>{finish=resolve;}));vi.mocked(apiService.getCourtRecoveries).mockResolvedValue({awardedAmount:100000,receivedAmount:0,remainingAmount:100000,linkedPayments:[],availablePayments:[{paymentId:7,date:'2026-09-24',description:'Поступление',paidAmount:25000,allocatedAmount:null,effectiveAmount:0,warning:null}],hasMoreAvailablePayments:false,hasCompletePaymentVisibility:true});vi.mocked(apiService.getCaseV2).mockImplementation(async id=>createCase({id,courtAwardedAmount:100000}));const props={caseId:15,onBack:vi.fn(),canViewFinance:true,canEdit:true};const view=render(<CaseDetailPage {...props}/>);fireEvent.change(await screen.findByRole('combobox',{name:'Платёж для взыскания'}),{target:{value:'7'}});fireEvent.click(screen.getByRole('button',{name:'Сохранить связь'}));await waitFor(()=>expect(apiService.setCourtRecoveryPayment).toHaveBeenCalledExactlyOnceWith(15,7,25000));view.rerender(<CaseDetailPage {...props} caseId={16}/>);await act(async()=>{});const reads=vi.mocked(apiService.getCourtRecoveries).mock.calls.length;await act(async()=>finish());expect(apiService.getCourtRecoveries).toHaveBeenCalledTimes(reads);expect(screen.queryByText(/Связь с платежом сохранена/)).toBeNull();
   });
 
 });

@@ -6,6 +6,13 @@ const decimal = (value: number): { integer: bigint; scale: number } => {
   return scale < 0 ? { integer: integer * 10n ** BigInt(-scale), scale: 0 } : { integer, scale };
 };
 
+/** Exact cents for the decimal number serialized in JSON, without rounding or a floating-point multiply. */
+export function exactMoneyCents(value: number): bigint | null {
+  if (!Number.isFinite(value)) return null;
+  const parsed = decimal(value);
+  return parsed.scale <= 2 ? parsed.integer * 10n ** BigInt(2 - parsed.scale) : null;
+}
+
 export const lineItemPrecisionError = 'В цене допускается до двух знаков после запятой, в количестве — до четырёх.';
 
 /** Sum rounded line amounts as integer cents so JSON retains the exact document total. */

@@ -1,0 +1,12 @@
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import { apiService } from './api';
+import { documentCopyTestSession } from '../test/documentCopySession';
+let session: ReturnType<typeof documentCopyTestSession>;
+beforeEach(()=>{session=documentCopyTestSession();});
+afterEach(()=>{session.restore();vi.unstubAllGlobals();});
+describe('recovery HTTP contract',()=>{
+ it('preserves old calls and escapes the trimmed search while forwarding signal/no-store',async()=>{const fetch=vi.fn<typeof globalThis.fetch>().mockImplementation(async()=>Response.json({}));vi.stubGlobal('fetch',fetch);await apiService.getCourtRecoveries(3);await apiService.getCourtRecoveries(3,'  №7 & тест  ');const controller=new AbortController();await apiService.getCourtRecoveries(3,'  №7 & тест  ',{signal:controller.signal});expect(fetch).toHaveBeenCalledTimes(3);expect(String(fetch.mock.calls[0][0])).toMatch(/\/v2\/cases\/3\/court-recoveries$/);expect(new URL(String(fetch.mock.calls[2][0]),'http://localhost').searchParams.get('search')).toBe('№7 & тест');expect(fetch.mock.calls[2][1]).toMatchObject({signal:controller.signal,cache:'no-store'});});
+ it('does not dispatch a cancelled read',async()=>{const fetch=vi.fn<typeof globalThis.fetch>();vi.stubGlobal('fetch',fetch);const controller=new AbortController();controller.abort();await expect(apiService.getCourtRecoveries(3,'',{signal:controller.signal})).rejects.toMatchObject({name:'AbortError'});expect(fetch).not.toHaveBeenCalled();});
+ it.each([401,403,404,409,503])('keeps HTTP%s refusal and does not retry a case read',async status=>{const fetch=vi.fn<typeof globalThis.fetch>().mockImplementation(async()=>Response.json({message:'Взыскания недоступны'},{status}));vi.stubGlobal('fetch',fetch);await expect(apiService.getCourtRecoveries(3)).rejects.toMatchObject({status});expect(fetch.mock.calls.filter(([url])=>String(url).includes('/court-recoveries'))).toHaveLength(1);});
+ it('retains the existing PUT body and DELETE without creating a new payment',async()=>{const fetch=vi.fn<typeof globalThis.fetch>().mockImplementation(async()=>new Response(null,{status:204}));vi.stubGlobal('fetch',fetch);await apiService.setCourtRecoveryPayment(3,7,0.29);await apiService.removeCourtRecoveryPayment(3,7);expect(fetch).toHaveBeenCalledTimes(2);expect(fetch.mock.calls.every(([url])=>String(url).endsWith('/v2/cases/3/court-recoveries/7'))).toBe(true);expect(fetch.mock.calls[0][1]).toMatchObject({method:'PUT',body:JSON.stringify({amount:0.29})});expect(fetch.mock.calls[1][1]?.method).toBe('DELETE');});
+});
