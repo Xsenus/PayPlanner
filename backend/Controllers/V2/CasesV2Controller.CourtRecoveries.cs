@@ -1,9 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Payments;
 
 namespace PayPlanner.Api.Controllers.V2;
 
@@ -111,8 +114,9 @@ public partial class CasesV2Controller
     }
 
     [HttpPut("{id:int}/court-recoveries/{paymentId:int}")]
-    public async Task<IActionResult> SetCourtRecoveryPayment(
+    public Task<IActionResult> SetCourtRecoveryPayment(
         int id, int paymentId, [FromBody] SetCourtRecoveryPaymentRequest request, CancellationToken ct)
+        => RunCourtRecoveryMutationAsync(async lease =>
     {
         if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
             return forbidden;
@@ -128,6 +132,7 @@ public partial class CasesV2Controller
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (clientCase is null)
             return NotFound();
+        await LockCourtRecoveryCaseAsync(id, ct);
         if (clientCase.CourtAwardedAmount is null or <= 0m)
             return BadRequest(new { message = "Сначала укажите присуждённую судом сумму в карточке дела." });
 
@@ -140,6 +145,7 @@ public partial class CasesV2Controller
                 (item.ClientCaseId == id || item.InvoiceClientCases.Any(link => link.ClientCaseId == id)), ct);
         if (payment is null)
             return NotFound();
+        await lease.LockPaymentAsync(paymentId, ct);
         if (payment.Type != PaymentType.Income || payment.DocumentKind != DocumentKind.Payment ||
             payment.Status == PaymentStatus.Cancelled || payment.PaidAmount <= 0m)
             return BadRequest(new { message = "Можно связать только фактически оплаченный приходный платёж по этому делу." });
@@ -173,22 +179,13 @@ public partial class CasesV2Controller
         }
 
         _db.SetAuditReason($"Связь платежа #{paymentId} с взысканием по делу #{id}");
-        try
-        {
-            await _db.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateException) when (existing is null)
-        {
-            if (await _db.ClientCaseCourtRecoveryPayments.AsNoTracking()
-                .AnyAsync(item => item.PaymentId == paymentId, ct))
-                return Conflict(new { message = "Этот платёж уже отмечен как взыскание. Обновите список платежей." });
-            throw;
-        }
+        await _db.SaveChangesAsync(ct);
         return NoContent();
-    }
+    }, ct);
 
     [HttpDelete("{id:int}/court-recoveries/{paymentId:int}")]
-    public async Task<IActionResult> RemoveCourtRecoveryPayment(int id, int paymentId, CancellationToken ct)
+    public Task<IActionResult> RemoveCourtRecoveryPayment(int id, int paymentId, CancellationToken ct)
+        => RunCourtRecoveryMutationAsync(async lease =>
     {
         if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
             return forbidden;
@@ -200,6 +197,7 @@ public partial class CasesV2Controller
         if (!await _db.ClientCases.ApplyClientCaseVisibility(visibility).AsNoTracking().AnyAsync(item => item.Id == id, ct))
             return NotFound();
 
+        await LockCourtRecoveryCaseAsync(id, ct);
         var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
         if (paymentsVisibility is null)
             return Forbid();
@@ -210,10 +208,66 @@ public partial class CasesV2Controller
                 visiblePayments.Any(payment => payment.Id == item.PaymentId), ct);
         if (link is null)
             return NotFound();
+        await lease.LockPaymentAsync(paymentId, ct);
         _db.ClientCaseCourtRecoveryPayments.Remove(link);
         _db.SetAuditReason($"Удалена связь платежа #{paymentId} с взысканием по делу #{id}");
         await _db.SaveChangesAsync(ct);
         return NoContent();
+    }, ct);
+
+    private async Task<IActionResult> RunCourtRecoveryMutationAsync(
+        Func<BalanceApplicationLease, Task<IActionResult>> write, CancellationToken ct)
+    {
+        var actorId = User.GetUserId();
+        if (User.Identity?.IsAuthenticated != true || actorId is not > 0)
+            return Unauthorized();
+        BalanceApplicationLease? lease = null;
+        try
+        {
+            // Read permissions, ownership and paid amounts only inside the same
+            // clean lease used by the payment writers. Never discard pending work.
+            lease = await BalanceApplicationLease.BeginAsync(_db, actorId.Value, ct);
+            if (_db.Database.IsNpgsql())
+                await _db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", ct);
+            if (!await _db.Users.AsNoTracking().AnyAsync(user => user.Id == actorId.Value && user.IsActive && user.IsApproved, ct))
+                return Unauthorized();
+            _casesAccessTask = null;
+            _canViewCaseFinanceTask = null;
+            var result = await write(lease);
+            if (result is NoContentResult)
+                await lease.CommitAsync(ct);
+            return result;
+        }
+        catch (Exception error) when (!ct.IsCancellationRequested
+            && (BalanceApplicationLease.IsConflict(error) || IsCourtRecoveryUniqueConflict(error))
+            && (lease?.CommitStarted != true || BalanceApplicationLease.IsDefiniteDatabaseAbort(error)))
+        {
+            return Conflict(new { message = "Платёж или связь взыскания уже изменены либо сейчас заняты. Обновите список платежей и повторите действие." });
+        }
+        finally
+        {
+            if (lease is not null) await lease.DisposeAsync();
+        }
+    }
+
+    private async Task LockCourtRecoveryCaseAsync(int id, CancellationToken ct)
+    {
+        // Lock only a case already admitted by the current visibility check.
+        // Keep its award and ownership stable until this mutation commits.
+        if (_db.Database.IsNpgsql())
+            await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"ClientCases\" WHERE \"Id\" = {id} FOR SHARE NOWAIT", ct);
+    }
+
+    private static bool IsCourtRecoveryUniqueConflict(Exception error)
+    {
+        for (Exception? current = error; current is not null; current = current.InnerException)
+        {
+            if (current is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "PK_ClientCaseCourtRecoveryPayments" }
+                || current is SqliteException { SqliteErrorCode: 19 } sqlite
+                && sqlite.Message.Contains("ClientCaseCourtRecoveryPayments.PaymentId", StringComparison.Ordinal))
+                return true;
+        }
+        return false;
     }
 
     private static string? CourtRecoveryPaymentWarning(Payment payment, int clientCaseId, bool linkedByInvoice, decimal amount)

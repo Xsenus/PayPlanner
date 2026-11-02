@@ -1307,9 +1307,9 @@
 | GET | appeal-deadlines/expiring | CasesV2Controller | GetExpiringCaseAppeals | backend/Controllers/V2/CasesV2Controller.Appeal.cs:112 | не задано | да | нет |
 | POST | {id:int}/appeal-decision | CasesV2Controller | DecideCaseAppeal | backend/Controllers/V2/CasesV2Controller.Appeal.cs:206 | не задано | да | нет |
 | POST | {id:int}/appeal-reminder | CasesV2Controller | RemindCaseAppealAssignee | backend/Controllers/V2/CasesV2Controller.Appeal.cs:406 | не задано | да | нет |
-| GET | {id:int}/court-recoveries | CasesV2Controller | GetCourtRecoveries | backend/Controllers/V2/CasesV2Controller.CourtRecoveries.cs:32 | не задано | да | нет |
-| PUT | {id:int}/court-recoveries/{paymentId:int} | CasesV2Controller | SetCourtRecoveryPayment | backend/Controllers/V2/CasesV2Controller.CourtRecoveries.cs:113 | не задано | да | нет |
-| DELETE | {id:int}/court-recoveries/{paymentId:int} | CasesV2Controller | RemoveCourtRecoveryPayment | backend/Controllers/V2/CasesV2Controller.CourtRecoveries.cs:190 | не задано | да | нет |
+| GET | {id:int}/court-recoveries | CasesV2Controller | GetCourtRecoveries | backend/Controllers/V2/CasesV2Controller.CourtRecoveries.cs:35 | не задано | да | нет |
+| PUT | {id:int}/court-recoveries/{paymentId:int} | CasesV2Controller | SetCourtRecoveryPayment | backend/Controllers/V2/CasesV2Controller.CourtRecoveries.cs:116 | не задано | да | нет |
+| DELETE | {id:int}/court-recoveries/{paymentId:int} | CasesV2Controller | RemoveCourtRecoveryPayment | backend/Controllers/V2/CasesV2Controller.CourtRecoveries.cs:186 | не задано | да | нет |
 | GET | api/v2/cases | CasesV2Controller | Get | backend/Controllers/V2/CasesV2Controller.cs:293 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-business-rules.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/case-registry-query-optimization.md, docs/development-2026-10-16-audit-write-budget.md, docs/full-project-audit-2026-06-10.md, docs/max-latest-reply-drafts-2026-10-15.md, docs/storage-resilience-runbook.md |
 | GET | api/v2/cases/court-registry-summary | CasesV2Controller | GetCourtRegistrySummary | backend/Controllers/V2/CasesV2Controller.cs:392 | [Authorize] | да | нет |
 | GET | api/v2/cases/court-report-overview | CasesV2Controller | GetCourtReportOverview | backend/Controllers/V2/CasesV2Controller.cs:503 | [Authorize] | да | нет |

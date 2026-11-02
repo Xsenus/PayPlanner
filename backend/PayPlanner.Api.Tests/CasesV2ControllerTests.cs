@@ -2119,6 +2119,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         await db.SaveChangesAsync();
         Assert.IsType<ConflictObjectResult>(await controller.SetCourtRecoveryPayment(secondCase.Id, payment.Id, new(1_000m), CancellationToken.None));
 
+        payment = await db.Payments.SingleAsync(item => item.Id == payment.Id);
         payment.PaidAmount = 500m;
         await db.SaveChangesAsync();
         var overview = Assert.IsType<CasesV2Controller.CourtRecoveryOverviewDto>(
