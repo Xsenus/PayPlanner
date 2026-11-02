@@ -359,7 +359,7 @@ describe('CaseModal', () => {
     render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase({ strategy: 'Подать ходатайство' })} onSave={vi.fn()} onPositionReviewed={onPositionReviewed} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Подтвердить проверку позиции' }));
-    await waitFor(() => expect(apiService.reviewCasePosition).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(apiService.reviewCasePosition).toHaveBeenCalledWith(1, 'Подать ходатайство'));
     expect(onPositionReviewed).toHaveBeenCalledWith(expect.objectContaining({ positionReviewedByName: 'Юрист' }));
     expect(screen.getByText(/Позиция проверена.*Юрист/)).toBeTruthy();
   });
@@ -416,7 +416,7 @@ describe('CaseModal', () => {
     expect(screen.getByText(/сначала сохраните дело/)).toBeTruthy();
     fireEvent.change(dateInput, { target: { value: savedInputValue } });
     fireEvent.click(screen.getByRole('button', { name: 'Подтвердить дату заседания' }));
-    await waitFor(() => expect(apiService.confirmNextHearing).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(apiService.confirmNextHearing).toHaveBeenCalledWith(1, nextHearingAt));
     expect(onNextHearingConfirmed).toHaveBeenCalledWith(expect.objectContaining({ nextHearingConfirmedByName: 'Юрист' }));
     expect(screen.getByText(/Дата подтверждена.*Юрист/)).toBeTruthy();
   });
@@ -1326,6 +1326,31 @@ describe('CaseModal', () => {
   it('recovery parent bridge: a pending allocation blocks parent save and cannot refresh after finance access is removed',async()=>{
     const pending=deferred<void>();vi.mocked(apiService.setCourtRecoveryPayment).mockReset().mockReturnValueOnce(pending.promise);vi.mocked(apiService.getCourtRecoveries).mockResolvedValue({awardedAmount:100000,receivedAmount:0,remainingAmount:100000,linkedPayments:[],availablePayments:[{paymentId:7,date:'2026-09-24',description:'Поступление',paidAmount:25000,allocatedAmount:null,effectiveAmount:0,warning:null}],hasMoreAvailablePayments:false,hasCompletePaymentVisibility:true});
     const props={isOpen:true,caseData:createCase({courtAwardedAmount:100000}),onClose:vi.fn(),onSave:vi.fn(),canViewFinance:true};const view=render(<CaseModal {...props}/>);fireEvent.change(await screen.findByRole('combobox',{name:'Платёж для взыскания'}),{target:{value:'7'}});fireEvent.click(screen.getByRole('button',{name:'Сохранить связь'}));await waitFor(()=>expect(apiService.setCourtRecoveryPayment).toHaveBeenCalledOnce());expect(screen.getByRole('button',{name:'Сохранить'})).toHaveProperty('disabled',true);fireEvent.keyDown(screen.getByLabelText('Название дела'),{key:'Enter',ctrlKey:true});expect(props.onSave).not.toHaveBeenCalled();view.rerender(<CaseModal {...props} canViewFinance={false}/>);await act(async()=>{});const reads=vi.mocked(apiService.getCourtRecoveries).mock.calls.length;await act(async()=>pending.resolve());expect(apiService.getCourtRecoveries).toHaveBeenCalledTimes(reads);expect(screen.queryByText(/Связь с платежом сохранена/)).toBeNull();
+  });
+
+  it.each(['position', 'hearing'] as const)('checked confirmation source: legacy %s conflict does not mark or retry', async kind => {
+    const onPositionReviewed = vi.fn(); const onNextHearingConfirmed = vi.fn();
+    const source = createCase({ strategy: '  Сохранённая позиция  ', nextHearingAt: '2099-11-03T12:00:00.1234567' });
+    const failure = new Error('HTTP 409 - {"message":"Данные изменены. Обновите карточку дела."}');
+    if (kind === 'position') vi.mocked(apiService.reviewCasePosition).mockRejectedValueOnce(failure);
+    else vi.mocked(apiService.confirmNextHearing).mockRejectedValueOnce(failure);
+    render(<CaseModal isOpen onClose={vi.fn()} caseData={source} onSave={vi.fn()} onPositionReviewed={onPositionReviewed} onNextHearingConfirmed={onNextHearingConfirmed} />);
+    fireEvent.click(screen.getByRole('button', { name: kind === 'position' ? 'Подтвердить проверку позиции' : 'Подтвердить дату заседания' }));
+    await screen.findByText('Данные изменены. Обновите карточку дела.');
+    if (kind === 'position') expect(apiService.reviewCasePosition).toHaveBeenCalledExactlyOnceWith(source.id, source.strategy);
+    else expect(apiService.confirmNextHearing).toHaveBeenCalledExactlyOnceWith(source.id, source.nextHearingAt);
+    expect(onPositionReviewed).not.toHaveBeenCalled(); expect(onNextHearingConfirmed).not.toHaveBeenCalled();
+    expect((screen.getByLabelText('Стратегия и план действий') as HTMLTextAreaElement).value).toBe(source.strategy);
+  });
+
+  it('checked confirmation source: legacy naive UTC proof accepts an equivalent Z hearing', async () => {
+    const onNextHearingConfirmed = vi.fn();
+    vi.mocked(apiService.confirmNextHearing).mockResolvedValueOnce({ nextHearingConfirmedAt: '2026-11-03T00:00:00', nextHearingConfirmedForAt: '2099-11-03T12:00:00Z', nextHearingConfirmedByName: 'Юрист', nextHearingConfirmedByUserId: 7 });
+    render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase({ nextHearingAt: '2099-11-03T12:00:00' })} onSave={vi.fn()} onNextHearingConfirmed={onNextHearingConfirmed} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Подтвердить дату заседания' }));
+    await waitFor(() => expect(onNextHearingConfirmed).toHaveBeenCalledOnce());
+    expect(apiService.confirmNextHearing).toHaveBeenCalledExactlyOnceWith(1, '2099-11-03T12:00:00');
+    expect(screen.queryByRole('button', { name: 'Подтвердить дату заседания' })).toBeNull();
   });
 
 });

@@ -1,11 +1,14 @@
 using Microsoft.AspNetCore.Mvc;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers.V2;
 
 public partial class CasesV2Controller
 {
+    public sealed record NextHearingConfirmationRequest(DateTime? ExpectedNextHearingAt);
+
     public sealed class NextHearingConfirmationDto
     {
         public DateTime NextHearingConfirmedForAt { get; init; }
@@ -15,9 +18,15 @@ public partial class CasesV2Controller
     }
 
     [HttpPost("{id:int}/next-hearing-confirmation")]
-    public Task<ActionResult<NextHearingConfirmationDto>> ConfirmNextHearing(int id, CancellationToken ct)
+    [HttpPost("{id:int}/next-hearing-confirmation/checked")]
+    public Task<ActionResult<NextHearingConfirmationDto>> ConfirmNextHearing(int id, [FromBody] NextHearingConfirmationRequest? request, CancellationToken ct)
         => RunCaseConfirmationAsync<NextHearingConfirmationDto>(id, async clientCase =>
     {
+        if (request?.ExpectedNextHearingAt is null)
+            return BadRequest(new { message = "Для подтверждения нужна сохранённая дата заседания. Обновите карточку дела." });
+        if (clientCase.NextHearingAt.HasValue && CalendarTimeZoneHelper.NormalizeUtcInstant(request.ExpectedNextHearingAt.Value)
+            != CalendarTimeZoneHelper.NormalizeUtcInstant(clientCase.NextHearingAt.Value))
+            return Conflict(new { message = "Дата заседания изменилась. Обновите карточку и проверьте актуальное время." });
         if (IsFinishedCaseStatus(clientCase.Status))
         {
             return Conflict(new { message = "Дату заседания закрытого дела нельзя подтвердить." });

@@ -5,6 +5,8 @@ namespace PayPlanner.Api.Controllers.V2;
 
 public partial class CasesV2Controller
 {
+    public sealed record CasePositionReviewRequest(string? ExpectedStrategy);
+
     public sealed class CasePositionReviewDto
     {
         public DateTime PositionReviewedAt { get; init; }
@@ -13,9 +15,14 @@ public partial class CasesV2Controller
     }
 
     [HttpPost("{id:int}/position-review")]
-    public Task<ActionResult<CasePositionReviewDto>> ReviewCasePosition(int id, CancellationToken ct)
+    [HttpPost("{id:int}/position-review/checked")]
+    public Task<ActionResult<CasePositionReviewDto>> ReviewCasePosition(int id, [FromBody] CasePositionReviewRequest? request, CancellationToken ct)
         => RunCaseConfirmationAsync<CasePositionReviewDto>(id, async clientCase =>
     {
+        if (request?.ExpectedStrategy is null)
+            return BadRequest(new { message = "Для подтверждения нужен сохранённый текст позиции. Обновите карточку дела." });
+        if (!string.Equals(request.ExpectedStrategy, clientCase.Strategy, StringComparison.Ordinal))
+            return Conflict(new { message = "Позиция дела изменилась. Обновите карточку и проверьте актуальный текст." });
         if (IsFinishedCaseStatus(clientCase.Status))
         {
             return Conflict(new { message = "Позицию закрытого дела нельзя отмечать как проверенную." });

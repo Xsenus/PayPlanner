@@ -3964,17 +3964,17 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         await db.SaveChangesAsync();
 
         var lawyerController = CreateController(db, lawyer);
-        Assert.IsType<ConflictObjectResult>((await lawyerController.ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result);
+        Assert.IsType<ConflictObjectResult>((await lawyerController.ReviewCasePosition(clientCase.Id, new(clientCase.Strategy), CancellationToken.None)).Result);
         clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         clientCase.Strategy = "Проверить доказательства и подготовить отзыв";
         await db.SaveChangesAsync();
-        Assert.IsType<ForbidResult>((await CreateController(db, viewer).ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result);
-        Assert.IsType<NotFoundResult>((await CreateController(db, outsider).ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await CreateController(db, viewer).ReviewCasePosition(clientCase.Id, new(clientCase.Strategy), CancellationToken.None)).Result);
+        Assert.IsType<NotFoundResult>((await CreateController(db, outsider).ReviewCasePosition(clientCase.Id, new(clientCase.Strategy), CancellationToken.None)).Result);
 
         var first = Assert.IsType<CasesV2Controller.CasePositionReviewDto>(
-            Assert.IsType<OkObjectResult>((await lawyerController.ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result).Value);
+            Assert.IsType<OkObjectResult>((await lawyerController.ReviewCasePosition(clientCase.Id, new(clientCase.Strategy), CancellationToken.None)).Result).Value);
         var repeated = Assert.IsType<CasesV2Controller.CasePositionReviewDto>(
-            Assert.IsType<OkObjectResult>((await lawyerController.ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result).Value);
+            Assert.IsType<OkObjectResult>((await lawyerController.ReviewCasePosition(clientCase.Id, new(clientCase.Strategy), CancellationToken.None)).Result).Value);
         Assert.Equal(first.PositionReviewedAt, repeated.PositionReviewedAt);
         Assert.Equal(lawyer.Id, first.PositionReviewedByUserId);
         Assert.Equal(lawyer.FullName, first.PositionReviewedByName);
@@ -3997,7 +3997,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
 
         clientCase.Status = ClientCaseStatus.Closed;
         await db.SaveChangesAsync();
-        Assert.IsType<ConflictObjectResult>((await lawyerController.ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result);
+        Assert.IsType<ConflictObjectResult>((await lawyerController.ReviewCasePosition(clientCase.Id, new(clientCase.Strategy), CancellationToken.None)).Result);
     }
 
     [Fact]
@@ -4020,21 +4020,21 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         await db.SaveChangesAsync();
 
         var controller = CreateController(db, lawyer);
-        Assert.IsType<ConflictObjectResult>((await controller.ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result);
+        Assert.IsType<ConflictObjectResult>((await controller.ConfirmNextHearing(clientCase.Id, new(clientCase.NextHearingAt ?? new DateTime(2099, 11, 3, 12, 0, 0, DateTimeKind.Utc)), CancellationToken.None)).Result);
         clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         clientCase.NextHearingAt = DateTime.UtcNow.AddDays(-1);
         await db.SaveChangesAsync();
-        Assert.IsType<ConflictObjectResult>((await controller.ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result);
+        Assert.IsType<ConflictObjectResult>((await controller.ConfirmNextHearing(clientCase.Id, new(clientCase.NextHearingAt ?? new DateTime(2099, 11, 3, 12, 0, 0, DateTimeKind.Utc)), CancellationToken.None)).Result);
         clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         clientCase.NextHearingAt = nextHearing;
         await db.SaveChangesAsync();
-        Assert.IsType<ForbidResult>((await CreateController(db, viewer).ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result);
-        Assert.IsType<NotFoundResult>((await CreateController(db, outsider).ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await CreateController(db, viewer).ConfirmNextHearing(clientCase.Id, new(clientCase.NextHearingAt ?? new DateTime(2099, 11, 3, 12, 0, 0, DateTimeKind.Utc)), CancellationToken.None)).Result);
+        Assert.IsType<NotFoundResult>((await CreateController(db, outsider).ConfirmNextHearing(clientCase.Id, new(clientCase.NextHearingAt ?? new DateTime(2099, 11, 3, 12, 0, 0, DateTimeKind.Utc)), CancellationToken.None)).Result);
 
         var first = Assert.IsType<CasesV2Controller.NextHearingConfirmationDto>(
-            Assert.IsType<OkObjectResult>((await controller.ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result).Value);
+            Assert.IsType<OkObjectResult>((await controller.ConfirmNextHearing(clientCase.Id, new(clientCase.NextHearingAt ?? new DateTime(2099, 11, 3, 12, 0, 0, DateTimeKind.Utc)), CancellationToken.None)).Result).Value);
         var repeated = Assert.IsType<CasesV2Controller.NextHearingConfirmationDto>(
-            Assert.IsType<OkObjectResult>((await controller.ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result).Value);
+            Assert.IsType<OkObjectResult>((await controller.ConfirmNextHearing(clientCase.Id, new(clientCase.NextHearingAt ?? new DateTime(2099, 11, 3, 12, 0, 0, DateTimeKind.Utc)), CancellationToken.None)).Result).Value);
         Assert.Equal(nextHearing, first.NextHearingConfirmedForAt);
         Assert.Equal(first.NextHearingConfirmedAt, repeated.NextHearingConfirmedAt);
         Assert.Equal(lawyer.Id, first.NextHearingConfirmedByUserId);
@@ -4069,7 +4069,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
 
         clientCase.Status = ClientCaseStatus.Closed;
         await db.SaveChangesAsync();
-        Assert.IsType<ConflictObjectResult>((await controller.ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result);
+        Assert.IsType<ConflictObjectResult>((await controller.ConfirmNextHearing(clientCase.Id, new(clientCase.NextHearingAt ?? new DateTime(2099, 11, 3, 12, 0, 0, DateTimeKind.Utc)), CancellationToken.None)).Result);
     }
 
     [Fact]

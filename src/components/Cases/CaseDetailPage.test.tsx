@@ -1302,7 +1302,7 @@ describe('CaseDetailPage', () => {
 
     expect(await screen.findByText('Позиция заполнена, но ещё не подтверждена.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Подтвердить проверку позиции' }));
-    await waitFor(() => expect(apiService.reviewCasePosition).toHaveBeenCalledWith(15));
+    await waitFor(() => expect(apiService.reviewCasePosition).toHaveBeenCalledWith(15, createCase().strategy));
     expect(await screen.findByText(/Проверена.*Юрист/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Подтвердить проверку позиции' })).toBeNull();
   });
@@ -1340,7 +1340,7 @@ describe('CaseDetailPage', () => {
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Подтвердить дату' }));
-    await waitFor(() => expect(apiService.confirmNextHearing).toHaveBeenCalledWith(15));
+    await waitFor(() => expect(apiService.confirmNextHearing).toHaveBeenCalledWith(15, nextHearingAt));
     expect(await screen.findByText(/подтверждена.*Юрист/i)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Подтвердить дату' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Вернуться к обзору' }));
@@ -5821,6 +5821,22 @@ describe('CaseDetailPage', () => {
     await waitFor(() => expect(apiService.updateCaseV2).toHaveBeenCalledTimes(2));
     expect(vi.mocked(apiService.updateCaseV2).mock.calls[1][1].nextHearingAt).toBe('2099-11-03T12:00:00.000Z');
     expect(vi.mocked(apiService.updateCaseV2).mock.calls[1][1]).not.toHaveProperty('timeZoneId');
+  });
+
+  it.each(['position', 'hearing'] as const)('checked confirmation source: full page %s conflict retains source without retry', async kind => {
+    const source = createCase({ strategy: '  Сохранённая позиция  ', nextHearingAt: '2099-11-03T12:00:00.1234567' });
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(source);
+    const failure = new Error('HTTP 409 - {"message":"Данные изменены. Обновите карточку дела."}');
+    if (kind === 'position') vi.mocked(apiService.reviewCasePosition).mockRejectedValueOnce(failure);
+    else vi.mocked(apiService.confirmNextHearing).mockRejectedValueOnce(failure);
+    render(<CaseDetailPage caseId={source.id} onBack={vi.fn()} canEdit />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    if (kind === 'hearing') fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    fireEvent.click(await screen.findByRole('button', { name: kind === 'position' ? 'Подтвердить проверку позиции' : 'Подтвердить дату' }));
+    await screen.findByText('Данные изменены. Обновите карточку дела.');
+    if (kind === 'position') expect(apiService.reviewCasePosition).toHaveBeenCalledExactlyOnceWith(source.id, source.strategy);
+    else expect(apiService.confirmNextHearing).toHaveBeenCalledExactlyOnceWith(source.id, source.nextHearingAt);
+    expect(screen.queryByText(/отмечена как проверенная|Дата следующего заседания подтверждена/)).toBeNull();
   });
 
 });

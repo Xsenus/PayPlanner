@@ -72,8 +72,8 @@ public partial class CasesV2ControllerTests
         await using var request = Open(hook);
         var controller = CreateController(request, user);
         ActionResult result = hearing
-            ? (await controller.ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result!
-            : (await controller.ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result!;
+            ? (await controller.ConfirmNextHearing(clientCase.Id, new(clientCase.NextHearingAt ?? new DateTime(2099, 11, 3, 12, 0, 0, DateTimeKind.Utc)), CancellationToken.None)).Result!
+            : (await controller.ReviewCasePosition(clientCase.Id, new(clientCase.Strategy), CancellationToken.None)).Result!;
         Assert.True(hook.Called);
         await using var verify = Open();
         var actual = await verify.ClientCases.AsNoTracking().SingleAsync(row => row.Id == clientCase.Id);
@@ -122,15 +122,15 @@ public partial class CasesV2ControllerTests
             await using var other = Open();
             var controller = CreateController(other, user);
             competing = hearing
-                ? (await controller.ConfirmNextHearing(clientCase.Id, ct)).Result
-                : (await controller.ReviewCasePosition(clientCase.Id, ct)).Result;
+                ? (await controller.ConfirmNextHearing(clientCase.Id, new(clientCase.NextHearingAt ?? new DateTime(2099, 11, 3, 12, 0, 0, DateTimeKind.Utc)), ct)).Result
+                : (await controller.ReviewCasePosition(clientCase.Id, new(clientCase.Strategy), ct)).Result;
             Assert.Null(other.Database.CurrentTransaction);
         });
         await using var request = Open(hook);
         var firstController = CreateController(request, user);
         ActionResult first = hearing
-            ? (await firstController.ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result!
-            : (await firstController.ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result!;
+            ? (await firstController.ConfirmNextHearing(clientCase.Id, new(clientCase.NextHearingAt ?? new DateTime(2099, 11, 3, 12, 0, 0, DateTimeKind.Utc)), CancellationToken.None)).Result!
+            : (await firstController.ReviewCasePosition(clientCase.Id, new(clientCase.Strategy), CancellationToken.None)).Result!;
         Assert.True(hook.Called);
         Assert.IsType<ConflictObjectResult>(competing);
         Assert.IsType<OkObjectResult>(first);
@@ -156,8 +156,8 @@ public partial class CasesV2ControllerTests
         var (user, clientCase) = await SeedConfirmationCaseAsync(db);
         var controller = CreateController(db, user);
         ActionResult first = hearing
-            ? (await controller.ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result!
-            : (await controller.ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result!;
+            ? (await controller.ConfirmNextHearing(clientCase.Id, new(clientCase.NextHearingAt ?? new DateTime(2099, 11, 3, 12, 0, 0, DateTimeKind.Utc)), CancellationToken.None)).Result!
+            : (await controller.ReviewCasePosition(clientCase.Id, new(clientCase.Strategy), CancellationToken.None)).Result!;
         Assert.IsType<OkObjectResult>(first);
         var before = await db.ClientCases.AsNoTracking().SingleAsync();
         if (change == "permission")
@@ -168,8 +168,8 @@ public partial class CasesV2ControllerTests
         else
             await db.Users.Where(row => row.Id == user.Id).ExecuteUpdateAsync(set => set.SetProperty(row => row.IsApproved, false));
         ActionResult repeated = hearing
-            ? (await controller.ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result!
-            : (await controller.ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result!;
+            ? (await controller.ConfirmNextHearing(clientCase.Id, new(clientCase.NextHearingAt ?? new DateTime(2099, 11, 3, 12, 0, 0, DateTimeKind.Utc)), CancellationToken.None)).Result!
+            : (await controller.ReviewCasePosition(clientCase.Id, new(clientCase.Strategy), CancellationToken.None)).Result!;
         if (change == "permission") Assert.IsType<ForbidResult>(repeated);
         else Assert.IsType<UnauthorizedResult>(repeated);
         var after = await db.ClientCases.AsNoTracking().SingleAsync();
@@ -193,8 +193,8 @@ public partial class CasesV2ControllerTests
         if (!ambient) db.Clients.Add(pending);
         var controller = CreateController(db, user);
         ActionResult result = hearing
-            ? (await controller.ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result!
-            : (await controller.ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result!;
+            ? (await controller.ConfirmNextHearing(clientCase.Id, new(clientCase.NextHearingAt ?? new DateTime(2099, 11, 3, 12, 0, 0, DateTimeKind.Utc)), CancellationToken.None)).Result!
+            : (await controller.ReviewCasePosition(clientCase.Id, new(clientCase.Strategy), CancellationToken.None)).Result!;
         Assert.IsType<ConflictObjectResult>(result);
         if (ambient) Assert.Same(transaction, db.Database.CurrentTransaction);
         else Assert.Equal(EntityState.Added, db.Entry(pending).State);
@@ -220,8 +220,8 @@ public partial class CasesV2ControllerTests
         using var cancellation = new CancellationTokenSource();
         failure.Cancel = cancellation.Cancel;
         Task Confirm() => hearing
-            ? controller.ConfirmNextHearing(clientCase.Id, cancellation.Token)
-            : controller.ReviewCasePosition(clientCase.Id, cancellation.Token);
+            ? controller.ConfirmNextHearing(clientCase.Id, new(clientCase.NextHearingAt ?? new DateTime(2099, 11, 3, 12, 0, 0, DateTimeKind.Utc)), cancellation.Token)
+            : controller.ReviewCasePosition(clientCase.Id, new(clientCase.Strategy), cancellation.Token);
         if (cancel) await Assert.ThrowsAnyAsync<OperationCanceledException>(Confirm);
         else await Assert.ThrowsAsync<ConfirmationSaveFailureException>(Confirm);
         Assert.True(failure.Called);

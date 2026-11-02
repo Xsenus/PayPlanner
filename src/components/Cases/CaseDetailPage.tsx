@@ -2850,7 +2850,7 @@ function CaseDetailScreen({
     const current = () => operation.isCurrent() && currentCase.current?.strategy === caseItem.strategy && currentCase.current?.status === caseItem.status;
     setReviewingPosition(true); setError(null); setNotice(null);
     try {
-      const review = await awaitOwnedUiResult(() => apiService.reviewCasePosition(caseItem.id), current);
+      const review = await awaitOwnedUiResult(() => apiService.reviewCasePosition(caseItem.id, caseItem.strategy ?? ''), current);
       if (!review || typeof review.positionReviewedAt !== 'string' || !Number.isFinite(parseInstant(review.positionReviewedAt).getTime()) || typeof review.positionReviewedByName !== 'string')
         throw new Error('Не удалось подтвердить сведения о проверке позиции. Обновите карточку.');
       const updated = await refreshCaseAfterHeaderWrite(operation);
@@ -2871,7 +2871,7 @@ function CaseDetailScreen({
     const current = () => operation.isCurrent() && currentCase.current?.nextHearingAt === caseItem.nextHearingAt && currentCase.current?.status === caseItem.status;
     setConfirmingNextHearing(true); setError(null); setNotice(null);
     try {
-      const confirmation = await awaitOwnedUiResult(() => apiService.confirmNextHearing(caseItem.id), current);
+      const confirmation = await awaitOwnedUiResult(() => apiService.confirmNextHearing(caseItem.id, caseItem.nextHearingAt!), current);
       if (!confirmation || typeof confirmation.nextHearingConfirmedAt !== 'string' || typeof confirmation.nextHearingConfirmedForAt !== 'string' || !Number.isFinite(parseInstant(confirmation.nextHearingConfirmedAt).getTime()) || typeof confirmation.nextHearingConfirmedByName !== 'string'
         || parseInstant(confirmation.nextHearingConfirmedForAt).getTime() !== parseInstant(caseItem.nextHearingAt).getTime())
         throw new Error('Дата заседания изменилась или не подтверждена. Обновите карточку дела.');

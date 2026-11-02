@@ -6819,9 +6819,9 @@ export class ApiService {
     return this.request<ClientCase>(`/v2/cases/${id}`, { signal: options?.signal, cache: 'no-store' });
   }
 
-  async reviewCasePosition(id: number) {
-    return this.request<{ positionReviewedAt: string; positionReviewedByUserId: number | null; positionReviewedByName: string }>(`/v2/cases/${id}/position-review`, {
-      method: 'POST',
+  async reviewCasePosition(id: number, expectedStrategy: string) {
+    return this.request<{ positionReviewedAt: string; positionReviewedByUserId: number | null; positionReviewedByName: string }>(`/v2/cases/${id}/position-review/checked`, {
+      method: 'POST', body: JSON.stringify({ expectedStrategy }),
     });
   }
 
@@ -6846,9 +6846,9 @@ export class ApiService {
     return this.request<void>(`/v2/cases/position-templates/${id}`, { method: 'DELETE' });
   }
 
-  async confirmNextHearing(id: number) {
-    return this.request<{ nextHearingConfirmedForAt: string; nextHearingConfirmedAt: string; nextHearingConfirmedByUserId: number | null; nextHearingConfirmedByName: string }>(`/v2/cases/${id}/next-hearing-confirmation`, {
-      method: 'POST',
+  async confirmNextHearing(id: number, expectedNextHearingAt: string) {
+    return this.request<{ nextHearingConfirmedForAt: string; nextHearingConfirmedAt: string; nextHearingConfirmedByUserId: number | null; nextHearingConfirmedByName: string }>(`/v2/cases/${id}/next-hearing-confirmation/checked`, {
+      method: 'POST', body: JSON.stringify({ expectedNextHearingAt }),
     });
   }
 

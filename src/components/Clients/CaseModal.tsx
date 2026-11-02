@@ -24,7 +24,7 @@ import { apiService, type ContactDirectoryItemDto } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { downloadBlob } from '../../utils/downloadBlob';
 import { courtAmountToInput, hasInvalidCourtAmounts, parseCourtAmountInput } from '../../utils/courtAmounts';
-import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
+import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, parseInstant, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_OPTIONS, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import type { TaskJournalItem, TaskJournalPriority, TaskJournalStatus } from '../../utils/taskJournalStore';
 
@@ -687,8 +687,8 @@ export function CaseModal({
     const isCurrent = () => operation.isCurrent() && currentCourtState.current.strategy === caseData.strategy && currentCourtState.current.status === caseData.status;
     setError(null);
     try {
-      const review = await awaitOwnedUiResult(() => apiService.reviewCasePosition(caseData.id), isCurrent);
-      if (!review || !Number.isFinite(Date.parse(review.positionReviewedAt)) || typeof review.positionReviewedByName !== 'string') throw new Error('Не удалось подтвердить сведения о проверке позиции.');
+      const review = await awaitOwnedUiResult(() => apiService.reviewCasePosition(caseData.id, caseData.strategy ?? ''), isCurrent);
+      if (!review || typeof review.positionReviewedAt !== 'string' || !Number.isFinite(parseInstant(review.positionReviewedAt).getTime()) || typeof review.positionReviewedByName !== 'string') throw new Error('Не удалось подтвердить сведения о проверке позиции.');
       setPositionReview(review);
       onPositionReviewed?.(review);
     } catch (err) {
@@ -699,7 +699,7 @@ export function CaseModal({
   };
 
   const handleConfirmNextHearing = async () => {
-    if (!isOpen || !allowEdit || !caseActionOwner.capture() || caseData.id <= 0 || !caseData.nextHearingAt || caseData.status === 'Closed' || caseData.status === 'Lost' || !(Date.parse(caseData.nextHearingAt) > Date.now())) return;
+    if (!isOpen || !allowEdit || !caseActionOwner.capture() || caseData.id <= 0 || !caseData.nextHearingAt || caseData.status === 'Closed' || caseData.status === 'Lost' || !(parseInstant(caseData.nextHearingAt).getTime() > Date.now())) return;
     if (nextHearingAt !== toDateTimeInput(caseData.nextHearingAt, timeZoneId)) {
       setError('Сначала сохраните изменённую дату следующего заседания.');
       return;
@@ -708,9 +708,9 @@ export function CaseModal({
     const isCurrent = () => operation.isCurrent() && currentCourtState.current.hearing === caseData.nextHearingAt && currentCourtState.current.status === caseData.status;
     setError(null);
     try {
-      const confirmation = await awaitOwnedUiResult(() => apiService.confirmNextHearing(caseData.id), isCurrent);
-      if (!confirmation || !Number.isFinite(Date.parse(confirmation.nextHearingConfirmedAt)) || typeof confirmation.nextHearingConfirmedByName !== 'string'
-        || Date.parse(confirmation.nextHearingConfirmedForAt) !== Date.parse(caseData.nextHearingAt)) throw new Error('Дата заседания изменилась или не подтверждена. Обновите карточку дела.');
+      const confirmation = await awaitOwnedUiResult(() => apiService.confirmNextHearing(caseData.id, caseData.nextHearingAt!), isCurrent);
+      if (!confirmation || typeof confirmation.nextHearingConfirmedAt !== 'string' || typeof confirmation.nextHearingConfirmedForAt !== 'string' || !Number.isFinite(parseInstant(confirmation.nextHearingConfirmedAt).getTime()) || typeof confirmation.nextHearingConfirmedByName !== 'string'
+        || parseInstant(confirmation.nextHearingConfirmedForAt).getTime() !== parseInstant(caseData.nextHearingAt).getTime()) throw new Error('Дата заседания изменилась или не подтверждена. Обновите карточку дела.');
       setHearingConfirmation(confirmation);
       onNextHearingConfirmed?.(confirmation);
     } catch (err) {
@@ -1619,11 +1619,11 @@ export function CaseModal({
                 ? 'Дата пока не назначена — ожидайте сведения суда или укажите её вручную.'
                 : nextHearingAt !== toDateTimeInput(caseData.nextHearingAt, timeZoneId)
                   ? 'Дата изменена: сначала сохраните дело, затем подтвердите её.'
-                  : hearingConfirmation.nextHearingConfirmedAt && hearingConfirmation.nextHearingConfirmedForAt && Date.parse(hearingConfirmation.nextHearingConfirmedForAt) === Date.parse(caseData.nextHearingAt ?? '')
+                  : hearingConfirmation.nextHearingConfirmedAt && hearingConfirmation.nextHearingConfirmedForAt && parseInstant(hearingConfirmation.nextHearingConfirmedForAt).getTime() === parseInstant(caseData.nextHearingAt ?? '').getTime()
                     ? `Дата подтверждена ${formatDocumentDate(hearingConfirmation.nextHearingConfirmedAt, timeZoneId)}${hearingConfirmation.nextHearingConfirmedByName ? ` · ${hearingConfirmation.nextHearingConfirmedByName}` : ''}. При переносе отметка сбросится.`
                     : 'Дата ещё не подтверждена сотрудником.'}
             </p>
-            {caseData.id > 0 && allowEdit && caseData.status !== 'Closed' && caseData.status !== 'Lost' && caseData.nextHearingAt && Date.parse(caseData.nextHearingAt) > Date.now() && (!hearingConfirmation.nextHearingConfirmedAt || !hearingConfirmation.nextHearingConfirmedForAt || Date.parse(hearingConfirmation.nextHearingConfirmedForAt) !== Date.parse(caseData.nextHearingAt)) ? (
+            {caseData.id > 0 && allowEdit && caseData.status !== 'Closed' && caseData.status !== 'Lost' && caseData.nextHearingAt && parseInstant(caseData.nextHearingAt).getTime() > Date.now() && (!hearingConfirmation.nextHearingConfirmedAt || !hearingConfirmation.nextHearingConfirmedForAt || parseInstant(hearingConfirmation.nextHearingConfirmedForAt).getTime() !== parseInstant(caseData.nextHearingAt).getTime()) ? (
               <button type="button" onClick={() => void handleConfirmNextHearing()} disabled={saving || confirmingNextHearing || nextHearingAt !== toDateTimeInput(caseData.nextHearingAt, timeZoneId)} className="mt-1 rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-semibold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
                 {confirmingNextHearing ? 'Сохраняем…' : 'Подтвердить дату заседания'}
               </button>
