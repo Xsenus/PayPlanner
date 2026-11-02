@@ -1081,4 +1081,111 @@ describe('CaseModal', () => {
     expect(document.body.textContent).not.toMatch(/ПРЕЖНИЕ ДАННЫЕ|Прежний вход/);
   });
 
+  it('case command baseline: late position confirmation cannot notify a different case', async () => {
+    const pending = deferred<Awaited<ReturnType<typeof apiService.reviewCasePosition>>>(); vi.mocked(apiService.reviewCasePosition).mockReturnValueOnce(pending.promise);
+    const props = { isOpen: true, caseData: createCase({ strategy: 'Сохранённая позиция' }), onClose: vi.fn(), onSave: vi.fn(), onPositionReviewed: vi.fn() };
+    const view = render(<CaseModal {...props} />); await act(async () => {}); fireEvent.click(screen.getByRole('button', { name: 'Подтвердить проверку позиции' }));
+    expect(apiService.reviewCasePosition).toHaveBeenCalledOnce(); view.rerender(<CaseModal {...props} caseData={createCase({ id: 2, strategy: 'Другая позиция' })} />);
+    await act(async () => pending.resolve({ positionReviewedAt: '2026-11-02T10:00:00Z', positionReviewedByUserId: 7, positionReviewedByName: 'ПРЕЖНЯЯ ПОЗИЦИЯ' }));
+    expect(props.onPositionReviewed).not.toHaveBeenCalled(); expect(document.body.textContent).not.toContain('ПРЕЖНЯЯ ПОЗИЦИЯ');
+  });
+  it('case command baseline: old reminder prompt cannot replace a new case setting', async () => {
+    const pending = deferred<string | null>(); dialogMock.prompt.mockReturnValueOnce(pending.promise);
+    const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn() }; const view = render(<CaseModal {...props} />); await act(async () => {});
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Автоконтроль дела' })); expect(dialogMock.prompt).toHaveBeenCalledOnce();
+    view.rerender(<CaseModal {...props} caseData={createCase({ id: 2 })} />); await act(async () => pending.resolve('ПРЕЖНЯЯ ПРИЧИНА'));
+    expect((screen.getByRole('checkbox', { name: 'Автоконтроль дела' }) as HTMLInputElement).checked).toBe(true); expect(document.body.textContent).not.toContain('ПРЕЖНЯЯ ПРИЧИНА');
+  });
+
+  type DirectCommand = 'position' | 'hearing' | 'activity';
+  const commandLabels = { position: 'Подтвердить проверку позиции', hearing: 'Подтвердить дату заседания', activity: 'Подтвердить активность' };
+  const commandCase = () => createCase({ strategy: 'Сохранённая позиция', nextHearingAt: '2099-12-03T12:00:00Z' });
+  const commandReply = (command: DirectCommand) => command === 'position'
+    ? { positionReviewedAt: '2026-11-02T10:00:00Z', positionReviewedByUserId: 7, positionReviewedByName: 'ПРЕЖНИЙ ОТВЕТ' }
+    : command === 'hearing' ? { nextHearingConfirmedForAt: '2099-12-03T12:00:00Z', nextHearingConfirmedAt: '2026-11-02T10:00:00Z', nextHearingConfirmedByUserId: 7, nextHearingConfirmedByName: 'ПРЕЖНИЙ ОТВЕТ' }
+      : { activityConfirmedAt: '2026-11-02T10:00:00Z', activityConfirmedByUserId: 7, activityConfirmedByUserName: 'ПРЕЖНИЙ ОТВЕТ', inactivityRemindersEnabled: true, eventHistory: 'ПРЕЖНИЙ ОТВЕТ' };
+  const stubCommand = (command: DirectCommand, promise: Promise<unknown>) => {
+    if (command === 'position') vi.mocked(apiService.reviewCasePosition).mockReturnValue(promise as never);
+    else if (command === 'hearing') vi.mocked(apiService.confirmNextHearing).mockReturnValue(promise as never);
+    else vi.mocked(apiService.markCaseActivity).mockImplementation((_id, payload) => (payload?.confirmed ? promise : Promise.resolve({ inactivityRemindersEnabled: true })) as never);
+  };
+  const commandCount = (command: DirectCommand) => command === 'position' ? vi.mocked(apiService.reviewCasePosition).mock.calls.length
+    : command === 'hearing' ? vi.mocked(apiService.confirmNextHearing).mock.calls.length
+      : vi.mocked(apiService.markCaseActivity).mock.calls.filter(([, payload]) => payload?.confirmed).length;
+
+  it.each((['position', 'hearing', 'activity'] as const).flatMap(command => (['case', 'role', 'rights', 'close', 'login', 'unmount'] as const).flatMap(change => ['success', 'error'].map(outcome => ({ command, change, outcome })))))('case command boundary: $command ignores $outcome after $change', async ({ command, change, outcome }) => {
+    const pending = deferred<unknown>(); stubCommand(command, pending.promise);
+    const props = { isOpen: true, caseData: commandCase(), onClose: vi.fn(), onSave: vi.fn(), onPositionReviewed: vi.fn(), onNextHearingConfirmed: vi.fn() };
+    const view = render(<CaseModal {...props} />); await act(async () => {}); fireEvent.click(screen.getByRole('button', { name: commandLabels[command] })); expect(commandCount(command)).toBe(1);
+    if (change === 'case') view.rerender(<CaseModal {...props} caseData={{ ...props.caseData, id: 2 }} />);
+    else if (change === 'role') { caseAuth.roleId++; view.rerender(<CaseModal {...props} />); }
+    else if (change === 'rights') view.rerender(<CaseModal {...props} allowEdit={false} />);
+    else if (change === 'close') fireEvent.click(screen.getByRole('button', { name: 'Закрыть' }));
+    else if (change === 'login') caseReadSession.replace();
+    else view.unmount();
+    await act(async () => { if (outcome === 'success') pending.resolve(commandReply(command)); else pending.reject(new Error('ПРЕЖНЯЯ ОШИБКА')); });
+    expect(props.onPositionReviewed).not.toHaveBeenCalled(); expect(props.onNextHearingConfirmed).not.toHaveBeenCalled(); expect(document.body.textContent).not.toMatch(/ПРЕЖНИЙ ОТВЕТ|ПРЕЖНЯЯ ОШИБКА/); expect(props.onSave).not.toHaveBeenCalled();
+  });
+  it.each(['position', 'hearing', 'activity'] as const)('case command boundary: %s owns one operation and excludes save/delete until settled', async command => {
+    const pending = deferred<unknown>(); stubCommand(command, pending.promise);
+    const props = { isOpen: true, caseData: commandCase(), onClose: vi.fn(), onSave: vi.fn(), onDelete: vi.fn() };
+    render(<CaseModal {...props} />); await act(async () => {}); const button = screen.getByRole('button', { name: commandLabels[command] });
+    act(() => { fireEvent.click(button); fireEvent.click(button); fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true }); fireEvent.click(screen.getByRole('button', { name: 'Удалить' })); });
+    expect(commandCount(command)).toBe(1); expect(props.onSave).not.toHaveBeenCalled(); expect(props.onDelete).not.toHaveBeenCalled(); expect(dialogMock.confirm).not.toHaveBeenCalled();
+    await act(async () => pending.resolve(commandReply(command))); expect((screen.getByRole('button', { name: 'Сохранить' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+  it.each(['position', 'hearing', 'activity'] as const)('case command boundary: %s current failure preserves draft and permits explicit retry', async command => {
+    const pending = deferred<unknown>(); stubCommand(command, pending.promise); render(<CaseModal isOpen caseData={commandCase()} onSave={vi.fn()} onClose={vi.fn()} />); await act(async () => {});
+    fireEvent.change(screen.getByLabelText('Название дела'), { target: { value: 'Ручной черновик' } }); fireEvent.click(screen.getByRole('button', { name: commandLabels[command] }));
+    await act(async () => pending.reject(new Error('Доступ к действию отклонён'))); await screen.findByText(/Доступ к действию отклонён/); expect(screen.getByLabelText('Название дела')).toHaveProperty('value', 'Ручной черновик');
+    stubCommand(command, Promise.resolve(commandReply(command))); fireEvent.click(screen.getByRole('button', { name: commandLabels[command] })); await waitFor(() => expect(commandCount(command)).toBe(2)); await act(async () => {}); expect(screen.queryByText(/Доступ к действию отклонён/)).toBeNull();
+  });
+  it.each(['position', 'hearing', 'activity'] as const)('case command boundary: %s cannot start from an obsolete login before render', async command => {
+    render(<CaseModal isOpen caseData={commandCase()} onSave={vi.fn()} onClose={vi.fn()} />); await act(async () => {}); caseReadSession.replace();
+    fireEvent.click(screen.getByRole('button', { name: commandLabels[command] })); await act(async () => {}); expect(commandCount(command)).toBe(0);
+  });
+  it.each(['case', 'role', 'rights', 'close', 'unmount'] as const)('case command prompt: %s aborts pending reason and ignores late acceptance', async change => {
+    const pending = deferred<string | null>(); dialogMock.prompt.mockReturnValueOnce(pending.promise);
+    const props = { isOpen: true, caseData: commandCase(), onClose: vi.fn(), onSave: vi.fn() }; const view = render(<CaseModal {...props} />); await act(async () => {});
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Автоконтроль дела' })); const signal = dialogMock.prompt.mock.calls[0][0].signal as AbortSignal; expect(signal).toBeInstanceOf(AbortSignal);
+    if (change === 'case') view.rerender(<CaseModal {...props} caseData={{ ...props.caseData, id: 2 }} />);
+    else if (change === 'role') { caseAuth.roleId++; view.rerender(<CaseModal {...props} />); }
+    else if (change === 'rights') view.rerender(<CaseModal {...props} allowEdit={false} />);
+    else if (change === 'close') fireEvent.click(screen.getByRole('button', { name: 'Закрыть' })); else view.unmount();
+    expect(signal.aborted).toBe(true); await act(async () => pending.resolve('ПРЕЖНЯЯ ПРИЧИНА')); expect(document.body.textContent).not.toContain('ПРЕЖНЯЯ ПРИЧИНА'); expect(props.onSave).not.toHaveBeenCalled();
+  });
+  it('case command prompt: cancellation/blank/rejection unlock and preserve the existing draft', async () => {
+    dialogMock.prompt.mockResolvedValueOnce(null).mockResolvedValueOnce('   ').mockRejectedValueOnce(new Error('Диалог недоступен')).mockResolvedValueOnce('  Согласованная причина  ');
+    const props = { isOpen: true, caseData: commandCase(), onClose: vi.fn(), onSave: vi.fn() }; render(<CaseModal {...props} />); await act(async () => {});
+    const toggle = screen.getByRole('checkbox', { name: 'Автоконтроль дела' }); fireEvent.change(screen.getByLabelText('Название дела'), { target: { value: 'Ручной черновик' } });
+    fireEvent.click(toggle); await act(async () => {}); expect(toggle).toHaveProperty('checked', true);
+    fireEvent.click(toggle); await screen.findByText('Укажите причину выключения автоконтроля.'); expect(toggle).toHaveProperty('checked', true);
+    fireEvent.click(toggle); await screen.findByText('Диалог недоступен'); expect(toggle).toHaveProperty('checked', true);
+    fireEvent.click(toggle); await screen.findByText('Причина: Согласованная причина'); expect(toggle).toHaveProperty('checked', false); expect(screen.getByLabelText('Название дела')).toHaveProperty('value', 'Ручной черновик');
+    fireEvent.click(toggle); expect(toggle).toHaveProperty('checked', true); expect(screen.queryByText(/Причина: Согласованная причина/)).toBeNull(); expect(props.onSave).not.toHaveBeenCalled();
+  });
+  it('case command prompt: pending prompt excludes other confirmations and save', async () => {
+    const pending = deferred<string | null>(); dialogMock.prompt.mockReturnValueOnce(pending.promise); const onSave = vi.fn(); render(<CaseModal isOpen caseData={commandCase()} onSave={onSave} onClose={vi.fn()} />); await act(async () => {});
+    const toggle = screen.getByRole('checkbox', { name: 'Автоконтроль дела' }); act(() => { fireEvent.click(toggle); fireEvent.click(toggle); fireEvent.click(screen.getByRole('button', { name: commandLabels.position })); fireEvent.click(screen.getByRole('button', { name: commandLabels.activity })); fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', metaKey: true }); });
+    expect(dialogMock.prompt).toHaveBeenCalledOnce(); expect(apiService.reviewCasePosition).not.toHaveBeenCalled(); expect(commandCount('activity')).toBe(0); expect(onSave).not.toHaveBeenCalled(); await act(async () => pending.resolve(null));
+  });
+  it('case command permissions: read-only activity remains available, edit commands and settings stay unavailable', async () => {
+    stubCommand('activity', Promise.resolve(commandReply('activity'))); render(<CaseModal isOpen allowEdit={false} caseData={commandCase()} onSave={vi.fn()} onClose={vi.fn()} />); await act(async () => {});
+    expect(screen.queryByRole('button', { name: commandLabels.position })).toBeNull(); expect(screen.queryByRole('button', { name: commandLabels.hearing })).toBeNull(); expect(screen.getByRole('checkbox', { name: 'Автоконтроль дела' })).toHaveProperty('disabled', true);
+    fireEvent.click(screen.getByRole('button', { name: commandLabels.activity })); await screen.findByText(/Подтверждено:.*ПРЕЖНИЙ ОТВЕТ/); expect(commandCount('activity')).toBe(1); expect(dialogMock.prompt).not.toHaveBeenCalled();
+  });
+  it.each(['position', 'hearing'] as const)('case command concurrency: %s ignores confirmation of changed saved content in the same case', async command => {
+    const pending = deferred<unknown>(); stubCommand(command, pending.promise); const props = { isOpen: true, caseData: commandCase(), onSave: vi.fn(), onClose: vi.fn(), onPositionReviewed: vi.fn(), onNextHearingConfirmed: vi.fn() }; const view = render(<CaseModal {...props} />); await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: commandLabels[command] })); view.rerender(<CaseModal {...props} caseData={{ ...props.caseData, strategy: 'Обновлённая позиция', nextHearingAt: '2099-12-04T12:00:00Z' }} />); await act(async () => pending.resolve(commandReply(command)));
+    expect(props.onPositionReviewed).not.toHaveBeenCalled(); expect(props.onNextHearingConfirmed).not.toHaveBeenCalled(); expect(document.body.textContent).not.toContain('ПРЕЖНИЙ ОТВЕТ');
+  });
+  it('case command validation: a confirmation for another saved hearing does not notify the parent', async () => {
+    const props = { isOpen: true, caseData: commandCase(), onSave: vi.fn(), onClose: vi.fn(), onNextHearingConfirmed: vi.fn() }; vi.mocked(apiService.confirmNextHearing).mockResolvedValue({ ...commandReply('hearing'), nextHearingConfirmedForAt: '2099-12-04T12:00:00Z' } as never);
+    render(<CaseModal {...props} />); await act(async () => {}); fireEvent.click(screen.getByRole('button', { name: commandLabels.hearing })); await screen.findByText('Дата заседания изменилась или не подтверждена. Обновите карточку дела.'); expect(props.onNextHearingConfirmed).not.toHaveBeenCalled();
+  });
+  it('case command validation: malformed review does not notify the parent and permits retry', async () => {
+    vi.mocked(apiService.reviewCasePosition).mockResolvedValue({ positionReviewedAt: 'invalid', positionReviewedByName: 'Чужой ответ' } as never); const onPositionReviewed = vi.fn(); render(<CaseModal isOpen caseData={commandCase()} onSave={vi.fn()} onClose={vi.fn()} onPositionReviewed={onPositionReviewed} />); await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: commandLabels.position })); await screen.findByText('Не удалось подтвердить сведения о проверке позиции.'); expect(onPositionReviewed).not.toHaveBeenCalled(); expect(screen.getByRole('button', { name: commandLabels.position })).toHaveProperty('disabled', false);
+  });
+
 });

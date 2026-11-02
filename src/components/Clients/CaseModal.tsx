@@ -293,13 +293,16 @@ export function CaseModal({
   const modalRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const deleteConfirmation = useRef<AbortController | null>(null);
+  const activityPrompt = useRef<AbortController | null>(null);
+  const currentCourtState = useRef({ strategy: caseData.strategy, hearing: caseData.nextHearingAt, status: caseData.status });
+  currentCourtState.current = { strategy: caseData.strategy, hearing: caseData.nextHearingAt, status: caseData.status };
   const handleClose = () => {
     if (!isOpen || !caseActionOwner.capture()) return;
-    caseActionOwner.invalidate(); setReadClosed(true); deleteConfirmation.current?.abort(); onClose();
+    caseActionOwner.invalidate(); setReadClosed(true); deleteConfirmation.current?.abort(); activityPrompt.current?.abort(); onClose();
   };
   const trapFocus = useModalFocusTrap(modalRef, isOpen, handleClose, titleInputRef);
   useEffect(() => {
-    return () => { deleteConfirmation.current?.abort(); };
+    return () => { deleteConfirmation.current?.abort(); activityPrompt.current?.abort(); };
   }, [caseActionOwner.scope]);
   const fallbackTimeZone = useMemo(() => normalizeUserTimeZoneId(), []);
   const [timeZoneState, setTimeZoneState] = useState({ scope: caseActionOwner.scope, value: fallbackTimeZone });
@@ -359,14 +362,14 @@ export function CaseModal({
     positionReviewedByUserId: caseData.positionReviewedByUserId ?? null,
     positionReviewedByName: caseData.positionReviewedByName ?? '',
   });
-  const [reviewingPosition, setReviewingPosition] = useState(false);
+  const reviewingPosition = caseActionOwner.kind === 'review-position';
   const [hearingConfirmation, setHearingConfirmation] = useState({
     nextHearingConfirmedForAt: caseData.nextHearingConfirmedForAt ?? null,
     nextHearingConfirmedAt: caseData.nextHearingConfirmedAt ?? null,
     nextHearingConfirmedByUserId: caseData.nextHearingConfirmedByUserId ?? null,
     nextHearingConfirmedByName: caseData.nextHearingConfirmedByName ?? '',
   });
-  const [confirmingNextHearing, setConfirmingNextHearing] = useState(false);
+  const confirmingNextHearing = caseActionOwner.kind === 'confirm-hearing';
   const [documentsSaving, setDocumentsSaving] = useState(false);
   const [uploadRevision, setUploadRevision] = useState(0);
   const [documentActionError, setDocumentActionError] = useState<{ owner: DocumentDeliveryRead; message: string } | null>(null);
@@ -394,7 +397,7 @@ export function CaseModal({
     inactivityRemindersDisabledReason: caseData.inactivityRemindersDisabledReason ?? '',
     eventHistory: caseData.eventHistory ?? '',
   });
-  const [activitySaving, setActivitySaving] = useState(false);
+  const activitySaving = caseActionOwner.kind === 'confirm-activity';
   const [relatedPartiesSaving, setRelatedPartiesSaving] = useState(false);
   const [partyActionError, setPartyActionError] = useState<{ owner: DocumentDeliveryRead; message: string } | null>(null);
   const setRelatedPartiesError = useCallback((message: string | null) => {
@@ -494,7 +497,6 @@ export function CaseModal({
       inactivityRemindersDisabledReason: caseData.inactivityRemindersDisabledReason ?? '',
       eventHistory: caseData.eventHistory ?? '',
     });
-    setActivitySaving(false);
     setRelatedPartiesError(null);
     setRelatedPartyMode('contact');
     setRelatedPartySourceKey('');
@@ -670,40 +672,45 @@ export function CaseModal({
   };
 
   const handleReviewPosition = async () => {
-    if (!allowEdit || !caseData.id || !strategy.trim() || positionReview.positionReviewedAt) return;
+    if (!isOpen || !allowEdit || !caseActionOwner.capture() || caseData.id <= 0 || caseData.status === 'Closed' || caseData.status === 'Lost' || !strategy.trim() || positionReview.positionReviewedAt) return;
     if (strategy.trim() !== (caseData.strategy ?? '').trim()) {
       setError('Сначала сохраните изменённую позицию по делу.');
       return;
     }
-    setReviewingPosition(true);
+    const operation = caseActionOwner.begin('review-position'); if (!operation) return;
+    const isCurrent = () => operation.isCurrent() && currentCourtState.current.strategy === caseData.strategy && currentCourtState.current.status === caseData.status;
     setError(null);
     try {
-      const review = await apiService.reviewCasePosition(caseData.id);
+      const review = await awaitOwnedUiResult(() => apiService.reviewCasePosition(caseData.id), isCurrent);
+      if (!review || !Number.isFinite(Date.parse(review.positionReviewedAt)) || typeof review.positionReviewedByName !== 'string') throw new Error('Не удалось подтвердить сведения о проверке позиции.');
       setPositionReview(review);
       onPositionReviewed?.(review);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось подтвердить проверку позиции.');
+      if (isCurrent() && !(err instanceof StaleUiOperationError)) setError(extractDisplayErrorMessage(err, 'Не удалось подтвердить проверку позиции.'));
     } finally {
-      setReviewingPosition(false);
+      operation.finish();
     }
   };
 
   const handleConfirmNextHearing = async () => {
-    if (!allowEdit || !caseData.id || !caseData.nextHearingAt) return;
+    if (!isOpen || !allowEdit || !caseActionOwner.capture() || caseData.id <= 0 || !caseData.nextHearingAt || caseData.status === 'Closed' || caseData.status === 'Lost' || !(Date.parse(caseData.nextHearingAt) > Date.now())) return;
     if (nextHearingAt !== toDateTimeInput(caseData.nextHearingAt, timeZoneId)) {
       setError('Сначала сохраните изменённую дату следующего заседания.');
       return;
     }
-    setConfirmingNextHearing(true);
+    const operation = caseActionOwner.begin('confirm-hearing'); if (!operation) return;
+    const isCurrent = () => operation.isCurrent() && currentCourtState.current.hearing === caseData.nextHearingAt && currentCourtState.current.status === caseData.status;
     setError(null);
     try {
-      const confirmation = await apiService.confirmNextHearing(caseData.id);
+      const confirmation = await awaitOwnedUiResult(() => apiService.confirmNextHearing(caseData.id), isCurrent);
+      if (!confirmation || !Number.isFinite(Date.parse(confirmation.nextHearingConfirmedAt)) || typeof confirmation.nextHearingConfirmedByName !== 'string'
+        || Date.parse(confirmation.nextHearingConfirmedForAt) !== Date.parse(caseData.nextHearingAt)) throw new Error('Дата заседания изменилась или не подтверждена. Обновите карточку дела.');
       setHearingConfirmation(confirmation);
       onNextHearingConfirmed?.(confirmation);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось подтвердить дату следующего заседания.');
+      if (isCurrent() && !(err instanceof StaleUiOperationError)) setError(extractDisplayErrorMessage(err, 'Не удалось подтвердить дату следующего заседания.'));
     } finally {
-      setConfirmingNextHearing(false);
+      operation.finish();
     }
   };
 
@@ -925,53 +932,55 @@ export function CaseModal({
   };
 
   const handleConfirmActivity = async () => {
-    if (!caseData.id || caseData.id <= 0) return;
-
+    // Confirming a view is allowed with the existing view permission, including read-only cards.
+    if (!isOpen || !caseActionOwner.capture() || caseData.id <= 0) return;
+    const operation = caseActionOwner.begin('confirm-activity'); if (!operation) return;
     activityReadSequence.current++;
-    setActivitySaving(true);
     setError(null);
     try {
-      const nextActivity = await apiService.markCaseActivity(caseData.id, { confirmed: true });
+      const nextActivity = await awaitOwnedUiResult(() => apiService.markCaseActivity(caseData.id, { confirmed: true }), operation.isCurrent);
       applyActivity(nextActivity);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (operation.isCurrent() && !(e instanceof StaleUiOperationError)) setError(extractDisplayErrorMessage(e, 'Не удалось подтвердить активность по делу.'));
     } finally {
-      setActivitySaving(false);
+      operation.finish();
     }
   };
 
   const handleInactivityRemindersChange = async (enabled: boolean) => {
-    if (enabled) {
+    if (!isOpen || !allowEdit || !caseActionOwner.capture()) return;
+    const operation = caseActionOwner.begin('activity-reminders'); if (!operation) return;
+    let controller: AbortController | null = null;
+    try {
+      if (enabled) {
+        activityEdited.current = true;
+        setActivity(current => ({ ...current, inactivityRemindersEnabled: true, inactivityRemindersDisabledReason: '' }));
+        return;
+      }
+      controller = new AbortController(); activityPrompt.current = controller;
+      const reason = await awaitOwnedUiResult(() => prompt({
+        signal: controller!.signal,
+        title: 'Выключить автоконтроль дела',
+        label: 'Причина выключения',
+        defaultValue: activity.inactivityRemindersDisabledReason ?? '',
+        multiline: true,
+        confirmLabel: 'Выключить',
+        cancelLabel: 'Отмена',
+      }), operation.isCurrent);
+      if (reason === null) return;
+      if (!reason.trim()) {
+        setError('Укажите причину выключения автоконтроля.');
+        return;
+      }
       activityEdited.current = true;
-      setActivity((current) => ({
-        ...current,
-        inactivityRemindersEnabled: true,
-        inactivityRemindersDisabledReason: '',
-      }));
-      return;
+      setError(null);
+      setActivity(current => ({ ...current, inactivityRemindersEnabled: false, inactivityRemindersDisabledReason: reason.trim() }));
+    } catch (e: unknown) {
+      if (operation.isCurrent() && !(e instanceof StaleUiOperationError)) setError(extractDisplayErrorMessage(e, 'Не удалось изменить автоконтроль дела.'));
+    } finally {
+      if (activityPrompt.current === controller) activityPrompt.current = null;
+      operation.finish();
     }
-
-    const reason = await prompt({
-      title: 'Выключить автоконтроль дела',
-      label: 'Причина выключения',
-      defaultValue: activity.inactivityRemindersDisabledReason ?? '',
-      multiline: true,
-      confirmLabel: 'Выключить',
-      cancelLabel: 'Отмена',
-    });
-    if (reason === null) return;
-    if (!reason.trim()) {
-      setError('Укажите причину выключения автоконтроля.');
-      return;
-    }
-
-    activityEdited.current = true;
-    setError(null);
-    setActivity((current) => ({
-      ...current,
-      inactivityRemindersEnabled: false,
-      inactivityRemindersDisabledReason: reason.trim(),
-    }));
   };
 
   const handleAddRelatedParty = async () => {
