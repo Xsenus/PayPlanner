@@ -598,6 +598,21 @@ describe('background publication attempt acknowledgement', () => {
   const versionScope = (api = API_BASE_URL) => JSON.stringify(['version', api, 18, 'Документ', 'Подготовлен']);
   const receipt = (key: string) => ({ uploadKey: key, status: 'uploaded', documentId: 19, version: 2 });
 
+  it.each(['discovery', 'status'])('retains the local attempt after a forbidden %s response in the same session', async (mode) => {
+    localStorage.setItem('pp_token', token(1));
+    const own = beginCaseDocumentUpload(caseScope(), file(), token(1));
+    const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: 'HTTP 403: forbidden' }), { status: 403, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const api = new ApiService();
+    await expect(mode === 'discovery' ? api.getPendingCaseDocumentUploads(15) : api.getCaseDocumentUploadStates(15, [own.key]))
+      .rejects.toThrow('HTTP 403');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+
   it.each(['discovery', 'status'])('rejects late sensitive %s data after an actor switch', async (mode) => {
     localStorage.setItem('pp_token', token(1));
     const own = beginCaseDocumentUpload(caseScope(), file(), token(1));

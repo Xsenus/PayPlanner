@@ -1,5 +1,6 @@
+// @vitest-environment node
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { it as test } from 'vitest';
 import { mkdtemp, mkdir, readFile, readdir, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -92,7 +93,7 @@ async function artifactFixture(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'payplanner-image-probe-test-'));
   const app = path.join(directory, 'app');
   await mkdir(app);
-  t.after(async () => {
+  t.onTestFinished(async () => {
     assert.equal(path.dirname(directory), tmpdir());
     assert.ok(path.basename(directory).startsWith('payplanner-image-probe-test-'));
     for (const file of await readdir(app)) await unlink(path.join(app, file));

@@ -90,6 +90,19 @@ describe('published local case attempt recovery', () => {
     else expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBeNull();
   });
 
+  it('preserves a local attempt when proof is forbidden in the unchanged session', async () => {
+    beginCaseDocumentGeneration(scope(), token());
+    const before = sessionStorage.getItem('pp.case-document-upload-attempts.v1');
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(response(empty)).mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: 'HTTP 403: forbidden' }), { status: 403, headers: { 'content-type': 'application/json' } }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(apiService.getPendingCaseDocumentUploads(7)).rejects.toThrow('403');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.every(([, options]) => (options?.method ?? 'GET') === 'GET' && options?.body === undefined)).toBe(true);
+    expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
+  });
+
   it('reads sixty unresolved keys in two bounded batches without history or writes', async () => {
     for (let i = 0; i < 60; i++) beginCaseDocumentGeneration(scope('contract', 7, API_BASE_URL, i.toString(16).padStart(64, '0')), token());
     const sizes: number[] = [];

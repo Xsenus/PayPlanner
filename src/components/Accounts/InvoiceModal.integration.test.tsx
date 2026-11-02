@@ -712,6 +712,7 @@ describe('InvoiceModal integration', () => {
     vi.mocked(apiService.getDocumentImagePrintDefaults).mockReset().mockResolvedValue({ includeLogo: false, includeSeal: false, includeSignature: false });
     vi.mocked(apiService.prepareDocumentPrint).mockReset().mockImplementation(async () => Object.assign(new Blob(['print copy']), { text: async () => 'print copy' }));
     vi.mocked(apiService.uploadInvoiceDocumentToYandexDisk).mockReset().mockResolvedValue({ success: true, path: '/CRM/invoice.pdf' });
+    vi.mocked(apiService.sendInvoiceByEmail).mockReset().mockResolvedValue({ sent: true, recipient: 'client@example.test', fileName: 'invoice.docx', format: 'word' });
     permissionState.value = null;
     vi.mocked(apiService.getInvoicePreview).mockClear();
     caseModalSubmitPayloadRef.current = {

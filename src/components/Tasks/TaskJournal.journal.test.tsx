@@ -334,7 +334,8 @@ describe('TaskJournal', () => {
       expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({
         calendarView: true,
       }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
-      expect(apiMock.getTaskJournalAssignees).toHaveBeenCalledWith({ calendarView: true });
+      expect(apiMock.getTaskJournalAssignees).toHaveBeenCalledWith({ calendarView: true },
+        expect.objectContaining({ signal: expect.any(AbortSignal) }));
     });
   });
 

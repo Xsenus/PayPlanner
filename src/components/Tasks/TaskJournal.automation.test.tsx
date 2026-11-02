@@ -1,4 +1,4 @@
-import { setupTaskJournalTests, apiMock, toastMock, todayAt, toDatetimeLocalInputValue, createTask, renderJournal } from './TaskJournal.test-support';
+import { setupTaskJournalTests, apiMock, toastMock, clientsState, casesState, todayAt, toDatetimeLocalInputValue, createTask, renderJournal } from './TaskJournal.test-support';
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { TASK_JOURNAL_EVENT } from '../../utils/taskJournalStore';
@@ -270,6 +270,8 @@ describe('TaskJournal', () => {
   });
 
   it('falls back to the binding step when automatic billing lookup fails', async () => {
+    clientsState.clients.push({ ...clientsState.clients[0], id: 12, name: 'Петров Пётр Петрович' });
+    casesState.cases.push({ ...casesState.cases[0], id: 103, clientId: 12, title: 'ДЕЛО В ОЖИДАНИИ' });
     apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([
       {
         clientId: 12,
@@ -302,7 +304,7 @@ describe('TaskJournal', () => {
     fireEvent.click(screen.getByTestId('task-automation-create-103'));
 
     expect(await screen.findByRole('heading', { name: 'Выберите клиента и дело' })).toBeTruthy();
-    expect(screen.getByText('Нет связи с расчётом договора')).toBeTruthy();
+    expect(await screen.findByText('Нет связи с расчётом договора')).toBeTruthy();
     expect(apiMock.createTaskJournalCaseAutomationTask).not.toHaveBeenCalled();
   });
 
@@ -340,6 +342,8 @@ describe('TaskJournal', () => {
   });
 
   it('shows all cases without active tasks by automation state', async () => {
+    clientsState.clients.push({ ...clientsState.clients[0], id: 11, name: 'Петров Петр Петрович' });
+    casesState.cases.push({ ...casesState.cases[0], id: 101, clientId: 11, title: 'ОЖИДАЕТ ПОРОГА' });
     apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([
       {
         clientId: 10,
@@ -515,13 +519,14 @@ describe('TaskJournal', () => {
     expect(waitingTaskButton.textContent).toContain('Поставить задачу');
 
     apiMock.getTaskBillingContext.mockClear();
+    apiMock.getTaskBillingContext.mockResolvedValueOnce({ clientId: 11, legalEntityId: null, clientCaseId: 101, contracts: [] });
     fireEvent.click(waitingTaskButton);
 
     await waitFor(() => expect(apiMock.getTaskBillingContext).toHaveBeenCalledWith({
       clientId: 11,
       legalEntityId: undefined,
       clientCaseId: 101,
-    }));
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) })));
     expect(await screen.findByRole('heading', { name: 'Определите учёт задачи' })).toBeTruthy();
     expect(apiMock.createTaskJournalCaseAutomationTask).not.toHaveBeenCalled();
   });
@@ -715,7 +720,7 @@ describe('TaskJournal', () => {
         clientId: 10,
         legalEntityId: undefined,
         clientCaseId: 100,
-      }));
+      }, expect.objectContaining({ signal: expect.any(AbortSignal) })));
       expect(await screen.findByRole('heading', { name: 'Определите учёт задачи' })).toBeTruthy();
       fireEvent.click(screen.getByRole('button', { name: /^Внутренняя задача/ }));
 
@@ -790,7 +795,7 @@ describe('TaskJournal', () => {
         clientId: 10,
         legalEntityId: undefined,
         clientCaseId: 100,
-      }));
+      }, expect.objectContaining({ signal: expect.any(AbortSignal) })));
       expect(await screen.findByRole('heading', { name: 'Определите учёт задачи' })).toBeTruthy();
       fireEvent.click(screen.getByRole('button', { name: /^Внутренняя задача/ }));
 
