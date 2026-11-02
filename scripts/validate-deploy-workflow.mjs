@@ -281,7 +281,10 @@ export function validateDeployWorkflow(source) {
   ].map(run => command('backend-format', run));
   requireValue(command('backend-format', restore).index < formatting[0].index
     && formatting.every((gate, index) => index === 0 || gate.index > formatting[index - 1].index), 'Strict restore and all full semantic/migration formatting gates must remain ordered');
-  for (const gate of formatting.slice(1, 4)) requireValue(JSON.stringify(gate.step.env) === JSON.stringify({ DOTNET_GCHeapHardLimit: '240000000', CompilerResponseFile: '${{ github.workspace }}/scripts/compiler-serial.rsp' }), 'All migration format phases require the full nine-GiB serial profile');
+  for (const [index, gate] of formatting.slice(1, 4).entries()) {
+    const heap = index === 2 ? '280000000' : '240000000';
+    requireValue(JSON.stringify(gate.step.env) === JSON.stringify({ DOTNET_GCHeapHardLimit: heap, CompilerResponseFile: '${{ github.workspace }}/scripts/compiler-serial.rsp' }), 'Migration format phases require their bounded full-catalog serial profiles');
+  }
   for (const [jobId, job] of Object.entries(jobs)) {
     requireValue(job.env?.PayPlannerSkipMigrationsBuild === undefined && job.env?.ArtifactsPath === undefined && job.env?.UseArtifactsOutput === undefined, 'Do not bypass the fresh build graph');
     if (jobId !== 'backend-build') requireValue(job.env?.CompilerResponseFile === undefined, 'Compiler response override belongs only to the reviewed build job');

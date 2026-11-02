@@ -73,7 +73,19 @@ describe('merged production workflow protections', () => {
     expect(() => validateDeployWorkflow(replaceOnce(command, 'run: echo formatted'))).toThrow();
     const job = parseWorkflow(workflow).jobs['backend-format'];
     const step = job.steps.find((step: { run?: string }) => step.run === command.slice(5));
-    expect(step.env).toEqual({ DOTNET_GCHeapHardLimit: '240000000', CompilerResponseFile: '${{ github.workspace }}/scripts/compiler-serial.rsp' });
+    expect(step.env).toEqual({ DOTNET_GCHeapHardLimit: mode === 'analyzers' ? '280000000' : '240000000', CompilerResponseFile: '${{ github.workspace }}/scripts/compiler-serial.rsp' });
+  });
+
+  it.each([
+    ['analyzers', '240000000'],
+    ['analyzers', '300000000'],
+    ['style', '280000000'],
+    ['whitespace', '280000000'],
+  ])('rejects an unreviewed %s heap %s', (mode, heap) => {
+    const phase = mode === 'analyzers' ? 'analyzer' : mode;
+    const expected = mode === 'analyzers' ? '280000000' : '240000000';
+    const before = `      - name: Verify all Migrations ${phase} formatting\n        env:\n          DOTNET_GCHeapHardLimit: "${expected}"`;
+    expect(() => validateDeployWorkflow(replaceOnce(before, before.replace(expected, heap)))).toThrow();
   });
 });
 
