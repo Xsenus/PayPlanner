@@ -40,6 +40,8 @@ import { captureAuthSessionIdentity, isAuthSessionIdentityCurrent } from '../../
 import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useInvoiceReferenceDictionaries } from '../../hooks/useInvoiceReferenceDictionaries';
+import { useInvoiceFinancialReads } from '../../hooks/useInvoiceFinancialReads';
+import { moneyBalanceCurrencyLabel } from '../../utils/moneyBalanceIdentity';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
@@ -164,6 +166,7 @@ type InvoiceAmountReconciliationDecision = 'save' | 'manage' | 'cancel';
 const LINE_ITEM_GRID_TEMPLATE =
   'md:grid-cols-[minmax(24rem,2.7fr)_minmax(5.5rem,0.55fr)_minmax(6.5rem,0.7fr)_minmax(8.5rem,0.85fr)_minmax(6.5rem,0.7fr)_minmax(8.5rem,0.85fr)_2.75rem]';
 const LINE_ITEM_GRID_MIN_WIDTH_CLASS = 'md:min-w-[64rem]';
+const movementAmountFormatter = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function formatMoneyValue(value: string | number | null | undefined): string {
   const parsed = parseMoneyInput(value);
@@ -1060,11 +1063,6 @@ export function InvoiceModal({
   const [storedDisplayPayments, setDisplayPayments] = useState<Payment[]>(visibleRelatedPayments);
   const displayPayments = canViewPayments ? storedDisplayPayments : EMPTY_RELATED_PAYMENTS;
   const [amountReconciliationDialog, setAmountReconciliationDialog] = useState<InvoiceAmountReconciliation | null>(null);
-  const [linkedMoneyOperations, setLinkedMoneyOperations] = useState<MoneyOperation[]>([]);
-  const [linkedMoneyOperationsLoading, setLinkedMoneyOperationsLoading] = useState(false);
-  const [linkedMoneyOperationsError, setLinkedMoneyOperationsError] = useState<string | null>(null);
-  const [counterpartyBalance, setCounterpartyBalance] = useState<number | null>(null);
-  const [counterpartyBalanceLoading, setCounterpartyBalanceLoading] = useState(false);
   const [installmentPlan, setInstallmentPlan] = useState<InstallmentPlanInput | null>(() => cloneInstallmentPlan(deriveInstallmentPlanFromPayments(visibleRelatedPayments)));
   const [installmentModalOpen, setInstallmentModalOpen] = useState(false);
   const [installmentPlanTouched, setInstallmentPlanTouched] = useState(false);
@@ -1479,6 +1477,7 @@ export function InvoiceModal({
     invoice?.clientId, invoice?.expenseClientId, selectedClient?.email, isAdmin, canSendToDisk, permissions.yandexDisk.viewScope]);
   const delivery = useDocumentDeliveryOwner(deliveryScope);
   const leaveInvoiceCard = (leave: () => void) => {
+    financialReads.cancel();
     editorDraftOwner.invalidate();
     printOwner.invalidate();
     delivery.invalidate();
@@ -1542,57 +1541,10 @@ export function InvoiceModal({
   const selectedResponsibleSourceClient = isIncome
     ? selectedClient
     : (selectedExpenseClient ?? selectedClient);
-  const positiveCounterpartyBalance = Math.max(Number(counterpartyBalance ?? 0), 0);
-  const showCounterpartyBalanceNotice = isIncome
-    && Boolean(form.clientId || form.legalEntityId)
-    && (counterpartyBalanceLoading || positiveCounterpartyBalance > 0);
   const counterpartyBalanceOwnerLabel = form.legalEntityId ? 'юрлица' : 'клиента';
   const selectedCounterpartyName = selectedClient?.name ?? (selectedLegalEntity ? getLegalEntityDisplayName(selectedLegalEntity) : '');
   const selectedExpenseCounterpartyName = selectedExpenseClient?.name
     ?? (selectedExpenseLegalEntity ? getLegalEntityDisplayName(selectedExpenseLegalEntity) : '');
-
-  useEffect(() => {
-    if (!open || !canViewPayments || pageViewMode || !isIncome || (!form.clientId && !form.legalEntityId)) {
-      setCounterpartyBalance(null);
-      setCounterpartyBalanceLoading(false);
-      return;
-    }
-
-    const clientId = Number(form.clientId || 0);
-    const legalEntityId = Number(form.legalEntityId || 0);
-    if (!clientId && !legalEntityId) {
-      setCounterpartyBalance(null);
-      setCounterpartyBalanceLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setCounterpartyBalanceLoading(true);
-    const request = clientId > 0
-      ? apiService.getClientBalance(clientId)
-      : apiService.getLegalEntityBalance(legalEntityId);
-
-    request
-      .then((summary) => {
-        if (!cancelled) {
-          setCounterpartyBalance(summary.balance ?? 0);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCounterpartyBalance(null);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setCounterpartyBalanceLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [form.clientId, form.legalEntityId, isIncome, open, canViewPayments, pageViewMode]);
 
   const selectedCounterpartyPickerValue = useMemo<CounterpartySelection[]>(() => {
     if (clientPickerMode === 'expense') {
@@ -1658,6 +1610,22 @@ export function InvoiceModal({
     invoice?.invoiceEntityId ?? invoice?.id ?? null, currentUser?.id, currentUser?.role?.id, currentUser?.role?.name,
     permissions.accounts, permissions.payments, defaultClientId, defaultLegalEntityId,
     defaultExpenseClientId, defaultExpenseLegalEntityId, defaultClientCaseId]));
+  const canReadFinancialContext = isAdmin || (mode === 'edit' ? permissions.accounts.canView : permissions.accounts.canCreate);
+  const canReadCounterpartyBalance = isAdmin || permissions.payments.viewScope === 'all'
+    && (form.legalEntityId ? permissions.legalEntities.canView : permissions.clients.canView);
+  const financialReads = useInvoiceFinancialReads({
+    owner: { scope: JSON.stringify([editorDraftOwner.scope, invoice?.auditUpdatedAt, permissions.clients, permissions.legalEntities]), capture: editorDraftOwner.capture },
+    balanceEnabled: open && canReadFinancialContext && canViewPayments && canReadCounterpartyBalance && !pageViewMode && isIncome,
+    movementsEnabled: open && canReadFinancialContext && canViewPayments && mode === 'edit' && !pageViewMode,
+    clientId: form.clientId ? Number(form.clientId) : null, legalEntityId: form.legalEntityId ? Number(form.legalEntityId) : null,
+    invoiceId: invoice?.invoiceEntityId ?? invoice?.id ?? null,
+  });
+  const linkedMoneyOperations = financialReads.movements;
+  const linkedMoneyOperationsLoading = financialReads.movementsLoading;
+  const linkedMoneyOperationsError = financialReads.movementsError;
+  const counterpartyBalanceLoading = financialReads.balanceLoading;
+  const positiveCounterpartyBalance = Math.max(financialReads.balance?.balance ?? 0, 0);
+  const showCounterpartyBalanceNotice = isIncome && (counterpartyBalanceLoading || positiveCounterpartyBalance > 0 || Boolean(financialReads.balanceError));
   const editorSource = useMemo<InvoiceEditorContent>(() => ({
     form: normalizeInvoiceToForm(invoice, defaultClientId, defaultLegalEntityId, defaultResponsibleId, defaultType,
       defaultExpenseClientId, defaultExpenseLegalEntityId, profileTimeZoneIdRef.current),
@@ -2110,41 +2078,6 @@ export function InvoiceModal({
         : visibleRelatedPayments
     ));
   }, [visibleRelatedPayments]);
-
-  useEffect(() => {
-    const linkedInvoiceId = invoice?.invoiceEntityId ?? invoice?.id ?? null;
-    if (!open || !canViewPayments || mode !== 'edit' || !linkedInvoiceId) {
-      setLinkedMoneyOperations([]);
-      setLinkedMoneyOperationsError(null);
-      setLinkedMoneyOperationsLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setLinkedMoneyOperationsLoading(true);
-    setLinkedMoneyOperationsError(null);
-
-    apiService
-      .getMoneyOperationsPaged({ linkedInvoiceId, page: 1, pageSize: 20 })
-      .then((response) => {
-        if (cancelled) return;
-        setLinkedMoneyOperations(response.items ?? []);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        setLinkedMoneyOperations([]);
-        setLinkedMoneyOperationsError(extractDisplayErrorMessage(error, 'Не удалось загрузить движения денег по счёту.'));
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLinkedMoneyOperationsLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [invoice?.id, invoice?.invoiceEntityId, mode, open, canViewPayments]);
 
   useEffect(() => {
     if (!open || mode !== 'create') return;
@@ -5120,7 +5053,7 @@ export function InvoiceModal({
                 )}
               </section>
 
-              {canViewPayments && !linkedMoneyOperationsError && (linkedMoneyOperationsLoading || linkedMoneyOperations.length > 0) && (
+              {financialReads.movementsEnabled && (linkedMoneyOperationsLoading || linkedMoneyOperationsError || linkedMoneyOperations.length > 0 || financialReads.page > 1) && (
               <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
                 <header className="mb-3 flex flex-col gap-1">
                   <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -5131,7 +5064,13 @@ export function InvoiceModal({
                   </p>
                 </header>
 
-                {linkedMoneyOperationsLoading ? (
+                {linkedMoneyOperationsError ? (
+                  <div role="alert" className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    <p>{linkedMoneyOperationsError}</p>
+                    <button type="button" onClick={() => { void financialReads.retryMovements(); }}
+                      className="rounded-lg border border-amber-300 bg-white px-2 py-1 text-xs font-semibold">Повторить загрузку движений денег</button>
+                  </div>
+                ) : linkedMoneyOperationsLoading ? (
                   <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     {t('loading') ?? 'Загрузка...'}
@@ -5139,7 +5078,7 @@ export function InvoiceModal({
                 ) : (
                   <div className="space-y-3">
                     {linkedMoneyOperations.map((operation) => {
-                      const amount = formatCurrencySmart(operation.amount ?? 0).full;
+                      const amount = `${movementAmountFormatter.format(operation.amount)} ${moneyBalanceCurrencyLabel(operation.currency)}`;
                       const statusLabel = moneyOperationMatchStatusLabel(operation.matchStatus);
                       const sourceLabel = moneyOperationSourceLabel(operation.source);
                       const directionLabel = moneyOperationDirectionLabel(operation.direction);
@@ -5192,6 +5131,19 @@ export function InvoiceModal({
                     })}
                   </div>
                 )}
+                {!linkedMoneyOperationsLoading && linkedMoneyOperations.length === 0 && !linkedMoneyOperationsError && financialReads.page > 1
+                  ? <p className="text-sm text-slate-500">На этой странице движений денег нет.</p> : null}
+                {(financialReads.page > 1 || financialReads.hasNext) && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
+                  <span>{financialReads.total !== null && linkedMoneyOperations.length > 0
+                    ? `Показаны ${(financialReads.page - 1) * financialReads.pageSize + 1}–${(financialReads.page - 1) * financialReads.pageSize + linkedMoneyOperations.length} из ${financialReads.total}`
+                    : `Страница ${financialReads.page}`}</span>
+                  <div className="flex gap-2">
+                    <button type="button" aria-label="Предыдущая страница движений денег" disabled={linkedMoneyOperationsLoading || financialReads.page === 1}
+                      onClick={() => financialReads.movePage(-1)} className="rounded-lg border px-2 py-1 disabled:opacity-50">Назад</button>
+                    <button type="button" aria-label="Следующая страница движений денег" disabled={linkedMoneyOperationsLoading || !financialReads.hasNext}
+                      onClick={() => financialReads.movePage(1)} className="rounded-lg border px-2 py-1 disabled:opacity-50">Далее</button>
+                  </div>
+                </div>}
               </section>
               )}
             </div>
@@ -5255,10 +5207,14 @@ export function InvoiceModal({
                                 </div>
                               )}
                               {showCounterpartyBalanceNotice && (
-                                <div className="mt-2 rounded-xl border border-emerald-100 bg-emerald-50 p-3">
+                                financialReads.balanceError ? <div role="alert" className="mt-2 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                                  <p>{financialReads.balanceError}</p>
+                                  <button type="button" onClick={() => { void financialReads.retryBalance(); }}
+                                    className="rounded-lg border border-amber-300 bg-white px-2 py-1 text-xs font-semibold">Повторить загрузку баланса</button>
+                                </div> : <div className="mt-2 rounded-xl border border-emerald-100 bg-emerald-50 p-3">
                                   <div className="flex flex-wrap items-center justify-between gap-2">
                                     <div>
-                                      <div className="text-sm font-medium text-emerald-900">Доступно на балансе {counterpartyBalanceOwnerLabel}</div>
+                                      <div className="text-sm font-medium text-emerald-900">{counterpartyBalanceLoading ? 'Баланс контрагента' : `Доступно на балансе ${counterpartyBalanceOwnerLabel}`}</div>
                                       <div className="mt-0.5 text-xs text-emerald-700">
                                         Эти деньги можно зачесть в счет оплаты после создания связанного платежа.
                                       </div>

@@ -9249,12 +9249,12 @@ export class ApiService {
       page?: number;
       pageSize?: number;
     },
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; cache?: RequestCache; expectedStatus?: number },
   ) {
     const q = buildQuery(params ?? {});
     return this.request<PagedResult<MoneyOperation> & { summary: MoneyOperationsSummary }>(
       `/money-operations/paged${q}`,
-      { signal: options?.signal, headers: { 'X-PayPlanner-Currency-Contract': '1' } },
+      { signal: options?.signal, cache: options?.cache, expectedStatus: options?.expectedStatus, headers: { 'X-PayPlanner-Currency-Contract': '1' } },
     );
   }
 

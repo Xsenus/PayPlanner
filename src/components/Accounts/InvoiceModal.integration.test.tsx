@@ -6,6 +6,7 @@ import { InvoiceModal } from './InvoiceModal';
 import type {
   Act,
   Client,
+  ClientBalanceSummary,
   ClientCase,
   Contract,
   ContractInput,
@@ -325,6 +326,88 @@ describe('InvoiceModal integration', () => {
   }
   const paymentReadProps = () => ({ ...referenceProps(), mode: 'edit' as const, invoice: { id: 91, invoiceEntityId: 910, number: 'СЧ-91', date: '2026-11-02', dueDate: '2026-11-05', amount: 1000,
     clientId: 1, type: 'Expense', status: 'Pending', workflowStatus: 'Draft', isPaid: false, createdAt: '2026-11-02' } as Invoice, clients: [createTestClient(1, 'Клиент счёта')] });
+  describe('invoice financial reads', () => {
+    const currentProps = () => ({ ...paymentReadProps(), invoice: { ...paymentReadProps().invoice, type: 'Income' as const } });
+    const operation = (id = 701, linkedInvoiceId = 910): MoneyOperation => ({ id, linkedInvoiceId, amount: 25, currency: 'RUB', source: 'Bank', direction: 'Income', accountingType: 'Fact',
+      isAdvancePayment: false, date: '2026-11-02', createdAt: '2026-11-02T00:00:00Z', purpose: `Движение ${id}` });
+    const page = (rows = [operation()], total = rows.length, current = 1) => ({ items: rows, total, page: current, pageSize: 20, summary: createEmptyMoneyOperationsSummary() });
+    it('ignores pending movement data from a former role', async () => {
+      const pending = createDeferred<ReturnType<typeof page>>(); vi.mocked(apiService.getMoneyOperationsPaged).mockReturnValueOnce(pending.promise).mockResolvedValue(page([operation(702)]));
+      const props = currentProps(); const view = render(<InvoiceModal {...props} />); await waitFor(() => expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledOnce());
+      printAuthState.user = { id: 7, role: { id: 8 } }; view.rerender(<InvoiceModal {...props} />); await act(async () => pending.resolve(page()));
+      expect(screen.queryByText('Движение 701')).toBeNull(); expect(await screen.findByText('Движение 702')).toBeTruthy();
+    });
+    it('rejects a previous login response even before the auth context rerenders', async () => {
+      const pending = createDeferred<ReturnType<typeof page>>(); vi.mocked(apiService.getMoneyOperationsPaged).mockReturnValueOnce(pending.promise);
+      render(<InvoiceModal {...currentProps()} />); await waitFor(() => expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledOnce());
+      baseAuthSession.replace(); await act(async () => pending.resolve(page())); expect(screen.queryByText('Движение 701')).toBeNull();
+    });
+    it('rejects a movement explicitly linked to another canonical invoice', async () => {
+      vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValue(page([operation(701, 911)])); render(<InvoiceModal {...currentProps()} />);
+      await waitFor(() => expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledOnce()); await act(async () => {});
+      expect(screen.queryByText('Движение 701')).toBeNull(); expect(screen.getByRole('button', { name: 'Повторить загрузку движений денег' })).toBeTruthy();
+    });
+    it('keeps a failed movement request visible and allows one explicit retry without changing the draft', async () => {
+      vi.mocked(apiService.getMoneyOperationsPaged).mockRejectedValueOnce(new Error('Движения временно недоступны')).mockResolvedValue(page());
+      render(<InvoiceModal {...currentProps()} />); fireEvent.change(await screen.findByLabelText('Номер счёта'), { target: { value: 'РУЧНОЙ' } });
+      expect(await screen.findByText('Движения временно недоступны')).toBeTruthy(); fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку движений денег' }));
+      expect(await screen.findByText('Движение 701')).toBeTruthy(); expect(screen.getByLabelText('Номер счёта')).toHaveProperty('value', 'РУЧНОЙ');
+    });
+    it('rejects a balance from another counterparty instead of showing its money', async () => {
+      vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 2, balance: 98765.43 }); render(<InvoiceModal {...currentProps()} />);
+      await waitFor(() => expect(apiService.getClientBalance).toHaveBeenCalledOnce()); await act(async () => {});
+      expect(screen.queryByText('Доступно на балансе клиента')).toBeNull(); expect(screen.getByRole('button', { name: 'Повторить загрузку баланса' })).toBeTruthy();
+    });
+    it('hides a formerly confirmed balance on role change while its replacement is pending', async () => {
+      const pending = createDeferred<ClientBalanceSummary>(); vi.mocked(apiService.getClientBalance).mockResolvedValueOnce({ clientId: 1, balance: 100 }).mockReturnValueOnce(pending.promise);
+      const props = currentProps(); const view = render(<InvoiceModal {...props} />); expect(await screen.findByText('Доступно на балансе клиента')).toBeTruthy();
+      printAuthState.user = { id: 7, role: { id: 8 } }; view.rerender(<InvoiceModal {...props} />);
+      expect(screen.queryByText('100,00')).toBeNull(); await act(async () => pending.resolve({ clientId: 1, balance: 0 }));
+    });
+    it('does not request a full balance with a restricted payment scope', async () => {
+      permissionState.value = { ...defaultRolePermissions, payments: { ...defaultRolePermissions.payments, viewScope: 'own' } };
+      render(<InvoiceModal {...currentProps()} />); await act(async () => {}); expect(apiService.getClientBalance).not.toHaveBeenCalled();
+    });
+    it('keeps movement reads bounded and opens the next page on demand', async () => {
+      vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValueOnce(page(Array.from({ length: 20 }, (_, i) => operation(701 + i)), 21))
+        .mockResolvedValueOnce(page([operation(721)], 21, 2));
+      render(<InvoiceModal {...currentProps()} />); expect(await screen.findByText('Движение 720')).toBeTruthy(); expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledOnce();
+      fireEvent.click(screen.getByRole('button', { name: 'Следующая страница движений денег' })); expect(await screen.findByText('Движение 721')).toBeTruthy(); expect(screen.queryByText('Движение 701')).toBeNull();
+      expect(vi.mocked(apiService.getMoneyOperationsPaged).mock.calls[1][0]).toEqual({ linkedInvoiceId: 910, page: 2, pageSize: 20 });
+    });
+    it.each(['USD', null] as const)('shows the supplied movement currency %s without silently assuming rubles', async currency => {
+      vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValue(page([{ ...operation(), amount: -25.75, currency }])); render(<InvoiceModal {...currentProps()} />);
+      expect(await screen.findByText(currency ? '-25,75 USD' : '-25,75 валюта не указана')).toBeTruthy();
+    });
+    it('displays a large finite movement amount without scientific notation or an undefined fractional part', async () => {
+      vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValue(page([{ ...operation(), amount: 1e22, currency: 'USD' }])); render(<InvoiceModal {...currentProps()} />);
+      expect(await screen.findByText((_, element) => element?.tagName === 'SPAN'
+        && element.textContent?.replace(/\s/g, ' ') === '10 000 000 000 000 000 000 000,00 USD')).toBeTruthy();
+    });
+    it('keeps the real server readonly payment identity and label', async () => {
+      vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValue(page([{ ...operation(-701), isReadonly: true, relatedPaymentId: 701 }])); render(<InvoiceModal {...currentProps()} />);
+      expect(await screen.findByText('Движение -701')).toBeTruthy(); expect(screen.getByText('Платёж')).toBeTruthy();
+    });
+    it('loads only the selected legal entity balance and masks it when its view permission is revoked', async () => {
+      vi.mocked(apiService.getLegalEntityBalance).mockResolvedValue({ legalEntityId: 12, balance: 321 }); const props = currentProps();
+      props.invoice = { ...props.invoice, legalEntityId: 12, clientId: null };
+      const view = render(<InvoiceModal {...props} />); expect(await screen.findByText('Доступно на балансе юрлица')).toBeTruthy(); expect(apiService.getClientBalance).not.toHaveBeenCalled();
+      permissionState.value = { ...defaultRolePermissions, legalEntities: { ...defaultRolePermissions.legalEntities, canView: false } }; view.rerender(<InvoiceModal {...props} />);
+      expect(screen.queryByText('Доступно на балансе юрлица')).toBeNull(); expect(screen.queryByText('321,00')).toBeNull();
+    });
+    it('does not fetch money or balance without the invoice read permission', async () => {
+      permissionState.value = { ...defaultRolePermissions, accounts: { ...defaultRolePermissions.accounts, canView: false } };
+      render(<InvoiceModal {...currentProps()} />); await act(async () => {}); expect(apiService.getMoneyOperationsPaged).not.toHaveBeenCalled(); expect(apiService.getClientBalance).not.toHaveBeenCalled();
+    });
+    it('keeps financial details lazy in page preview and aborts their reads when returning to preview', async () => {
+      const pending = createDeferred<ReturnType<typeof page>>(); vi.mocked(apiService.getMoneyOperationsPaged).mockReturnValueOnce(pending.promise);
+      render(<InvoiceModal {...currentProps()} presentation="page" />); await screen.findByRole('button', { name: 'Редактировать счёт' });
+      expect(apiService.getMoneyOperationsPaged).not.toHaveBeenCalled(); expect(apiService.getClientBalance).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: 'Редактировать счёт' })); await waitFor(() => expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledOnce());
+      const signal = vi.mocked(apiService.getMoneyOperationsPaged).mock.calls[0][1]?.signal; fireEvent.click(screen.getByRole('button', { name: 'Отмена' }));
+      expect(signal?.aborted).toBe(true); await act(async () => pending.resolve(page())); expect(screen.queryByText('Движение 701')).toBeNull();
+    });
+  });
   it.each(['loading', 'error'] as const)('invoice payments read: %s cannot submit unconfirmed financial rows through the form', async state => {
     const props = paymentReadProps(); render(<InvoiceModal {...props} paymentsLoading={state === 'loading'} paymentsError={state === 'error' ? 'Ошибка загрузки платежей' : null} />);
     await screen.findByLabelText('Номер счёта'); expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveProperty('disabled', true);
@@ -775,7 +858,7 @@ describe('InvoiceModal integration', () => {
 
     expect(await screen.findByText('Доступно на балансе клиента')).toBeTruthy();
     expect(await screen.findByText('7 100,00')).toBeTruthy();
-    expect(apiService.getClientBalance).toHaveBeenCalledWith(69);
+    expect(apiService.getClientBalance).toHaveBeenCalledWith(69, { signal: expect.any(AbortSignal) });
   });
 
   it('keeps the linked contract selected after invoice data is reopened and contracts finish loading', async () => {
@@ -1194,7 +1277,7 @@ describe('InvoiceModal integration', () => {
     await screen.findByText('Движения денег');
 
     await waitFor(() => {
-      expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledWith({ linkedInvoiceId: 33, page: 1, pageSize: 20 });
+      expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledWith({ linkedInvoiceId: 33, page: 1, pageSize: 20 }, { signal: expect.any(AbortSignal), cache: 'no-store', expectedStatus: 200 });
     });
 
     expect(await screen.findByText('Оплата по счёту №33')).toBeTruthy();
@@ -1240,7 +1323,7 @@ describe('InvoiceModal integration', () => {
     );
 
     await waitFor(() => {
-      expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledWith({ linkedInvoiceId: 1850, page: 1, pageSize: 20 });
+      expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledWith({ linkedInvoiceId: 1850, page: 1, pageSize: 20 }, { signal: expect.any(AbortSignal), cache: 'no-store', expectedStatus: 200 });
     });
 
     await waitFor(() => {
@@ -1249,7 +1332,7 @@ describe('InvoiceModal integration', () => {
     expect(screen.queryByText('Связанные движения денег пока не найдены.')).toBeNull();
   });
 
-  it('hides the money operations section when linked operations fail to load', async () => {
+  it('shows a recoverable money operations error when linked operations fail to load', async () => {
     const invoice = {
       id: 1849,
       invoiceEntityId: 1849,
@@ -1280,13 +1363,14 @@ describe('InvoiceModal integration', () => {
     );
 
     await waitFor(() => {
-      expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledWith({ linkedInvoiceId: 1849, page: 1, pageSize: 20 });
+      expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledWith({ linkedInvoiceId: 1849, page: 1, pageSize: 20 }, { signal: expect.any(AbortSignal), cache: 'no-store', expectedStatus: 200 });
     });
 
     await waitFor(() => {
-      expect(screen.queryByText('Движения денег')).toBeNull();
+      expect(screen.getByText('Движения денег')).toBeTruthy();
     });
-    expect(screen.queryByText('Не удалось загрузить движения денег по счёту.')).toBeNull();
+    expect(screen.getByText('Не удалось загрузить движения денег по счёту. Повторите загрузку.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Повторить загрузку движений денег' })).toBeTruthy();
   });
 
   it('restores installment summary and badges from related installment payments', async () => {
