@@ -8,7 +8,7 @@
 - Разделов frontend: 55.
 - Backend-контроллеров: 97.
 - HTTP endpoints: 964; с прямой тестовой связью: 680.
-- HTTP endpoints с точной ссылкой из документации: 267; критичных без такой ссылки: 530.
+- HTTP endpoints с точной ссылкой из документации: 269; критичных без такой ссылки: 529.
 - Критичных endpoints без прямой тестовой связи: 236.
 - Реальных HTML-форм: 21; с найденной тестовой связью: 19.
 - Фоновых сервисов: 35; с найденной тестовой связью: 28.
@@ -1430,8 +1430,8 @@
 | PUT | {id:int}/hearing-preparation | CasesV2Controller | UpdateHearingPreparation | backend/Controllers/V2/CasesV2Controller.HearingPreparation.cs:57 | не задано | да | нет |
 | POST | {id:int}/next-hearing-confirmation | CasesV2Controller | ConfirmNextHearing | backend/Controllers/V2/CasesV2Controller.NextHearingConfirmation.cs:18 | не задано | да | нет |
 | POST | {id:int}/position-review | CasesV2Controller | ReviewCasePosition | backend/Controllers/V2/CasesV2Controller.PositionReview.cs:17 | не задано | да | нет |
-| GET | position-templates | CasesV2Controller | GetPositionTemplates | backend/Controllers/V2/CasesV2Controller.PositionTemplates.cs:26 | не задано | да | нет |
-| POST | position-templates | CasesV2Controller | CreatePositionTemplate | backend/Controllers/V2/CasesV2Controller.PositionTemplates.cs:53 | не задано | да | нет |
+| GET | position-templates | CasesV2Controller | GetPositionTemplates | backend/Controllers/V2/CasesV2Controller.PositionTemplates.cs:26 | не задано | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
+| POST | position-templates | CasesV2Controller | CreatePositionTemplate | backend/Controllers/V2/CasesV2Controller.PositionTemplates.cs:53 | не задано | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
 | PUT | position-templates/{templateId:int} | CasesV2Controller | UpdatePositionTemplate | backend/Controllers/V2/CasesV2Controller.PositionTemplates.cs:96 | не задано | да | нет |
 | DELETE | position-templates/{templateId:int} | CasesV2Controller | ArchivePositionTemplate | backend/Controllers/V2/CasesV2Controller.PositionTemplates.cs:129 | не задано | да | нет |
 | GET | api/v2/clients | ClientsV2Controller | Get | backend/Controllers/V2/ClientsV2Controller.cs:91 | [Authorize] | да | docs/development-roadmap-merge-2026-10-27.md, docs/full-project-audit-2026-06-10.md, docs/payplanner-access-security-roadmap-2026-10-14.md |

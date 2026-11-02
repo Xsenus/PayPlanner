@@ -3127,8 +3127,9 @@ export class ApiService {
     return result;
   }
 
-  async getFeatureFlags() {
-    return this.request<AppFeatureFlagsDto>('/features');
+  async getFeatureFlags(options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
+    return this.request<AppFeatureFlagsDto>('/features', { signal: options?.signal, cache: 'no-store' });
   }
 
   async getLatestAppVersion() {
@@ -6813,8 +6814,9 @@ export class ApiService {
     return this.request<ClientCase>('/v2/cases', { method: 'POST', body: JSON.stringify(model) });
   }
 
-  async getCaseV2(id: number) {
-    return this.request<ClientCase>(`/v2/cases/${id}`);
+  async getCaseV2(id: number, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
+    return this.request<ClientCase>(`/v2/cases/${id}`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async reviewCasePosition(id: number) {
@@ -7143,12 +7145,14 @@ export class ApiService {
     });
   }
 
-  async getCaseTimeline(caseId: number) {
-    return this.request<ClientCaseTimelineEntry[]>(`/v2/cases/${caseId}/timeline`);
+  async getCaseTimeline(caseId: number, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
+    return this.request<ClientCaseTimelineEntry[]>(`/v2/cases/${caseId}/timeline`, { signal: options?.signal, cache: 'no-store' });
   }
 
-  async getCaseConversation(caseId: number) {
-    return this.request<ClientCaseConversationEntry[]>(`/v2/cases/${caseId}/conversation`);
+  async getCaseConversation(caseId: number, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
+    return this.request<ClientCaseConversationEntry[]>(`/v2/cases/${caseId}/conversation`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async addCaseConversationEntry(caseId: number, payload: { text: string; files?: File[] }) {
@@ -7172,8 +7176,9 @@ export class ApiService {
     return this.request<ClientCaseSummary>(`/v2/cases/${caseId}/summary`);
   }
 
-  async getCaseFinance(caseId: number) {
-    return this.request<ClientCaseFinanceDetail>(`/v2/cases/${caseId}/finance`);
+  async getCaseFinance(caseId: number, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
+    return this.request<ClientCaseFinanceDetail>(`/v2/cases/${caseId}/finance`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async getCourtRecoveries(caseId: number, search = '', options?: { signal?: AbortSignal }) {
@@ -7341,9 +7346,11 @@ export class ApiService {
     });
   }
 
-  async getExternalWorkOrderApproval(caseId: number) {
+  async getExternalWorkOrderApproval(caseId: number, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
     return this.request<ExternalWorkOrderApprovalStatus | undefined>(
       `/v2/cases/${caseId}/work-order/external-approval`,
+      { signal: options?.signal, cache: 'no-store' },
     );
   }
 
@@ -7571,8 +7578,9 @@ export class ApiService {
     });
   }
 
-  async getCaseCourtSyncLogs(caseId: number) {
-    return this.request<ClientCaseCourtSyncLog[]>(`/v2/cases/${caseId}/court-sync/logs`);
+  async getCaseCourtSyncLogs(caseId: number, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
+    return this.request<ClientCaseCourtSyncLog[]>(`/v2/cases/${caseId}/court-sync/logs`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async getCourtSyncHealth(status: 'failed' | 'paused' = 'failed', page = 1, options?: { signal?: AbortSignal }) {
@@ -7627,9 +7635,10 @@ export class ApiService {
     });
   }
 
-  async getCaseCourtDirectory(includeInactive = false) {
+  async getCaseCourtDirectory(includeInactive = false, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
     const query = includeInactive ? '?includeInactive=true' : '';
-    return this.request<ClientCaseCourt[]>(`/v2/cases/court-directory${query}`);
+    return this.request<ClientCaseCourt[]>(`/v2/cases/court-directory${query}`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async createCaseCourtDirectoryItem(payload: UpsertClientCaseCourtPayload) {
@@ -7646,8 +7655,9 @@ export class ApiService {
     });
   }
 
-  async getCaseCourtInstances(caseId: number) {
-    return this.request<ClientCaseCourtInstance[]>(`/v2/cases/${caseId}/court-instances`);
+  async getCaseCourtInstances(caseId: number, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
+    return this.request<ClientCaseCourtInstance[]>(`/v2/cases/${caseId}/court-instances`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async updateCaseCourtInstance(caseId: number, instance: string, payload: UpsertClientCaseCourtInstancePayload) {
@@ -7675,8 +7685,9 @@ export class ApiService {
     return this.request<void>(`/v2/cases/${caseId}/court-instances/${encodeURIComponent(instance)}/complaints/${complaintId}`, { method: 'DELETE' });
   }
 
-  async getCaseCourtEvents(caseId: number) {
-    return this.request<ClientCaseCourtEvent[]>(`/v2/cases/${caseId}/court-events`);
+  async getCaseCourtEvents(caseId: number, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
+    return this.request<ClientCaseCourtEvent[]>(`/v2/cases/${caseId}/court-events`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async getCaseHearingPreparation(caseId: number, options?: { signal?: AbortSignal }) {
@@ -7721,9 +7732,10 @@ export class ApiService {
     return this.request<ClientCaseCourtEventHistory[]>(`/v2/cases/${caseId}/court-events/${courtEventId}/history`);
   }
 
-  async getCaseCourtParties(caseId: number, includeArchived = false) {
+  async getCaseCourtParties(caseId: number, includeArchived = false, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
     const query = includeArchived ? '?includeArchived=true' : '';
-    return this.request<ClientCaseCourtParty[]>(`/v2/cases/${caseId}/court-parties${query}`);
+    return this.request<ClientCaseCourtParty[]>(`/v2/cases/${caseId}/court-parties${query}`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async createCaseCourtParty(caseId: number, payload: UpsertClientCaseCourtPartyPayload) {
@@ -7833,8 +7845,9 @@ export class ApiService {
     });
   }
 
-  async getCaseDocumentTypes() {
-    return this.request<string[]>('/v2/cases/document-types');
+  async getCaseDocumentTypes(options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
+    return this.request<string[]>('/v2/cases/document-types', { signal: options?.signal, cache: 'no-store' });
   }
 
   async getCaseCalendarEvents(params?: {
@@ -7922,8 +7935,9 @@ export class ApiService {
     };
   }
 
-  async getCaseProceduralDeadlines(caseId: number) {
-    return this.request<ClientCaseProceduralDeadline[]>(`/v2/cases/${caseId}/procedural-deadlines`);
+  async getCaseProceduralDeadlines(caseId: number, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
+    return this.request<ClientCaseProceduralDeadline[]>(`/v2/cases/${caseId}/procedural-deadlines`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async createCaseProceduralDeadline(caseId: number, payload: UpsertClientCaseProceduralDeadlinePayload) {

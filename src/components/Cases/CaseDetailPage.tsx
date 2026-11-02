@@ -58,6 +58,9 @@ import {
 } from 'lucide-react';
 
 import { apiService, type ContactDirectoryItemDto } from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
+import { useDocumentDeliveryOwner, type DocumentReadOwner } from '../../hooks/useDocumentDeliveryOwner';
+import { captureAuthSessionIdentity } from '../../services/authService';
 import { useDialog } from '../../hooks/useDialog';
 import { useNestedCaseOperationOwner, type CaseOperationParent } from '../../hooks/useNestedCaseOperationOwner';
 import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
@@ -116,6 +119,7 @@ interface CaseDetailPageProps {
   canViewFinance?: boolean;
   canViewTasks?: boolean;
   taskAccessKey?: string;
+  caseAccessKey?: string;
   canCreateTasks?: boolean;
   canEditTasks?: boolean;
   canEditTaskBilling?: boolean;
@@ -474,8 +478,8 @@ interface WorkOrderItemDraft {
   unitPrice: string;
 }
 
-function getCaseDetailViewStateKey(caseId: number) {
-  return `pp.case-detail.${caseId}.view.v1`;
+function getCaseDetailViewStateKey(caseId: number, actor: string) {
+  return `pp.case-detail.${caseId}.view.v2.${encodeURIComponent(actor)}`;
 }
 
 function isCaseDetailTab(value: unknown): value is CaseDetailTab {
@@ -490,11 +494,12 @@ function isParticipantSourceType(value: unknown): value is ParticipantSourceType
   return value === 'client' || value === 'legalEntity' || value === 'externalContact';
 }
 
-function readCaseDetailViewState(caseId: number): CaseDetailViewState {
+function readCaseDetailViewState(caseId: number, actor: string | null): CaseDetailViewState {
+  if (!actor) return {};
   if (typeof window === 'undefined') return {};
 
   try {
-    const raw = window.sessionStorage.getItem(getCaseDetailViewStateKey(caseId));
+    const raw = window.sessionStorage.getItem(getCaseDetailViewStateKey(caseId, actor));
     if (!raw) return {};
 
     const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -514,11 +519,12 @@ function readCaseDetailViewState(caseId: number): CaseDetailViewState {
   }
 }
 
-function writeCaseDetailViewState(caseId: number, state: CaseDetailViewState) {
+function writeCaseDetailViewState(caseId: number, actor: string | null, state: CaseDetailViewState) {
+  if (!actor) return;
   if (typeof window === 'undefined') return;
 
   try {
-    window.sessionStorage.setItem(getCaseDetailViewStateKey(caseId), JSON.stringify(state));
+    window.sessionStorage.setItem(getCaseDetailViewStateKey(caseId, actor), JSON.stringify(state));
   } catch {
     /** */
   }
@@ -1539,7 +1545,32 @@ function buildStageTransitionPrompt(previousStage: string | null | undefined, ne
   };
 }
 
-export function CaseDetailPage({
+export function CaseDetailPage(props: CaseDetailPageProps) {
+  const { user } = useAuth();
+  const session = captureAuthSessionIdentity();
+  const viewSessionKey = JSON.stringify([session.epoch, session.actor, session.authenticated]);
+  const viewed = useRef({ sessionKey: viewSessionKey, marker: { current: null as number | null } });
+  if (viewed.current.sessionKey !== viewSessionKey)
+    viewed.current = { sessionKey: viewSessionKey, marker: { current: null } };
+  const markedViewedCaseIdRef = viewed.current.marker;
+  const owner = useDocumentDeliveryOwner(JSON.stringify([props.caseId, props.caseAccessKey, props.taskAccessKey,
+    user?.id, user?.role?.id, user?.departmentId, user?.department,
+    props.canEdit ?? true, props.canDelete ?? true, props.canViewFinance ?? true, props.canViewTasks ?? true,
+    props.canCreateTasks ?? true, props.canEditTasks ?? false, props.canEditTaskBilling ?? props.canEditTasks ?? false,
+    props.canExportTasks ?? false, props.canSendMessenger ?? false]));
+  const guard = <Args extends unknown[],>(callback: ((...args: Args) => void) | undefined) => callback
+    ? (...args: Args) => { if (owner.capture()) callback(...args); } : undefined;
+  if (!captureAuthSessionIdentity().authenticated) return <p className="p-3 text-sm text-slate-600">Войдите в систему, чтобы открыть дело.</p>;
+  return <CaseDetailScreen key={owner.scope} {...props} screenOwner={owner} markedViewedCaseIdRef={markedViewedCaseIdRef}
+    onBack={() => { if (owner.capture()) props.onBack(); }}
+    onOpenClient={guard(props.onOpenClient)} onOpenLegalEntity={guard(props.onOpenLegalEntity)}
+    onOpenFinance={guard(props.onOpenFinance)} onCreateInvoice={guard(props.onCreateInvoice)}
+    onCreatePayment={guard(props.onCreatePayment)} onOpenTask={guard(props.onOpenTask)} />;
+}
+
+function CaseDetailScreen({
+  screenOwner: { capture: captureScreen },
+  markedViewedCaseIdRef,
   caseId,
   onBack,
   backLabel = 'Реестр дел',
@@ -1559,9 +1590,10 @@ export function CaseDetailPage({
   canEditTaskBilling = canEditTasks,
   canExportTasks = false,
   canSendMessenger = false,
-}: CaseDetailPageProps) {
+}: CaseDetailPageProps & { screenOwner: DocumentReadOwner; markedViewedCaseIdRef: { current: number | null } }) {
   const { confirm, prompt } = useDialog();
-  const initialViewState = readCaseDetailViewState(caseId);
+  const viewStateActor = useMemo(() => captureAuthSessionIdentity().actor, []);
+  const initialViewState = useMemo(() => readCaseDetailViewState(caseId, viewStateActor), [caseId, viewStateActor]);
   const canCreateCaseTask = canViewTasks && canCreateTasks;
   const [loadedCaseItem, setCaseItem] = useState<ClientCase | null>(null);
   const [caseItemAccessKey, setCaseItemAccessKey] = useState(taskAccessKey);
@@ -1572,7 +1604,6 @@ export function CaseDetailPage({
       nextInactivityControlAt: null, inactivityControlExclusionReason: 'Сведения автоконтроля недоступны из-за ограничений доступа' };
   }, [loadedCaseItem, caseItemAccessKey, taskAccessKey]);
   const [caseTaskBulkBusy, setCaseTaskBulkBusy] = useState(false);
-  const markedViewedCaseIdRef = useRef<number | null>(null);
   const [caseTimeZoneId, setCaseTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
   const documentSourceKey = JSON.stringify([caseId, taskAccessKey]);
@@ -1812,7 +1843,7 @@ export function CaseDetailPage({
   const documentTypeListId = useMemo(() => `case-document-types-${caseId}`, [caseId]);
 
   useEffect(() => {
-    const savedState = readCaseDetailViewState(caseId);
+    const savedState = readCaseDetailViewState(caseId, viewStateActor);
     setActiveTab(
       (canViewFinance || savedState.activeTab !== 'finance')
         && (canViewTasks || savedState.activeTab !== 'tasks')
@@ -1876,7 +1907,7 @@ export function CaseDetailPage({
     setCourtPartyRoleDraft('');
     setCourtPartyRepresentativeDraft('');
     setCourtPartyNotesDraft('');
-  }, [canViewFinance, canViewTasks, caseId]);
+  }, [canViewFinance, canViewTasks, caseId, viewStateActor]);
 
   const visibleDetailTabs = useMemo(
     () => DETAIL_TABS.filter((tab) =>
@@ -1918,7 +1949,8 @@ export function CaseDetailPage({
   }, [participantSourceType]);
 
   useEffect(() => {
-    writeCaseDetailViewState(caseId, {
+    if (!captureScreen()) return;
+    writeCaseDetailViewState(caseId, viewStateActor, {
       activeTab,
       courtOverview,
       taskFilter,
@@ -1930,6 +1962,8 @@ export function CaseDetailPage({
       documentStatusDraft,
     });
   }, [
+    captureScreen,
+    viewStateActor,
     activeTab,
     caseId,
     documentStatusDraft,
@@ -1952,18 +1986,21 @@ export function CaseDetailPage({
   }, [documentPreview?.url]);
 
   useEffect(() => {
-    let cancelled = false;
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
     setLoading(true);
     setError(null);
 
     Promise.all([
-      apiService.getCaseV2(caseId),
+      apiService.getCaseV2(caseId, { signal: readController.signal }),
       typeof apiService.getUserSetting === 'function'
-        ? apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY).catch(() => null)
+        ? apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY, { signal: readController.signal }).catch(() => null)
         : Promise.resolve(null),
     ])
       .then(([loadedCase, timeZoneResponse]) => {
-        if (cancelled) return;
+        if (!isReadCurrent()) return;
         const nextTimeZoneId = normalizeUserTimeZoneId(timeZoneResponse?.value);
         setActiveCaseTimeZoneId(nextTimeZoneId);
         setCaseTimeZoneId(nextTimeZoneId);
@@ -1971,27 +2008,29 @@ export function CaseDetailPage({
         setCaseItemAccessKey(taskAccessKey);
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (!isReadCurrent()) return;
         setCaseItem(null);
         setError(err instanceof Error ? err.message : 'Не удалось загрузить карточку дела.');
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (isReadCurrent()) setLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, [caseId, reloadToken, taskAccessKey]);
+  }, [captureScreen, caseId, reloadToken, taskAccessKey]);
 
   useEffect(() => {
-    if (caseItem?.id !== caseId || markedViewedCaseIdRef.current === caseId) return;
+    if (caseItem?.id !== caseId) return;
+    const owner = captureScreen();
+    if (!owner || markedViewedCaseIdRef.current === caseId) return;
     markedViewedCaseIdRef.current = caseId;
-
-    let cancelled = false;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
     apiService.markCaseActivity(caseId, { confirmed: false })
       .then((activity) => {
-        if (cancelled) return;
+        if (!isReadCurrent()) return;
         setCaseItem((current) => current?.id === caseId
           ? {
             ...current,
@@ -2021,30 +2060,36 @@ export function CaseDetailPage({
       });
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, [caseId, caseItem?.id]);
+  }, [captureScreen, caseId, caseItem?.id, markedViewedCaseIdRef]);
 
   useEffect(() => {
-    let cancelled = false;
-    apiService.getActResponsibles()
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
+    apiService.getActResponsibles({ signal: readController.signal })
       .then((items) => {
-        if (!cancelled) setResponsibles(items ?? []);
+        if (isReadCurrent()) setResponsibles(items ?? []);
       })
       .catch(() => {
-        if (!cancelled) setResponsibles([]);
+        if (isReadCurrent()) setResponsibles([]);
       });
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, []);
+  }, [captureScreen, ]);
 
   useEffect(() => {
-    let cancelled = false;
-    apiService.getCaseDocumentTemplates()
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
+    apiService.getCaseDocumentTemplates({ signal: readController.signal })
       .then((items) => {
-        if (cancelled) return;
+        if (!isReadCurrent()) return;
 
         const templates = (items ?? []).filter((item) => item.key && item.label && item.documentType);
         const nextTemplates = templates.length > 0 ? templates : FALLBACK_DOCUMENT_TEMPLATE_OPTIONS;
@@ -2052,7 +2097,7 @@ export function CaseDetailPage({
         setDocumentTemplateKey((current) => nextTemplates.some((item) => item.key === current) ? current : nextTemplates[0].key);
       })
       .catch(() => {
-        if (cancelled) return;
+        if (!isReadCurrent()) return;
 
         setDocumentTemplates(FALLBACK_DOCUMENT_TEMPLATE_OPTIONS);
         setDocumentTemplateKey((current) => FALLBACK_DOCUMENT_TEMPLATE_OPTIONS.some((item) => item.key === current)
@@ -2061,9 +2106,9 @@ export function CaseDetailPage({
       })
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, []);
+  }, [captureScreen, ]);
 
   useEffect(() => {
     setDocumentTemplateKey((current) => (
@@ -2074,15 +2119,18 @@ export function CaseDetailPage({
   }, [availableDocumentTemplates]);
 
   useEffect(() => {
-    let cancelled = false;
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
 
     const loadDocumentDictionaries = async () => {
       const [typesResult, statusesResult] = await Promise.allSettled([
-        apiService.getCaseDocumentTypes(),
-        apiService.getDocumentStatuses(),
+        apiService.getCaseDocumentTypes({ signal: readController.signal }),
+        apiService.getDocumentStatuses({ signal: readController.signal }),
       ]);
 
-      if (cancelled) return;
+      if (!isReadCurrent()) return;
 
       if (typesResult.status === 'fulfilled') {
         setDocumentTypeDirectoryOptions(
@@ -2102,9 +2150,9 @@ export function CaseDetailPage({
     void loadDocumentDictionaries();
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, []);
+  }, [captureScreen, ]);
 
   useEffect(() => {
     if (!canViewTasks) {
@@ -2114,54 +2162,61 @@ export function CaseDetailPage({
 
     if (activeTab !== 'documents') return;
 
+    const owner = captureScreen(); if (!owner) return;
     const controller = new AbortController();
     apiService.getTaskJournalItems({ clientCaseId: caseId, page: 1, pageSize: 50 }, { signal: controller.signal })
       .then((result) => {
-        if (!controller.signal.aborted) setDocumentSourceTaskState({ key: documentSourceKey, items: result.items ?? [] });
+        if (!controller.signal.aborted && owner.isCurrent()) setDocumentSourceTaskState({ key: documentSourceKey, items: result.items ?? [] });
       })
       .catch(() => {
-        if (!controller.signal.aborted) setDocumentSourceTaskState({ key: documentSourceKey, items: [] });
+        if (!controller.signal.aborted && owner.isCurrent()) setDocumentSourceTaskState({ key: documentSourceKey, items: [] });
       });
 
     return () => controller.abort();
-  }, [activeTab, canViewTasks, caseId, documentSourceKey, reloadToken]);
+  }, [captureScreen, activeTab, canViewTasks, caseId, documentSourceKey, reloadToken]);
 
   useEffect(() => {
     if (activeTab !== 'participants') return;
 
-    let cancelled = false;
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
     setParticipantsLoading(true);
-    apiService.getCaseRelatedParties(caseId, showArchivedParties)
+    apiService.getCaseRelatedParties(caseId, showArchivedParties, { signal: readController.signal })
       .then((items) => {
-        if (!cancelled) setRelatedParties(items);
+        if (isReadCurrent()) setRelatedParties(items);
       })
       .catch(() => {
-        if (!cancelled) setRelatedParties([]);
+        if (isReadCurrent()) setRelatedParties([]);
       })
       .finally(() => {
-        if (!cancelled) setParticipantsLoading(false);
+        if (isReadCurrent()) setParticipantsLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, [activeTab, caseId, reloadToken, showArchivedParties]);
+  }, [captureScreen, activeTab, caseId, reloadToken, showArchivedParties]);
 
   useEffect(() => {
     if (activeTab !== 'participants') return;
 
-    let cancelled = false;
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
     setParticipantDirectoryLoading(true);
     setParticipantDirectoryError(null);
 
     const loadDirectory = async () => {
       const [clientsResult, legalEntitiesResult, contactsResult] = await Promise.allSettled([
-        apiService.getClients(),
-        apiService.getLegalEntitiesPaged({ page: 1, pageSize: 200 }),
-        apiService.getContacts({ scope: 'all' }),
+        apiService.getClients({ signal: readController.signal }),
+        apiService.getLegalEntitiesPaged({ page: 1, pageSize: 200 }, { signal: readController.signal }),
+        apiService.getContacts({ scope: 'all' }, { signal: readController.signal }),
       ]);
 
-      if (cancelled) return;
+      if (!isReadCurrent()) return;
 
       const loadedClients = clientsResult.status === 'fulfilled' ? clientsResult.value : [];
       const loadedLegalEntities = legalEntitiesResult.status === 'fulfilled' ? legalEntitiesResult.value.items ?? [] : [];
@@ -2178,7 +2233,7 @@ export function CaseDetailPage({
 
     void loadDirectory()
       .catch(() => {
-        if (!cancelled) {
+        if (isReadCurrent()) {
           setParticipantDirectoryError('Не удалось загрузить справочники участников дела.');
           setParticipantClients([]);
           setParticipantLegalEntities([]);
@@ -2186,121 +2241,136 @@ export function CaseDetailPage({
         }
       })
       .finally(() => {
-        if (!cancelled) setParticipantDirectoryLoading(false);
+        if (isReadCurrent()) setParticipantDirectoryLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, [activeTab]);
+  }, [captureScreen, activeTab]);
 
   useEffect(() => {
     if (activeTab !== 'documents'
       && activeTab !== 'court'
       && !(activeTab === 'workOrder' && externalApprovalAvailable)) return;
 
-    let cancelled = false;
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
     setDocumentsLoading(true);
     setDocumentsLoadError(false);
-    apiService.getCaseDocuments(caseId)
+    apiService.getCaseDocuments(caseId, readController.signal)
       .then((items) => {
-        if (!cancelled) setDocuments(items);
+        if (isReadCurrent()) setDocuments(items);
       })
       .catch(() => {
-        if (!cancelled) {
+        if (isReadCurrent()) {
           setDocuments([]);
           setDocumentsLoadError(true);
         }
       })
       .finally(() => {
-        if (!cancelled) setDocumentsLoading(false);
+        if (isReadCurrent()) setDocumentsLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, [activeTab, caseId, documentReloadToken, externalApprovalAvailable, reloadToken]);
+  }, [captureScreen, activeTab, caseId, documentReloadToken, externalApprovalAvailable, reloadToken]);
 
   useEffect(() => {
     if (!editPageOpen || activeTab === 'documents' || activeTab === 'court'
       || (activeTab === 'workOrder' && externalApprovalAvailable)) return;
-    let cancelled = false;
-    void apiService.getCaseDocuments(caseId)
-      .then((items) => { if (!cancelled) setDocuments(items); })
-      .catch(() => { if (!cancelled) setDocuments([]); });
-    return () => { cancelled = true; };
-  }, [activeTab, caseId, documentReloadToken, editPageOpen, externalApprovalAvailable]);
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
+    void apiService.getCaseDocuments(caseId, readController.signal)
+      .then((items) => { if (isReadCurrent()) setDocuments(items); })
+      .catch(() => { if (isReadCurrent()) setDocuments([]); });
+    return () => { readController.abort(); };
+  }, [captureScreen, activeTab, caseId, documentReloadToken, editPageOpen, externalApprovalAvailable]);
 
   useEffect(() => {
     if (activeTab !== 'court' && activeTab !== 'documents') return;
 
-    let cancelled = false;
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
     setCourtPartiesLoading(true);
     setCourtPartiesError(null);
-    apiService.getCaseCourtParties(caseId)
+    apiService.getCaseCourtParties(caseId, false, { signal: readController.signal })
       .then((items) => {
-        if (!cancelled) setCourtParties(items ?? []);
+        if (isReadCurrent()) setCourtParties(items ?? []);
       })
       .catch((error) => {
-        if (!cancelled) {
+        if (isReadCurrent()) {
           setCourtParties([]);
           setCourtPartiesError(extractDisplayErrorMessage(error, 'Не удалось загрузить участников процесса.'));
         }
       })
       .finally(() => {
-        if (!cancelled) setCourtPartiesLoading(false);
+        if (isReadCurrent()) setCourtPartiesLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, [activeTab, caseId, courtPartiesReloadToken, reloadToken]);
+  }, [captureScreen, activeTab, caseId, courtPartiesReloadToken, reloadToken]);
 
   useEffect(() => {
     if (activeTab !== 'court' && activeTab !== 'documents') return;
 
-    let cancelled = false;
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
     setCourtDirectoryLoading(true);
-    apiService.getCaseCourtDirectory()
+    apiService.getCaseCourtDirectory(false, { signal: readController.signal })
       .then((items) => {
-        if (!cancelled) setCourtDirectory(items ?? []);
+        if (isReadCurrent()) setCourtDirectory(items ?? []);
       })
       .catch(() => {
-        if (!cancelled) setCourtDirectory([]);
+        if (isReadCurrent()) setCourtDirectory([]);
       })
       .finally(() => {
-        if (!cancelled) setCourtDirectoryLoading(false);
+        if (isReadCurrent()) setCourtDirectoryLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, [activeTab, reloadToken]);
+  }, [captureScreen, activeTab, reloadToken]);
 
   useEffect(() => {
     if (activeTab !== 'court' && activeTab !== 'documents') return;
 
-    let cancelled = false;
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
     setCourtInstancesLoading(true);
     setCourtInstancesError(null);
-    apiService.getCaseCourtInstances(caseId)
+    apiService.getCaseCourtInstances(caseId, { signal: readController.signal })
       .then((items) => {
-        if (!cancelled) setCourtInstances(items ?? []);
+        if (isReadCurrent()) setCourtInstances(items ?? []);
       })
       .catch((err) => {
-        if (!cancelled) {
+        if (isReadCurrent()) {
           setCourtInstances([]);
           setCourtInstancesError(extractDisplayErrorMessage(err, 'Не удалось загрузить судебные инстанции.'));
         }
       })
       .finally(() => {
-        if (!cancelled) setCourtInstancesLoading(false);
+        if (isReadCurrent()) setCourtInstancesLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, [activeTab, caseId, reloadToken]);
+  }, [captureScreen, activeTab, caseId, reloadToken]);
 
   useEffect(() => {
     const selected = courtInstances.find((item) => item.instance === activeCourtInstance);
@@ -2317,50 +2387,56 @@ export function CaseDetailPage({
   useEffect(() => {
     if (activeTab !== 'court' && activeTab !== 'documents' && activeTab !== 'events') return;
 
-    let cancelled = false;
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
     setCourtEventsLoading(true);
     setCourtEventsError(null);
-    apiService.getCaseCourtEvents(caseId)
+    apiService.getCaseCourtEvents(caseId, { signal: readController.signal })
       .then((items) => {
-        if (!cancelled) setCourtEvents(items ?? []);
+        if (isReadCurrent()) setCourtEvents(items ?? []);
       })
       .catch((err) => {
-        if (!cancelled) {
+        if (isReadCurrent()) {
           setCourtEvents([]);
           setCourtEventsError(extractDisplayErrorMessage(err, 'Не удалось загрузить движение судебного дела.'));
         }
       })
       .finally(() => {
-        if (!cancelled) setCourtEventsLoading(false);
+        if (isReadCurrent()) setCourtEventsLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, [activeTab, caseId, reloadToken]);
+  }, [captureScreen, activeTab, caseId, reloadToken]);
 
   useEffect(() => {
-    let cancelled = false;
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
     setProceduralDeadlinesLoading(true);
     setProceduralDeadlinesError(null);
-    apiService.getCaseProceduralDeadlines(caseId)
+    apiService.getCaseProceduralDeadlines(caseId, { signal: readController.signal })
       .then((items) => {
-        if (!cancelled) setProceduralDeadlines(items ?? []);
+        if (isReadCurrent()) setProceduralDeadlines(items ?? []);
       })
       .catch((err) => {
-        if (!cancelled) {
+        if (isReadCurrent()) {
           setProceduralDeadlines([]);
           setProceduralDeadlinesError(extractDisplayErrorMessage(err, 'Не удалось проверить процессуальные сроки.'));
         }
       })
       .finally(() => {
-        if (!cancelled) setProceduralDeadlinesLoading(false);
+        if (isReadCurrent()) setProceduralDeadlinesLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, [caseId, reloadToken]);
+  }, [captureScreen, caseId, reloadToken]);
 
   useEffect(() => {
     if (caseItem?.id !== caseId) return;
@@ -2373,27 +2449,30 @@ export function CaseDetailPage({
       return;
     }
 
-    let cancelled = false;
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
     setCourtSyncLogsLoading(true);
     setCourtSyncLogsError(null);
-    apiService.getCaseCourtSyncLogs(caseId)
+    apiService.getCaseCourtSyncLogs(caseId, { signal: readController.signal })
       .then((items) => {
-        if (!cancelled) setCourtSyncLogs(items ?? []);
+        if (isReadCurrent()) setCourtSyncLogs(items ?? []);
       })
       .catch((err) => {
-        if (!cancelled) {
+        if (isReadCurrent()) {
           setCourtSyncLogs([]);
           setCourtSyncLogsError(extractDisplayErrorMessage(err, 'Не удалось получить состояние судебной проверки.'));
         }
       })
       .finally(() => {
-        if (!cancelled) setCourtSyncLogsLoading(false);
+        if (isReadCurrent()) setCourtSyncLogsLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, [
+  }, [captureScreen,
     caseId,
     caseItem?.courtCaseNumber,
     caseItem?.courtName,
@@ -2411,36 +2490,42 @@ export function CaseDetailPage({
     }
     if (activeTab !== 'finance' && activeTab !== 'documents') return;
 
-    let cancelled = false;
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
     setFinanceLoading(true);
-    apiService.getCaseFinance(caseId)
+    apiService.getCaseFinance(caseId, { signal: readController.signal })
       .then((detail) => {
-        if (!cancelled) setFinanceDetail(detail);
+        if (isReadCurrent()) setFinanceDetail(detail);
       })
       .catch(() => {
-        if (!cancelled) setFinanceDetail(null);
+        if (isReadCurrent()) setFinanceDetail(null);
       })
       .finally(() => {
-        if (!cancelled) setFinanceLoading(false);
+        if (isReadCurrent()) setFinanceLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, [activeTab, canViewFinance, caseId, reloadToken]);
+  }, [captureScreen, activeTab, canViewFinance, caseId, reloadToken]);
 
   useEffect(() => () => { workOrderPublicationRead.current?.abort(); }, [caseId]);
 
   useEffect(() => {
     if (activeTab !== 'workOrder' && activeTab !== 'documents') return;
 
-    let cancelled = false;
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
     const sequence = ++workOrderReadSequence.current;
     workOrderPublicationRead.current?.abort();
     setWorkOrderLoading(true);
-    apiService.getCaseWorkOrder(caseId)
+    apiService.getCaseWorkOrder(caseId, readController.signal)
       .then((loadedWorkOrder) => {
-        if (cancelled || sequence !== workOrderReadSequence.current) return;
+        if (!isReadCurrent() || sequence !== workOrderReadSequence.current) return;
         setWorkOrder(loadedWorkOrder);
         setWorkOrderDraft(buildWorkOrderHeaderDraft(loadedWorkOrder?.id ? loadedWorkOrder : null));
         setWorkOrderItemDrafts(Object.fromEntries(
@@ -2448,38 +2533,38 @@ export function CaseDetailPage({
         ));
       })
       .catch(() => {
-        if (cancelled || sequence !== workOrderReadSequence.current) return;
+        if (!isReadCurrent() || sequence !== workOrderReadSequence.current) return;
         setWorkOrder(null);
         setWorkOrderDraft(buildWorkOrderHeaderDraft(null));
         setWorkOrderItemDrafts({});
       })
       .finally(() => {
-        if (!cancelled && sequence === workOrderReadSequence.current) setWorkOrderLoading(false);
+        if (isReadCurrent() && sequence === workOrderReadSequence.current) setWorkOrderLoading(false);
       });
 
-    apiService.getFeatureFlags()
+    apiService.getFeatureFlags({ signal: readController.signal })
       .then(async (flags) => {
-        if (cancelled) return;
+        if (!isReadCurrent()) return;
         const available = Boolean(flags.legal.externalWorkOrderApproval);
         setExternalApprovalAvailable(available);
         if (!available) {
           setExternalApprovalStatus(null);
           return;
         }
-        const status = await apiService.getExternalWorkOrderApproval(caseId);
-        if (!cancelled) setExternalApprovalStatus(status ?? null);
+        const status = await apiService.getExternalWorkOrderApproval(caseId, { signal: readController.signal });
+        if (isReadCurrent()) setExternalApprovalStatus(status ?? null);
       })
       .catch(() => {
-        if (!cancelled) {
+        if (isReadCurrent()) {
           setExternalApprovalAvailable(false);
           setExternalApprovalStatus(null);
         }
       });
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, [activeTab, caseId, reloadToken]);
+  }, [captureScreen, activeTab, caseId, reloadToken]);
 
   useEffect(() => {
     if (!caseItem) return;
@@ -2499,14 +2584,17 @@ export function CaseDetailPage({
   useEffect(() => {
     if (activeTab !== 'history') return;
 
-    let cancelled = false;
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
     setTimelineLoading(true);
-    apiService.getCaseTimeline(caseId)
+    apiService.getCaseTimeline(caseId, { signal: readController.signal })
       .then((items) => {
-        if (!cancelled) setTimeline(items ?? []);
+        if (isReadCurrent()) setTimeline(items ?? []);
       })
       .catch(() => {
-        if (!cancelled) {
+        if (isReadCurrent()) {
           setTimeline(splitHistory(caseItem?.eventHistory).map((line, index) => ({
             id: index + 1,
             clientCaseId: caseId,
@@ -2516,34 +2604,37 @@ export function CaseDetailPage({
         }
       })
       .finally(() => {
-        if (!cancelled) setTimelineLoading(false);
+        if (isReadCurrent()) setTimelineLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, [activeTab, caseId, caseItem?.eventHistory, reloadToken]);
+  }, [captureScreen, activeTab, caseId, caseItem?.eventHistory, reloadToken]);
 
   useEffect(() => {
     if (activeTab !== 'conversation') return;
 
-    let cancelled = false;
+    const owner = captureScreen();
+    if (!owner) return;
+    const readController = new AbortController();
+    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
     setConversationLoading(true);
-    apiService.getCaseConversation(caseId)
+    apiService.getCaseConversation(caseId, { signal: readController.signal })
       .then((items) => {
-        if (!cancelled) setConversation(items ?? []);
+        if (isReadCurrent()) setConversation(items ?? []);
       })
       .catch(() => {
-        if (!cancelled) setConversation([]);
+        if (isReadCurrent()) setConversation([]);
       })
       .finally(() => {
-        if (!cancelled) setConversationLoading(false);
+        if (isReadCurrent()) setConversationLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      readController.abort();
     };
-  }, [activeTab, caseId, reloadToken]);
+  }, [captureScreen, activeTab, caseId, reloadToken]);
 
   useEffect(() => {
     if (!caseItem) return;

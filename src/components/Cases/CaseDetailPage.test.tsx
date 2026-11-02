@@ -3,11 +3,18 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { documentCopyTestSession } from '../../test/documentCopySession';
+import { captureAuthSessionIdentity } from '../../services/authService';
+import { StrictMode } from 'react';
+
+function detailViewStateKey(caseId: number) {
+  return `pp.case-detail.${caseId}.view.v2.${encodeURIComponent(captureAuthSessionIdentity().actor!)}`;
+}
 import { apiService } from '../../services/api';
 import type { ClientCase, ClientCaseCourtEvent, ClientCaseDocument, ClientCaseWorkOrder } from '../../types';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
 import { CaseDetailPage, CourtSourceProvenance } from './CaseDetailPage';
-vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 7 } }) }));
+const detailAuth = vi.hoisted(() => ({ user: { id: 7, role: { id: 10 } } }));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => detailAuth }));
 
 function createJournalEvent(overrides: Partial<ClientCaseCourtEvent> = {}): ClientCaseCourtEvent {
   return { id: 80, clientCaseId: 15, eventType: 'hearing', eventTypeLabel: 'Заседание', title: 'Заседание',
@@ -295,7 +302,7 @@ describe('CaseDetailPage', () => {
     let confirm!: (value: Awaited<ReturnType<typeof apiService.getPendingCaseDocumentUploads>>) => void;
     const proof = new Promise<Awaited<ReturnType<typeof apiService.getPendingCaseDocumentUploads>>>((resolve) => { confirm = resolve; });
     vi.mocked(apiService.getPendingCaseDocumentUploads).mockReturnValue(proof);
-    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'workOrder' }));
+    window.sessionStorage.setItem(detailViewStateKey(15), JSON.stringify({ activeTab: 'workOrder' }));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
     await screen.findByRole('button', { name: 'Создать счет' });
     if (form === 'edit') {
@@ -343,7 +350,7 @@ describe('CaseDetailPage', () => {
         return boundary === 'late initial read' ? initial : approved;
       });
       vi.mocked(apiService.getPendingCaseDocumentUploads).mockReturnValue(proof);
-      window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'workOrder' }));
+      window.sessionStorage.setItem(detailViewStateKey(15), JSON.stringify({ activeTab: 'workOrder' }));
       const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
       await screen.findByText('ЗЕМЦОВ - банкротство');
       await waitFor(() => expect(apiService.getCaseWorkOrder).toHaveBeenCalledTimes(1));
@@ -462,6 +469,7 @@ describe('CaseDetailPage', () => {
     expect(apiService.uploadCaseDocumentVersion).not.toHaveBeenCalled();
   });
   beforeEach(() => {
+    detailAuth.user = { id: 7, role: { id: 10 } };
     const session = documentCopyTestSession(); onTestFinished(() => session.restore());
     vi.mocked(apiService.getMessengerDocumentDeliveryConfiguration).mockReset();
     vi.mocked(apiService.retireCaseDocumentUpload).mockReset();
@@ -1492,7 +1500,7 @@ describe('CaseDetailPage', () => {
     const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
     await screen.findByText('Дело 15');
     fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
-    await waitFor(() => expect(apiService.getCaseCourtParties).toHaveBeenCalledWith(15));
+    await waitFor(() => expect(apiService.getCaseCourtParties).toHaveBeenCalledWith(15, false, expect.objectContaining({ signal: expect.any(AbortSignal) })));
     view.rerender(<CaseDetailPage caseId={16} onBack={vi.fn()} />);
     await screen.findByText('Дело 16');
     fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
@@ -1515,7 +1523,7 @@ describe('CaseDetailPage', () => {
     const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
     await screen.findByText('Дело 15');
     fireEvent.click(screen.getByRole('button', { name: 'События' }));
-    await waitFor(() => expect(apiService.getCaseCourtEvents).toHaveBeenCalledWith(15));
+    await waitFor(() => expect(apiService.getCaseCourtEvents).toHaveBeenCalledWith(15, expect.objectContaining({ signal: expect.any(AbortSignal) })));
     view.rerender(<CaseDetailPage caseId={16} onBack={vi.fn()} />);
     await screen.findByText('Дело 16');
     fireEvent.click(screen.getByRole('button', { name: 'События' }));
@@ -2140,8 +2148,8 @@ describe('CaseDetailPage', () => {
   });
 
   it('does not show documents from the previous case while the new case documents load', async () => {
-    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'court', courtOverview: true }));
-    window.sessionStorage.setItem('pp.case-detail.16.view.v1', JSON.stringify({ activeTab: 'court', courtOverview: true }));
+    window.sessionStorage.setItem(detailViewStateKey(15), JSON.stringify({ activeTab: 'court', courtOverview: true }));
+    window.sessionStorage.setItem(detailViewStateKey(16), JSON.stringify({ activeTab: 'court', courtOverview: true }));
     let finishNew!: (documents: ClientCaseDocument[]) => void;
     const pending = new Promise<ClientCaseDocument[]>(resolve => { finishNew = resolve; });
     vi.mocked(apiService.getCaseV2).mockImplementation(async id => createCase({ id, title: `Дело ${id}` }));
@@ -2244,7 +2252,7 @@ describe('CaseDetailPage', () => {
   });
 
   it('does not expose task counts in the court overview without task access', async () => {
-    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'court', courtOverview: true }));
+    window.sessionStorage.setItem(detailViewStateKey(15), JSON.stringify({ activeTab: 'court', courtOverview: true }));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canViewTasks={false} />);
     await screen.findByText('ЗЕМЦОВ - банкротство');
     expect(screen.queryByText('Активные задачи')).toBeNull();
@@ -2794,7 +2802,7 @@ describe('CaseDetailPage', () => {
     fireEvent.click(financeTab!);
 
     await waitFor(() => {
-      expect(apiService.getCaseFinance).toHaveBeenCalledWith(15);
+      expect(apiService.getCaseFinance).toHaveBeenCalledWith(15, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     });
     expect(await screen.findByText('Договор №1-2026')).toBeTruthy();
     expect(screen.getByText('Счет №8')).toBeTruthy();
@@ -2826,7 +2834,7 @@ describe('CaseDetailPage', () => {
 
   it('hides finance tab and skips finance loading without finance permission', async () => {
     window.sessionStorage.setItem(
-      'pp.case-detail.15.view.v1',
+      detailViewStateKey(15),
       JSON.stringify({ activeTab: 'finance' }),
     );
 
@@ -2906,7 +2914,7 @@ describe('CaseDetailPage', () => {
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'Заказ-наряд' }));
-    await waitFor(() => expect(apiService.getCaseWorkOrder).toHaveBeenCalledWith(15));
+    await waitFor(() => expect(apiService.getCaseWorkOrder).toHaveBeenCalledWith(15, expect.any(AbortSignal)));
 
     expect(await screen.findByDisplayValue('Предварительный расчет')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Создать счет' })).toBeNull();
@@ -2960,11 +2968,11 @@ describe('CaseDetailPage', () => {
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
 
-    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'workOrder' }));
+    window.sessionStorage.setItem(detailViewStateKey(15), JSON.stringify({ activeTab: 'workOrder' }));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
-    await waitFor(() => expect(apiService.getCaseWorkOrder).toHaveBeenCalledWith(15));
+    await waitFor(() => expect(apiService.getCaseWorkOrder).toHaveBeenCalledWith(15, expect.any(AbortSignal)));
     await waitFor(() => expect(apiService.getObjectAuditHistory).toHaveBeenCalledWith('client-case-work-order', 31));
     expect(await screen.findByText('Причина: Отправлено на согласование')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'История услуги Подготовка заявления' }));
@@ -3006,7 +3014,7 @@ describe('CaseDetailPage', () => {
       ],
     });
 
-    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'workOrder' }));
+    window.sessionStorage.setItem(detailViewStateKey(15), JSON.stringify({ activeTab: 'workOrder' }));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
@@ -3067,7 +3075,7 @@ describe('CaseDetailPage', () => {
       approvalComment: 'Согласовано',
     });
 
-    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'workOrder' }));
+    window.sessionStorage.setItem(detailViewStateKey(15), JSON.stringify({ activeTab: 'workOrder' }));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
@@ -3332,7 +3340,7 @@ describe('CaseDetailPage', () => {
     await screen.findByText('ЗЕМЦОВ - банкротство'); fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
     await screen.findByRole('button', { name: 'Активные · 1' });
     fireEvent.click(screen.getByRole('button', { name: 'Фильтры задач' }));
-    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('pp.case-detail.15.view.v1')!).taskFiltersExpanded).toBe(false));
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem(detailViewStateKey(15))!).taskFiltersExpanded).toBe(false));
     view.unmount(); render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
     await screen.findByText('Задача сохранённых фильтров');
     expect(screen.getByRole('button', { name: 'Фильтры задач' }).getAttribute('aria-expanded')).toBe('false');
@@ -3341,7 +3349,7 @@ describe('CaseDetailPage', () => {
   });
 
   it('PAY-24 filters: ignores a string masquerading as a saved boolean', async () => {
-    sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'tasks', taskFiltersExpanded: 'false' }));
+    sessionStorage.setItem(detailViewStateKey(15), JSON.stringify({ activeTab: 'tasks', taskFiltersExpanded: 'false' }));
     mockCaseTaskServer([createTask({ id: 51, title: 'Задача неправильного состояния' })]);
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
     await screen.findByRole('button', { name: 'Активные · 1' });
@@ -3568,6 +3576,7 @@ describe('CaseDetailPage', () => {
     view.rerender(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit taskAccessKey="own" />);
     expect(screen.queryByRole('option', { name: 'Старый источник', hidden: true })).toBeNull();
     await act(async () => finish({ items: [createTask({ id: 712, title: 'Доступный источник' })], total: 1, page: 1, pageSize: 50 }));
+    fireEvent.change(await screen.findByLabelText('Источник документа'), { target: { value: 'task' } });
     expect(await screen.findByRole('option', { name: 'Доступный источник', hidden: true })).toBeTruthy();
     expect((screen.getByLabelText('Объект документа') as HTMLSelectElement).value).not.toBe('711');
   });
@@ -4289,7 +4298,7 @@ describe('CaseDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Показать архив' }));
 
     await waitFor(() => {
-      expect(apiService.getCaseRelatedParties).toHaveBeenCalledWith(15, true);
+      expect(apiService.getCaseRelatedParties).toHaveBeenCalledWith(15, true, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     });
     expect(await screen.findByText('Архивный участник')).toBeTruthy();
     expect(screen.getByText('Архивная связь')).toBeTruthy();
@@ -4321,7 +4330,7 @@ describe('CaseDetailPage', () => {
   });
 
   it.each([false, true])('shows pending court summaries while deadline controls are already saved (overview=%s)', async (overview) => {
-    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'court', courtOverview: overview }));
+    window.sessionStorage.setItem(detailViewStateKey(15), JSON.stringify({ activeTab: 'court', courtOverview: overview }));
     vi.mocked(apiService.runCaseCourtSync).mockResolvedValue({
       clientCaseId: 15, status: 'external-sync-completed', hasCourtBinding: true,
       message: 'Судебный источник обновлен.', checkedAt: '2026-05-18T10:00:00Z',
@@ -4336,7 +4345,7 @@ describe('CaseDetailPage', () => {
   });
 
   it.each([false, true])('preserves the court source conflict message when no documents were published (overview=%s)', async (overview) => {
-    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'court', courtOverview: overview }));
+    window.sessionStorage.setItem(detailViewStateKey(15), JSON.stringify({ activeTab: 'court', courtOverview: overview }));
     vi.mocked(apiService.runCaseCourtSync).mockResolvedValue({
       clientCaseId: 15, status: 'external-sync-completed', hasCourtBinding: true,
       message: 'Судебный источник обновлен: требует проверки конфликтов: 1.', checkedAt: '2026-05-18T10:00:00Z',
@@ -4356,7 +4365,7 @@ describe('CaseDetailPage', () => {
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'История' }));
     expect(await screen.findByText('Комментарий по делу: Проверить срок.')).toBeTruthy();
-    expect(apiService.getCaseTimeline).toHaveBeenCalledWith(15);
+    expect(apiService.getCaseTimeline).toHaveBeenCalledWith(15, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     fireEvent.change(screen.getByLabelText('Комментарий по истории дела'), { target: { value: 'Проверить срок апелляции' } });
     fireEvent.click(screen.getByRole('button', { name: 'Добавить комментарий' }));
 
@@ -4385,7 +4394,7 @@ describe('CaseDetailPage', () => {
     expect(await screen.findByText('Журнал судебных проверок')).toBeTruthy();
     expect(screen.getAllByText('Проверка записана').length).toBeGreaterThan(0);
     expect(screen.getByText('Инициатор: Администратор')).toBeTruthy();
-    expect(apiService.getCaseCourtSyncLogs).toHaveBeenCalledWith(15);
+    expect(apiService.getCaseCourtSyncLogs).toHaveBeenCalledWith(15, expect.objectContaining({ signal: expect.any(AbortSignal) }));
 
     fireEvent.click(screen.getByRole('button', { name: /Проверить источник/u }));
     await waitFor(() => {
@@ -4395,7 +4404,7 @@ describe('CaseDetailPage', () => {
 
   it('opens the court card in a read-first overview from the court registry', async () => {
     window.sessionStorage.setItem(
-      'pp.case-detail.15.view.v1',
+      detailViewStateKey(15),
       JSON.stringify({ activeTab: 'court', courtOverview: true }),
     );
     vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
@@ -4552,7 +4561,7 @@ describe('CaseDetailPage', () => {
 
   it('keeps archived source events in history without showing them as current movement', async () => {
     window.sessionStorage.setItem(
-      'pp.case-detail.15.view.v1',
+      detailViewStateKey(15),
       JSON.stringify({ activeTab: 'court', courtOverview: true }),
     );
     vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([
@@ -4609,7 +4618,7 @@ describe('CaseDetailPage', () => {
 
   it('shows an issued appeal decision from the result of a completed complaint hearing', async () => {
     window.sessionStorage.setItem(
-      'pp.case-detail.15.view.v1',
+      detailViewStateKey(15),
       JSON.stringify({ activeTab: 'court', courtOverview: true }),
     );
     vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([{
@@ -4640,7 +4649,7 @@ describe('CaseDetailPage', () => {
 
   it('does not show court conclusions while source data is still loading', async () => {
     window.sessionStorage.setItem(
-      'pp.case-detail.15.view.v1',
+      detailViewStateKey(15),
       JSON.stringify({ activeTab: 'court', courtOverview: true }),
     );
     vi.mocked(apiService.getCaseCourtEvents).mockImplementation(() => new Promise(() => {}));
@@ -4654,7 +4663,7 @@ describe('CaseDetailPage', () => {
 
   it('shows a source warning instead of unsupported court conclusions', async () => {
     window.sessionStorage.setItem(
-      'pp.case-detail.15.view.v1',
+      detailViewStateKey(15),
       JSON.stringify({ activeTab: 'court', courtOverview: true }),
     );
     vi.mocked(apiService.getCaseCourtEvents).mockRejectedValue(new Error('Failed to fetch'));
@@ -4885,7 +4894,7 @@ describe('CaseDetailPage', () => {
   });
 
   it('lets the lawyer identify who filed a court complaint', async () => {
-    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'court' }));
+    window.sessionStorage.setItem(detailViewStateKey(15), JSON.stringify({ activeTab: 'court' }));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
 
     expect(await screen.findByText('Режим редактирования судебных данных')).toBeTruthy();
@@ -4901,7 +4910,7 @@ describe('CaseDetailPage', () => {
   });
 
   it('requires the filing date before saving a filed appeal with a known side', async () => {
-    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'court' }));
+    window.sessionStorage.setItem(detailViewStateKey(15), JSON.stringify({ activeTab: 'court' }));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
 
     expect(await screen.findByText('Режим редактирования судебных данных')).toBeTruthy();
@@ -4915,7 +4924,7 @@ describe('CaseDetailPage', () => {
   });
 
   it('shows a compact court sync summary in overview without duplicating the technical message', async () => {
-    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'court' }));
+    window.sessionStorage.setItem(detailViewStateKey(15), JSON.stringify({ activeTab: 'court' }));
     vi.mocked(apiService.runCaseCourtSync).mockResolvedValueOnce({
       clientCaseId: 15,
       status: 'external-sync-completed',
@@ -4944,7 +4953,7 @@ describe('CaseDetailPage', () => {
     expect(screen.queryByText(/Технический подробный результат синхронизации/u)).toBeNull();
     expect(screen.getByText('Сводка по судебному делу')).toBeTruthy();
     expect(screen.queryByText('Режим редактирования судебных данных')).toBeNull();
-    expect(JSON.parse(window.sessionStorage.getItem('pp.case-detail.15.view.v1') || '{}').courtOverview).toBe(true);
+    expect(JSON.parse(window.sessionStorage.getItem(detailViewStateKey(15)) || '{}').courtOverview).toBe(true);
   });
 
   it('searches and binds an external court card from the court tab', async () => {
@@ -5289,7 +5298,7 @@ describe('CaseDetailPage', () => {
     let finish!:(row:ClientCaseDocument)=>void;vi.mocked(apiService.uploadCaseDocument).mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));const props={caseId:15,onBack:vi.fn(),canEdit:true};const view=render(<CaseDetailPage {...props}/>);await screen.findByText('ЗЕМЦОВ - банкротство');fireEvent.click(screen.getByRole('button',{name:'Редактировать дело'}));fireEvent.change(await screen.findByLabelText('Загрузить скан исполнительного листа'),{target:{files:[new File(['x'],'writ.pdf')]}});view.rerender(<CaseDetailPage {...props} canEdit={false}/>);await act(async()=>{});const reads=vi.mocked(apiService.getCaseDocuments).mock.calls.length;await act(async()=>finish(createCaseDocument({documentType:'Исполнительный лист',status:'Получен'})));expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(reads);expect(screen.queryByRole('heading',{name:'Редактирование дела'})).toBeNull();
   });
   it('nested parent boundary: an already started writ refresh cannot replace files after revocation',async()=>{
-    let finish!:(rows:ClientCaseDocument[])=>void;const refresh=new Promise<ClientCaseDocument[]>(resolve=>{finish=resolve;});vi.mocked(apiService.getCaseDocuments).mockImplementation(async()=>vi.mocked(apiService.uploadCaseDocument).mock.calls.length?refresh:[]);const props={caseId:15,onBack:vi.fn(),canEdit:true};const view=render(<CaseDetailPage {...props}/>);await screen.findByText('ЗЕМЦОВ - банкротство');fireEvent.click(screen.getByRole('button',{name:'Документы'}));await act(async()=>{});fireEvent.click(screen.getByRole('button',{name:'Редактировать дело'}));fireEvent.change(await screen.findByLabelText('Загрузить скан исполнительного листа'),{target:{files:[new File(['x'],'writ.pdf')]}});await waitFor(()=>expect(vi.mocked(apiService.getCaseDocuments).mock.calls.some(([,signal])=>!!signal)).toBe(true));const signal=vi.mocked(apiService.getCaseDocuments).mock.calls.slice().reverse().find(([,signal])=>!!signal)?.[1];view.rerender(<CaseDetailPage {...props} canEdit={false}/>);expect(signal?.aborted).toBe(true);await act(async()=>finish([createCaseDocument({originalFileName:'ПРЕЖНИЙ СПИСОК.pdf'})]));expect(screen.getByRole('heading',{name:'Документы дела'})).toBeTruthy();expect(document.body.textContent).not.toContain('ПРЕЖНИЙ СПИСОК.pdf');
+    let revoked=false;let finish!:(rows:ClientCaseDocument[])=>void;const refresh=new Promise<ClientCaseDocument[]>(resolve=>{finish=resolve;});vi.mocked(apiService.getCaseDocuments).mockImplementation(async()=>revoked?[]:vi.mocked(apiService.uploadCaseDocument).mock.calls.length?refresh:[]);const props={caseId:15,onBack:vi.fn(),canEdit:true};const view=render(<CaseDetailPage {...props}/>);await screen.findByText('ЗЕМЦОВ - банкротство');fireEvent.click(screen.getByRole('button',{name:'Документы'}));await act(async()=>{});fireEvent.click(screen.getByRole('button',{name:'Редактировать дело'}));fireEvent.change(await screen.findByLabelText('Загрузить скан исполнительного листа'),{target:{files:[new File(['x'],'writ.pdf')]}});await waitFor(()=>expect(vi.mocked(apiService.getCaseDocuments).mock.calls.length).toBeGreaterThanOrEqual(2));const signal=vi.mocked(apiService.getCaseDocuments).mock.calls.slice().reverse().find(([,signal])=>!!signal)?.[1];revoked=true;view.rerender(<CaseDetailPage {...props} canEdit={false}/>);expect(signal?.aborted).toBe(true);await act(async()=>finish([createCaseDocument({originalFileName:'ПРЕЖНИЙ СПИСОК.pdf'})]));expect(screen.getByRole('heading',{name:'Документы дела'})).toBeTruthy();expect(document.body.textContent).not.toContain('ПРЕЖНИЙ СПИСОК.pdf');
   });
   it('nested parent boundary: old full-editor save cannot replace another case',async()=>{
     let finish!:(value:ClientCase)=>void;vi.mocked(apiService.updateCaseV2).mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));vi.mocked(apiService.getCaseV2).mockImplementation(async id=>createCase({id,title:id===16?'Следующее дело':'ЗЕМЦОВ - банкротство'}));const props={caseId:15,onBack:vi.fn(),canEdit:true};const view=render(<CaseDetailPage {...props}/>);await screen.findByText('ЗЕМЦОВ - банкротство');fireEvent.click(screen.getByRole('button',{name:'Редактировать дело'}));fireEvent.click((await screen.findAllByRole('button',{name:/Сохранить дело/}))[0]);await waitFor(()=>expect(apiService.updateCaseV2).toHaveBeenCalledOnce());view.rerender(<CaseDetailPage {...props} caseId={16}/>);await act(async()=>{});await act(async()=>finish(createCase({title:'ПРЕЖНИЙ ОТВЕТ СОХРАНЕНИЯ'})));expect(document.body.textContent).not.toContain('ПРЕЖНИЙ ОТВЕТ СОХРАНЕНИЯ');expect(screen.queryByText('Карточка дела обновлена.')).toBeNull();
@@ -5318,6 +5327,112 @@ describe('CaseDetailPage', () => {
 
   it('recovery parent bridge: allocation completion cannot refresh a new full-page case',async()=>{
     let finish!:()=>void;vi.mocked(apiService.setCourtRecoveryPayment).mockReset().mockReturnValueOnce(new Promise<void>(resolve=>{finish=resolve;}));vi.mocked(apiService.getCourtRecoveries).mockResolvedValue({awardedAmount:100000,receivedAmount:0,remainingAmount:100000,linkedPayments:[],availablePayments:[{paymentId:7,date:'2026-09-24',description:'Поступление',paidAmount:25000,allocatedAmount:null,effectiveAmount:0,warning:null}],hasMoreAvailablePayments:false,hasCompletePaymentVisibility:true});vi.mocked(apiService.getCaseV2).mockImplementation(async id=>createCase({id,courtAwardedAmount:100000}));const props={caseId:15,onBack:vi.fn(),canViewFinance:true,canEdit:true};const view=render(<CaseDetailPage {...props}/>);fireEvent.change(await screen.findByRole('combobox',{name:'Платёж для взыскания'}),{target:{value:'7'}});fireEvent.click(screen.getByRole('button',{name:'Сохранить связь'}));await waitFor(()=>expect(apiService.setCourtRecoveryPayment).toHaveBeenCalledExactlyOnceWith(15,7,25000));view.rerender(<CaseDetailPage {...props} caseId={16}/>);await act(async()=>{});const reads=vi.mocked(apiService.getCourtRecoveries).mock.calls.length;await act(async()=>finish());expect(apiService.getCourtRecoveries).toHaveBeenCalledTimes(reads);expect(screen.queryByText(/Связь с платежом сохранена/)).toBeNull();
+  });
+
+  it.each(['login', 'actor', 'logout'] as const)('page read owner baseline: ignores a late case after %s before React renders', async (change) => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    let resolve!: (value: ClientCase) => void;
+    vi.mocked(apiService.getCaseV2).mockReturnValue(new Promise<ClientCase>(done => { resolve = done; }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    session.replace(change);
+    await act(async () => { resolve(createCase({ title: 'Прежнее закрытое дело' })); });
+    expect(screen.queryByText('Прежнее закрытое дело')).toBeNull();
+    expect(apiService.markCaseActivity).not.toHaveBeenCalled();
+  });
+
+  it('page read owner baseline: discards the old page and reloads on a role change', async () => {
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    vi.mocked(apiService.getCaseV2).mockReturnValue(new Promise(() => {}));
+    detailAuth.user = { id: 7, role: { id: 20 } };
+    view.rerender(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    expect(screen.queryByText('ЗЕМЦОВ - банкротство')).toBeNull();
+    await waitFor(() => expect(apiService.getCaseV2).toHaveBeenCalledTimes(2));
+  });
+
+  it.each(['role', 'access', 'finance', 'edit', 'department'] as const)('page read owner: aborts previous reads and hides an old editor after %s changes', async change => {
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit canViewFinance caseAccessKey="first" />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Прежний секретный черновик' } });
+    const signal = vi.mocked(apiService.getCaseV2).mock.calls[0][1]?.signal;
+    expect(signal?.aborted).toBe(false);
+    vi.mocked(apiService.getCaseV2).mockReturnValue(new Promise(() => {}));
+    if (change === 'role') detailAuth.user = { id: 7, role: { id: 20 } };
+    if (change === 'department') Object.assign(detailAuth.user, { departmentId: 20 });
+    view.rerender(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit={change !== 'edit'} canViewFinance={change !== 'finance'} caseAccessKey={change === 'access' ? 'second' : 'first'} />);
+    expect(screen.queryByDisplayValue('Прежний секретный черновик')).toBeNull();
+    expect(signal?.aborted).toBe(true);
+    await waitFor(() => expect(apiService.getCaseV2).toHaveBeenCalledTimes(2));
+    expect(apiService.updateCaseV2).not.toHaveBeenCalled();
+  });
+
+  it('page read owner: preserves the current editor and request counts through a token refresh and harmless parent render', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Текущий черновик' } });
+    const counts = [vi.mocked(apiService.getCaseV2).mock.calls.length, vi.mocked(apiService.getActResponsibles).mock.calls.length, vi.mocked(apiService.getCaseDocumentTemplates).mock.calls.length];
+    session.refresh();
+    view.rerender(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit backLabel="К списку" />);
+    expect(screen.getByDisplayValue('Текущий черновик')).toBeTruthy();
+    expect([vi.mocked(apiService.getCaseV2).mock.calls.length, vi.mocked(apiService.getActResponsibles).mock.calls.length, vi.mocked(apiService.getCaseDocumentTemplates).mock.calls.length]).toEqual(counts);
+  });
+
+  it('page read owner: recovers the current lifetime in StrictMode and records a loaded case only once', async () => {
+    render(<StrictMode><CaseDetailPage caseId={15} onBack={vi.fn()} /></StrictMode>);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    await waitFor(() => expect(apiService.markCaseActivity).toHaveBeenCalledTimes(1));
+    const calls = vi.mocked(apiService.getCaseV2).mock.calls;
+    expect(calls.at(-1)?.[1]?.signal?.aborted).toBe(false);
+    expect(calls.slice(0, -1).every(call => call[1]?.signal?.aborted)).toBe(true);
+  });
+
+  it('page read owner: does not continue external-approval reads after a new login before React renders', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    let resolve!: (value: Awaited<ReturnType<typeof apiService.getFeatureFlags>>) => void;
+    vi.mocked(apiService.getFeatureFlags).mockReturnValue(new Promise(done => { resolve = done; }));
+    window.sessionStorage.setItem(detailViewStateKey(15), JSON.stringify({ activeTab: 'workOrder' }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    await waitFor(() => expect(apiService.getFeatureFlags).toHaveBeenCalledTimes(2));
+    session.replace();
+    await act(async () => { resolve({ legal: { externalWorkOrderApproval: true } } as Awaited<ReturnType<typeof apiService.getFeatureFlags>>); });
+    expect(apiService.getExternalWorkOrderApproval).not.toHaveBeenCalled();
+  });
+
+  it('page read owner: isolates saved tab preferences per actor and ignores unowned legacy preferences', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'conversation', participantRole: 'Прежняя роль' }));
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    expect(apiService.getCaseConversation).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /^Переписка/ }));
+    await waitFor(() => expect(apiService.getCaseConversation).toHaveBeenCalledTimes(1));
+    const oldKey = detailViewStateKey(15);
+    expect(JSON.parse(window.sessionStorage.getItem(oldKey)!).activeTab).toBe('conversation');
+    session.replace('actor');
+    detailAuth.user = { id: 8, role: { id: 10 } };
+    view.rerender(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    expect(JSON.parse(window.sessionStorage.getItem(detailViewStateKey(15))!).activeTab).toBe('overview');
+    expect(JSON.parse(window.sessionStorage.getItem(oldKey)!).activeTab).toBe('conversation');
+    expect(apiService.getCaseConversation).toHaveBeenCalledTimes(1);
+  });
+
+  it('page read owner: does not repeat a view write on an access reload but records a new login', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} caseAccessKey="first" />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    await waitFor(() => expect(apiService.markCaseActivity).toHaveBeenCalledTimes(1));
+    view.rerender(<CaseDetailPage caseId={15} onBack={vi.fn()} caseAccessKey="second" />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    expect(apiService.markCaseActivity).toHaveBeenCalledTimes(1);
+    session.replace();
+    view.rerender(<CaseDetailPage caseId={15} onBack={vi.fn()} caseAccessKey="second" />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    await waitFor(() => expect(apiService.markCaseActivity).toHaveBeenCalledTimes(2));
   });
 
 });
