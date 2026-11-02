@@ -563,7 +563,7 @@ export function Accounts({
   const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
   const { t } = useTranslation();
-  const documentStatusSettings = useDocumentStatusSettings();
+  const documentStatusSettings = useDocumentStatusSettings({ enabled: permissions.accounts.canView, ownerScope: JSON.stringify([user?.id, user?.role?.id, permissions.accounts]) });
 
   const canCreate = permissions.accounts.canCreate;
   const canEdit = permissions.accounts.canEdit;

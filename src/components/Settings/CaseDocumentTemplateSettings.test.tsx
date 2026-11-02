@@ -1,5 +1,10 @@
+import { documentCopyTestSession } from '../../test/documentCopySession';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
+let sharedTimezoneTestSession: ReturnType<typeof documentCopyTestSession>;
+beforeEach(() => { sharedTimezoneTestSession = documentCopyTestSession(); });
+afterEach(() => sharedTimezoneTestSession.restore());
+
 
 import { DialogProvider } from '../../contexts/DialogContext';
 import { apiService } from '../../services/api';

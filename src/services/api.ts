@@ -3907,11 +3907,12 @@ export class ApiService {
   }
 
   // ===== User settings =====
-  async getUserSetting(key: string): Promise<UserSettingDto | null> {
+  async getUserSetting(key: string, options?: { signal?: AbortSignal }): Promise<UserSettingDto | null> {
+    options?.signal?.throwIfAborted();
     try {
-      return await this.request<UserSettingDto | undefined>(`/user-settings/${encodeURIComponent(key)}`) ?? null;
+      return await this.request<UserSettingDto | undefined>(`/user-settings/${encodeURIComponent(key)}`, { signal: options?.signal, cache: 'no-store' }) ?? null;
     } catch (error) {
-      if (error instanceof Error && /\bHTTP 404\b/.test(error.message)) {
+      if (error instanceof ApiHttpFailure && error.status === 404) {
         return null;
       }
 
@@ -3919,10 +3920,20 @@ export class ApiService {
     }
   }
 
-  async upsertUserSetting(key: string, value: string) {
+  async upsertUserSetting(key: string, value: string, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
     return this.request<UserSettingDto>(`/user-settings/${encodeURIComponent(key)}`, {
       method: 'PUT',
+      signal: options?.signal,
       body: JSON.stringify({ value }),
+    });
+  }
+
+  async initializeUserSetting(key: string, value: string, options?: { signal?: AbortSignal }) {
+    options?.signal?.throwIfAborted();
+    // No fallback to the legacy PUT: older servers must reject initialization safely.
+    return this.request<UserSettingDto>(`/user-settings/${encodeURIComponent(key)}/initialize`, {
+      method: 'PUT', signal: options?.signal, body: JSON.stringify({ value }),
     });
   }
 
@@ -8438,8 +8449,8 @@ export class ApiService {
   async getPaymentStatuses() {
     return this.getDict('payment-statuses');
   }
-  async getDocumentStatuses() {
-    return this.getDict('document-statuses');
+  async getDocumentStatuses(options?: { signal?: AbortSignal }) {
+    return this.getDict('document-statuses', options);
   }
 
   // ===== Statistics =====

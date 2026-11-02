@@ -141,6 +141,7 @@ vi.mock('../../hooks/useToast', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getOwnCompanyOptions: vi.fn().mockResolvedValue([]),
+    getDocumentStatuses: vi.fn().mockResolvedValue([]),
     getMessengerRecipients: vi.fn(),
     getMessengerDocumentDeliveryHistory: vi.fn(),
     prepareFinancialDocumentMessengerDelivery: vi.fn(),
@@ -329,6 +330,28 @@ describe('InvoiceModal integration', () => {
   }
   const paymentReadProps = () => ({ ...referenceProps(), mode: 'edit' as const, invoice: { id: 91, invoiceEntityId: 910, number: 'СЧ-91', date: '2026-11-02', dueDate: '2026-11-05', amount: 1000,
     clientId: 1, type: 'Expense', status: 'Pending', workflowStatus: 'Draft', isPaid: false, createdAt: '2026-11-02' } as Invoice, clients: [createTestClient(1, 'Клиент счёта')] });
+
+  describe('invoice shared statuses', () => {
+    const oldStatus = () => ({ id: 701, code: 'Draft' as const, name: 'Прежний закрытый статус', description: '', colorHex: '#ffffff', isActive: true,
+      useForInvoices: true, useForActs: true, useForContracts: true, sortOrder: 1, createdAt: '2026-11-02' });
+    it('does not load document statuses while the invoice form is closed', async () => {
+      const props = paymentReadProps(); const view = render(<InvoiceModal {...props} open={false} />); await act(async () => {});
+      expect(apiService.getDocumentStatuses).not.toHaveBeenCalled(); view.rerender(<InvoiceModal {...props} />);
+      await waitFor(() => expect(apiService.getDocumentStatuses).toHaveBeenCalledOnce());
+    });
+    it.each(['role', 'view'].flatMap(change => ['success', 'error'].map(outcome => ({ change, outcome }))))(
+      'never shows a late status $outcome from former $change', async ({ change, outcome }) => {
+        const pending = createDeferred<ReturnType<typeof oldStatus>[]>(); vi.mocked(apiService.getDocumentStatuses).mockReturnValueOnce(pending.promise);
+        const props = paymentReadProps(); const view = render(<InvoiceModal {...props} />); await waitFor(() => expect(apiService.getDocumentStatuses).toHaveBeenCalledOnce());
+        const signal = vi.mocked(apiService.getDocumentStatuses).mock.calls[0][0]?.signal;
+        if (change === 'role') printAuthState.user = { id: 7, role: { id: 8 } };
+        else permissionState.value = { ...defaultRolePermissions, accounts: { ...defaultRolePermissions.accounts, canView: false } };
+        view.rerender(<InvoiceModal {...props} />);
+        await act(async () => { if (outcome === 'success') pending.resolve([oldStatus()]); else pending.reject(new Error('HTTP 403 прежнего статуса')); });
+        expect(signal?.aborted).toBe(true); expect(screen.queryByText('Прежний закрытый статус')).toBeNull(); expect(props.onSubmit).not.toHaveBeenCalled();
+        expect(apiService.getDocumentStatuses).toHaveBeenCalledTimes(change === 'role' ? 2 : 1);
+      });
+  });
   describe('invoice direct writes lifecycle', () => {
     const pageProps = () => ({ ...paymentReadProps(), presentation: 'page' as const, onRefreshRequested: vi.fn() });
     beforeEach(() => {
@@ -857,6 +880,7 @@ describe('InvoiceModal integration', () => {
 
   beforeEach(() => {
     configureDocumentDeliveryTestApi('invoice', 0, 0, false);
+    vi.mocked(apiService.getDocumentStatuses).mockReset().mockResolvedValue([]);
     referenceHookSpy.mockClear(); referenceState.loading = false; referenceState.error = null;
     referenceLookupSpy.mockClear();
     referenceState.refresh.mockReset().mockResolvedValue(undefined); referenceState.capture.mockReset().mockImplementation(() => ({ isCurrent: () => true }));

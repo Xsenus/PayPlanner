@@ -7,9 +7,9 @@
 
 - Разделов frontend: 55.
 - Backend-контроллеров: 97.
-- HTTP endpoints: 963; с прямой тестовой связью: 678.
-- HTTP endpoints с точной ссылкой из документации: 265; критичных без такой ссылки: 531.
-- Критичных endpoints без прямой тестовой связи: 237.
+- HTTP endpoints: 964; с прямой тестовой связью: 680.
+- HTTP endpoints с точной ссылкой из документации: 267; критичных без такой ссылки: 530.
+- Критичных endpoints без прямой тестовой связи: 236.
 - Реальных HTML-форм: 21; с найденной тестовой связью: 19.
 - Фоновых сервисов: 35; с найденной тестовой связью: 28.
 - Исходящих HTTP-интеграций: 12; с найденной тестовой связью: 12.
@@ -240,7 +240,7 @@
 | TaxRegisterController | backend/Controllers/TaxRegisterController.cs | 12 | [Authorize(Policy = "Admin")] | нет |
 | UserActivityController | backend/Controllers/UserActivityController.cs | 10 | [Authorize] | да |
 | UsersController | backend/Controllers/UsersController.cs | 11 | [Authorize(Policy = "Admin")] | да |
-| UserSettingsController | backend/Controllers/UserSettingsController.cs | 4 | [Authorize] | да |
+| UserSettingsController | backend/Controllers/UserSettingsController.cs | 5 | [Authorize] | да |
 | CasesV1Controller | backend/Controllers/V1/CasesV1Controller.cs | 5 | [Authorize] | да |
 | ClientsV1Controller | backend/Controllers/V1/ClientsV1Controller.cs | 5 | [Authorize] | да |
 | PaymentsV1Controller | backend/Controllers/V1/PaymentsV1Controller.cs | 5 | [Authorize] | да |
@@ -365,8 +365,7 @@
 | POST | api/user-activity/admin/compact | UserActivityController.CompactAsync | изменение данных, чувствительные данные или операция | backend/Controllers/UserActivityController.cs:474 |
 | PUT | api/user-activity/admin/settings | UserActivityController.UpdateSettingsAsync | изменение данных, чувствительные данные или операция | backend/Controllers/UserActivityController.cs:457 |
 | DELETE | api/user-activity/cleanup | UserActivityController.DeleteAllAsync | изменение данных, чувствительные данные или операция | backend/Controllers/UserActivityController.cs:487 |
-| PUT | api/user-settings/{key} | UserSettingsController.Upsert | изменение данных, чувствительные данные или операция | backend/Controllers/UserSettingsController.cs:59 |
-| PUT | api/user-settings/users/{userId:int}/{key} | UserSettingsController.UpsertForUser | изменение данных, чувствительные данные или операция | backend/Controllers/UserSettingsController.cs:81 |
+| PUT | api/user-settings/users/{userId:int}/{key} | UserSettingsController.UpsertForUser | изменение данных, чувствительные данные или операция | backend/Controllers/UserSettingsController.cs:91 |
 | POST | api/users | UsersController.CreateUser | изменение данных, чувствительные данные или операция | backend/Controllers/UsersController.cs:54 |
 | DELETE | api/users/{id:int} | UsersController.DeleteUser | изменение данных, чувствительные данные или операция | backend/Controllers/UsersController.cs:78 |
 | PUT | api/users/{id:int} | UsersController.UpdateUser | изменение данных, чувствительные данные или операция | backend/Controllers/UsersController.cs:231 |
@@ -1284,10 +1283,11 @@
 | POST | api/users/{id:int}/reject | UsersController | RejectUser | backend/Controllers/UsersController.cs:178 | [Authorize(Policy = "Admin")] | нет | нет |
 | POST | api/users/merge | UsersController | MergeUsers | backend/Controllers/UsersController.cs:212 | [Authorize(Policy = "Admin")] | нет | нет |
 | PUT | api/users/{id:int} | UsersController | UpdateUser | backend/Controllers/UsersController.cs:231 | [Authorize(Policy = "Admin")] | нет | нет |
-| GET | api/user-settings/{key} | UserSettingsController | Get | backend/Controllers/UserSettingsController.cs:44 | [Authorize] | да | docs/development-2026-10-16-audit-write-budget.md |
-| PUT | api/user-settings/{key} | UserSettingsController | Upsert | backend/Controllers/UserSettingsController.cs:59 | [Authorize] | нет | нет |
-| GET | api/user-settings/users/{userId:int}/{key} | UserSettingsController | GetForUser | backend/Controllers/UserSettingsController.cs:68 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
-| PUT | api/user-settings/users/{userId:int}/{key} | UserSettingsController | UpsertForUser | backend/Controllers/UserSettingsController.cs:81 | [Authorize]; [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/user-settings/{key} | UserSettingsController | Get | backend/Controllers/UserSettingsController.cs:46 | [Authorize] | да | docs/development-2026-10-16-audit-write-budget.md, docs/shared-status-timezone-checkpoint-2026-11-02.md |
+| PUT | api/user-settings/{key} | UserSettingsController | Upsert | backend/Controllers/UserSettingsController.cs:61 | [Authorize] | да | docs/shared-status-timezone-checkpoint-2026-11-02.md |
+| PUT | api/user-settings/{key}/initialize | UserSettingsController | Initialize | backend/Controllers/UserSettingsController.cs:70 | [Authorize] | да | docs/shared-status-timezone-checkpoint-2026-11-02.md |
+| GET | api/user-settings/users/{userId:int}/{key} | UserSettingsController | GetForUser | backend/Controllers/UserSettingsController.cs:78 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
+| PUT | api/user-settings/users/{userId:int}/{key} | UserSettingsController | UpsertForUser | backend/Controllers/UserSettingsController.cs:91 | [Authorize]; [Authorize(Policy = "Admin")] | нет | нет |
 | GET | api/v1/cases | CasesV1Controller | Get | backend/Controllers/V1/CasesV1Controller.cs:29 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/unpushed-changes-map-2026-10-03.md |
 | GET | api/v1/cases/{id:int} | CasesV1Controller | GetById | backend/Controllers/V1/CasesV1Controller.cs:59 | [Authorize] | да | нет |
 | POST | api/v1/cases | CasesV1Controller | Create | backend/Controllers/V1/CasesV1Controller.cs:81 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |

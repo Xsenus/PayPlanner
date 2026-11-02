@@ -124,7 +124,7 @@ export function Acts({
   const canViewLinkedClients = permissions.clients.canView;
 
   const { t } = useTranslation();
-  const documentStatusSettings = useDocumentStatusSettings();
+  const documentStatusSettings = useDocumentStatusSettings({ enabled: actsPermissions.canView, ownerScope: JSON.stringify([user?.id, user?.role?.id, actsPermissions]) });
 
   const defaultPeriod = useMemo<PeriodFilter>(() => ({ mode: 'custom', from: '', to: '' }), []);
   const storagePrefix = useMemo(() => `pp.acts.${user?.id ?? 'guest'}`, [user?.id]);

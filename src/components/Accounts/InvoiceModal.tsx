@@ -1148,7 +1148,7 @@ export function InvoiceModal({
     try { await refreshReferences(); }
     finally { if (referenceRetry.current === attempt) referenceRetry.current = null; }
   };
-  const documentStatusSettings = useDocumentStatusSettings();
+  const documentStatusSettings = useDocumentStatusSettings({ enabled: open && canReadPrint, ownerScope: referenceScope });
   const invoiceWorkflowStatusLabels = useMemo(
     () => getDocumentStatusLabels(documentStatusSettings, 'invoice', DEFAULT_INVOICE_WORKFLOW_STATUS_LABELS),
     [documentStatusSettings],

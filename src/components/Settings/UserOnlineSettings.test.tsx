@@ -1,5 +1,10 @@
+import { documentCopyTestSession } from '../../test/documentCopySession';
 import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+let sharedTimezoneTestSession: ReturnType<typeof documentCopyTestSession>;
+beforeEach(() => { sharedTimezoneTestSession = documentCopyTestSession(); });
+afterEach(() => sharedTimezoneTestSession.restore());
+
 
 import { apiServiceMock, resetApiServiceMock } from '../../test/apiMock';
 import { UserOnlineSettings } from './UserOnlineSettings';

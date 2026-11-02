@@ -165,6 +165,22 @@ describe('ActDetailPage', () => {
     });
   });
 
+
+  it.each(['document', 'role', 'view'].flatMap(change => ['success', 'error'].map(outcome => ({ change, outcome }))))(
+    'shared status caller: refuses late $outcome after $change', async ({ change, outcome }) => {
+      const session = documentCopyTestSession(); try {
+        let finish!: (value: unknown[]) => void; let fail!: (error: Error) => void;
+        getDocumentStatusesMock.mockReset().mockResolvedValue([]).mockReturnValueOnce(new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
+        getActMock.mockImplementation(async id => ({ id, number: String(id), date: '2026-04-14', amount: 1000, type: 'Income', status: 'Created', workflowStatus: 'Draft', lineItems: [] }));
+        const view = render(<ActDetailPage actId={32} onBack={vi.fn()} />); await waitFor(() => expect(getDocumentStatusesMock).toHaveBeenCalledOnce());
+        const signal = getDocumentStatusesMock.mock.calls[0][0].signal as AbortSignal;
+        if (change === 'role') authState.user = { id: 1, role: { id: 8 } };
+        if (change === 'view') rolePermissionsMock.acts.canView = false;
+        view.rerender(<ActDetailPage actId={change === 'document' ? 33 : 32} onBack={vi.fn()} />);
+        await act(async () => { if (outcome === 'error') fail(new Error('HTTP 403 прежнего статуса')); else finish([{ id: 701, code: 'Draft', name: 'Прежний закрытый статус', description: '', colorHex: '#ffffff', isActive: true, useForInvoices: true, useForActs: true, useForContracts: true, sortOrder: 1, createdAt: '2026-11-02' }]); });
+        expect(signal.aborted).toBe(true); expect(screen.queryByText('Прежний закрытый статус')).toBeNull(); expect(getDocumentStatusesMock).toHaveBeenCalledTimes(change === 'view' ? 1 : 2);
+      } finally { session.restore(); }
+    });
   it('does not open linked client or invoice when related sections are hidden by role', async () => {
     rolePermissionsMock.accounts.canView = false;
     rolePermissionsMock.clients.canView = false;

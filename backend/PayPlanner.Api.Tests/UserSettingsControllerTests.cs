@@ -10,6 +10,7 @@ using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Models.Requests;
 using System.Security.Claims;
 using Xunit;
 
@@ -101,6 +102,93 @@ public sealed class UserSettingsControllerTests
         var result = await controller.GetForUser(user.Id, "missing.admin.lookup");
 
         Assert.IsType<NotFoundResult>(result.Result);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Upsert_InitializesOneOwnSettingWithoutChangingOtherUsers(bool onlyIfMissing)
+    {
+        await using var scope = await CreateScopeAsync();
+        var user = await CreateUserAsync(scope.Db, "timezone-owner@example.test");
+        var other = await CreateUserAsync(scope.Db, "timezone-other@example.test");
+        scope.Db.UserSettings.Add(new UserSetting { UserId = other.Id, Key = "profile.timeZoneId", Value = "Europe/Samara" });
+        await scope.Db.SaveChangesAsync();
+        var controller = CreateController(scope.Db, user.Id);
+        var request = new UpsertUserSettingRequest { Value = "UTC" };
+        var result = onlyIfMissing ? await controller.Initialize("profile.timeZoneId", request) : await controller.Upsert("profile.timeZoneId", request);
+        var dto = Assert.IsType<UserSettingDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal("UTC", dto.Value);
+        Assert.Equal(2, await scope.Db.UserSettings.CountAsync());
+        Assert.Equal("Europe/Samara", await scope.Db.UserSettings.AsNoTracking().Where(row => row.UserId == other.Id).Select(row => row.Value).SingleAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Upsert_ExplicitChoiceWinsInBothInitializationOrders(bool manualFirst)
+    {
+        await using var scope = await CreateScopeAsync();
+        var user = await CreateUserAsync(scope.Db, "timezone-order@example.test");
+        var controller = CreateController(scope.Db, user.Id);
+        var automatic = new UpsertUserSettingRequest { Value = "UTC" };
+        var manual = new UpsertUserSettingRequest { Value = "Europe/Samara" };
+        await (manualFirst ? controller.Upsert("profile.timeZoneId", manual) : controller.Initialize("profile.timeZoneId", automatic));
+        var original = await scope.Db.UserSettings.AsNoTracking().SingleAsync();
+        await (manualFirst ? controller.Initialize("profile.timeZoneId", automatic) : controller.Upsert("profile.timeZoneId", manual));
+        var final = await scope.Db.UserSettings.AsNoTracking().SingleAsync();
+        Assert.Equal(original.Id, final.Id);
+        Assert.Equal(original.CreatedAt, final.CreatedAt);
+        Assert.Equal("Europe/Samara", final.Value);
+        Assert.Single(await scope.Db.UserSettings.ToListAsync());
+        if (manualFirst) Assert.Equal(original.UpdatedAt, final.UpdatedAt);
+    }
+
+    [Theory]
+    [InlineData("with'quote", "value'; DELETE FROM \"Users\"; --")]
+    [InlineData("empty.value", "")]
+    public async Task Upsert_ParameterizesValuesAndPreservesValidEmptyStrings(string key, string value)
+    {
+        await using var scope = await CreateScopeAsync();
+        var user = await CreateUserAsync(scope.Db, "setting-values@example.test");
+        await CreateController(scope.Db, user.Id).Upsert(key, new UpsertUserSettingRequest { Value = value });
+        var saved = await scope.Db.UserSettings.AsNoTracking().SingleAsync();
+        Assert.Equal(key, saved.Key); Assert.Equal(value, saved.Value);
+        Assert.True(await scope.Db.Users.AnyAsync(row => row.Id == user.Id));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task Upsert_RejectsAnInvalidKeyWithoutWrites(string key)
+    {
+        await using var scope = await CreateScopeAsync();
+        var user = await CreateUserAsync(scope.Db, "setting-invalid@example.test");
+        var result = await CreateController(scope.Db, user.Id).Initialize(key, new UpsertUserSettingRequest { Value = "UTC" });
+        Assert.IsType<BadRequestResult>(result.Result);
+        Assert.Empty(await scope.Db.UserSettings.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Upsert_RejectsMissingUserAndOversizedKeyWithoutWrites()
+    {
+        await using var scope = await CreateScopeAsync();
+        var controller = CreateController(scope.Db, 999);
+        Assert.IsType<NotFoundResult>((await controller.Initialize("profile.timeZoneId", new UpsertUserSettingRequest { Value = "UTC" })).Result);
+        var user = await CreateUserAsync(scope.Db, "setting-key-size@example.test");
+        Assert.IsType<BadRequestResult>((await CreateController(scope.Db, user.Id).Upsert(new string('x', 161), new UpsertUserSettingRequest { Value = "UTC" })).Result);
+        Assert.Empty(await scope.Db.UserSettings.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Initialize_RejectsMissingIdentityWithoutWriting()
+    {
+        await using var scope = await CreateScopeAsync();
+        var controller = CreateController(scope.Db, 999);
+        controller.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity());
+        var result = await controller.Initialize("profile.timeZoneId", new UpsertUserSettingRequest { Value = "UTC" });
+        Assert.IsType<UnauthorizedResult>(result.Result);
+        Assert.Empty(await scope.Db.UserSettings.ToListAsync());
     }
 
     private static UserSettingsController CreateController(PaymentContext db, int userId, bool isAdminClaim = false)

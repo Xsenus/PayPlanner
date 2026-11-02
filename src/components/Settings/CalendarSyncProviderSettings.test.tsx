@@ -1,5 +1,10 @@
+import { documentCopyTestSession } from '../../test/documentCopySession';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
+let sharedTimezoneTestSession: ReturnType<typeof documentCopyTestSession>;
+beforeEach(() => { sharedTimezoneTestSession = documentCopyTestSession(); });
+afterEach(() => sharedTimezoneTestSession.restore());
+
 
 import { CalendarSyncProviderSettings } from './CalendarSyncProviderSettings';
 
@@ -20,7 +25,8 @@ vi.mock('../../services/api', () => ({
   apiService: apiMock,
 }));
 
-vi.mock('../../services/authService', () => ({
+vi.mock('../../services/authService', async importOriginal => ({
+  ...await importOriginal<typeof import('../../services/authService')>(),
   authService: authMock,
 }));
 

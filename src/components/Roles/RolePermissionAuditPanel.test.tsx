@@ -1,6 +1,11 @@
+import { documentCopyTestSession } from '../../test/documentCopySession';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
+let sharedTimezoneTestSession: ReturnType<typeof documentCopyTestSession>;
+beforeEach(() => { sharedTimezoneTestSession = documentCopyTestSession(); });
+afterEach(() => sharedTimezoneTestSession.restore());
+
 
 import { apiService } from '../../services/api';
 import { RolePermissionAuditPanel } from './RolePermissionAuditPanel';

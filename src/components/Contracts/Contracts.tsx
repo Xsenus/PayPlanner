@@ -89,7 +89,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
   const toast = useToast();
   const { confirm } = useDialog();
   const { t } = useTranslation();
-  const documentStatusSettings = useDocumentStatusSettings();
+  const documentStatusSettings = useDocumentStatusSettings({ enabled: permissions.canView, ownerScope: JSON.stringify([user?.id, user?.role?.id, permissions]) });
 
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');

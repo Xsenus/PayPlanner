@@ -179,9 +179,9 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const canViewLinkedAccounts = permissions.accounts.canView;
   const canViewLinkedClients = permissions.clients.canView;
   const requiresFinancialActionReason = Boolean(user?.requiresFinancialActionReason);
-  const documentStatusSettings = useDocumentStatusSettings();
 
   const actScope = JSON.stringify([actId, user?.id, user?.role?.id, canView, canEdit, permissions.acts.viewScope]);
+  const documentStatusSettings = useDocumentStatusSettings({ enabled: canView, ownerScope: actScope });
   const actScopeRef = useRef(actScope);
   actScopeRef.current = actScope;
   const clientsScope = JSON.stringify([actScope, canViewLinkedClients, permissions.clients.viewScope]);

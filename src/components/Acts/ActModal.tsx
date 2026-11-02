@@ -530,7 +530,7 @@ export function ActModal({
   const actReadStateRef = useRef(actReadState);
   actReadStateRef.current = actReadState;
   const { isRequired } = useFormRequirements('acts', open, { ownerScope: editorScope });
-  const documentStatusSettings = useDocumentStatusSettings();
+  const documentStatusSettings = useDocumentStatusSettings({ enabled: open, ownerScope: editorScope });
   const { legalEntities } = useLegalEntities({ enabled: open, ownerScope: editorScope });
   const profileTimeZoneId = useUserTimeZone();
   const profileTimeZoneIdRef = useRef(profileTimeZoneId);

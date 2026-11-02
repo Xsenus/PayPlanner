@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using NpgsqlTypes;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
@@ -65,6 +67,14 @@ public class UserSettingsController : ControllerBase, IAsyncActionFilter
         return await UpsertForUser(userId.Value, key, request);
     }
 
+    [HttpPut("{key}/initialize")]
+    public async Task<ActionResult<UserSettingDto>> Initialize(string key, [FromBody] UpsertUserSettingRequest request)
+    {
+        var userId = GetUserId(User);
+        if (userId is null) return Unauthorized();
+        return await WriteSettingAsync(userId.Value, key, request, onlyIfMissing: true);
+    }
+
     [HttpGet("users/{userId:int}/{key}")]
     [Authorize(Policy = "Admin")]
     public async Task<ActionResult<UserSettingDto>> GetForUser(int userId, string key)
@@ -81,35 +91,54 @@ public class UserSettingsController : ControllerBase, IAsyncActionFilter
     [HttpPut("users/{userId:int}/{key}")]
     [Authorize(Policy = "Admin")]
     public async Task<ActionResult<UserSettingDto>> UpsertForUser(int userId, string key, [FromBody] UpsertUserSettingRequest request)
+        => await WriteSettingAsync(userId, key, request, onlyIfMissing: false);
+
+    private async Task<ActionResult<UserSettingDto>> WriteSettingAsync(int userId, string key, UpsertUserSettingRequest request, bool onlyIfMissing)
     {
         var exists = await _db.Users.AsNoTracking().AnyAsync(user => user.Id == userId);
         if (!exists) return NotFound();
 
-        var now = DateTime.UtcNow;
-        var setting = await _db.UserSettings
-            .FirstOrDefaultAsync(s => s.UserId == userId && s.Key == key);
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 160 || request.Value is null) return BadRequest();
+        if (!_db.Database.IsNpgsql() && !_db.Database.IsSqlite())
+            throw new InvalidOperationException("User settings require a supported relational provider.");
 
-        if (setting is null)
+        var now = DateTime.UtcNow;
+        // Match the existing UTC-by-convention timestamp columns on both providers.
+        var storedNow = DateTime.SpecifyKind(now, DateTimeKind.Unspecified);
+        object createdAt = _db.Database.IsNpgsql()
+            ? new NpgsqlParameter("createdAt", NpgsqlDbType.Timestamp) { Value = storedNow }
+            : storedNow;
+        object updatedAt = _db.Database.IsNpgsql()
+            ? new NpgsqlParameter("updatedAt", NpgsqlDbType.Timestamp) { Value = storedNow }
+            : storedNow;
+        var ct = HttpContext.RequestAborted;
+        // Both providers implement the same unique (UserId, Key) conflict boundary.
+        // A late default can never replace an explicit choice; an explicit write
+        // also remains an atomic upsert when the default won the first insert.
+        // UserSetting is excluded from PaymentContext's audited entity registry.
+        if (onlyIfMissing)
         {
-            setting = new UserSetting
-            {
-                UserId = userId,
-                Key = key,
-                Value = request.Value,
-                CreatedAt = now,
-                UpdatedAt = now,
-            };
-            _db.UserSettings.Add(setting);
+            await _db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "UserSettings" ("UserId", "Key", "Value", "CreatedAt", "UpdatedAt")
+                VALUES ({userId}, {key}, {request.Value}, {createdAt}, {updatedAt})
+                ON CONFLICT ("UserId", "Key") DO NOTHING
+                """, ct);
         }
         else
         {
-            setting.Value = request.Value;
-            setting.UpdatedAt = now;
+            await _db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "UserSettings" ("UserId", "Key", "Value", "CreatedAt", "UpdatedAt")
+                VALUES ({userId}, {key}, {request.Value}, {createdAt}, {updatedAt})
+                ON CONFLICT ("UserId", "Key") DO UPDATE
+                SET "Value" = excluded."Value", "UpdatedAt" = excluded."UpdatedAt"
+                """, ct);
+            // Keep the legacy response for an explicit write, including its UTC timestamp.
+            return Ok(new UserSettingDto { Key = key, Value = request.Value, UpdatedAt = now });
         }
 
-        await _db.SaveChangesAsync();
-
-        return Ok(Map(setting));
+        var setting = await _db.UserSettings.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.UserId == userId && item.Key == key, ct);
+        return setting is null ? NotFound() : Ok(Map(setting));
     }
 
     private static int? GetUserId(ClaimsPrincipal user)
