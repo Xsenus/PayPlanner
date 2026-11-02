@@ -113,6 +113,11 @@ public sealed class BankImportProvenanceMigrationTests
             "20261028040010_AddDeadlineReviewerDispatch", "20261028050010_AddTaskStatusNotificationOutbox",
             "20261028060010_AddTaskStatusTransitionToken", "20261028070010_BindApprovalNotificationStage",
             "20261028080010_CashInventoryAccountIdentityPostgreSql",
+            "20261030224445_AddBalanceApplicationReceiptsPostgreSql",
+            "20261030232554_FenceCancelledBalanceApplicationsPostgreSql",
+            "20261031125252_AddPaymentOverdueNotificationOutboxPostgreSql",
+            "20261031233007_AddCompanyBankAccountBindingsPostgreSql",
+            "20261101000834_IndexCompanyBankBindingHistoryPostgreSql",
         } : new[]
         {
             "20261027031742_AddTaskTimeTracking", "20261027130000_AddSalesRequestServiceInvoice",
@@ -120,6 +125,11 @@ public sealed class BankImportProvenanceMigrationTests
             "20261028040000_AddDeadlineReviewerDispatch", "20261028050000_AddTaskStatusNotificationOutbox",
             "20261028060000_AddTaskStatusTransitionToken", "20261028070000_BindApprovalNotificationStage",
             "20261028080000_CashInventoryAccountIdentity",
+            "20261030224434_AddBalanceApplicationReceipts",
+            "20261030232545_FenceCancelledBalanceApplications",
+            "20261031125245_AddPaymentOverdueNotificationOutbox",
+            "20261031232958_AddCompanyBankAccountBindings",
+            "20261101000824_IndexCompanyBankBindingHistory",
         };
         Assert.Equal(new[] { current, policy, paymentAttempts, chatHistory }.Concat(remaining), migrations[(provenanceIndex + 1)..]);
         var upgrade = previousStage > 0;

@@ -552,22 +552,7 @@ public class InvoicePaymentConsistencyTests
 
         var invoicesController = CreateInvoicesController(db);
         var accountsController = new AccountsController(db);
-        var paymentsController = CreatePaymentsController(db);
-        var adminRole = await db.Roles.SingleOrDefaultAsync(role => role.Name == "admin") ?? new Role { Name = "admin" };
-        var actor = new User
-        {
-            Role = adminRole,
-            Email = "invoice-link-writer@test.local",
-            FullName = "Invoice link administrator",
-            PasswordHash = "unused",
-            IsActive = true,
-            IsApproved = true,
-            IsEmployee = true,
-        };
-        db.Users.Add(actor);
-        await db.SaveChangesAsync();
-        ((ClaimsIdentity)paymentsController.User.Identity!).AddClaim(new Claim(ClaimTypes.NameIdentifier, actor.Id.ToString()));
-
+        var paymentsController = await CreatePaymentsControllerAsync(db);
         var updateModel = new Payment
         {
             Amount = 5_000m,
@@ -685,7 +670,7 @@ public class InvoicePaymentConsistencyTests
 
         var invoicesController = CreateInvoicesController(db);
         var accountsController = new AccountsController(db);
-        var paymentsController = CreatePaymentsController(db);
+        var paymentsController = await CreatePaymentsControllerAsync(db);
 
         var createModel = new Payment
         {
@@ -1322,8 +1307,22 @@ public class InvoicePaymentConsistencyTests
         return controller;
     }
 
-    private static PaymentsController CreatePaymentsController(PaymentContext db)
+    private static async Task<PaymentsController> CreatePaymentsControllerAsync(PaymentContext db)
     {
+        var adminRole = await db.Roles.SingleOrDefaultAsync(role => role.Name == "admin") ?? new Role { Name = "admin" };
+        var actor = new User
+        {
+            Role = adminRole,
+            Email = "invoice-link-writer@test.local",
+            FullName = "Invoice link administrator",
+            PasswordHash = "unused",
+            IsActive = true,
+            IsApproved = true,
+            IsEmployee = true,
+        };
+        db.Users.Add(actor);
+        await db.SaveChangesAsync();
+
         var controller = new PaymentsController(db, new NoopFormRequirementsService());
         controller.ControllerContext = new ControllerContext
         {
@@ -1332,6 +1331,7 @@ public class InvoicePaymentConsistencyTests
                 User = new ClaimsPrincipal(new ClaimsIdentity(
                     new[]
                     {
+                        new Claim(ClaimTypes.NameIdentifier, actor.Id.ToString()),
                         new Claim(ClaimTypes.Name, "Test Admin"),
                         new Claim(ClaimTypes.Role, "admin"),
                     },

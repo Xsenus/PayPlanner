@@ -29,7 +29,6 @@ public sealed partial class ManagedCaseDocumentWireTests
             clientId = Assert.IsType<int>(clientCase.ClientId); clientCase.Title = "Synthetic financial browser case";
             if (kind == "invoice" && editor)
             {
-                static string Image(string svg) => "data:image/svg+xml;base64," + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(svg));
                 var company = new LegalEntity
                 {
                     ShortName = "ТЕСТОВЫЙ ПОСТАВЩИК",
@@ -38,8 +37,8 @@ public sealed partial class ManagedCaseDocumentWireTests
                     Kpp = "000000000",
                     Address = "Тестовый адрес, дом 1",
                     BankAccountsJson = "[{\"bank\":\"Тестовый банк\",\"bik\":\"000000000\",\"accountNumber\":\"00000000000000000000\"}]",
-                    SealDataUrl = Image("<svg xmlns='http://www.w3.org/2000/svg' width='90' height='90'><circle cx='45' cy='45' r='40' fill='none' stroke='blue' stroke-width='3'/><text x='45' y='50' font-size='16' text-anchor='middle' fill='blue'>ТЕСТ</text></svg>"),
-                    DirectorSignatureDataUrl = Image("<svg xmlns='http://www.w3.org/2000/svg' width='120' height='40'><text x='5' y='28' font-size='20' fill='blue'>ОБРАЗЕЦ</text></svg>"),
+                    SealDataUrl = CompanyImageTestData.TransparentPng,
+                    DirectorSignatureDataUrl = CompanyImageTestData.TransparentPng,
                     DocumentDirectorJson = "{\"position\":\"Директор\",\"lastName\":\"Тестовый\",\"firstName\":\"Иван\",\"noMiddleName\":true}",
                 };
                 seed.LegalEntities.Add(company);

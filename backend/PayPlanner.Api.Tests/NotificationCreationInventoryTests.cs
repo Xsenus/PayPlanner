@@ -11,24 +11,58 @@ public class NotificationCreationInventoryTests
 
     private static readonly string[] AllowedProductionFiles =
     [
-        NormalizePath("backend/Services/Notifications/NotificationService.cs")
+        NormalizePath("backend/Services/Notifications/NotificationService.cs"),
+        NormalizePath("backend/Services/Notifications/NotificationService.PaymentOverdue.cs")
     ];
 
     [Fact]
     public void ProductionUserNotifications_AreCreatedOnlyThroughNotificationService()
     {
-        var repositoryRoot = ResolveRepositoryRoot();
-        var backendRoot = Path.Combine(repositoryRoot, "backend");
+        Assert.Empty(FindUnauthorizedWrites(ResolveRepositoryRoot()));
+    }
 
-        var offenders = Directory
-            .EnumerateFiles(backendRoot, "*.cs", SearchOption.AllDirectories)
+    [Fact]
+    public void Inventory_RejectsUnreviewedPartsAndOtherNotificationProducers()
+    {
+        var directory = Directory.CreateTempSubdirectory("payplanner-notification-inventory-");
+        string[] reviewedFiles =
+        [
+            "backend/Services/Notifications/NotificationService.cs",
+            "backend/Services/Notifications/NotificationService.PaymentOverdue.cs"
+        ];
+        string[] forbiddenFiles =
+        [
+            "backend/Services/Notifications/NotificationService.Other.cs",
+            "backend/Services/Notifications/NotificationService.PaymentOverdue.cs.backup.cs",
+            "backend/Controllers/NotificationService.cs"
+        ];
+        try
+        {
+            foreach (var relativePath in reviewedFiles.Concat(forbiddenFiles))
+            {
+                var file = Path.Combine(directory.FullName, relativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                File.WriteAllText(file, "new UserNotification();\ncontext.UserNotifications.Add(row);\ncontext.UserNotifications.AddRange(rows);");
+            }
+
+            var offenders = FindUnauthorizedWrites(directory.FullName);
+
+            Assert.Equal(forbiddenFiles.Order(StringComparer.Ordinal),
+                offenders.Select(hit => hit.RelativePath).Distinct().Order(StringComparer.Ordinal));
+            Assert.All(forbiddenFiles, file => Assert.Equal(3, offenders.Count(hit => hit.RelativePath == file)));
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    private static DirectWriteHit[] FindUnauthorizedWrites(string repositoryRoot)
+        => Directory.EnumerateFiles(Path.Combine(repositoryRoot, "backend"), "*.cs", SearchOption.AllDirectories)
             .Where(IsProductionSourceFile)
             .SelectMany(file => FindDirectUserNotificationWrites(repositoryRoot, file))
             .Where(hit => !AllowedProductionFiles.Contains(hit.RelativePath, StringComparer.OrdinalIgnoreCase))
             .ToArray();
-
-        Assert.Empty(offenders);
-    }
 
     private static IEnumerable<DirectWriteHit> FindDirectUserNotificationWrites(string repositoryRoot, string file)
     {

@@ -24,16 +24,20 @@ public class LegalEntitiesControllerInternalCoverageTests
         Assert.NotNull(stateType);
 
         var companyIds = new[] { 3, 7, 11 };
+        var timing = DocumentSellerSnapshotPolicy.OnCreate;
+        var version = new string('a', 64);
         var instance = Activator.CreateInstance(
             stateType!,
             BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public,
             binder: null,
-            args: new object?[] { companyIds, 7 },
+            args: new object?[] { companyIds, 7, timing, version },
             culture: null);
 
         Assert.NotNull(instance);
         Assert.Equal(companyIds, Assert.IsAssignableFrom<IReadOnlyList<int>>(stateType!.GetProperty("CompanyIds")!.GetValue(instance)));
         Assert.Equal(7, stateType.GetProperty("DefaultCompanyId")!.GetValue(instance));
+        Assert.Equal(timing, stateType.GetProperty("SellerSnapshotTiming")!.GetValue(instance));
+        Assert.Equal(version, stateType.GetProperty("Version")!.GetValue(instance));
     }
 
     [Fact]
