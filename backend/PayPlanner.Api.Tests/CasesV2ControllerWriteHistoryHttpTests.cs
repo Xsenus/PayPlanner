@@ -228,9 +228,14 @@ public partial class CasesV2ControllerTests
     {
         public object Create(ControllerContext context)
         {
-            ControllerBase controller = context.ActionDescriptor.ControllerTypeInfo.AsType() == typeof(CasesController)
-                ? new CasesController(db) : context.ActionDescriptor.ControllerTypeInfo.AsType() == typeof(PayPlanner.Api.Controllers.V1.CasesV1Controller)
-                    ? new PayPlanner.Api.Controllers.V1.CasesV1Controller(db) : CreateController(db, user);
+            ControllerBase controller = context.ActionDescriptor.ControllerTypeInfo.AsType() switch
+            {
+                var type when type == typeof(CasesController) => new CasesController(db),
+                var type when type == typeof(PayPlanner.Api.Controllers.V1.CasesV1Controller) => new PayPlanner.Api.Controllers.V1.CasesV1Controller(db),
+                var type when type == typeof(PayPlanner.Api.Controllers.V1.ClientsV1Controller) => new PayPlanner.Api.Controllers.V1.ClientsV1Controller(db),
+                var type when type == typeof(ClientsV2Controller) => new ClientsV2Controller(db),
+                _ => CreateController(db, user),
+            };
             controller.ControllerContext = context; return controller;
         }
         public void Release(ControllerContext context, object controller) { }

@@ -6,6 +6,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Clients;
 
 namespace PayPlanner.Api.Controllers.V1;
 
@@ -135,6 +136,8 @@ public class ClientsV1Controller : ControllerBase
         {
             return Unauthorized();
         }
+
+        if (ClientCreationInput.Validate(_db, model) is { } graphError) return graphError;
 
         var responsibleUserId = access.IsAdmin
             ? (model.ResponsibleUserId ?? access.UserId)
