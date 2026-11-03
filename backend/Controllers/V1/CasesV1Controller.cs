@@ -105,59 +105,52 @@ public class CasesV1Controller : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] ClientCase model, CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        return await CaseEditTransaction.RunAsync(_db, User, id, async (e, access) =>
         {
-            return forbidden;
-        }
+            // V1 changes only these owner fields; its other supplied case fields stay ignored.
+            var links = new ClientCase { ClientId = model.ClientId, LegalEntityId = model.LegalEntityId, ResponsibleUserId = e.ResponsibleUserId };
+            var validation = await CaseEditTransaction.ValidateEditedLinksAsync(_db, e, links, access.Visibility, ct);
+            if (validation is not null) return validation;
 
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
-
-        var e = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (e is null) return NotFound();
-        var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
-        if (validation is not null) return validation;
-
-        var shouldCloseLinkedTasks = e.Status is not (ClientCaseStatus.Closed or ClientCaseStatus.Lost)
-            && model.Status is ClientCaseStatus.Closed or ClientCaseStatus.Lost;
-        var shouldCancelFinalReport = e.Status is ClientCaseStatus.Closed or ClientCaseStatus.Lost
-            && model.Status is not (ClientCaseStatus.Closed or ClientCaseStatus.Lost);
-        var isCourtCase = shouldCloseLinkedTasks && (ClientCaseFinalReportTaskService.HasCourtFields(model)
-            || (await ClientCaseFinalReportTaskService.FilterCourtCaseIdsAsync(_db, [e], ct)).Contains(e.Id));
-        var finalReportAssignee = isCourtCase
-            ? await ClientCaseFinalReportTaskService.ResolveAssigneeAsync(_db, ct)
-            : null;
-        if (isCourtCase && finalReportAssignee is null)
-        {
-            return BadRequest("Перед закрытием дела выберите в настройках журнала задач ответственного за итоговые отчёты с доступом ко всем делам.");
-        }
-
-        e.Title = model.Title;
-        e.Description = model.Description;
-        e.Status = model.Status;
-        e.ClientId = model.ClientId;
-        e.LegalEntityId = model.LegalEntityId;
-
-        if (shouldCloseLinkedTasks)
-        {
-            await ClientCaseTaskSyncService.CloseActiveTasksForClosedCaseAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
-            if (isCourtCase)
+            var shouldCloseLinkedTasks = e.Status is not (ClientCaseStatus.Closed or ClientCaseStatus.Lost)
+                && model.Status is ClientCaseStatus.Closed or ClientCaseStatus.Lost;
+            var shouldCancelFinalReport = e.Status is ClientCaseStatus.Closed or ClientCaseStatus.Lost
+                && model.Status is not (ClientCaseStatus.Closed or ClientCaseStatus.Lost);
+            var isCourtCase = shouldCloseLinkedTasks && (ClientCaseFinalReportTaskService.HasCourtFields(model)
+                || (await ClientCaseFinalReportTaskService.FilterCourtCaseIdsAsync(_db, [e], ct)).Contains(e.Id));
+            var finalReportAssignee = isCourtCase
+                ? await ClientCaseFinalReportTaskService.ResolveAssigneeAsync(_db, ct)
+                : null;
+            if (isCourtCase && finalReportAssignee is null)
             {
-                await ClientCaseFinalReportTaskService.CreateForClosedCasesAsync(_db, [e.Id], finalReportAssignee!, User.GetUserId(), User.GetDisplayName(), ct);
+                return BadRequest("Перед закрытием дела выберите в настройках журнала задач ответственного за итоговые отчёты с доступом ко всем делам.");
             }
-        }
-        if (shouldCancelFinalReport)
-        {
-            await ClientCaseFinalReportTaskService.CancelForReopenedCasesAsync(_db, [e.Id], User.GetUserId(), User.GetDisplayName(), ct);
-        }
+            if (finalReportAssignee is not null && finalReportAssignee.Id != User.GetUserId())
+                await CaseEditTransaction.LockUserAccessAsync(_db, finalReportAssignee.Id, ct);
 
-        await _db.SaveChangesAsync(ct);
-        return Ok(e);
+            e.Title = model.Title;
+            e.Description = model.Description;
+            e.Status = model.Status;
+            e.ClientId = model.ClientId;
+            e.LegalEntityId = model.LegalEntityId;
+
+            if (shouldCloseLinkedTasks || shouldCancelFinalReport) await CaseEditTransaction.LockLinkedTasksAsync(_db, [e.Id], ct);
+            if (shouldCloseLinkedTasks)
+            {
+                await ClientCaseTaskSyncService.CloseActiveTasksForClosedCaseAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
+                if (isCourtCase)
+                {
+                    await ClientCaseFinalReportTaskService.CreateForClosedCasesAsync(_db, [e.Id], finalReportAssignee!, User.GetUserId(), User.GetDisplayName(), ct);
+                }
+            }
+            if (shouldCancelFinalReport)
+            {
+                await ClientCaseFinalReportTaskService.CancelForReopenedCasesAsync(_db, [e.Id], User.GetUserId(), User.GetDisplayName(), ct);
+            }
+
+            await _db.SaveChangesAsync(ct);
+            return Ok(CaseEditSnapshot.ForReply(e));
+        }, ct);
     }
 
     [HttpDelete("{id:int}")]

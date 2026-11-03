@@ -1294,7 +1294,7 @@
 | GET | api/v1/cases/{id:int} | CasesV1Controller | GetById | backend/Controllers/V1/CasesV1Controller.cs:60 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
 | POST | api/v1/cases | CasesV1Controller | Create | backend/Controllers/V1/CasesV1Controller.cs:82 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/full-project-audit-2026-06-10.md |
 | PUT | api/v1/cases/{id:int} | CasesV1Controller | Update | backend/Controllers/V1/CasesV1Controller.cs:105 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
-| DELETE | api/v1/cases/{id:int} | CasesV1Controller | Delete | backend/Controllers/V1/CasesV1Controller.cs:163 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
+| DELETE | api/v1/cases/{id:int} | CasesV1Controller | Delete | backend/Controllers/V1/CasesV1Controller.cs:156 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
 | GET | api/v1/clients | ClientsV1Controller | Get | backend/Controllers/V1/ClientsV1Controller.cs:54 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | GET | api/v1/clients/{id:int} | ClientsV1Controller | GetById | backend/Controllers/V1/ClientsV1Controller.cs:91 | [Authorize] | да | нет |
 | POST | api/v1/clients | ClientsV1Controller | Create | backend/Controllers/V1/ClientsV1Controller.cs:126 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
