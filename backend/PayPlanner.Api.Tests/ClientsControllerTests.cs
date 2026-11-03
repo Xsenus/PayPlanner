@@ -19,7 +19,7 @@ using ClientsV1Controller = PayPlanner.Api.Controllers.V1.ClientsV1Controller;
 
 namespace PayPlanner.Api.Tests;
 
-public class ClientsControllerTests
+public partial class ClientsControllerTests
 {
     private const string ClientProfileNotesPrefix = "__PP_CLIENT_PROFILE_V2__:";
 
