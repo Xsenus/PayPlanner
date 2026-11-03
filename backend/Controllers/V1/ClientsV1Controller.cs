@@ -170,29 +170,7 @@ public class ClientsV1Controller : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id, CancellationToken ct)
-    {
-        if (await RequireClientsPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
+    public Task<IActionResult> Delete(int id, CancellationToken ct)
+        => ClientBatchTransaction.DeleteAsync(_db, User, [id], true, ct);
 
-        var access = await GetCurrentAccessAsync(ct);
-        if (access is null)
-        {
-            return Unauthorized();
-        }
-
-        var e = await BuildVisibleClientsQuery(access)
-            .FirstOrDefaultAsync(c => c.Id == id, ct);
-        if (e is null) return NotFound();
-
-        var payments = await _db.Payments.Where(p => p.ClientId == id).ToListAsync(ct);
-        foreach (var p in payments) { p.ClientId = null; p.ClientCaseId = null; }
-        await _db.SaveChangesAsync(ct);
-
-        _db.Clients.Remove(e);
-        await _db.SaveChangesAsync(ct);
-        return NoContent();
-    }
 }

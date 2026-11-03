@@ -998,8 +998,19 @@ public sealed class SalesRequestService : ISalesRequestService
     {
         if (input.ClientId is int clientId)
         {
-            var existing = await _db.Clients.FirstOrDefaultAsync(item => item.Id == clientId, ct);
-            return existing is null ? SalesRequestResult<Client>.Fail("Клиент не найден.", 404) : new(existing);
+            try
+            {
+                // This logical link has no FK. Pin the active client before reading
+                // it so concurrent profile deletion cannot leave an orphan request.
+                if (_db.Database.IsNpgsql())
+                    await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Clients\" WHERE \"Id\" = {clientId} FOR SHARE NOWAIT", ct);
+                var existing = await _db.Clients.FirstOrDefaultAsync(item => item.Id == clientId, ct);
+                return existing is null ? SalesRequestResult<Client>.Fail("Клиент не найден.", 404) : new(existing);
+            }
+            catch (Exception error) when (!ct.IsCancellationRequested && PayPlanner.Api.Services.Payments.BalanceApplicationLease.IsConflict(error))
+            {
+                return SalesRequestResult<Client>.Fail("Карточка клиента сейчас изменяется. Обновите данные перед созданием заявки.", 409);
+            }
         }
 
         var name = input.NewClientName?.Trim();
