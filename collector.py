@@ -1,5 +1,5 @@
 import sys;sys.dont_write_bytecode=True
-import pathlib,json,hashlib,datetime,time,subprocess,importlib.util,ctypes,ctypes.wintypes as W,re
+import pathlib,json,hashlib,datetime,time,subprocess,importlib.util,ctypes,ctypes.wintypes as W,re,os
 B=pathlib.Path('D:/PayPlannerDiagnostics');P=B/'dependency-fingerprint-lowmem-plan-20261103';pins=json.loads((P/'pins.json').read_text());H='5441ed9c68d6d9de13bf80e42eb106b2c0be4136';MH='e960d8377d08ce38ea14628bb967b6a8d8e589810fba29064bf56cec399391a7';S='one-retirement-dependency-fingerprint-512m-5441ed9c';A=4831838208;IDLE={'id':21,'status':'online','busy':False};install=pathlib.Path('D:/PayPlannerRunner/agent')
 def utc():return datetime.datetime.now(datetime.timezone.utc).isoformat()
 def sha(f):
@@ -12,9 +12,15 @@ def cmd(args):
  if r.returncode:raise RuntimeError('STANDARD_METADATA_FAILED')
  return r.stdout.strip()
 def gh(path,jq):return json.loads(cmd(['gh','api','repos/Xsenus/PayPlanner'+path,'--jq',jq]))
-spec=importlib.util.spec_from_file_location('prior_os_metadata',B/'20261031-original-pair-native-corrected/native_win.py');n=importlib.util.module_from_spec(spec);spec.loader.exec_module(n);K=n.K;K.QueryFullProcessImageNameW.argtypes=[W.HANDLE,W.DWORD,W.LPWSTR,ctypes.POINTER(W.DWORD)];K.QueryFullProcessImageNameW.restype=W.BOOL;K.GetSystemTimePreciseAsFileTime.argtypes=[ctypes.POINTER(W.FILETIME)];K.GetSystemTimePreciseAsFileTime.restype=None
+native_path=pathlib.Path(__file__).resolve().parent/'native_win.py';assert sha(native_path)=='798af10a95e21fc0df532d95f4c0935d331935f1b95298a5b359800be5491159';spec=importlib.util.spec_from_file_location('pinned_os_metadata',native_path);n=importlib.util.module_from_spec(spec);spec.loader.exec_module(n);K=n.K;K.QueryFullProcessImageNameW.argtypes=[W.HANDLE,W.DWORD,W.LPWSTR,ctypes.POINTER(W.DWORD)];K.QueryFullProcessImageNameW.restype=W.BOOL;K.GetSystemTimePreciseAsFileTime.argtypes=[ctypes.POINTER(W.FILETIME)];K.GetSystemTimePreciseAsFileTime.restype=None
 for f in [install,install/'.runner']:assert not f.lstat().st_file_attributes&1024
 reg=json.loads((install/'.runner').read_text(encoding='utf-8-sig'));registered=reg.get('agentId')==21 and reg.get('agentName')=='PayPlanner-XSENUS';ranges=[tuple(int(datetime.datetime.fromisoformat(v).timestamp()*10000000)+116444736000000000 for v in x) for x in [('2026-10-31T16:58:40+00:00','2026-10-31T16:58:55+00:00'),('2026-10-31T18:26:25+00:00','2026-10-31T18:26:40+00:00')]]
+def own_memory():
+ # Kernel pseudo-handle -1 always denotes this current process; no real handle is opened.
+ h=W.HANDLE(-1);c,x,k,u=(W.FILETIME() for _ in range(4));m=n.ProcessMemory();m.cb=ctypes.sizeof(m)
+ if not K.GetProcessTimes(h,ctypes.byref(c),ctypes.byref(x),ctypes.byref(k),ctypes.byref(u)):raise RuntimeError('SELF_IDENTITY_QUERY_FAILED')
+ if not n.P.GetProcessMemoryInfo(h,ctypes.byref(m),m.cb):raise RuntimeError('SELF_MEMORY_QUERY_FAILED')
+ return {'pid':os.getpid(),'createdTicks':str((c.dwHighDateTime<<32)|c.dwLowDateTime),'workingSetBytes':int(m.WorkingSetSize),'privateBytes':int(m.PrivateUsage),'peakWorkingSetBytes':int(m.PeakWorkingSetSize),'peakPagefileUsageBytes':int(m.PeakPagefileUsage),'pseudoHandleNeedsClose':False}
 def sample():
  m=n.memory();ft=W.FILETIME();K.GetSystemTimePreciseAsFileTime(ctypes.byref(ft));cut=(ft.dwHighDateTime<<32)|ft.dwLowDateTime;r={'utc':m['utc'],'availablePhysicalBytes':m['availableBytes'],'availableCommitBytes':m['commitLimitBytes']-m['commitUsedBytes'],'workerCount':0,'identityUnknownCount':0,'oldMonitorCount':0,'verifiedListeners':[],'unknown':[]};h=K.CreateToolhelp32Snapshot(2,0)
  if h==ctypes.c_void_p(-1).value:raise RuntimeError('SNAPSHOT_FAILED')
@@ -45,14 +51,18 @@ def sample():
           except OSError:trusted=False
          if not trusted:error={'pid':pid,'operation':'RunnerInstallationBindingUnproven','win32Error':None}
          elif name=='runner.listener.exe':r['verifiedListeners'].append({'pid':pid,'createdTicks':str(t),'bin':parent.name,'installationRootBound':True})
-     finally:K.CloseHandle(ph)
+     finally:
+      if not K.CloseHandle(ph):raise RuntimeError('PROCESS_HANDLE_CLOSE_FAILED')
     if error:r['unknown'].append(error)
    ctypes.set_last_error(0);ok=K.Process32NextW(h,ctypes.byref(e))
   if ctypes.get_last_error()!=18:raise RuntimeError('ENUMERATION_FAILED')
- finally:K.CloseHandle(h)
- r['identityUnknownCount']=len({x['pid'] for x in r['unknown']});return r
+ finally:
+  if not K.CloseHandle(h):raise RuntimeError('SNAPSHOT_HANDLE_CLOSE_FAILED')
+ r['identityUnknownCount']=len({x['pid'] for x in r['unknown']});r['collectorOwn']=own_memory();return r
 def clean(r):return min(r['availablePhysicalBytes'],r['availableCommitBytes'])>=A and all(r[k]==0 for k in ['workerCount','identityUnknownCount','oldMonitorCount']) and len(r['verifiedListeners'])==1
-ready={'scope':S,'headSha':H,'planManifestSha256':MH,'qualified':False,'pinsAllMatch':False,'intervalSeconds':10,'samples':[],'runnerBefore':None,'runnerAfter':None};audit={'readiness':ready,'thresholdPhysicalAndCommitBytes':A,'mandatoryCiProfileChanged':False,'executionAuthorized':False,'authorizationCreated':False,'captureInvocations':0,'applicationModuleImports':0,'nodeModulesScans':0,'historicalCiChildAbsenceProven':False,'identityScope':'Current runner and Python candidates against two saved Oct31 monitor creation windows; no broad historical PID audit'}
+ready={'scope':S,'headSha':H,'planManifestSha256':MH,'qualified':False,'pinsAllMatch':False,'intervalSeconds':10,'samples':[],'runnerBefore':None,'runnerAfter':None};audit={'collectorSourceSha256':sha(__file__),'nativeHelperSha256':sha(native_path),'nativeHandleCloseResultsChecked':True,'ownMemoryScope':'Current process only, never foreign memory; transitive child peaks UNKNOWN','readiness':ready,'thresholdPhysicalAndCommitBytes':A,'mandatoryCiProfileChanged':False,'executionAuthorized':False,'authorizationCreated':False,'captureInvocations':0,'applicationModuleImports':0,'nodeModulesScans':0,'historicalCiChildAbsenceProven':False,'identityScope':'Current runner and Python candidates against two saved Oct31 monitor creation windows; no broad historical PID audit'}
+if datetime.datetime.now(datetime.timezone.utc)<datetime.datetime.fromisoformat('2026-11-03T04:22:08.165057+00:00'):
+ print(json.dumps({'status':'NO_INVOKE_TOO_EARLY','osSamples':0,'captureInvocations':0}));raise SystemExit(75)
 try:
  initial=sample();audit['initialSample']=initial;ready['runnerBefore']=gh('/actions/runners/21','{id,status,busy}');main=gh('/git/ref/heads/main','{sha:.object.sha}');run=gh('/actions/runs/41509039583','{id,run_attempt,head_sha,status}');jobs=gh('/actions/runs/41509039583/attempts/1/jobs?per_page=100','{total_count,jobs:[.jobs[]|{id,status,head_sha,run_attempt}]}');bad=[];local=cmd(['git','--no-optional-locks','rev-parse','HEAD']);dirty=cmd(['git','--no-optional-locks','status','--porcelain=v1','--untracked-files=no'])
  if sha(P/'manifest.json')!=MH:bad.append('Manifest')
@@ -72,4 +82,4 @@ try:
 except Exception as e:audit['status']='NO_INVOKE_METADATA_OR_IDENTITY';audit['errorClass']=str(e) if isinstance(e,RuntimeError) else type(e).__name__
 audit['finishedUtc']=utc()
 if not ready['qualified'] and 'initialSample' in audit:audit['nextOsReadNotBeforeUtc']=(datetime.datetime.fromisoformat(audit['initialSample']['utc'])+datetime.timedelta(minutes=15)).isoformat()
-d=B/('dependency-fingerprint-lowmem-readiness-'+datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d-%H%M%S'));d.mkdir(exist_ok=False);f=d/'proof.json';f.write_text(json.dumps(ready,indent=2)+'\n',encoding='utf8');o=d/'observation.json';o.write_text(json.dumps(audit,indent=2)+'\n',encoding='utf8');m=d/'manifest.json';m.write_text(json.dumps({'files':[{'file':z.name,'sha256':sha(z),'bytes':z.stat().st_size} for z in [f,o]]},indent=2)+'\n',encoding='utf8');print(json.dumps({'readiness':ready,'status':audit['status'],'initialSample':audit.get('initialSample'),'ci':audit.get('ci'),'minPhysicalBytes':audit.get('minPhysicalBytes'),'minCommitBytes':audit.get('minCommitBytes'),'nextOsReadNotBeforeUtc':audit.get('nextOsReadNotBeforeUtc'),'proofPath':str(f),'proofSha256':sha(f),'observationSha256':sha(o),'manifestPath':str(m),'manifestSha256':sha(m),'executionAuthorized':False,'captureInvocations':0}))
+d=B/('dependency-fingerprint-lowmem-readiness-checked-'+datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d-%H%M%S'));d.mkdir(exist_ok=False);f=d/'proof.json';f.write_text(json.dumps(ready,indent=2)+'\n',encoding='utf8');o=d/'observation.json';o.write_text(json.dumps(audit,indent=2)+'\n',encoding='utf8');m=d/'manifest.json';m.write_text(json.dumps({'files':[{'file':z.name,'sha256':sha(z),'bytes':z.stat().st_size} for z in [f,o]]},indent=2)+'\n',encoding='utf8');print(json.dumps({'readiness':ready,'status':audit['status'],'initialSample':audit.get('initialSample'),'ci':audit.get('ci'),'minPhysicalBytes':audit.get('minPhysicalBytes'),'minCommitBytes':audit.get('minCommitBytes'),'nextOsReadNotBeforeUtc':audit.get('nextOsReadNotBeforeUtc'),'proofPath':str(f),'proofSha256':sha(f),'observationSha256':sha(o),'manifestPath':str(m),'manifestSha256':sha(m),'executionAuthorized':False,'captureInvocations':0}))

@@ -1,0 +1,15 @@
+{
+  "scope": "Checked readonly readiness source; no authorization/capture capability",
+  "files": [
+    {
+      "file": "collector.py",
+      "bytes": 10519,
+      "sha256": "45965acb3159873bb4b0caff276b2ad4144dfe4a601dc24408b7318d897a2109"
+    },
+    {
+      "file": "native_win.py",
+      "bytes": 5242,
+      "sha256": "798af10a95e21fc0df532d95f4c0935d331935f1b95298a5b359800be5491159"
+    }
+  ]
+}
