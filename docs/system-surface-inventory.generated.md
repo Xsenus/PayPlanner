@@ -8,7 +8,7 @@
 - Разделов frontend: 55.
 - Backend-контроллеров: 98.
 - HTTP endpoints: 968; с прямой тестовой связью: 684.
-- HTTP endpoints с точной ссылкой из документации: 273; критичных без такой ссылки: 529.
+- HTTP endpoints с точной ссылкой из документации: 276; критичных без такой ссылки: 527.
 - Критичных endpoints без прямой тестовой связи: 236.
 - Реальных HTML-форм: 21; с найденной тестовой связью: 19.
 - Фоновых сервисов: 35; с найденной тестовой связью: 28.
@@ -1290,11 +1290,11 @@
 | PUT | api/user-settings/{key}/initialize | UserSettingsController | Initialize | backend/Controllers/UserSettingsController.cs:70 | [Authorize] | да | docs/shared-status-timezone-checkpoint-2026-11-02.md |
 | GET | api/user-settings/users/{userId:int}/{key} | UserSettingsController | GetForUser | backend/Controllers/UserSettingsController.cs:78 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
 | PUT | api/user-settings/users/{userId:int}/{key} | UserSettingsController | UpsertForUser | backend/Controllers/UserSettingsController.cs:91 | [Authorize]; [Authorize(Policy = "Admin")] | нет | нет |
-| GET | api/v1/cases | CasesV1Controller | Get | backend/Controllers/V1/CasesV1Controller.cs:30 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/unpushed-changes-map-2026-10-03.md |
-| GET | api/v1/cases/{id:int} | CasesV1Controller | GetById | backend/Controllers/V1/CasesV1Controller.cs:60 | [Authorize] | да | нет |
-| POST | api/v1/cases | CasesV1Controller | Create | backend/Controllers/V1/CasesV1Controller.cs:82 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| PUT | api/v1/cases/{id:int} | CasesV1Controller | Update | backend/Controllers/V1/CasesV1Controller.cs:105 | [Authorize] | да | нет |
-| DELETE | api/v1/cases/{id:int} | CasesV1Controller | Delete | backend/Controllers/V1/CasesV1Controller.cs:163 | [Authorize] | да | нет |
+| GET | api/v1/cases | CasesV1Controller | Get | backend/Controllers/V1/CasesV1Controller.cs:30 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/full-project-audit-2026-06-10.md, docs/unpushed-changes-map-2026-10-03.md |
+| GET | api/v1/cases/{id:int} | CasesV1Controller | GetById | backend/Controllers/V1/CasesV1Controller.cs:60 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
+| POST | api/v1/cases | CasesV1Controller | Create | backend/Controllers/V1/CasesV1Controller.cs:82 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/full-project-audit-2026-06-10.md |
+| PUT | api/v1/cases/{id:int} | CasesV1Controller | Update | backend/Controllers/V1/CasesV1Controller.cs:105 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
+| DELETE | api/v1/cases/{id:int} | CasesV1Controller | Delete | backend/Controllers/V1/CasesV1Controller.cs:163 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
 | GET | api/v1/clients | ClientsV1Controller | Get | backend/Controllers/V1/ClientsV1Controller.cs:54 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | GET | api/v1/clients/{id:int} | ClientsV1Controller | GetById | backend/Controllers/V1/ClientsV1Controller.cs:91 | [Authorize] | да | нет |
 | POST | api/v1/clients | ClientsV1Controller | Create | backend/Controllers/V1/ClientsV1Controller.cs:126 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
