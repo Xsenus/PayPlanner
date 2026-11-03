@@ -302,87 +302,43 @@ public partial class ContactsController : ControllerBase
             return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missing });
         }
 
-        var access = await GetCurrentAccessAsync(ct);
-        if (access is null)
+        return await WriteExternalContactAsync(null, request, ExternalWrite.Create, async (existing, responsibleUserId) =>
         {
-            return Unauthorized();
-        }
+            var normalizedPhones = NormalizeStringList(request.Phones, request.Phone);
+            var normalizedEmails = NormalizeStringList(request.Emails, request.Email);
+            var now = DateTime.UtcNow;
 
-        if (await RequireClientsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
+            var entity = new ExternalContact
+            {
+                FullName = request.FullName.Trim(),
+                ContactType = NormalizeContactType(request.ContactType),
+                Inn = NormalizeOptional(request.Inn),
+                RolesJson = SerializeRoles(request.Roles),
+                Phone = normalizedPhones.FirstOrDefault(),
+                Email = normalizedEmails.FirstOrDefault(),
+                PhonesJson = SerializeStringList(normalizedPhones),
+                EmailsJson = SerializeStringList(normalizedEmails),
+                Position = NormalizeOptional(request.Position),
+                PowerOfAttorney = NormalizeOptional(request.PowerOfAttorney),
+                Notes = NormalizeOptional(request.Notes),
+                LegalEntityId = request.LegalEntityId,
+                ParentContactId = request.ParentContactId,
+                ResponsibleUserId = responsibleUserId,
+                IsActive = request.IsActive,
+                SyncToPhonebook = !IsOrganizationContact(NormalizeContactType(request.ContactType)) && request.SyncToPhonebook,
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
 
-        var legalEntity = await ResolveLegalEntityAsync(request.LegalEntityId, ct);
-        if (request.LegalEntityId.HasValue && legalEntity is null)
-        {
-            return BadRequest("Указанное юридическое лицо не найдено.");
-        }
+            _db.ExternalContacts.Add(entity);
+            await _db.SaveChangesAsync(ct);
 
-        var contactType = NormalizeContactType(request.ContactType);
-        if (string.IsNullOrWhiteSpace(request.FullName))
-        {
-            return BadRequest(IsOrganizationContact(contactType) ? "Укажите название организации." : "Укажите ФИО контакта.");
-        }
-        if (!IsValidInn(contactType, request.Inn))
-        {
-            return BadRequest("ИНН организации должен содержать 10 или 12 цифр.");
-        }
-        if (IsOrganizationContact(contactType) && !string.IsNullOrWhiteSpace(request.Inn) &&
-            await _db.ExternalContacts.AsNoTracking().AnyAsync(x => x.Inn == request.Inn.Trim(), ct))
-        {
-            return Conflict("Контакт организации с таким ИНН уже существует.");
-        }
-        var parentContact = await ResolveParentContactAsync(request.ParentContactId, access, excludedContactId: null, ct);
-        if (request.ParentContactId.HasValue && parentContact is null)
-        {
-            return BadRequest("Указанная организация-контакт не найдена.");
-        }
-        if (IsOrganizationContact(contactType) && request.ParentContactId.HasValue)
-        {
-            return BadRequest("Организацию нельзя привязать как сотрудника другой организации.");
-        }
+            await _db.Entry(entity).Reference(x => x.LegalEntity).LoadAsync(ct);
+            await _db.Entry(entity).Reference(x => x.ParentContact).LoadAsync(ct);
+            await _db.Entry(entity).Reference(x => x.ResponsibleUser).LoadAsync(ct);
 
-        var responsibleUserId = access.IsAdmin ? request.ResponsibleUserId ?? access.UserId : access.UserId;
-        if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
-        {
-            return BadRequest("Указанный ответственный не найден.");
-        }
-
-        var normalizedPhones = NormalizeStringList(request.Phones, request.Phone);
-        var normalizedEmails = NormalizeStringList(request.Emails, request.Email);
-        var now = DateTime.UtcNow;
-
-        var entity = new ExternalContact
-        {
-            FullName = request.FullName.Trim(),
-            ContactType = contactType,
-            Inn = NormalizeOptional(request.Inn),
-            RolesJson = SerializeRoles(request.Roles),
-            Phone = normalizedPhones.FirstOrDefault(),
-            Email = normalizedEmails.FirstOrDefault(),
-            PhonesJson = SerializeStringList(normalizedPhones),
-            EmailsJson = SerializeStringList(normalizedEmails),
-            Position = NormalizeOptional(request.Position),
-            PowerOfAttorney = NormalizeOptional(request.PowerOfAttorney),
-            Notes = NormalizeOptional(request.Notes),
-            LegalEntityId = request.LegalEntityId,
-            ParentContactId = request.ParentContactId,
-            ResponsibleUserId = responsibleUserId,
-            IsActive = request.IsActive,
-            SyncToPhonebook = !IsOrganizationContact(contactType) && request.SyncToPhonebook,
-            CreatedAt = now,
-            UpdatedAt = now,
-        };
-
-        _db.ExternalContacts.Add(entity);
-        await _db.SaveChangesAsync(ct);
-
-        await _db.Entry(entity).Reference(x => x.LegalEntity).LoadAsync(ct);
-        await _db.Entry(entity).Reference(x => x.ParentContact).LoadAsync(ct);
-        await _db.Entry(entity).Reference(x => x.ResponsibleUser).LoadAsync(ct);
-
-        return Created($"/api/contacts/external/{entity.Id}", MapExternalContact(entity));
+            return Created($"/api/contacts/external/{entity.Id}", MapExternalContact(entity));
+        }, ct);
     }
 
     [HttpPut("external/{id:int}")]
@@ -397,121 +353,47 @@ public partial class ContactsController : ControllerBase
             return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missing });
         }
 
-        var access = await GetCurrentAccessAsync(ct);
-        if (access is null)
+        return await WriteExternalContactAsync(id, request, ExternalWrite.Edit, async (existing, responsibleUserId) =>
         {
-            return Unauthorized();
-        }
+            var entity = existing!;
+            var normalizedPhones = NormalizeStringList(request.Phones, request.Phone);
+            var normalizedEmails = NormalizeStringList(request.Emails, request.Email);
 
-        if (await RequireClientsPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
+            entity.FullName = request.FullName.Trim();
+            entity.ContactType = NormalizeContactType(request.ContactType);
+            entity.Inn = NormalizeOptional(request.Inn);
+            entity.RolesJson = SerializeRoles(request.Roles);
+            entity.Phone = normalizedPhones.FirstOrDefault();
+            entity.Email = normalizedEmails.FirstOrDefault();
+            entity.PhonesJson = SerializeStringList(normalizedPhones);
+            entity.EmailsJson = SerializeStringList(normalizedEmails);
+            entity.Position = NormalizeOptional(request.Position);
+            entity.PowerOfAttorney = NormalizeOptional(request.PowerOfAttorney);
+            entity.Notes = NormalizeOptional(request.Notes);
+            entity.LegalEntityId = request.LegalEntityId;
+            entity.ParentContactId = request.ParentContactId;
+            entity.ResponsibleUserId = responsibleUserId;
+            entity.IsActive = request.IsActive;
+            entity.SyncToPhonebook = !IsOrganizationContact(NormalizeContactType(request.ContactType)) && request.SyncToPhonebook;
+            entity.UpdatedAt = DateTime.UtcNow;
 
-        var entity = await BuildVisibleExternalContactsQuery(access)
-            .Include(x => x.LegalEntity)
-            .Include(x => x.ParentContact)
-            .Include(x => x.LinkedClient)
-                .ThenInclude(x => x!.ClientStatus)
-            .Include(x => x.LinkedLegalEntity)
-                .ThenInclude(x => x!.ClientStatus)
-            .Include(x => x.ResponsibleUser)
-            .FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (entity is null)
-        {
-            return NotFound();
-        }
+            await _db.SaveChangesAsync(ct);
+            await _db.Entry(entity).Reference(x => x.LegalEntity).LoadAsync(ct);
+            await _db.Entry(entity).Reference(x => x.ParentContact).LoadAsync(ct);
+            await _db.Entry(entity).Reference(x => x.ResponsibleUser).LoadAsync(ct);
 
-        var legalEntity = await ResolveLegalEntityAsync(request.LegalEntityId, ct);
-        if (request.LegalEntityId.HasValue && legalEntity is null)
-        {
-            return BadRequest("Указанное юридическое лицо не найдено.");
-        }
-
-        var contactType = NormalizeContactType(request.ContactType);
-        if (string.IsNullOrWhiteSpace(request.FullName))
-        {
-            return BadRequest(IsOrganizationContact(contactType) ? "Укажите название организации." : "Укажите ФИО контакта.");
-        }
-        if (!IsValidInn(contactType, request.Inn))
-        {
-            return BadRequest("ИНН организации должен содержать 10 или 12 цифр.");
-        }
-        if (IsOrganizationContact(contactType) && !string.IsNullOrWhiteSpace(request.Inn) &&
-            await _db.ExternalContacts.AsNoTracking().AnyAsync(x => x.Id != id && x.Inn == request.Inn.Trim(), ct))
-        {
-            return Conflict("Контакт организации с таким ИНН уже существует.");
-        }
-        var parentContact = await ResolveParentContactAsync(request.ParentContactId, access, id, ct);
-        if (request.ParentContactId.HasValue && parentContact is null)
-        {
-            return BadRequest("Указанная организация-контакт не найдена.");
-        }
-        if (IsOrganizationContact(contactType) && request.ParentContactId.HasValue)
-        {
-            return BadRequest("Организацию нельзя привязать как сотрудника другой организации.");
-        }
-
-        var responsibleUserId = access.IsAdmin ? request.ResponsibleUserId ?? entity.ResponsibleUserId : entity.ResponsibleUserId;
-        if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
-        {
-            return BadRequest("Указанный ответственный не найден.");
-        }
-
-        var normalizedPhones = NormalizeStringList(request.Phones, request.Phone);
-        var normalizedEmails = NormalizeStringList(request.Emails, request.Email);
-
-        entity.FullName = request.FullName.Trim();
-        entity.ContactType = contactType;
-        entity.Inn = NormalizeOptional(request.Inn);
-        entity.RolesJson = SerializeRoles(request.Roles);
-        entity.Phone = normalizedPhones.FirstOrDefault();
-        entity.Email = normalizedEmails.FirstOrDefault();
-        entity.PhonesJson = SerializeStringList(normalizedPhones);
-        entity.EmailsJson = SerializeStringList(normalizedEmails);
-        entity.Position = NormalizeOptional(request.Position);
-        entity.PowerOfAttorney = NormalizeOptional(request.PowerOfAttorney);
-        entity.Notes = NormalizeOptional(request.Notes);
-        entity.LegalEntityId = request.LegalEntityId;
-        entity.ParentContactId = request.ParentContactId;
-        entity.ResponsibleUserId = responsibleUserId;
-        entity.IsActive = request.IsActive;
-        entity.SyncToPhonebook = !IsOrganizationContact(contactType) && request.SyncToPhonebook;
-        entity.UpdatedAt = DateTime.UtcNow;
-
-        await _db.SaveChangesAsync(ct);
-        await _db.Entry(entity).Reference(x => x.LegalEntity).LoadAsync(ct);
-        await _db.Entry(entity).Reference(x => x.ParentContact).LoadAsync(ct);
-        await _db.Entry(entity).Reference(x => x.ResponsibleUser).LoadAsync(ct);
-
-        return Ok(MapExternalContact(entity));
+            return Ok(MapExternalContact(entity));
+        }, ct);
     }
 
     [HttpDelete("external/{id:int}")]
     public async Task<IActionResult> DeleteExternalContact(int id, CancellationToken ct)
-    {
-        var access = await GetCurrentAccessAsync(ct);
-        if (access is null)
+        => await WriteExternalContactAsync(id, null, ExternalWrite.Delete, async (existing, _) =>
         {
-            return Unauthorized();
-        }
-
-        if (await RequireClientsPermissionAsync(static permission => permission.CanDelete, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-
-        var entity = await BuildVisibleExternalContactsQuery(access)
-            .FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (entity is null)
-        {
-            return NotFound();
-        }
-
-        _db.ExternalContacts.Remove(entity);
-        await _db.SaveChangesAsync(ct);
-        return NoContent();
-    }
+            _db.ExternalContacts.Remove(existing!);
+            await _db.SaveChangesAsync(ct);
+            return NoContent();
+        }, ct);
 
     [HttpPost("external/{id:int}/promote")]
     public async Task<ActionResult<ContactDirectoryItemDto>> PromoteExternalContact(
