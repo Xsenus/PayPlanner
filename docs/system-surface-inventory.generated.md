@@ -603,12 +603,12 @@
 | GET | api/calendar-sync/settings | CalendarSyncController | GetSettings | backend/Controllers/CalendarSyncController.cs:74 | [Authorize] | нет | нет |
 | PUT | api/calendar-sync/settings | CalendarSyncController | UpdateSettings | backend/Controllers/CalendarSyncController.cs:78 | [Authorize]; [Authorize(Roles = "admin")] | да | нет |
 | GET | api/calendar-sync/logs | CalendarSyncController | GetLogs | backend/Controllers/CalendarSyncController.cs:137 | [Authorize]; [Authorize(Roles = "admin")] | да | нет |
-| GET | api/[controller] | CasesController | Get | backend/Controllers/CasesController.cs:39 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| GET | api/[controller]/{id:int} | CasesController | GetById | backend/Controllers/CasesController.cs:68 | [Authorize] | да | нет |
-| POST | api/[controller] | CasesController | Create | backend/Controllers/CasesController.cs:92 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/invoice-case-ownership-checkpoint-2026-10-31.md |
-| PUT | api/[controller]/{id:int} | CasesController | UpdateWithSource | backend/Controllers/CasesController.cs:118 | [Authorize] | да | нет |
-| PUT | api/[controller]/{id:int}/checked | CasesController | UpdateWithSource | backend/Controllers/CasesController.cs:119 | [Authorize] | да | нет |
-| DELETE | api/[controller]/{id:int} | CasesController | Delete | backend/Controllers/CasesController.cs:195 | [Authorize] | да | нет |
+| GET | api/[controller] | CasesController | Get | backend/Controllers/CasesController.cs:42 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+| GET | api/[controller]/{id:int} | CasesController | GetById | backend/Controllers/CasesController.cs:71 | [Authorize] | да | нет |
+| POST | api/[controller] | CasesController | Create | backend/Controllers/CasesController.cs:95 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/invoice-case-ownership-checkpoint-2026-10-31.md |
+| PUT | api/[controller]/{id:int} | CasesController | UpdateWithSource | backend/Controllers/CasesController.cs:121 | [Authorize] | да | нет |
+| PUT | api/[controller]/{id:int}/checked | CasesController | UpdateWithSource | backend/Controllers/CasesController.cs:122 | [Authorize] | да | нет |
+| DELETE | api/[controller]/{id:int} | CasesController | Delete | backend/Controllers/CasesController.cs:207 | [Authorize] | да | нет |
 | GET | api/cash-orders/cashbook | CashOrdersController | GetCashBook | backend/Controllers/CashOrdersController.cs:74 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
 | GET | api/cash-orders/cashbook/print | CashOrdersController | PrintCashBook | backend/Controllers/CashOrdersController.cs:119 | [Authorize] | да | нет |
 | GET | api/cash-orders/next-number | CashOrdersController | GetNextNumber | backend/Controllers/CashOrdersController.cs:161 | [Authorize] | да | нет |

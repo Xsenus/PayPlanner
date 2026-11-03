@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc.ModelBinding.Validation;
+using Microsoft.AspNetCore.Mvc.ModelBinding.Validation;
 using System.Reflection;
 using PayPlanner.Api.Models;
 
@@ -9,6 +9,35 @@ public sealed class CaseEditRequest : ClientCase
 {
     [ValidateNever]
     public ClientCase? ExpectedSource { get; init; }
+
+    public new DateTime? CourtRegisteredAt
+    {
+        get => base.CourtRegisteredAt;
+        set { base.CourtRegisteredAt = value; HasCourtRegisteredAt = true; }
+    }
+    public new DateTime? CourtDecisionAt
+    {
+        get => base.CourtDecisionAt;
+        set { base.CourtDecisionAt = value; HasCourtDecisionAt = true; }
+    }
+    public new DateTime? CassationDeadlineAt
+    {
+        get => base.CassationDeadlineAt;
+        set { base.CassationDeadlineAt = value; HasCassationDeadlineAt = true; }
+    }
+    internal bool HasCourtRegisteredAt { get; private set; }
+    internal bool HasCourtDecisionAt { get; private set; }
+    internal bool HasCassationDeadlineAt { get; private set; }
+
+    internal static bool IncludesLegacyDate(ClientCase model, string field) => model is CaseEditRequest request
+        ? field switch
+        {
+            nameof(ClientCase.CourtRegisteredAt) => request.HasCourtRegisteredAt || request.ClearCourtRegisteredAt,
+            nameof(ClientCase.CourtDecisionAt) => request.HasCourtDecisionAt,
+            nameof(ClientCase.CassationDeadlineAt) => request.HasCassationDeadlineAt,
+            _ => false,
+        }
+        : false;
 }
 
 internal static class CaseEditSnapshot
@@ -119,6 +148,9 @@ internal static class CaseEditSnapshot
         nameof(ClientCase.Strategy),
         nameof(ClientCase.ThirdParties),
         nameof(ClientCase.Title),
+        nameof(ClientCase.CourtRegisteredAt),
+        nameof(ClientCase.CourtDecisionAt),
+        nameof(ClientCase.CassationDeadlineAt),
     ];
 
     public static bool TryMerge(ClientCase current, ClientCase requested, ClientCase original, bool compareFeeAmount, bool legacy)
@@ -134,6 +166,12 @@ internal static class CaseEditSnapshot
         {
             if (legacy && !LegacyFields.Contains(property.Name)) continue;
             var actual = property.GetValue(current);
+            if (legacy && (property.Name is nameof(ClientCase.CourtRegisteredAt) or nameof(ClientCase.CourtDecisionAt) or nameof(ClientCase.CassationDeadlineAt))
+                && !CaseEditRequest.IncludesLegacyDate(requested, property.Name))
+            {
+                replacements.Add((property, actual));
+                continue;
+            }
             var wanted = property.GetValue(requested);
             var before = property.GetValue(original);
             if ((!compareFeeAmount && property.Name == nameof(ClientCase.FeeAmount))

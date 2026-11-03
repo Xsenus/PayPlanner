@@ -16,13 +16,16 @@ namespace PayPlanner.Api.Controllers;
 public class CasesController : ControllerBase
 {
     private readonly PaymentContext _db;
+    private readonly INotificationService? _notificationService;
     private readonly IRealtimeNotificationPublisher _realtimePublisher;
 
     public CasesController(
         PaymentContext db,
-        IRealtimeNotificationPublisher? realtimePublisher = null)
+        IRealtimeNotificationPublisher? realtimePublisher = null,
+        INotificationService? notificationService = null)
     {
         _db = db;
+        _notificationService = notificationService;
         _realtimePublisher = realtimePublisher ?? NoOpRealtimeNotificationPublisher.Instance;
     }
 
@@ -126,6 +129,7 @@ public class CasesController : ControllerBase
     [NonAction]
     public async Task<IActionResult> Update(int id, ClientCase model, CancellationToken ct, ClientCase? expectedSource = null)
     {
+        DateTime? previousCourtDecisionAt = null;
         var result = await CaseEditTransaction.RunAsync(_db, User, id, async (e, access) =>
         {
             if (expectedSource is not null && !CaseEditSnapshot.TryMerge(e, model, expectedSource, true, legacy: true))
@@ -151,6 +155,7 @@ public class CasesController : ControllerBase
             {
                 return BadRequest("Перед закрытием дела выберите в настройках журнала задач ответственного за итоговые отчёты с доступом ко всем делам.");
             }
+            previousCourtDecisionAt = e.CourtDecisionAt;
             var previousSubmittedAt = e.ExecutiveWritSubmittedAt;
             var previousSubmittedTo = e.ExecutiveWritSubmittedTo;
             e.Title = model.Title;
@@ -188,6 +193,13 @@ public class CasesController : ControllerBase
             return Ok(e);
         }, ct);
         if (result is not OkObjectResult { Value: ClientCase savedCase }) return result;
+        if (_notificationService is not null && !ClientCaseStageClassifier.IsPretrial(savedCase)
+            && previousCourtDecisionAt != savedCase.CourtDecisionAt)
+        {
+            var recipients = await CaseNotificationRecipients.ResolveAsync(_db, savedCase.Id, ct);
+            await _notificationService.NotifyCaseDecisionDateChangedAsync(savedCase, previousCourtDecisionAt, savedCase.CourtDecisionAt,
+                User.GetDisplayName(), User.GetUserId() ?? 0, recipients, DateTime.UtcNow, ct);
+        }
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return Ok(savedCase);
     }
@@ -299,6 +311,13 @@ public class CasesController : ControllerBase
         target.Courtroom = Text(target.Courtroom, source.Courtroom);
         target.CourtSecretaryContacts = Text(target.CourtSecretaryContacts, source.CourtSecretaryContacts);
         target.ClaimFiledAt = source.ClaimFiledAt;
+        if (CaseEditRequest.IncludesLegacyDate(source, nameof(ClientCase.CourtRegisteredAt)))
+        {
+            if (source.CourtRegisteredAt.HasValue) target.CourtRegisteredAt = source.CourtRegisteredAt;
+            else if (source.ClearCourtRegisteredAt) target.CourtRegisteredAt = null;
+        }
+        if (CaseEditRequest.IncludesLegacyDate(source, nameof(ClientCase.CourtDecisionAt))) target.CourtDecisionAt = source.CourtDecisionAt;
+        if (CaseEditRequest.IncludesLegacyDate(source, nameof(ClientCase.CassationDeadlineAt))) target.CassationDeadlineAt = source.CassationDeadlineAt;
         if (source.CourtDecisionEffectiveAt.HasValue) target.CourtDecisionEffectiveAt = source.CourtDecisionEffectiveAt;
         else if (source.ClearCourtDecisionEffectiveAt) target.CourtDecisionEffectiveAt = null;
         if (source.ExecutiveWritReceivedAt.HasValue) target.ExecutiveWritReceivedAt = source.ExecutiveWritReceivedAt;
