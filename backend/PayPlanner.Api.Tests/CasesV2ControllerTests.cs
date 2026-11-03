@@ -1,4 +1,4 @@
-﻿using System.Data.Common;
+using System.Data.Common;
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
@@ -12596,6 +12596,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Clients, canCreate: false, canEdit: false, canDelete: false, canExport: false);
         var client = new Client
         {
             Name = "Основной клиент",
@@ -12705,9 +12706,9 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Contains("Role", restoredAuditEvent.MetadataJson, StringComparison.Ordinal);
         using var restoredAuditMetadata = JsonDocument.Parse(restoredAuditEvent.MetadataJson!);
         Assert.Contains("восстановлено", restoredAuditMetadata.RootElement.GetProperty("reason").GetString(), StringComparison.Ordinal);
-        await db.Entry(clientCase).ReloadAsync();
-        Assert.Contains("Связь с делом добавлена: Земцов Виктор Александрович (Свидетель).", clientCase.EventHistory, StringComparison.Ordinal);
-        Assert.Contains("Связь с делом удалена: Земцов Виктор Александрович.", clientCase.EventHistory, StringComparison.Ordinal);
+        var reloadedCase = await db.ClientCases.AsNoTracking().SingleAsync(row => row.Id == clientCase.Id);
+        Assert.Contains("Связь с делом добавлена: Земцов Виктор Александрович (Свидетель).", reloadedCase.EventHistory, StringComparison.Ordinal);
+        Assert.Contains("Связь с делом удалена: Земцов Виктор Александрович.", reloadedCase.EventHistory, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -12715,6 +12716,8 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Clients, canCreate: false, canEdit: false, canDelete: false, canExport: false);
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.LegalEntities, canCreate: false, canEdit: false, canDelete: false, canExport: false);
         var organization = new LegalEntity
         {
             ShortName = "Нотариальная палата",

@@ -7000,288 +7000,226 @@ public partial class CasesV2Controller : ControllerBase
         [FromBody] UpsertClientCaseRelatedPartyRequest request,
         CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        return (ActionResult)await CaseRelatedPartyTransaction.AddAsync(_db, User, id, NormalizeRelatedPartySourceType(request.SourceType), request.SourceId, async (clientCase, directory) =>
         {
-            return forbidden;
-        }
+            var sourceType = directory.Kind;
+            var role = NormalizeRequired(request.Role, "Участник");
+            var notes = NormalizeOptional(request.Notes) ?? string.Empty;
+            ClientCaseRelatedParty? relatedParty = null;
+            LegalEntity? autoLegalEntity = null;
 
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
-
-        var clientCase = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
-
-        var sourceType = NormalizeRelatedPartySourceType(request.SourceType);
-        if (sourceType is null || request.SourceId <= 0)
-        {
-            return BadRequest(new { message = "Выберите связанное лицо или организацию из справочника." });
-        }
-
-        var role = NormalizeRequired(request.Role, "Участник");
-        var notes = NormalizeOptional(request.Notes) ?? string.Empty;
-        ClientCaseRelatedParty? relatedParty = null;
-        LegalEntity? autoLegalEntity = null;
-
-        if (sourceType == RelatedPartySourceClient)
-        {
-            var client = await _db.Clients
-                .AsNoTracking()
-                .Include(item => item.LegalEntity)
-                .ApplyClientVisibility(visibility)
-                .FirstOrDefaultAsync(item => item.Id == request.SourceId, ct);
-            if (client is null)
+            if (sourceType == RelatedPartySourceClient)
             {
-                return BadRequest(new { message = "Физическое лицо не найдено или недоступно." });
+                var client = directory.Client!;
+
+                if (await _db.ClientCaseRelatedParties.AnyAsync(item =>
+                        item.ClientCaseId == id &&
+                        item.SourceType == RelatedPartySourceClient &&
+                        !item.IsArchived &&
+                        item.ClientId == client.Id, ct))
+                {
+                    return Conflict(new { message = "Это физическое лицо уже связано с делом." });
+                }
+
+                var archivedParty = await _db.ClientCaseRelatedParties
+                    .FirstOrDefaultAsync(item =>
+                        item.ClientCaseId == id &&
+                        item.SourceType == RelatedPartySourceClient &&
+                        item.IsArchived &&
+                        item.ClientId == client.Id, ct);
+                if (archivedParty is not null)
+                {
+                    await CaseRelatedPartyTransaction.LockPartyAsync(_db, archivedParty.Id, ct);
+                    archivedParty.DisplayName = client.Name;
+                    archivedParty.Role = role;
+                    archivedParty.OrganizationName = client.LegalEntity?.ShortName ?? client.Company ?? string.Empty;
+                    archivedParty.Phone = client.Phone;
+                    archivedParty.Email = client.Email;
+                    archivedParty.Notes = notes;
+                    RestoreRelatedParty(archivedParty);
+                    _db.SetAuditReason($"Связанное лицо восстановлено в деле #{id}: {archivedParty.DisplayName} ({archivedParty.Role}).");
+                    AppendCaseEvent(clientCase, $"Связь с делом восстановлена: {archivedParty.DisplayName} ({archivedParty.Role}). Восстановил: {User.GetDisplayName()}.");
+                    await _db.SaveChangesAsync(ct);
+                    return Ok(MapRelatedParty(archivedParty));
+                }
+                relatedParty = new ClientCaseRelatedParty
+                {
+                    ClientCaseId = id,
+                    SourceType = RelatedPartySourceClient,
+                    ClientId = client.Id,
+                    DisplayName = client.Name,
+                    Role = role,
+                    OrganizationName = client.LegalEntity?.ShortName ?? client.Company ?? string.Empty,
+                    Phone = client.Phone,
+                    Email = client.Email,
+                    Notes = notes,
+                    CreatedByUserId = User.GetUserId(),
+                    CreatedByUserName = User.GetDisplayName(),
+                };
+                autoLegalEntity = client.LegalEntity;
+            }
+            else if (sourceType == RelatedPartySourceExternalContact)
+            {
+                var contact = directory.Contact!;
+
+                if (await _db.ClientCaseRelatedParties.AnyAsync(item =>
+                        item.ClientCaseId == id &&
+                        item.SourceType == RelatedPartySourceExternalContact &&
+                        !item.IsArchived &&
+                        item.ExternalContactId == contact.Id, ct))
+                {
+                    return Conflict(new { message = "Этот контакт уже связан с делом." });
+                }
+
+                var archivedContactParty = await _db.ClientCaseRelatedParties
+                    .FirstOrDefaultAsync(item =>
+                        item.ClientCaseId == id &&
+                        item.SourceType == RelatedPartySourceExternalContact &&
+                        item.IsArchived &&
+                        item.ExternalContactId == contact.Id, ct);
+                if (archivedContactParty is not null)
+                {
+                    await CaseRelatedPartyTransaction.LockPartyAsync(_db, archivedContactParty.Id, ct);
+                    archivedContactParty.DisplayName = contact.FullName;
+                    archivedContactParty.Role = role;
+                    archivedContactParty.OrganizationName = contact.LegalEntity?.ShortName ?? string.Empty;
+                    archivedContactParty.Phone = contact.Phone ?? string.Empty;
+                    archivedContactParty.Email = contact.Email ?? string.Empty;
+                    archivedContactParty.Notes = notes;
+                    RestoreRelatedParty(archivedContactParty);
+                    _db.SetAuditReason($"Связанное лицо восстановлено в деле #{id}: {archivedContactParty.DisplayName} ({archivedContactParty.Role}).");
+                    AppendCaseEvent(clientCase, $"Связь с делом восстановлена: {archivedContactParty.DisplayName} ({archivedContactParty.Role}). Восстановил: {User.GetDisplayName()}.");
+                    await _db.SaveChangesAsync(ct);
+                    return Ok(MapRelatedParty(archivedContactParty));
+                }
+
+                relatedParty = new ClientCaseRelatedParty
+                {
+                    ClientCaseId = id,
+                    SourceType = RelatedPartySourceExternalContact,
+                    ExternalContactId = contact.Id,
+                    DisplayName = contact.FullName,
+                    Role = role,
+                    OrganizationName = contact.LegalEntity?.ShortName ?? string.Empty,
+                    Phone = contact.Phone ?? string.Empty,
+                    Email = contact.Email ?? string.Empty,
+                    Notes = notes,
+                    CreatedByUserId = User.GetUserId(),
+                    CreatedByUserName = User.GetDisplayName(),
+                };
+                autoLegalEntity = contact.LegalEntity;
+            }
+            else if (sourceType == RelatedPartySourceLegalEntity)
+            {
+                var legalEntity = directory.LegalEntity!;
+
+                if (await _db.ClientCaseRelatedParties.AnyAsync(item =>
+                        item.ClientCaseId == id &&
+                        item.SourceType == RelatedPartySourceLegalEntity &&
+                        !item.IsArchived &&
+                        item.LegalEntityId == legalEntity.Id, ct))
+                {
+                    return Conflict(new { message = "Эта организация уже связана с делом." });
+                }
+
+                var archivedLegalEntityParty = await _db.ClientCaseRelatedParties
+                    .FirstOrDefaultAsync(item =>
+                        item.ClientCaseId == id &&
+                        item.SourceType == RelatedPartySourceLegalEntity &&
+                        item.IsArchived &&
+                        item.LegalEntityId == legalEntity.Id, ct);
+                if (archivedLegalEntityParty is not null)
+                {
+                    await CaseRelatedPartyTransaction.LockPartyAsync(_db, archivedLegalEntityParty.Id, ct);
+                    archivedLegalEntityParty.DisplayName = !string.IsNullOrWhiteSpace(legalEntity.ShortName) ? legalEntity.ShortName : legalEntity.FullName ?? $"Юрлицо #{legalEntity.Id}";
+                    archivedLegalEntityParty.Role = role;
+                    archivedLegalEntityParty.OrganizationName = legalEntity.FullName ?? string.Empty;
+                    archivedLegalEntityParty.Phone = legalEntity.Phone ?? string.Empty;
+                    archivedLegalEntityParty.Email = legalEntity.Email ?? string.Empty;
+                    archivedLegalEntityParty.Notes = notes;
+                    RestoreRelatedParty(archivedLegalEntityParty);
+                    _db.SetAuditReason($"Связанное лицо восстановлено в деле #{id}: {archivedLegalEntityParty.DisplayName} ({archivedLegalEntityParty.Role}).");
+                    AppendCaseEvent(clientCase, $"Связь с делом восстановлена: {archivedLegalEntityParty.DisplayName} ({archivedLegalEntityParty.Role}). Восстановил: {User.GetDisplayName()}.");
+                    await _db.SaveChangesAsync(ct);
+                    return Ok(MapRelatedParty(archivedLegalEntityParty));
+                }
+
+                relatedParty = new ClientCaseRelatedParty
+                {
+                    ClientCaseId = id,
+                    SourceType = RelatedPartySourceLegalEntity,
+                    LegalEntityId = legalEntity.Id,
+                    DisplayName = !string.IsNullOrWhiteSpace(legalEntity.ShortName) ? legalEntity.ShortName : legalEntity.FullName ?? $"Юрлицо #{legalEntity.Id}",
+                    Role = role,
+                    OrganizationName = legalEntity.FullName ?? string.Empty,
+                    Phone = legalEntity.Phone ?? string.Empty,
+                    Email = legalEntity.Email ?? string.Empty,
+                    Notes = notes,
+                    CreatedByUserId = User.GetUserId(),
+                    CreatedByUserName = User.GetDisplayName(),
+                };
             }
 
-            if (await _db.ClientCaseRelatedParties.AnyAsync(item =>
-                    item.ClientCaseId == id &&
-                    item.SourceType == RelatedPartySourceClient &&
-                    !item.IsArchived &&
-                    item.ClientId == client.Id, ct))
+            if (relatedParty is null)
             {
-                return Conflict(new { message = "Это физическое лицо уже связано с делом." });
+                return BadRequest(new { message = "Не удалось определить тип связи." });
             }
 
-            var archivedParty = await _db.ClientCaseRelatedParties
-                .FirstOrDefaultAsync(item =>
-                    item.ClientCaseId == id &&
-                    item.SourceType == RelatedPartySourceClient &&
-                    item.IsArchived &&
-                    item.ClientId == client.Id, ct);
-            if (archivedParty is not null)
+            _db.ClientCaseRelatedParties.Add(relatedParty);
+            _db.SetAuditReason($"Связанное лицо добавлено к делу #{id}: {relatedParty.DisplayName} ({relatedParty.Role}).");
+            AppendCaseEvent(clientCase, $"Связь с делом добавлена: {relatedParty.DisplayName} ({relatedParty.Role}). Добавил: {User.GetDisplayName()}.");
+            var autoRelatedParty = await BuildAutoLegalEntityRelatedPartyAsync(
+                id,
+                clientCase.LegalEntityId,
+                autoLegalEntity,
+                directory.LegalVisibility ?? directory.CaseVisibility,
+                User.GetUserId(),
+                User.GetDisplayName(),
+                ct);
+            if (autoRelatedParty is not null)
             {
-                archivedParty.DisplayName = client.Name;
-                archivedParty.Role = role;
-                archivedParty.OrganizationName = client.LegalEntity?.ShortName ?? client.Company ?? string.Empty;
-                archivedParty.Phone = client.Phone;
-                archivedParty.Email = client.Email;
-                archivedParty.Notes = notes;
-                RestoreRelatedParty(archivedParty);
-                _db.SetAuditReason($"Связанное лицо восстановлено в деле #{id}: {archivedParty.DisplayName} ({archivedParty.Role}).");
-                AppendCaseEvent(clientCase, $"Связь с делом восстановлена: {archivedParty.DisplayName} ({archivedParty.Role}). Восстановил: {User.GetDisplayName()}.");
-                await _db.SaveChangesAsync(ct);
-                return Ok(MapRelatedParty(archivedParty));
-            }
-            relatedParty = new ClientCaseRelatedParty
-            {
-                ClientCaseId = id,
-                SourceType = RelatedPartySourceClient,
-                ClientId = client.Id,
-                DisplayName = client.Name,
-                Role = role,
-                OrganizationName = client.LegalEntity?.ShortName ?? client.Company ?? string.Empty,
-                Phone = client.Phone,
-                Email = client.Email,
-                Notes = notes,
-                CreatedByUserId = User.GetUserId(),
-                CreatedByUserName = User.GetDisplayName(),
-            };
-            autoLegalEntity = client.LegalEntity;
-        }
-        else if (sourceType == RelatedPartySourceExternalContact)
-        {
-            var visibleUserIds = visibility.VisibleUserIds.ToArray();
-            var contactQuery = _db.ExternalContacts
-                .AsNoTracking()
-                .Include(item => item.LegalEntity)
-                .AsQueryable();
-            if (!visibility.SeesAll)
-            {
-                contactQuery = contactQuery.Where(item =>
-                    item.ResponsibleUserId.HasValue && visibleUserIds.Contains(item.ResponsibleUserId.Value));
+                _db.ClientCaseRelatedParties.Add(autoRelatedParty);
+                AppendCaseEvent(
+                    clientCase,
+                    $"Связь с организацией участника добавлена автоматически: {autoRelatedParty.DisplayName}. Добавил: {User.GetDisplayName()}.");
             }
 
-            var contact = await contactQuery.FirstOrDefaultAsync(item => item.Id == request.SourceId, ct);
-            if (contact is null)
-            {
-                return BadRequest(new { message = "Контакт не найден или недоступен." });
-            }
+            await _db.SaveChangesAsync(ct);
 
-            if (await _db.ClientCaseRelatedParties.AnyAsync(item =>
-                    item.ClientCaseId == id &&
-                    item.SourceType == RelatedPartySourceExternalContact &&
-                    !item.IsArchived &&
-                    item.ExternalContactId == contact.Id, ct))
-            {
-                return Conflict(new { message = "Этот контакт уже связан с делом." });
-            }
-
-            var archivedContactParty = await _db.ClientCaseRelatedParties
-                .FirstOrDefaultAsync(item =>
-                    item.ClientCaseId == id &&
-                    item.SourceType == RelatedPartySourceExternalContact &&
-                    item.IsArchived &&
-                    item.ExternalContactId == contact.Id, ct);
-            if (archivedContactParty is not null)
-            {
-                archivedContactParty.DisplayName = contact.FullName;
-                archivedContactParty.Role = role;
-                archivedContactParty.OrganizationName = contact.LegalEntity?.ShortName ?? string.Empty;
-                archivedContactParty.Phone = contact.Phone ?? string.Empty;
-                archivedContactParty.Email = contact.Email ?? string.Empty;
-                archivedContactParty.Notes = notes;
-                RestoreRelatedParty(archivedContactParty);
-                _db.SetAuditReason($"Связанное лицо восстановлено в деле #{id}: {archivedContactParty.DisplayName} ({archivedContactParty.Role}).");
-                AppendCaseEvent(clientCase, $"Связь с делом восстановлена: {archivedContactParty.DisplayName} ({archivedContactParty.Role}). Восстановил: {User.GetDisplayName()}.");
-                await _db.SaveChangesAsync(ct);
-                return Ok(MapRelatedParty(archivedContactParty));
-            }
-
-            relatedParty = new ClientCaseRelatedParty
-            {
-                ClientCaseId = id,
-                SourceType = RelatedPartySourceExternalContact,
-                ExternalContactId = contact.Id,
-                DisplayName = contact.FullName,
-                Role = role,
-                OrganizationName = contact.LegalEntity?.ShortName ?? string.Empty,
-                Phone = contact.Phone ?? string.Empty,
-                Email = contact.Email ?? string.Empty,
-                Notes = notes,
-                CreatedByUserId = User.GetUserId(),
-                CreatedByUserName = User.GetDisplayName(),
-            };
-            autoLegalEntity = contact.LegalEntity;
-        }
-        else if (sourceType == RelatedPartySourceLegalEntity)
-        {
-            var legalEntity = await _db.LegalEntities
-                .AsNoTracking()
-                .ApplyLegalEntityVisibility(visibility)
-                .FirstOrDefaultAsync(item => item.Id == request.SourceId, ct);
-            if (legalEntity is null)
-            {
-                return BadRequest(new { message = "Организация не найдена или недоступна." });
-            }
-
-            if (await _db.ClientCaseRelatedParties.AnyAsync(item =>
-                    item.ClientCaseId == id &&
-                    item.SourceType == RelatedPartySourceLegalEntity &&
-                    !item.IsArchived &&
-                    item.LegalEntityId == legalEntity.Id, ct))
-            {
-                return Conflict(new { message = "Эта организация уже связана с делом." });
-            }
-
-            var archivedLegalEntityParty = await _db.ClientCaseRelatedParties
-                .FirstOrDefaultAsync(item =>
-                    item.ClientCaseId == id &&
-                    item.SourceType == RelatedPartySourceLegalEntity &&
-                    item.IsArchived &&
-                    item.LegalEntityId == legalEntity.Id, ct);
-            if (archivedLegalEntityParty is not null)
-            {
-                archivedLegalEntityParty.DisplayName = !string.IsNullOrWhiteSpace(legalEntity.ShortName) ? legalEntity.ShortName : legalEntity.FullName ?? $"Юрлицо #{legalEntity.Id}";
-                archivedLegalEntityParty.Role = role;
-                archivedLegalEntityParty.OrganizationName = legalEntity.FullName ?? string.Empty;
-                archivedLegalEntityParty.Phone = legalEntity.Phone ?? string.Empty;
-                archivedLegalEntityParty.Email = legalEntity.Email ?? string.Empty;
-                archivedLegalEntityParty.Notes = notes;
-                RestoreRelatedParty(archivedLegalEntityParty);
-                _db.SetAuditReason($"Связанное лицо восстановлено в деле #{id}: {archivedLegalEntityParty.DisplayName} ({archivedLegalEntityParty.Role}).");
-                AppendCaseEvent(clientCase, $"Связь с делом восстановлена: {archivedLegalEntityParty.DisplayName} ({archivedLegalEntityParty.Role}). Восстановил: {User.GetDisplayName()}.");
-                await _db.SaveChangesAsync(ct);
-                return Ok(MapRelatedParty(archivedLegalEntityParty));
-            }
-
-            relatedParty = new ClientCaseRelatedParty
-            {
-                ClientCaseId = id,
-                SourceType = RelatedPartySourceLegalEntity,
-                LegalEntityId = legalEntity.Id,
-                DisplayName = !string.IsNullOrWhiteSpace(legalEntity.ShortName) ? legalEntity.ShortName : legalEntity.FullName ?? $"Юрлицо #{legalEntity.Id}",
-                Role = role,
-                OrganizationName = legalEntity.FullName ?? string.Empty,
-                Phone = legalEntity.Phone ?? string.Empty,
-                Email = legalEntity.Email ?? string.Empty,
-                Notes = notes,
-                CreatedByUserId = User.GetUserId(),
-                CreatedByUserName = User.GetDisplayName(),
-            };
-        }
-
-        if (relatedParty is null)
-        {
-            return BadRequest(new { message = "Не удалось определить тип связи." });
-        }
-
-        _db.ClientCaseRelatedParties.Add(relatedParty);
-        _db.SetAuditReason($"Связанное лицо добавлено к делу #{id}: {relatedParty.DisplayName} ({relatedParty.Role}).");
-        AppendCaseEvent(clientCase, $"Связь с делом добавлена: {relatedParty.DisplayName} ({relatedParty.Role}). Добавил: {User.GetDisplayName()}.");
-        var autoRelatedParty = await BuildAutoLegalEntityRelatedPartyAsync(
-            id,
-            clientCase.LegalEntityId,
-            autoLegalEntity,
-            visibility,
-            User.GetUserId(),
-            User.GetDisplayName(),
-            ct);
-        if (autoRelatedParty is not null)
-        {
-            _db.ClientCaseRelatedParties.Add(autoRelatedParty);
-            AppendCaseEvent(
-                clientCase,
-                $"Связь с организацией участника добавлена автоматически: {autoRelatedParty.DisplayName}. Добавил: {User.GetDisplayName()}.");
-        }
-
-        await _db.SaveChangesAsync(ct);
-
-        return Created($"/api/v2/cases/{id}/related-parties/{relatedParty.Id}", MapRelatedParty(relatedParty));
+            return Created($"/api/v2/cases/{id}/related-parties/{relatedParty.Id}", MapRelatedParty(relatedParty));
+        }, ct);
     }
 
     [HttpDelete("{id:int}/related-parties/{partyId:int}")]
     public async Task<IActionResult> DeleteRelatedParty(int id, int partyId, CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        return await CaseRelatedPartyTransaction.EditAsync(_db, User, id, async (clientCase, _) =>
         {
-            return forbidden;
-        }
+            var relatedParty = await _db.ClientCaseRelatedParties
+                .FirstOrDefaultAsync(item => item.Id == partyId && item.ClientCaseId == id, ct);
+            if (relatedParty is null)
+            {
+                return NotFound();
+            }
 
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
+            await CaseRelatedPartyTransaction.LockPartyAsync(_db, relatedParty.Id, ct);
 
-        var clientCase = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
+            if (relatedParty.IsArchived)
+            {
+                return NoContent();
+            }
 
-        var relatedParty = await _db.ClientCaseRelatedParties
-            .FirstOrDefaultAsync(item => item.Id == partyId && item.ClientCaseId == id, ct);
-        if (relatedParty is null)
-        {
-            return NotFound();
-        }
+            relatedParty.IsArchived = true;
+            relatedParty.ArchivedAt = DateTime.UtcNow;
+            relatedParty.ArchivedByUserId = User.GetUserId();
+            relatedParty.ArchivedByUserName = User.GetDisplayName();
+            relatedParty.ArchiveReason = "Archived from case card";
+            _db.SetAuditReason($"Связанное лицо архивировано в деле #{id}: {relatedParty.DisplayName}.");
+            AppendCaseEvent(clientCase, $"Связь с делом удалена: {relatedParty.DisplayName}. Удалил: {User.GetDisplayName()}.");
+            await _db.SaveChangesAsync(ct);
 
-        if (relatedParty.IsArchived)
-        {
             return NoContent();
-        }
-
-        relatedParty.IsArchived = true;
-        relatedParty.ArchivedAt = DateTime.UtcNow;
-        relatedParty.ArchivedByUserId = User.GetUserId();
-        relatedParty.ArchivedByUserName = User.GetDisplayName();
-        relatedParty.ArchiveReason = "Archived from case card";
-        _db.SetAuditReason($"Связанное лицо архивировано в деле #{id}: {relatedParty.DisplayName}.");
-        AppendCaseEvent(clientCase, $"Связь с делом удалена: {relatedParty.DisplayName}. Удалил: {User.GetDisplayName()}.");
-        await _db.SaveChangesAsync(ct);
-
-        return NoContent();
+        }, ct);
     }
 
     [HttpGet("{id:int}/work-order")]
