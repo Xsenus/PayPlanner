@@ -1,3 +1,4 @@
+import { buildCaseUpdatePayload } from '../../utils/caseEditPayload';
 import { SystemSelect } from '../ui/SystemSelect';
 import { ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import {
@@ -967,61 +968,7 @@ function ClientsScreen({ context, onOpenContract, onOpenInvoice, onOpenAct, onOp
     if (caseMode === 'edit' ? !canEditClientCases : !canCreateClientCases) throw new StaleUiOperationError();
     const operation = caseOwner.begin('save'); if (!operation) throw new Error('Сохранение дела уже выполняется.');
 
-    type Status = ClientCase['status'];
-    const DEFAULT_STATUS: Status = 'Open';
-
-    const base: Omit<ClientCase, 'id' | 'createdAt' | 'payments'> = {
-      clientId: caseClientId,
-      title: (patch.title ?? editingCase?.title ?? '').trim(),
-      description: (patch.description ?? editingCase?.description ?? '').trim(),
-      status: (patch.status ?? editingCase?.status ?? DEFAULT_STATUS) as Status,
-      caseNumber: patch.caseNumber ?? editingCase?.caseNumber ?? '',
-      caseType: patch.caseType ?? editingCase?.caseType ?? '',
-      stage: patch.stage ?? editingCase?.stage ?? '',
-      responsibleUserId: patch.responsibleUserId !== undefined ? patch.responsibleUserId : editingCase?.responsibleUserId ?? null,
-      startDate: patch.startDate !== undefined ? patch.startDate : editingCase?.startDate ?? null,
-      dueDate: patch.dueDate !== undefined ? patch.dueDate : editingCase?.dueDate ?? null,
-      feeAmount: patch.feeAmount ?? editingCase?.feeAmount ?? 0,
-      priority: patch.priority ?? editingCase?.priority ?? 'normal',
-      courtName: patch.courtName ?? editingCase?.courtName ?? '',
-      ourCourtRole: patch.ourCourtRole ?? editingCase?.ourCourtRole ?? '',
-      courtClaimAmount: patch.courtClaimAmount !== undefined ? patch.courtClaimAmount : editingCase?.courtClaimAmount ?? null,
-      courtAwardedAmount: patch.courtAwardedAmount !== undefined ? patch.courtAwardedAmount : editingCase?.courtAwardedAmount ?? null,
-      courtStateFeeAmount: patch.courtStateFeeAmount !== undefined ? patch.courtStateFeeAmount : editingCase?.courtStateFeeAmount ?? null,
-      clearCourtClaimAmount: patch.clearCourtClaimAmount ?? false,
-      clearCourtAwardedAmount: patch.clearCourtAwardedAmount ?? false,
-      clearCourtStateFeeAmount: patch.clearCourtStateFeeAmount ?? false,
-      courtCaseNumber: patch.courtCaseNumber ?? editingCase?.courtCaseNumber ?? '',
-      courtUrl: patch.courtUrl ?? editingCase?.courtUrl ?? '',
-      nextHearingAt: patch.nextHearingAt !== undefined ? patch.nextHearingAt : editingCase?.nextHearingAt ?? null,
-      claimant: patch.claimant ?? editingCase?.claimant ?? '',
-      claimantInn: patch.claimantInn ?? editingCase?.claimantInn ?? '',
-      claimantOgrn: patch.claimantOgrn ?? editingCase?.claimantOgrn ?? '',
-      defendant: patch.defendant ?? editingCase?.defendant ?? '',
-      defendantInn: patch.defendantInn ?? editingCase?.defendantInn ?? '',
-      defendantOgrn: patch.defendantOgrn ?? editingCase?.defendantOgrn ?? '',
-      thirdParties: patch.thirdParties ?? editingCase?.thirdParties ?? '',
-      representatives: patch.representatives ?? editingCase?.representatives ?? '',
-      judgeName: patch.judgeName ?? editingCase?.judgeName ?? '',
-      courtroom: patch.courtroom ?? editingCase?.courtroom ?? '',
-      courtSecretaryContacts: patch.courtSecretaryContacts ?? editingCase?.courtSecretaryContacts ?? '',
-      claimFiledAt: patch.claimFiledAt !== undefined ? patch.claimFiledAt : editingCase?.claimFiledAt ?? null,
-      courtDecisionAt: patch.courtDecisionAt !== undefined ? patch.courtDecisionAt : editingCase?.courtDecisionAt ?? null,
-      courtDecisionEffectiveAt: patch.courtDecisionEffectiveAt !== undefined ? patch.courtDecisionEffectiveAt : editingCase?.courtDecisionEffectiveAt ?? null,
-      clearCourtDecisionEffectiveAt: patch.clearCourtDecisionEffectiveAt ?? false,
-      executiveWritReceivedAt: patch.executiveWritReceivedAt !== undefined ? patch.executiveWritReceivedAt : editingCase?.executiveWritReceivedAt ?? null,
-      clearExecutiveWritReceivedAt: patch.clearExecutiveWritReceivedAt ?? false,
-      executiveWritSubmittedAt: patch.executiveWritSubmittedAt !== undefined ? patch.executiveWritSubmittedAt : editingCase?.executiveWritSubmittedAt ?? null,
-      executiveWritSubmittedTo: patch.executiveWritSubmittedTo !== undefined ? patch.executiveWritSubmittedTo : editingCase?.executiveWritSubmittedTo ?? '',
-      clearExecutiveWritSubmission: patch.clearExecutiveWritSubmission ?? false,
-      appealDeadlineAt: patch.appealDeadlineAt !== undefined ? patch.appealDeadlineAt : editingCase?.appealDeadlineAt ?? null,
-      cassationDeadlineAt: patch.cassationDeadlineAt !== undefined ? patch.cassationDeadlineAt : editingCase?.cassationDeadlineAt ?? null,
-      motionDeadlineAt: patch.motionDeadlineAt !== undefined ? patch.motionDeadlineAt : editingCase?.motionDeadlineAt ?? null,
-      objectionDeadlineAt: patch.objectionDeadlineAt !== undefined ? patch.objectionDeadlineAt : editingCase?.objectionDeadlineAt ?? null,
-      documentsSummary: patch.documentsSummary ?? editingCase?.documentsSummary ?? '',
-      eventHistory: patch.eventHistory ?? editingCase?.eventHistory ?? '',
-      strategy: patch.strategy ?? editingCase?.strategy ?? '',
-    };
+    const base = buildCaseUpdatePayload(editingCase, { ...patch, clientId: caseClientId, legalEntityId: null });
 
     try {
     if (caseMode === 'edit' && editingCase) {

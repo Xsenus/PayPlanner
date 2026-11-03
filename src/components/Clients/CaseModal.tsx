@@ -1,3 +1,4 @@
+import { caseDateInput, caseHearingInput, caseNullableTextInput, caseTextInput } from '../../utils/caseEditInput';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
@@ -24,7 +25,7 @@ import { apiService, type ContactDirectoryItemDto } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { downloadBlob } from '../../utils/downloadBlob';
 import { courtAmountToInput, hasInvalidCourtAmounts, parseCourtAmountInput } from '../../utils/courtAmounts';
-import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, parseInstant, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
+import { formatDateTimeInTimeZone, parseInstant, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_OPTIONS, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import type { TaskJournalItem, TaskJournalPriority, TaskJournalStatus } from '../../utils/taskJournalStore';
 
@@ -166,14 +167,6 @@ function toDateTimeInput(value: string | null | undefined, timeZoneId: string) {
   return toTimeZoneDateTimeInput(value, timeZoneId);
 }
 
-function fromDateInput(value: string) {
-  return value || null;
-}
-
-function fromDateTimeInput(value: string, timeZoneId: string) {
-  return value ? fromTimeZoneDateTimeInput(value, timeZoneId) : null;
-}
-
 function formatDateInput(year: number, monthIndex: number, day: number) {
   return `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
@@ -310,6 +303,7 @@ export function CaseModal({
   const timeZoneId = timeZoneState.scope === caseActionOwner.scope ? timeZoneState.value : fallbackTimeZone;
   const hearingEdited = useRef(false);
   const historyEdited = useRef(false);
+  const historySource = useRef(caseData.eventHistory);
   const activityEdited = useRef(false);
   const activityReadSequence = useRef(0);
   const documentReadSequence = useRef(0);
@@ -427,7 +421,7 @@ export function CaseModal({
   }, [canUseContactRelatedParties, canUseLegalEntityRelatedParties, relatedPartyMode]);
 
   useEffect(() => {
-    setReadClosed(false); hearingEdited.current = false; historyEdited.current = false; activityEdited.current = false;
+    setReadClosed(false); hearingEdited.current = false; historyEdited.current = false; historySource.current = caseData.eventHistory; activityEdited.current = false;
     setTitle(caseData.title ?? '');
     setDescription(caseData.description ?? '');
     setStatus((caseData.status as StatusValue) ?? 'Open');
@@ -585,7 +579,7 @@ export function CaseModal({
     setActivity(previous => activityEdited.current ? { ...next,
       inactivityRemindersEnabled: previous.inactivityRemindersEnabled,
       inactivityRemindersDisabledReason: previous.inactivityRemindersDisabledReason } : next);
-    if (!historyEdited.current && typeof next.eventHistory === 'string') setEventHistory(next.eventHistory);
+    if (!historyEdited.current && typeof next.eventHistory === 'string') { historySource.current = next.eventHistory; setEventHistory(next.eventHistory); }
   }, [captureCaseOwner]);
 
   useEffect(() => {
@@ -736,57 +730,57 @@ export function CaseModal({
     setError(null);
     try {
       const patch: Partial<ClientCase> = {
-        title: title.trim(),
-        description: description.trim(),
+        title: caseTextInput(title, caseData.title),
+        description: caseTextInput(description, caseData.description),
         status,
-        caseNumber: caseNumber.trim(),
-        caseType: caseType.trim(),
-        stage: stage.trim(),
+        caseNumber: caseTextInput(caseNumber, caseData.caseNumber),
+        caseType: caseTextInput(caseType, caseData.caseType),
+        stage: caseTextInput(stage, caseData.stage),
         responsibleUserId: responsibleUserId ? Number(responsibleUserId) : null,
-        startDate: fromDateInput(startDate),
-        dueDate: fromDateInput(dueDate),
+        startDate: caseDateInput(startDate, caseData.startDate),
+        dueDate: caseDateInput(dueDate, caseData.dueDate),
         ...(canViewFinance ? { feeAmount: Number(feeAmount.replace(',', '.')) || 0 } : {}),
         priority,
-        courtName: courtName.trim(),
+        courtName: caseTextInput(courtName, caseData.courtName),
         courtClaimAmount: parseCourtAmountInput(courtClaimAmount),
         courtAwardedAmount: parseCourtAmountInput(courtAwardedAmount),
         courtStateFeeAmount: parseCourtAmountInput(courtStateFeeAmount),
         clearCourtClaimAmount: !courtClaimAmount.trim(),
         clearCourtAwardedAmount: !courtAwardedAmount.trim(),
         clearCourtStateFeeAmount: !courtStateFeeAmount.trim(),
-        courtCaseNumber: courtCaseNumber.trim(),
-        courtUrl: courtUrl.trim(),
-        nextHearingAt: fromDateTimeInput(nextHearingAt, timeZoneId),
-        claimant: claimant.trim(),
-        claimantInn: claimantInn.trim(),
-        claimantOgrn: claimantOgrn.trim(),
-        ourCourtRole,
-        defendant: defendant.trim(),
-        defendantInn: defendantInn.trim(),
-        defendantOgrn: defendantOgrn.trim(),
-        thirdParties: thirdParties.trim(),
-        representatives: representatives.trim(),
-        judgeName: judgeName.trim(),
-        courtroom: courtroom.trim(),
-        courtSecretaryContacts: courtSecretaryContacts.trim(),
-        claimFiledAt: fromDateInput(claimFiledAt),
-        courtRegisteredAt: fromDateInput(courtRegisteredAt),
+        courtCaseNumber: caseTextInput(courtCaseNumber, caseData.courtCaseNumber),
+        courtUrl: caseTextInput(courtUrl, caseData.courtUrl),
+        nextHearingAt: caseHearingInput(nextHearingAt, caseData.nextHearingAt, timeZoneId),
+        claimant: caseTextInput(claimant, caseData.claimant),
+        claimantInn: caseNullableTextInput(claimantInn, caseData.claimantInn),
+        claimantOgrn: caseNullableTextInput(claimantOgrn, caseData.claimantOgrn),
+        ourCourtRole: ourCourtRole === (caseData.ourCourtRole ?? '') ? caseData.ourCourtRole ?? null : ourCourtRole,
+        defendant: caseTextInput(defendant, caseData.defendant),
+        defendantInn: caseNullableTextInput(defendantInn, caseData.defendantInn),
+        defendantOgrn: caseNullableTextInput(defendantOgrn, caseData.defendantOgrn),
+        thirdParties: caseTextInput(thirdParties, caseData.thirdParties),
+        representatives: caseTextInput(representatives, caseData.representatives),
+        judgeName: caseTextInput(judgeName, caseData.judgeName),
+        courtroom: caseTextInput(courtroom, caseData.courtroom),
+        courtSecretaryContacts: caseTextInput(courtSecretaryContacts, caseData.courtSecretaryContacts),
+        claimFiledAt: caseDateInput(claimFiledAt, caseData.claimFiledAt),
+        courtRegisteredAt: caseDateInput(courtRegisteredAt, caseData.courtRegisteredAt),
         clearCourtRegisteredAt: !courtRegisteredAt,
-        courtDecisionAt: fromDateInput(courtDecisionAt),
-        courtDecisionEffectiveAt: fromDateInput(courtDecisionEffectiveAt),
+        courtDecisionAt: caseDateInput(courtDecisionAt, caseData.courtDecisionAt),
+        courtDecisionEffectiveAt: caseDateInput(courtDecisionEffectiveAt, caseData.courtDecisionEffectiveAt),
         clearCourtDecisionEffectiveAt: !courtDecisionEffectiveAt,
-        executiveWritReceivedAt: fromDateInput(executiveWritReceivedAt),
+        executiveWritReceivedAt: caseDateInput(executiveWritReceivedAt, caseData.executiveWritReceivedAt),
         clearExecutiveWritReceivedAt: !executiveWritReceivedAt,
-        executiveWritSubmittedAt: fromDateInput(executiveWritSubmittedAt),
+        executiveWritSubmittedAt: caseDateInput(executiveWritSubmittedAt, caseData.executiveWritSubmittedAt),
         executiveWritSubmittedTo: executiveWritSubmittedAt ? executiveWritSubmittedTo : '',
         clearExecutiveWritSubmission: !executiveWritSubmittedAt,
-        appealDeadlineAt: fromDateInput(appealDeadlineAt),
-        cassationDeadlineAt: fromDateInput(cassationDeadlineAt),
-        motionDeadlineAt: fromDateInput(motionDeadlineAt),
-        objectionDeadlineAt: fromDateInput(objectionDeadlineAt),
-        documentsSummary: documentsSummary.trim(),
-        eventHistory: eventHistory.trim(),
-        strategy: strategy.trim(),
+        appealDeadlineAt: caseDateInput(appealDeadlineAt, caseData.appealDeadlineAt),
+        cassationDeadlineAt: caseDateInput(cassationDeadlineAt, caseData.cassationDeadlineAt),
+        motionDeadlineAt: caseDateInput(motionDeadlineAt, caseData.motionDeadlineAt),
+        objectionDeadlineAt: caseDateInput(objectionDeadlineAt, caseData.objectionDeadlineAt),
+        documentsSummary: caseTextInput(documentsSummary, caseData.documentsSummary),
+        eventHistory: caseTextInput(eventHistory, historySource.current),
+        strategy: caseTextInput(strategy, caseData.strategy),
         inactivityRemindersEnabled: activity.inactivityRemindersEnabled,
         inactivityRemindersDisabledReason: activity.inactivityRemindersEnabled
           ? ''

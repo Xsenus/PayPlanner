@@ -1367,4 +1367,60 @@ describe('CaseModal', () => {
     expect(screen.queryByText(/https:\/\/synthetic\.local/)).toBeNull(); expect(screen.queryByText(/^HTTP \d/)).toBeNull();
   });
 
+  it.each([false, true])('untouched case values baseline: modal preserves raw text and date precision, change back %s', async changeBack => {
+    vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'UTC' });
+    const source = createCase({ strategy: '  Исходная позиция  ', eventHistory: '  История\nсотрудника  ', documentsSummary: '  Материалы  ', nextHearingAt: '2099-11-03T12:34:56.1234567', startDate: '2026-10-01T12:34:56.1234567Z' });
+    vi.mocked(apiService.markCaseActivity).mockResolvedValue({ eventHistory: source.eventHistory, inactivityRemindersEnabled: true } as Awaited<ReturnType<typeof apiService.markCaseActivity>>);
+    const save = vi.fn(); render(<CaseModal isOpen caseData={source} onClose={vi.fn()} onSave={save} />);
+    await waitFor(() => expect(screen.getByLabelText('Следующее заседание')).toHaveProperty('value', '2099-11-03T12:34'));
+    if (changeBack) {
+      fireEvent.change(screen.getByLabelText('Следующее заседание'), { target: { value: '2099-11-04T12:34' } });
+      fireEvent.change(screen.getByLabelText('Следующее заседание'), { target: { value: '2099-11-03T12:34' } });
+      fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Другая позиция' } });
+      fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: source.strategy } });
+    }
+    fireEvent.change(screen.getByLabelText('Название дела'), { target: { value: 'Новое название' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/ })); await waitFor(() => expect(save).toHaveBeenCalledOnce());
+    expect(save.mock.calls[0][0]).toMatchObject({ strategy: source.strategy, eventHistory: source.eventHistory, documentsSummary: source.documentsSummary, nextHearingAt: source.nextHearingAt, startDate: source.startDate });
+  });
+
+  it.each(['2099-11-04T13:45', ''])('case exact explicit edit: modal saves hearing %s and normalized new text', async hearing => {
+    vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'UTC' });
+    const source = createCase({ strategy: '  Исходная позиция  ', eventHistory: '  История  ', nextHearingAt: '2099-11-03T12:34:56.1234567Z' });
+    const save = vi.fn(); render(<CaseModal isOpen caseData={source} onClose={vi.fn()} onSave={save} />);
+    await waitFor(() => expect(screen.getByLabelText('Следующее заседание')).toHaveProperty('value', '2099-11-03T12:34'));
+    fireEvent.change(screen.getByLabelText('Следующее заседание'), { target: { value: hearing } });
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: '  Новая позиция  ' } });
+    fireEvent.change(screen.getByLabelText('История событий'), { target: { value: '  Новая история  ' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/ })); await waitFor(() => expect(save).toHaveBeenCalledOnce()); const patch = save.mock.calls[0][0];
+    expect(patch.nextHearingAt).toBe(hearing ? '2099-11-04T13:45:00.000Z' : null); expect(patch.strategy).toBe('Новая позиция'); expect(patch.eventHistory).toBe('Новая история');
+  });
+
+  it('case exact activity: fresh server history remains exact when the user has not edited it', async () => {
+    const history = '  Запись коллеги\nБез потери пробелов  ';
+    vi.mocked(apiService.markCaseActivity).mockResolvedValue({ eventHistory: history, inactivityRemindersEnabled: true } as Awaited<ReturnType<typeof apiService.markCaseActivity>>);
+    const save = vi.fn(); render(<CaseModal isOpen caseData={createCase({ eventHistory: 'Старая история' })} onClose={vi.fn()} onSave={save} />);
+    await waitFor(() => expect(screen.getByLabelText('История событий')).toHaveProperty('value', history));
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/ })); await waitFor(() => expect(save).toHaveBeenCalledOnce());
+    expect(save.mock.calls[0][0].eventHistory).toBe(history);
+  });
+
+  it('case exact nullable: modal retains absent identifiers and court role as null', async () => {
+    const source = createCase({ claimantInn: null, claimantOgrn: null, defendantInn: null, defendantOgrn: null, ourCourtRole: null });
+    const save = vi.fn(); render(<CaseModal isOpen caseData={source} onClose={vi.fn()} onSave={save} />); await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/ })); await waitFor(() => expect(save).toHaveBeenCalledOnce()); const body = save.mock.calls[0][0];
+    expect(body).toMatchObject({ claimantInn: null, claimantOgrn: null, defendantInn: null, defendantOgrn: null, ourCourtRole: null });
+  });
+
+  it('case exact newline: modal keeps original CRLF after a visible edit and return', async () => {
+    const source = createCase({ strategy: '  Первая строка\r\nВторая строка  ', eventHistory: '  Запись\r\nИстория  ' });
+    vi.mocked(apiService.markCaseActivity).mockResolvedValue({ eventHistory: source.eventHistory, inactivityRemindersEnabled: true } as Awaited<ReturnType<typeof apiService.markCaseActivity>>); const save = vi.fn(); render(<CaseModal isOpen caseData={source} onClose={vi.fn()} onSave={save} />); await act(async () => {});
+    for (const [label, original] of [['Стратегия и план действий', source.strategy!], ['История событий', source.eventHistory!]]) {
+      fireEvent.change(screen.getByLabelText(label), { target: { value: 'Временный текст' } });
+      fireEvent.change(screen.getByLabelText(label), { target: { value: original.replace(/\r\n/g, '\n') } });
+    }
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/ })); await waitFor(() => expect(save).toHaveBeenCalledOnce()); const body = save.mock.calls[0][0];
+    expect(body.strategy).toBe(source.strategy); expect(body.eventHistory).toBe(source.eventHistory);
+  });
+
 });

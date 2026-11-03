@@ -524,6 +524,12 @@ describe('LegalEntityModal integration', () => {
       await act(async () => { if (action === 'save') await save('case', current); else await current.onDelete!(); });
       if (action === 'save') expect(apiService.updateCase).toHaveBeenCalledWith(81, expect.objectContaining({ title: 'Preserved case title', legalEntityId: 9, feeAmount: 215.5 }), expect.objectContaining({ id: 81 })); else expect(apiService.deleteCase).toHaveBeenCalledExactlyOnceWith(81);
     });
+    it('case exact parent: legal entity preserves complete edits and explicit empty dates', async () => {
+      const source = { ...row, strategy: '  Исходная позиция  ', eventHistory: '  История  ', nextHearingAt: '2099-11-03T12:34:56.1234567Z', isUnderControl: true };
+      vi.mocked(apiService.getCasesV1).mockResolvedValue([source]); render(<LegalEntityModal {...propsFor('page')} />); fireEvent.click(await screen.findByTitle('Редактировать дело')); await screen.findByTestId(fixture.case);
+      await act(async () => { await child('case').onSave({ title: 'Правка юриста', strategy: source.strategy, eventHistory: source.eventHistory, nextHearingAt: null, courtRegisteredAt: null, clearCourtRegisteredAt: true, documentsSummary: 'Новые материалы', courtClaimAmount: 123.45 }); });
+      expect(apiService.updateCase).toHaveBeenCalledWith(81, expect.objectContaining({ legalEntityId: 9, clientId: null, strategy: source.strategy, eventHistory: source.eventHistory, nextHearingAt: null, courtRegisteredAt: null, clearCourtRegisteredAt: true, documentsSummary: 'Новые материалы', courtClaimAmount: 123.45, isUnderControl: true }), expect.objectContaining({ id: 81, eventHistory: source.eventHistory }));
+    });
     it.each(['invoice', 'act'] as const)('related write edit: current %s keeps its existing ID and update payload', async kind => {
       if (kind === 'invoice') vi.mocked(apiService.getInvoices).mockResolvedValue({ items: [{ id: 82, invoiceEntityId: 82, number: 'INV-EDIT', type: 'Income', date: '2026-10-31', legalEntityId: 9, amount: 100, status: 'Pending' } as Invoice], total: 1, page: 1, pageSize: 5 });
       else vi.mocked(apiService.getActs).mockResolvedValue({ items: [{ id: 83, number: 'ACT-EDIT', date: '2026-10-31', amount: 100, status: 'Created', legalEntityId: 9, createdAt: '2026-10-31' } as Act], total: 1, page: 1, pageSize: 5 });

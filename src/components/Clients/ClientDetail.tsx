@@ -1,3 +1,4 @@
+import { buildCaseUpdatePayload } from '../../utils/caseEditPayload';
 import { PaymentCreateAdoptedError, type PaymentCreateContext } from '../../services/paymentCreateAttempts';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
@@ -5238,74 +5239,7 @@ function ClientDetailScreen({
       return;
     }
 
-    const base: Omit<ClientCase, "id" | "createdAt" | "payments"> = {
-      clientId,
-      title: (patch.title ?? editingCase?.title ?? "").trim(),
-      description: (patch.description ?? editingCase?.description ?? "").trim(),
-      status: (patch.status ??
-        editingCase?.status ??
-        "Open") as ClientCase["status"],
-      caseNumber: (patch.caseNumber ?? editingCase?.caseNumber ?? "").trim(),
-      caseType: (patch.caseType ?? editingCase?.caseType ?? "").trim(),
-      stage: (patch.stage ?? editingCase?.stage ?? "").trim(),
-      responsibleUserId:
-        patch.responsibleUserId === undefined
-          ? editingCase?.responsibleUserId ?? null
-          : patch.responsibleUserId,
-      startDate:
-        patch.startDate === undefined
-          ? editingCase?.startDate ?? null
-          : patch.startDate,
-      dueDate:
-        patch.dueDate === undefined ? editingCase?.dueDate ?? null : patch.dueDate,
-      feeAmount: patch.feeAmount ?? editingCase?.feeAmount ?? 0,
-      priority: patch.priority ?? editingCase?.priority ?? "normal",
-      courtName: (patch.courtName ?? editingCase?.courtName ?? "").trim(),
-      ourCourtRole: patch.ourCourtRole ?? editingCase?.ourCourtRole ?? '',
-      courtClaimAmount: patch.courtClaimAmount !== undefined ? patch.courtClaimAmount : editingCase?.courtClaimAmount ?? null,
-      courtAwardedAmount: patch.courtAwardedAmount !== undefined ? patch.courtAwardedAmount : editingCase?.courtAwardedAmount ?? null,
-      courtStateFeeAmount: patch.courtStateFeeAmount !== undefined ? patch.courtStateFeeAmount : editingCase?.courtStateFeeAmount ?? null,
-      clearCourtClaimAmount: patch.clearCourtClaimAmount ?? false,
-      clearCourtAwardedAmount: patch.clearCourtAwardedAmount ?? false,
-      clearCourtStateFeeAmount: patch.clearCourtStateFeeAmount ?? false,
-      courtCaseNumber: (
-        patch.courtCaseNumber ??
-        editingCase?.courtCaseNumber ??
-        ""
-      ).trim(),
-      courtUrl: (patch.courtUrl ?? editingCase?.courtUrl ?? "").trim(),
-      nextHearingAt:
-        patch.nextHearingAt === undefined
-          ? editingCase?.nextHearingAt ?? null
-          : patch.nextHearingAt,
-      claimant: patch.claimant ?? editingCase?.claimant ?? '',
-      claimantInn: patch.claimantInn ?? editingCase?.claimantInn ?? '',
-      claimantOgrn: patch.claimantOgrn ?? editingCase?.claimantOgrn ?? '',
-      defendant: patch.defendant ?? editingCase?.defendant ?? '',
-      defendantInn: patch.defendantInn ?? editingCase?.defendantInn ?? '',
-      defendantOgrn: patch.defendantOgrn ?? editingCase?.defendantOgrn ?? '',
-      thirdParties: patch.thirdParties ?? editingCase?.thirdParties ?? '',
-      representatives: patch.representatives ?? editingCase?.representatives ?? '',
-      judgeName: patch.judgeName ?? editingCase?.judgeName ?? '',
-      courtroom: patch.courtroom ?? editingCase?.courtroom ?? '',
-      courtSecretaryContacts: patch.courtSecretaryContacts ?? editingCase?.courtSecretaryContacts ?? '',
-      claimFiledAt: patch.claimFiledAt ?? editingCase?.claimFiledAt ?? null,
-      courtDecisionAt: patch.courtDecisionAt ?? editingCase?.courtDecisionAt ?? null,
-      courtDecisionEffectiveAt: patch.courtDecisionEffectiveAt ?? editingCase?.courtDecisionEffectiveAt ?? null,
-      clearCourtDecisionEffectiveAt: patch.clearCourtDecisionEffectiveAt ?? false,
-      executiveWritReceivedAt: patch.executiveWritReceivedAt ?? editingCase?.executiveWritReceivedAt ?? null,
-      clearExecutiveWritReceivedAt: patch.clearExecutiveWritReceivedAt ?? false,
-      executiveWritSubmittedAt: patch.executiveWritSubmittedAt !== undefined ? patch.executiveWritSubmittedAt : editingCase?.executiveWritSubmittedAt ?? null,
-      executiveWritSubmittedTo: patch.executiveWritSubmittedTo !== undefined ? patch.executiveWritSubmittedTo : editingCase?.executiveWritSubmittedTo ?? '',
-      clearExecutiveWritSubmission: patch.clearExecutiveWritSubmission ?? false,
-      appealDeadlineAt: patch.appealDeadlineAt ?? editingCase?.appealDeadlineAt ?? null,
-      cassationDeadlineAt: patch.cassationDeadlineAt ?? editingCase?.cassationDeadlineAt ?? null,
-      motionDeadlineAt: patch.motionDeadlineAt ?? editingCase?.motionDeadlineAt ?? null,
-      objectionDeadlineAt: patch.objectionDeadlineAt ?? editingCase?.objectionDeadlineAt ?? null,
-      documentsSummary: patch.documentsSummary ?? editingCase?.documentsSummary ?? '',
-      eventHistory: patch.eventHistory ?? editingCase?.eventHistory ?? '',
-      strategy: patch.strategy ?? editingCase?.strategy ?? '',
-    };
+    const base = buildCaseUpdatePayload(editingCase, { ...patch, clientId: clientId, legalEntityId: null });
 
     if (caseMode === "edit" && editingCase) {
       const updated = await apiService.updateCase(editingCase.id, base, editingCase);

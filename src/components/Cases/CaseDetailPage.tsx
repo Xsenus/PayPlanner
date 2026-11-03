@@ -1,3 +1,5 @@
+import { caseDateInput, caseHearingInput, caseNullableTextInput, caseTextInput } from '../../utils/caseEditInput';
+import { buildCaseUpdatePayload } from '../../utils/caseEditPayload';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
@@ -1243,10 +1245,6 @@ function setActiveCaseTimeZoneId(value?: string | null) {
   activeCaseTimeZoneId = normalizeUserTimeZoneId(value);
 }
 
-function fromDateInput(value: string) {
-  return value || null;
-}
-
 function fromDateTimeInput(value: string) {
   return value ? fromTimeZoneDateTimeInput(value, activeCaseTimeZoneId) : null;
 }
@@ -1346,15 +1344,15 @@ function buildCaseEditDraft(caseItem: ClientCase, timeZoneId = activeCaseTimeZon
 
 function buildCasePatchFromEditDraft(draft: CaseEditDraft): Partial<ClientCase> {
   return {
-    title: draft.title.trim(),
-    description: draft.description.trim(),
+    title: caseTextInput(draft.title, draft.originalSource.title),
+    description: caseTextInput(draft.description, draft.originalSource.description),
     status: draft.status,
-    caseNumber: draft.caseNumber.trim(),
-    caseType: draft.caseType.trim(),
-    stage: draft.stage.trim(),
+    caseNumber: caseTextInput(draft.caseNumber, draft.originalSource.caseNumber),
+    caseType: caseTextInput(draft.caseType, draft.originalSource.caseType),
+    stage: caseTextInput(draft.stage, draft.originalSource.stage),
     responsibleUserId: draft.responsibleUserId ? Number(draft.responsibleUserId) : null,
-    startDate: fromDateInput(draft.startDate),
-    dueDate: fromDateInput(draft.dueDate),
+    startDate: caseDateInput(draft.startDate, draft.originalSource.startDate),
+    dueDate: caseDateInput(draft.dueDate, draft.originalSource.dueDate),
     feeAmount: Number(draft.feeAmount.replace(',', '.')) || 0,
     courtClaimAmount: parseCourtAmountInput(draft.courtClaimAmount),
     courtAwardedAmount: parseCourtAmountInput(draft.courtAwardedAmount),
@@ -1363,114 +1361,49 @@ function buildCasePatchFromEditDraft(draft: CaseEditDraft): Partial<ClientCase> 
     clearCourtAwardedAmount: !draft.courtAwardedAmount.trim(),
     clearCourtStateFeeAmount: !draft.courtStateFeeAmount.trim(),
     priority: draft.priority,
-    courtName: draft.courtName.trim(),
-    ourCourtRole: draft.ourCourtRole,
-    courtCaseNumber: draft.courtCaseNumber.trim(),
-    courtUrl: draft.courtUrl.trim(),
-    nextHearingAt: draft.nextHearingAt ? fromTimeZoneDateTimeInput(draft.nextHearingAt, draft.timeZoneId) : null,
-    claimant: draft.claimant.trim(),
-    claimantInn: draft.claimantInn.trim(),
-    claimantOgrn: draft.claimantOgrn.trim(),
-    defendant: draft.defendant.trim(),
-    defendantInn: draft.defendantInn.trim(),
-    defendantOgrn: draft.defendantOgrn.trim(),
-    thirdParties: draft.thirdParties.trim(),
-    representatives: draft.representatives.trim(),
-    judgeName: draft.judgeName.trim(),
-    courtroom: draft.courtroom.trim(),
-    courtSecretaryContacts: draft.courtSecretaryContacts.trim(),
-    claimFiledAt: fromDateInput(draft.claimFiledAt),
-    courtRegisteredAt: fromDateInput(draft.courtRegisteredAt),
+    courtName: caseTextInput(draft.courtName, draft.originalSource.courtName),
+    ourCourtRole: draft.ourCourtRole === (draft.originalSource.ourCourtRole ?? '') ? draft.originalSource.ourCourtRole ?? null : draft.ourCourtRole,
+    courtCaseNumber: caseTextInput(draft.courtCaseNumber, draft.originalSource.courtCaseNumber),
+    courtUrl: caseTextInput(draft.courtUrl, draft.originalSource.courtUrl),
+    nextHearingAt: caseHearingInput(draft.nextHearingAt, draft.originalSource.nextHearingAt, draft.timeZoneId),
+    claimant: caseTextInput(draft.claimant, draft.originalSource.claimant),
+    claimantInn: caseNullableTextInput(draft.claimantInn, draft.originalSource.claimantInn),
+    claimantOgrn: caseNullableTextInput(draft.claimantOgrn, draft.originalSource.claimantOgrn),
+    defendant: caseTextInput(draft.defendant, draft.originalSource.defendant),
+    defendantInn: caseNullableTextInput(draft.defendantInn, draft.originalSource.defendantInn),
+    defendantOgrn: caseNullableTextInput(draft.defendantOgrn, draft.originalSource.defendantOgrn),
+    thirdParties: caseTextInput(draft.thirdParties, draft.originalSource.thirdParties),
+    representatives: caseTextInput(draft.representatives, draft.originalSource.representatives),
+    judgeName: caseTextInput(draft.judgeName, draft.originalSource.judgeName),
+    courtroom: caseTextInput(draft.courtroom, draft.originalSource.courtroom),
+    courtSecretaryContacts: caseTextInput(draft.courtSecretaryContacts, draft.originalSource.courtSecretaryContacts),
+    claimFiledAt: caseDateInput(draft.claimFiledAt, draft.originalSource.claimFiledAt),
+    courtRegisteredAt: caseDateInput(draft.courtRegisteredAt, draft.originalSource.courtRegisteredAt),
     clearCourtRegisteredAt: !draft.courtRegisteredAt,
-    courtDecisionAt: fromDateInput(draft.courtDecisionAt),
-    courtDecisionEffectiveAt: fromDateInput(draft.courtDecisionEffectiveAt),
+    courtDecisionAt: caseDateInput(draft.courtDecisionAt, draft.originalSource.courtDecisionAt),
+    courtDecisionEffectiveAt: caseDateInput(draft.courtDecisionEffectiveAt, draft.originalSource.courtDecisionEffectiveAt),
     clearCourtDecisionEffectiveAt: !draft.courtDecisionEffectiveAt,
-    executiveWritReceivedAt: fromDateInput(draft.executiveWritReceivedAt),
+    executiveWritReceivedAt: caseDateInput(draft.executiveWritReceivedAt, draft.originalSource.executiveWritReceivedAt),
     clearExecutiveWritReceivedAt: !draft.executiveWritReceivedAt,
-    executiveWritSubmittedAt: fromDateInput(draft.executiveWritSubmittedAt),
+    executiveWritSubmittedAt: caseDateInput(draft.executiveWritSubmittedAt, draft.originalSource.executiveWritSubmittedAt),
     executiveWritSubmittedTo: draft.executiveWritSubmittedAt ? draft.executiveWritSubmittedTo : '',
     clearExecutiveWritSubmission: !draft.executiveWritSubmittedAt,
-    appealDeadlineAt: fromDateInput(draft.appealDeadlineAt),
-    cassationDeadlineAt: fromDateInput(draft.cassationDeadlineAt),
-    motionDeadlineAt: fromDateInput(draft.motionDeadlineAt),
-    objectionDeadlineAt: fromDateInput(draft.objectionDeadlineAt),
-    documentsSummary: draft.documentsSummary.trim(),
-    eventHistory: draft.eventHistory.trim(),
-    strategy: draft.strategy.trim(),
+    appealDeadlineAt: caseDateInput(draft.appealDeadlineAt, draft.originalSource.appealDeadlineAt),
+    cassationDeadlineAt: caseDateInput(draft.cassationDeadlineAt, draft.originalSource.cassationDeadlineAt),
+    motionDeadlineAt: caseDateInput(draft.motionDeadlineAt, draft.originalSource.motionDeadlineAt),
+    objectionDeadlineAt: caseDateInput(draft.objectionDeadlineAt, draft.originalSource.objectionDeadlineAt),
+    documentsSummary: caseTextInput(draft.documentsSummary, draft.originalSource.documentsSummary),
+    eventHistory: caseTextInput(draft.eventHistory, draft.originalSource.eventHistory),
+    strategy: caseTextInput(draft.strategy, draft.originalSource.strategy),
     isHiddenFromExecutor: draft.isHiddenFromExecutor,
     inactivityRemindersEnabled: draft.inactivityRemindersEnabled,
     inactivityRemindersDisabledReason: draft.inactivityRemindersEnabled
       ? ''
-      : draft.inactivityRemindersDisabledReason.trim(),
+      : caseTextInput(draft.inactivityRemindersDisabledReason, draft.originalSource.inactivityRemindersDisabledReason),
   };
 }
 
-function buildCaseUpdatePayload(base: ClientCase, patch: Partial<ClientCase>): Omit<ClientCase, 'id' | 'createdAt' | 'payments'> {
-  return {
-    clientId: patch.clientId ?? base.clientId ?? null,
-    legalEntityId: patch.legalEntityId ?? base.legalEntityId ?? null,
-    client: patch.client ?? base.client ?? null,
-    legalEntity: patch.legalEntity ?? base.legalEntity ?? null,
-    title: patch.title ?? base.title ?? '',
-    description: patch.description ?? base.description ?? '',
-    status: patch.status ?? base.status ?? 'Open',
-    caseNumber: patch.caseNumber ?? base.caseNumber ?? '',
-    caseType: patch.caseType ?? base.caseType ?? '',
-    stage: patch.stage ?? base.stage ?? '',
-    responsibleUserId: patch.responsibleUserId ?? base.responsibleUserId ?? null,
-    startDate: patch.startDate ?? base.startDate ?? null,
-    dueDate: patch.dueDate ?? base.dueDate ?? null,
-    feeAmount: patch.feeAmount ?? base.feeAmount ?? 0,
-    courtClaimAmount: patch.courtClaimAmount !== undefined ? patch.courtClaimAmount : base.courtClaimAmount ?? null,
-    courtAwardedAmount: patch.courtAwardedAmount !== undefined ? patch.courtAwardedAmount : base.courtAwardedAmount ?? null,
-    courtStateFeeAmount: patch.courtStateFeeAmount !== undefined ? patch.courtStateFeeAmount : base.courtStateFeeAmount ?? null,
-    clearCourtClaimAmount: patch.clearCourtClaimAmount ?? false,
-    clearCourtAwardedAmount: patch.clearCourtAwardedAmount ?? false,
-    clearCourtStateFeeAmount: patch.clearCourtStateFeeAmount ?? false,
-    priority: patch.priority ?? base.priority ?? 'normal',
-    courtName: patch.courtName ?? base.courtName ?? '',
-    ourCourtRole: patch.ourCourtRole ?? base.ourCourtRole ?? '',
-    courtCaseNumber: patch.courtCaseNumber ?? base.courtCaseNumber ?? '',
-    judicialUid: patch.judicialUid ?? base.judicialUid ?? '',
-    courtUrl: patch.courtUrl ?? base.courtUrl ?? '',
-    nextHearingAt: patch.nextHearingAt ?? base.nextHearingAt ?? null,
-    claimant: patch.claimant ?? base.claimant ?? '',
-    claimantInn: patch.claimantInn ?? base.claimantInn ?? '',
-    claimantOgrn: patch.claimantOgrn ?? base.claimantOgrn ?? '',
-    defendant: patch.defendant ?? base.defendant ?? '',
-    defendantInn: patch.defendantInn ?? base.defendantInn ?? '',
-    defendantOgrn: patch.defendantOgrn ?? base.defendantOgrn ?? '',
-    thirdParties: patch.thirdParties ?? base.thirdParties ?? '',
-    representatives: patch.representatives ?? base.representatives ?? '',
-    judgeName: patch.judgeName ?? base.judgeName ?? '',
-    courtroom: patch.courtroom ?? base.courtroom ?? '',
-    courtSecretaryContacts: patch.courtSecretaryContacts ?? base.courtSecretaryContacts ?? '',
-    claimFiledAt: patch.claimFiledAt ?? base.claimFiledAt ?? null,
-    courtRegisteredAt: patch.courtRegisteredAt !== undefined ? patch.courtRegisteredAt : base.courtRegisteredAt ?? null,
-    clearCourtRegisteredAt: patch.clearCourtRegisteredAt ?? false,
-    courtDecisionAt: patch.courtDecisionAt ?? base.courtDecisionAt ?? null,
-    courtDecisionEffectiveAt: patch.courtDecisionEffectiveAt !== undefined ? patch.courtDecisionEffectiveAt : base.courtDecisionEffectiveAt ?? null,
-    clearCourtDecisionEffectiveAt: patch.clearCourtDecisionEffectiveAt ?? false,
-    executiveWritReceivedAt: patch.executiveWritReceivedAt !== undefined ? patch.executiveWritReceivedAt : base.executiveWritReceivedAt ?? null,
-    clearExecutiveWritReceivedAt: patch.clearExecutiveWritReceivedAt ?? false,
-    executiveWritSubmittedAt: patch.executiveWritSubmittedAt !== undefined ? patch.executiveWritSubmittedAt : base.executiveWritSubmittedAt ?? null,
-    executiveWritSubmittedTo: patch.executiveWritSubmittedTo !== undefined ? patch.executiveWritSubmittedTo : base.executiveWritSubmittedTo ?? '',
-    clearExecutiveWritSubmission: patch.clearExecutiveWritSubmission ?? false,
-    appealDeadlineAt: patch.appealDeadlineAt ?? base.appealDeadlineAt ?? null,
-    cassationDeadlineAt: patch.cassationDeadlineAt ?? base.cassationDeadlineAt ?? null,
-    motionDeadlineAt: patch.motionDeadlineAt ?? base.motionDeadlineAt ?? null,
-    objectionDeadlineAt: patch.objectionDeadlineAt ?? base.objectionDeadlineAt ?? null,
-    documentsSummary: patch.documentsSummary ?? base.documentsSummary ?? '',
-    eventHistory: patch.eventHistory ?? base.eventHistory ?? '',
-    strategy: patch.strategy ?? base.strategy ?? '',
-    inactivityRemindersEnabled: patch.inactivityRemindersEnabled ?? base.inactivityRemindersEnabled ?? true,
-    inactivityRemindersDisabledReason:
-      patch.inactivityRemindersDisabledReason ??
-      base.inactivityRemindersDisabledReason ??
-      '',
-    isHiddenFromExecutor: patch.isHiddenFromExecutor ?? base.isHiddenFromExecutor ?? false,
-  } as Omit<ClientCase, 'id' | 'createdAt' | 'payments'>;
-}
+
 
 function normalizeCaseStage(value?: string | null) {
   return (value ?? '').trim().toLocaleLowerCase('ru');

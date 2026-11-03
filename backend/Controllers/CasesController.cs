@@ -158,7 +158,7 @@ public class CasesController : ControllerBase
             e.Status = model.Status;
             e.ClientId = model.ClientId;
             e.LegalEntityId = model.LegalEntityId;
-            ApplyCaseDetails(e, model);
+            ApplyCaseDetails(e, model, preserveExistingText: true);
             CaseConfirmationResetPersistence.Apply(_db, e);
             if (previousSubmittedAt != e.ExecutiveWritSubmittedAt
                 || !string.Equals(previousSubmittedTo, e.ExecutiveWritSubmittedTo, StringComparison.Ordinal))
@@ -254,17 +254,21 @@ public class CasesController : ControllerBase
         return null;
     }
 
-    private static void ApplyCaseDetails(ClientCase target, ClientCase source)
+    private static void ApplyCaseDetails(ClientCase target, ClientCase source, bool preserveExistingText = false)
     {
-        target.CaseNumber = source.CaseNumber?.Trim() ?? string.Empty;
-        target.CaseType = source.CaseType?.Trim() ?? string.Empty;
-        target.Stage = source.Stage?.Trim() ?? string.Empty;
+        string Text(string? existing, string? incoming) => preserveExistingText && string.Equals(existing, incoming, StringComparison.Ordinal)
+            ? existing!
+            : incoming?.Trim() ?? string.Empty;
+
+        target.CaseNumber = Text(target.CaseNumber, source.CaseNumber);
+        target.CaseType = Text(target.CaseType, source.CaseType);
+        target.Stage = Text(target.Stage, source.Stage);
         target.ResponsibleUserId = source.ResponsibleUserId;
         target.StartDate = source.StartDate;
         target.DueDate = source.DueDate;
         target.FeeAmount = source.FeeAmount;
         target.Priority = string.IsNullOrWhiteSpace(source.Priority) ? "normal" : source.Priority.Trim();
-        target.CourtName = source.CourtName?.Trim() ?? string.Empty;
+        target.CourtName = Text(target.CourtName, source.CourtName);
         if (source.OurCourtRole is not null) target.OurCourtRole = source.OurCourtRole.Trim().ToLowerInvariant();
         if (source.CourtClaimAmount.HasValue) target.CourtClaimAmount = source.CourtClaimAmount;
         else if (source.ClearCourtClaimAmount) target.CourtClaimAmount = null;
@@ -272,9 +276,9 @@ public class CasesController : ControllerBase
         else if (source.ClearCourtAwardedAmount) target.CourtAwardedAmount = null;
         if (source.CourtStateFeeAmount.HasValue) target.CourtStateFeeAmount = source.CourtStateFeeAmount;
         else if (source.ClearCourtStateFeeAmount) target.CourtStateFeeAmount = null;
-        target.CourtCaseNumber = source.CourtCaseNumber?.Trim() ?? string.Empty;
-        target.JudicialUid = source.JudicialUid?.Trim() ?? string.Empty;
-        target.CourtUrl = source.CourtUrl?.Trim() ?? string.Empty;
+        target.CourtCaseNumber = Text(target.CourtCaseNumber, source.CourtCaseNumber);
+        target.JudicialUid = Text(target.JudicialUid, source.JudicialUid);
+        target.CourtUrl = Text(target.CourtUrl, source.CourtUrl);
         if (target.NextHearingAt != source.NextHearingAt)
         {
             target.NextHearingConfirmedForAt = null;
@@ -283,17 +287,17 @@ public class CasesController : ControllerBase
             target.NextHearingConfirmedByName = string.Empty;
         }
         target.NextHearingAt = source.NextHearingAt;
-        target.Claimant = source.Claimant?.Trim() ?? string.Empty;
-        if (source.ClaimantInn is not null) target.ClaimantInn = source.ClaimantInn.Trim();
-        if (source.ClaimantOgrn is not null) target.ClaimantOgrn = source.ClaimantOgrn.Trim();
-        target.Defendant = source.Defendant?.Trim() ?? string.Empty;
-        if (source.DefendantInn is not null) target.DefendantInn = source.DefendantInn.Trim();
-        if (source.DefendantOgrn is not null) target.DefendantOgrn = source.DefendantOgrn.Trim();
-        target.ThirdParties = source.ThirdParties?.Trim() ?? string.Empty;
-        target.Representatives = source.Representatives?.Trim() ?? string.Empty;
-        target.JudgeName = source.JudgeName?.Trim() ?? string.Empty;
-        target.Courtroom = source.Courtroom?.Trim() ?? string.Empty;
-        target.CourtSecretaryContacts = source.CourtSecretaryContacts?.Trim() ?? string.Empty;
+        target.Claimant = Text(target.Claimant, source.Claimant);
+        if (source.ClaimantInn is not null) target.ClaimantInn = Text(target.ClaimantInn, source.ClaimantInn);
+        if (source.ClaimantOgrn is not null) target.ClaimantOgrn = Text(target.ClaimantOgrn, source.ClaimantOgrn);
+        target.Defendant = Text(target.Defendant, source.Defendant);
+        if (source.DefendantInn is not null) target.DefendantInn = Text(target.DefendantInn, source.DefendantInn);
+        if (source.DefendantOgrn is not null) target.DefendantOgrn = Text(target.DefendantOgrn, source.DefendantOgrn);
+        target.ThirdParties = Text(target.ThirdParties, source.ThirdParties);
+        target.Representatives = Text(target.Representatives, source.Representatives);
+        target.JudgeName = Text(target.JudgeName, source.JudgeName);
+        target.Courtroom = Text(target.Courtroom, source.Courtroom);
+        target.CourtSecretaryContacts = Text(target.CourtSecretaryContacts, source.CourtSecretaryContacts);
         target.ClaimFiledAt = source.ClaimFiledAt;
         if (source.CourtDecisionEffectiveAt.HasValue) target.CourtDecisionEffectiveAt = source.CourtDecisionEffectiveAt;
         else if (source.ClearCourtDecisionEffectiveAt) target.CourtDecisionEffectiveAt = null;
@@ -312,9 +316,9 @@ public class CasesController : ControllerBase
         target.AppealDeadlineAt = source.AppealDeadlineAt;
         target.MotionDeadlineAt = source.MotionDeadlineAt;
         target.ObjectionDeadlineAt = source.ObjectionDeadlineAt;
-        target.DocumentsSummary = source.DocumentsSummary?.Trim() ?? string.Empty;
-        target.EventHistory = source.EventHistory?.Trim() ?? string.Empty;
-        var updatedStrategy = source.Strategy?.Trim() ?? string.Empty;
+        target.DocumentsSummary = Text(target.DocumentsSummary, source.DocumentsSummary);
+        target.EventHistory = Text(target.EventHistory, source.EventHistory);
+        var updatedStrategy = Text(target.Strategy, source.Strategy);
         if (!string.Equals(target.Strategy, updatedStrategy, StringComparison.Ordinal))
         {
             target.PositionReviewedAt = null;

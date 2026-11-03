@@ -5821,7 +5821,7 @@ describe('CaseDetailPage', () => {
     expect(screen.getByLabelText('Заседание')).toHaveProperty('value', '2099-11-03T12:00');
     fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u })[0]);
     await waitFor(() => expect(apiService.updateCaseV2).toHaveBeenCalledTimes(2));
-    expect(vi.mocked(apiService.updateCaseV2).mock.calls[1][1].nextHearingAt).toBe('2099-11-03T12:00:00.000Z');
+    expect(vi.mocked(apiService.updateCaseV2).mock.calls[1][1].nextHearingAt).toBe('2099-11-03T12:00:00Z');
     expect(vi.mocked(apiService.updateCaseV2).mock.calls[1][1]).not.toHaveProperty('timeZoneId');
   });
 
@@ -5859,6 +5859,54 @@ describe('CaseDetailPage', () => {
     expect(vi.mocked(apiService.updateCaseV2).mock.calls[1][2]).toMatchObject({ id: 15, eventHistory: 'Исходная история' });
     expect(vi.mocked(apiService.updateCaseV2).mock.calls[1][1].eventHistory).toBe('Исходная история');
     expect(vi.mocked(apiService.updateCaseV2).mock.calls[1][1]).not.toHaveProperty('originalSource');
+  });
+
+  it.each([false, true])('untouched case values baseline: full editor preserves raw text and date precision, change back %s', async changeBack => {
+    vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'UTC' });
+    const source = createCase({ strategy: '  Исходная позиция  ', eventHistory: '  История\nсотрудника  ', documentsSummary: '  Материалы  ', nextHearingAt: '2099-11-03T12:34:56.1234567', startDate: '2026-10-01T12:34:56.1234567Z' });
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(source);vi.mocked(apiService.updateCaseV2).mockResolvedValue(source);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />); await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    await waitFor(() => expect(screen.getByLabelText('Заседание')).toHaveProperty('value', '2099-11-03T12:34'));
+    if (changeBack) {
+      fireEvent.change(screen.getByLabelText('Заседание'), { target: { value: '2099-11-04T12:34' } });
+      fireEvent.change(screen.getByLabelText('Заседание'), { target: { value: '2099-11-03T12:34' } });
+      fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Другая позиция' } });
+      fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: source.strategy } });
+    }
+    fireEvent.change(screen.getByLabelText('Название дела'), { target: { value: 'Новое название' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/ })[0]); await waitFor(() => expect(apiService.updateCaseV2).toHaveBeenCalledOnce());
+    expect(vi.mocked(apiService.updateCaseV2).mock.calls[0][1]).toMatchObject({ strategy: source.strategy, eventHistory: source.eventHistory, documentsSummary: source.documentsSummary, nextHearingAt: source.nextHearingAt, startDate: source.startDate });
+  });
+
+  it.each(['2099-11-04T13:45', ''])('case exact explicit edit: full editor saves hearing %s and normalized new text', async hearing => {
+    vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'UTC' });
+    const source = createCase({ strategy: '  Исходная позиция  ', eventHistory: '  История  ', nextHearingAt: '2099-11-03T12:34:56.1234567Z' });
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(source); vi.mocked(apiService.updateCaseV2).mockResolvedValue(source); render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />); await screen.findByText('ЗЕМЦОВ - банкротство'); fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    await waitFor(() => expect(screen.getByLabelText('Заседание')).toHaveProperty('value', '2099-11-03T12:34'));
+    fireEvent.change(screen.getByLabelText('Заседание'), { target: { value: hearing } });
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: '  Новая позиция  ' } });
+    fireEvent.change(screen.getByLabelText('История событий'), { target: { value: '  Новая история  ' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/ })[0]); await waitFor(() => expect(apiService.updateCaseV2).toHaveBeenCalledOnce()); const patch = vi.mocked(apiService.updateCaseV2).mock.calls[0][1];
+    expect(patch.nextHearingAt).toBe(hearing ? '2099-11-04T13:45:00.000Z' : null); expect(patch.strategy).toBe('Новая позиция'); expect(patch.eventHistory).toBe('Новая история');
+  });
+
+  it('case exact nullable: full editor retains absent identifiers and court role as null', async () => {
+    const source = createCase({ claimantInn: null, claimantOgrn: null, defendantInn: null, defendantOgrn: null, ourCourtRole: null });
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(source); vi.mocked(apiService.updateCaseV2).mockResolvedValue(source); render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />); await screen.findByText('ЗЕМЦОВ - банкротство'); fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/ })[0]); await waitFor(() => expect(apiService.updateCaseV2).toHaveBeenCalledOnce()); const body = vi.mocked(apiService.updateCaseV2).mock.calls[0][1];
+    expect(body).toMatchObject({ claimantInn: null, claimantOgrn: null, defendantInn: null, defendantOgrn: null, ourCourtRole: null });
+  });
+
+  it('case exact newline: full editor keeps original CRLF after a visible edit and return', async () => {
+    const source = createCase({ strategy: '  Первая строка\r\nВторая строка  ', eventHistory: '  Запись\r\nИстория  ' });
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(source); vi.mocked(apiService.updateCaseV2).mockResolvedValue(source); render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />); await screen.findByText('ЗЕМЦОВ - банкротство'); fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    for (const [label, original] of [['Стратегия и план действий', source.strategy!], ['История событий', source.eventHistory!]]) {
+      fireEvent.change(screen.getByLabelText(label), { target: { value: 'Временный текст' } });
+      fireEvent.change(screen.getByLabelText(label), { target: { value: original.replace(/\r\n/g, '\n') } });
+    }
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/ })[0]); await waitFor(() => expect(apiService.updateCaseV2).toHaveBeenCalledOnce()); const body = vi.mocked(apiService.updateCaseV2).mock.calls[0][1];
+    expect(body.strategy).toBe(source.strategy); expect(body.eventHistory).toBe(source.eventHistory);
   });
 
 });

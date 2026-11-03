@@ -434,6 +434,7 @@ vi.mock('../../hooks/usePersistedTableSettings', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getClient: vi.fn(),
+    updateCase: vi.fn(),
     updateClient: vi.fn(),
     deleteClient: vi.fn(),
     cleanAddress: vi.fn(),
@@ -4482,4 +4483,16 @@ describe('ClientDetail integration', () => {
       expect(screen.getByText(/Период:/)).toBeTruthy();
     });
   });
+  it('case exact parent: client detail keeps the complete edit, exact history and cleared hearing', async () => {
+    Object.assign(permissionsResult.cases, { canView: true, canEdit: true });
+    const source = { id: 11, clientId: 1, title: 'Дело клиента', description: 'Описание', status: 'Open' as const, createdAt: '2026-11-01', strategy: '  Позиция  ', eventHistory: '  История  ', nextHearingAt: '2099-11-03T12:34:56.1234567Z', isUnderControl: true };
+    useClientCasesMock.mockReturnValue({ ...emptyClientCasesResult, cases: [source] });
+    vi.mocked(apiService.updateCase).mockReset().mockResolvedValue(source);
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="cases" />);
+    fireEvent.click(await screen.findByTitle('Редактировать дело'));
+    await waitFor(() => expect(caseLookupPropsSpy.mock.lastCall![0].isOpen).toBe(true));
+    await act(async () => { await caseLookupPropsSpy.mock.lastCall![0].onSave({ title: 'Новое название', strategy: source.strategy, eventHistory: source.eventHistory, nextHearingAt: null, courtRegisteredAt: null, clearCourtRegisteredAt: true, documentsSummary: 'Материалы' }); });
+    expect(apiService.updateCase).toHaveBeenCalledWith(11, expect.objectContaining({ clientId: 1, legalEntityId: null, strategy: source.strategy, eventHistory: source.eventHistory, nextHearingAt: null, courtRegisteredAt: null, clearCourtRegisteredAt: true, documentsSummary: 'Материалы', isUnderControl: true }), expect.objectContaining({ id: 11, eventHistory: source.eventHistory }));
+  });
+
 });

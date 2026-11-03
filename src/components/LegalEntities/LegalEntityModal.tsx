@@ -1,3 +1,4 @@
+import { buildCaseUpdatePayload } from '../../utils/caseEditPayload';
 import { PaymentCreateAdoptedError } from '../../services/paymentCreateAttempts';
 import { captureAuthSessionIdentity, isAuthSessionIdentityCurrent } from '../../services/authService';
 import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
@@ -2541,39 +2542,7 @@ export function LegalEntityModal({
     if (!operation) throw new StaleUiOperationError();
     try {
 
-      const payload: LegalEntityCasePayload = {
-        clientId: null,
-        legalEntityId: currentLegalEntityId,
-        title: (patch.title ?? editingCase?.title ?? "").trim(),
-        description: patch.description ?? editingCase?.description ?? "",
-        status: patch.status ?? editingCase?.status ?? "Open",
-        caseNumber: (patch.caseNumber ?? editingCase?.caseNumber ?? "").trim(),
-        caseType: (patch.caseType ?? editingCase?.caseType ?? "").trim(),
-        stage: (patch.stage ?? editingCase?.stage ?? "").trim(),
-        responsibleUserId:
-          patch.responsibleUserId === undefined
-            ? editingCase?.responsibleUserId ?? null
-            : patch.responsibleUserId,
-        startDate:
-          patch.startDate === undefined
-            ? editingCase?.startDate ?? null
-            : patch.startDate,
-        dueDate:
-          patch.dueDate === undefined ? editingCase?.dueDate ?? null : patch.dueDate,
-        feeAmount: patch.feeAmount ?? editingCase?.feeAmount ?? 0,
-        priority: patch.priority ?? editingCase?.priority ?? "normal",
-        courtName: (patch.courtName ?? editingCase?.courtName ?? "").trim(),
-        courtCaseNumber: (
-          patch.courtCaseNumber ??
-          editingCase?.courtCaseNumber ??
-          ""
-        ).trim(),
-        courtUrl: (patch.courtUrl ?? editingCase?.courtUrl ?? "").trim(),
-        nextHearingAt:
-          patch.nextHearingAt === undefined
-            ? editingCase?.nextHearingAt ?? null
-            : patch.nextHearingAt,
-      };
+      const payload: LegalEntityCasePayload = buildCaseUpdatePayload(editingCase, { ...patch, clientId: null, legalEntityId: currentLegalEntityId });
 
       if (caseMode === "edit" && editingCase) {
         await updateLegalEntityCase(editingCase.id, payload, operation.isCurrent, editingCase);

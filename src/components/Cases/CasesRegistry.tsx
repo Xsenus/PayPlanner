@@ -1,3 +1,4 @@
+import { buildCaseUpdatePayload } from '../../utils/caseEditPayload';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
@@ -360,67 +361,7 @@ function persistSavedRegistryViews(views: CaseRegistrySavedView[]) {
   window.localStorage.setItem(CASE_REGISTRY_VIEW_STORAGE_KEY, JSON.stringify(views.slice(0, 20)));
 }
 
-function buildCaseUpdatePayload(base: ClientCase, patch: Partial<ClientCase>): Omit<ClientCase, 'id' | 'createdAt' | 'payments'> {
-  return {
-    clientId: patch.clientId ?? base.clientId ?? null,
-    legalEntityId: patch.legalEntityId ?? base.legalEntityId ?? null,
-    client: patch.client ?? base.client ?? null,
-    legalEntity: patch.legalEntity ?? base.legalEntity ?? null,
-    title: patch.title ?? base.title ?? '',
-    description: patch.description ?? base.description ?? '',
-    status: patch.status ?? base.status ?? 'Open',
-    caseNumber: patch.caseNumber ?? base.caseNumber ?? '',
-    caseType: patch.caseType ?? base.caseType ?? '',
-    stage: patch.stage ?? base.stage ?? '',
-    responsibleUserId: patch.responsibleUserId ?? base.responsibleUserId ?? null,
-    startDate: patch.startDate ?? base.startDate ?? null,
-    dueDate: patch.dueDate ?? base.dueDate ?? null,
-    feeAmount: patch.feeAmount ?? base.feeAmount ?? 0,
-    courtClaimAmount: patch.courtClaimAmount !== undefined ? patch.courtClaimAmount : base.courtClaimAmount ?? null,
-    courtAwardedAmount: patch.courtAwardedAmount !== undefined ? patch.courtAwardedAmount : base.courtAwardedAmount ?? null,
-    courtStateFeeAmount: patch.courtStateFeeAmount !== undefined ? patch.courtStateFeeAmount : base.courtStateFeeAmount ?? null,
-    clearCourtClaimAmount: patch.clearCourtClaimAmount ?? false,
-    clearCourtAwardedAmount: patch.clearCourtAwardedAmount ?? false,
-    clearCourtStateFeeAmount: patch.clearCourtStateFeeAmount ?? false,
-    priority: patch.priority ?? base.priority ?? 'normal',
-    courtName: patch.courtName ?? base.courtName ?? '',
-    ourCourtRole: patch.ourCourtRole ?? base.ourCourtRole ?? '',
-    courtCaseNumber: patch.courtCaseNumber ?? base.courtCaseNumber ?? '',
-    judicialUid: patch.judicialUid ?? base.judicialUid ?? '',
-    courtUrl: patch.courtUrl ?? base.courtUrl ?? '',
-    nextHearingAt: patch.nextHearingAt ?? base.nextHearingAt ?? null,
-    claimant: patch.claimant ?? base.claimant ?? '',
-    claimantInn: patch.claimantInn ?? base.claimantInn ?? '',
-    claimantOgrn: patch.claimantOgrn ?? base.claimantOgrn ?? '',
-    defendant: patch.defendant ?? base.defendant ?? '',
-    defendantInn: patch.defendantInn ?? base.defendantInn ?? '',
-    defendantOgrn: patch.defendantOgrn ?? base.defendantOgrn ?? '',
-    thirdParties: patch.thirdParties ?? base.thirdParties ?? '',
-    representatives: patch.representatives ?? base.representatives ?? '',
-    judgeName: patch.judgeName ?? base.judgeName ?? '',
-    courtroom: patch.courtroom ?? base.courtroom ?? '',
-    courtSecretaryContacts: patch.courtSecretaryContacts ?? base.courtSecretaryContacts ?? '',
-    claimFiledAt: patch.claimFiledAt ?? base.claimFiledAt ?? null,
-    courtDecisionAt: patch.courtDecisionAt ?? base.courtDecisionAt ?? null,
-    courtDecisionEffectiveAt: patch.courtDecisionEffectiveAt !== undefined ? patch.courtDecisionEffectiveAt : base.courtDecisionEffectiveAt ?? null,
-    clearCourtDecisionEffectiveAt: patch.clearCourtDecisionEffectiveAt ?? false,
-    executiveWritReceivedAt: patch.executiveWritReceivedAt !== undefined ? patch.executiveWritReceivedAt : base.executiveWritReceivedAt ?? null,
-    clearExecutiveWritReceivedAt: patch.clearExecutiveWritReceivedAt ?? false,
-    executiveWritSubmittedAt: patch.executiveWritSubmittedAt !== undefined ? patch.executiveWritSubmittedAt : base.executiveWritSubmittedAt ?? null,
-    executiveWritSubmittedTo: patch.executiveWritSubmittedTo !== undefined ? patch.executiveWritSubmittedTo : base.executiveWritSubmittedTo ?? '',
-    clearExecutiveWritSubmission: patch.clearExecutiveWritSubmission ?? false,
-    appealDeadlineAt: patch.appealDeadlineAt ?? base.appealDeadlineAt ?? null,
-    cassationDeadlineAt: patch.cassationDeadlineAt ?? base.cassationDeadlineAt ?? null,
-    motionDeadlineAt: patch.motionDeadlineAt ?? base.motionDeadlineAt ?? null,
-    objectionDeadlineAt: patch.objectionDeadlineAt ?? base.objectionDeadlineAt ?? null,
-    documentsSummary: patch.documentsSummary ?? base.documentsSummary ?? '',
-    eventHistory: patch.eventHistory ?? base.eventHistory ?? '',
-    strategy: patch.strategy ?? base.strategy ?? '',
-    inactivityRemindersEnabled: patch.inactivityRemindersEnabled ?? base.inactivityRemindersEnabled ?? true,
-    isUnderControl: patch.isUnderControl ?? base.isUnderControl ?? false,
-    isHiddenFromExecutor: patch.isHiddenFromExecutor ?? base.isHiddenFromExecutor ?? false,
-  } as Omit<ClientCase, 'id' | 'createdAt' | 'payments'>;
-}
+
 
 export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onOpenCaseFinance, allowCreate = true }: CasesRegistryProps) {
   const { user, isAdmin } = useAuth();
