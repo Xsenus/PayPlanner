@@ -627,22 +627,12 @@ public partial class ContactsController : ControllerBase
         [FromForm] string? decisionsJson = null,
         CancellationToken ct = default)
     {
-        var access = await GetCurrentAccessAsync(ct);
-        if (access is null)
-        {
-            return Unauthorized();
-        }
+        return await RunYealinkImportAsync(file, dryRun, decisionsJson, ct);
+    }
 
-        if (await RequireClientsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-
-        if (!access.IsAdmin)
-        {
-            return Forbid();
-        }
-
+    private async Task<ActionResult<YealinkContactImportResultDto>> ImportYealinkCoreAsync(
+        IFormFile? file, bool dryRun, string? decisionsJson, DataVisibilityAccess access, CancellationToken ct)
+    {
         if (file is null || file.Length == 0)
         {
             return BadRequest("Файл телефонной книги пустой.");
@@ -656,6 +646,7 @@ public partial class ContactsController : ControllerBase
             var xml = await reader.ReadToEndAsync(ct);
             document = XDocument.Parse(xml);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch
         {
             return BadRequest("Не удалось прочитать XML телефонной книги Yealink.");
@@ -1121,6 +1112,7 @@ public partial class ContactsController : ControllerBase
     {
         if (string.Equals(match.SourceType, "client", StringComparison.OrdinalIgnoreCase))
         {
+            await LockYealinkMatchAsync("client", match.SourceId, ct);
             var client = await _db.Clients.FirstOrDefaultAsync(x => x.Id == match.SourceId, ct);
             if (client is null)
             {
@@ -1146,6 +1138,7 @@ public partial class ContactsController : ControllerBase
 
         if (string.Equals(match.SourceType, "external", StringComparison.OrdinalIgnoreCase))
         {
+            await LockYealinkMatchAsync("external", match.SourceId, ct);
             var contact = await _db.ExternalContacts.FirstOrDefaultAsync(x => x.Id == match.SourceId, ct);
             if (contact is null)
             {
@@ -1449,26 +1442,21 @@ public partial class ContactsController : ControllerBase
     {
         var index = new Dictionary<string, PhoneMatchInfo>(StringComparer.OrdinalIgnoreCase);
 
-        var clients = await _db.Clients.ToListAsync(ct);
-        foreach (var client in clients)
+        // Stream only the fields required for matching; do not track the whole directory.
+        var clients = _db.Clients.AsNoTracking().Select(x => new { x.Id, x.Name, x.Phone, x.Notes });
+        await foreach (var client in clients.AsAsyncEnumerable().WithCancellation(ct))
         {
-            var contact = MapClientContact(client);
-            var match = new PhoneMatchInfo("client", client.Id, contact.FullName, contact.Phones);
-            foreach (var key in GetPhoneMatchKeys(contact.Phones))
-            {
-                index.TryAdd(key, match);
-            }
+            var phones = ReadProfileStringArray(GetOrCreateClientProfileObject(client.Notes), "phones", client.Phone);
+            var match = new PhoneMatchInfo("client", client.Id, client.Name, phones);
+            foreach (var key in GetPhoneMatchKeys(phones)) index.TryAdd(key, match);
         }
 
-        var externalContacts = await _db.ExternalContacts.ToListAsync(ct);
-        foreach (var contact in externalContacts)
+        var contacts = _db.ExternalContacts.AsNoTracking().Select(x => new { x.Id, x.FullName, x.Phone, x.PhonesJson });
+        await foreach (var contact in contacts.AsAsyncEnumerable().WithCancellation(ct))
         {
-            var directoryItem = MapExternalContact(contact);
-            var match = new PhoneMatchInfo("external", contact.Id, directoryItem.FullName, directoryItem.Phones);
-            foreach (var key in GetPhoneMatchKeys(directoryItem.Phones))
-            {
-                index.TryAdd(key, match);
-            }
+            var phones = DeserializeStringList(contact.PhonesJson, contact.Phone);
+            var match = new PhoneMatchInfo("external", contact.Id, contact.FullName, phones);
+            foreach (var key in GetPhoneMatchKeys(phones)) index.TryAdd(key, match);
         }
 
         return index;

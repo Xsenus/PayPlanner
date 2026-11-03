@@ -6,7 +6,7 @@
 ## Сводка
 
 - Разделов frontend: 55.
-- Backend-контроллеров: 101.
+- Backend-контроллеров: 102.
 - HTTP endpoints: 969; с прямой тестовой связью: 684.
 - HTTP endpoints с точной ссылкой из документации: 278; критичных без такой ссылки: 526.
 - Критичных endpoints без прямой тестовой связи: 238.
@@ -187,6 +187,7 @@
 | ContactsController | backend/Controllers/ContactsController.cs | 9 | [Authorize] | да |
 | ContactsController | backend/Controllers/ContactsController.ExternalWrites.cs | 0 | не задано | да |
 | ContactsController | backend/Controllers/ContactsController.Merge.cs | 2 | не задано | да |
+| ContactsController | backend/Controllers/ContactsController.YealinkImport.cs | 0 | не задано | да |
 | ContractsController | backend/Controllers/ContractsController.cs | 29 | [Authorize] | да |
 | DadataIntegrationSettingsController | backend/Controllers/DadataIntegrationSettingsController.cs | 2 | [Authorize] | да |
 | DatabaseAdminController | backend/Controllers/DatabaseAdminController.cs | 21 | [Authorize(Policy = "Admin")] | да |
