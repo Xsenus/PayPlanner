@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "scope": "one-retirement-dependency-fingerprint-uv12-5441ed9c",
+  "files": [
+    {
+      "file": "controller.py",
+      "bytes": 16691,
+      "sha256": "b61c2d540eb611c8642bcd4380d8d4f2033254256d51a19bcd0349f7aa919e65"
+    },
+    {
+      "file": "pins.json",
+      "bytes": 1204,
+      "sha256": "c3b7c6f3dcdbed102ddee5ccbd45f56d764cc72d2161b404dfef9f18fc1ca8e3"
+    },
+    {
+      "file": "plan.json",
+      "bytes": 9743,
+      "sha256": "fef6d47c36cd97dc6e6e632e9911e8dd2a6d2d03b09b1c584ce81c54b92477d3"
+    },
+    {
+      "file": "win_owned.py",
+      "bytes": 12844,
+      "sha256": "85963f50766c8cc17eadb873dfe3b8ff07cb265e9e32261bf657db24be18a95b"
+    },
+    {
+      "file": "worker.mjs",
+      "bytes": 5539,
+      "sha256": "1b292c81d778d72628603651d26c67a4d4b586d28370cd12c999eb24adcf0581"
+    }
+  ]
+}

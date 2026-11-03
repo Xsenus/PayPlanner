@@ -1,0 +1,154 @@
+{
+  "schema": 1,
+  "scope": "one-retirement-dependency-fingerprint-uv12-5441ed9c",
+  "status": "ROOT_REVIEWED_UV12_SINGLE_CAPTURE_PREPARED_ONLY",
+  "preparedUtc": "2026-11-03T05:22:26.403294+00:00",
+  "headSha": "5441ed9c68d6d9de13bf80e42eb106b2c0be4136",
+  "runId": 41509039583,
+  "attempt": 1,
+  "failedJobId": 125544632697,
+  "ciManifestSha256": "996d89bac0cb5834a4515f8fb374e8ad19bcfad9e66b22b3280ab4f5a78acae5",
+  "workspace": "D:\\PayPlannerRunner\\agent\\_work\\PayPlanner\\PayPlanner",
+  "measurement": {
+    "module": "scripts/case-retirement-production-bundle.mjs",
+    "export": "captureRetirementDependencyInputs",
+    "moduleSha256": "8166f0a56d48161ab441e559b7144921e694e606c743fc1690939976743c1fa0",
+    "captureInvocationsMaximum": 1,
+    "retries": 0,
+    "warmups": 0,
+    "dependencyBoundary": "Entire original function result, unchanged concurrency12 and original cache/link rules. Import calls no build/browser/API/export other than the exact capture.",
+    "output": "dependency-fingerprint.json is the exact returned object serialized once; capture-result.json binds complete file count, link count, tool hash/version, monotonic elapsed and fingerprint hash.",
+    "atomicSnapshot": false,
+    "dependencyMutationLimitation": "Single pass is not a filesystem snapshot. Inputs must be exclusively stable. No second tree scan or capture is performed to assert stability. Package/source pins and CI idle guards cannot prove the absence of arbitrary concurrent foreign writes.",
+    "failureCauseOfHistoricalCiProven": false,
+    "baselineCaptureResultPath": "D:/PayPlannerDiagnostics/dependency-fingerprint-lowmem-plan-20261103/capture-result.json",
+    "baselineCaptureResultSha256": "49f50fc7519af755ff89fe96843308fb5eccebd12c9e7c23a43b4864d175770a",
+    "baselineCaptureMilliseconds": 294173.4831,
+    "sourceAlgorithmUnchanged": true,
+    "newScopeCaptureMaximum": 1,
+    "originalHistoricalTimeoutCauseProven": false
+  },
+  "resourceProfile": {
+    "nodeOldSpaceMiB": 128,
+    "nodeJobMemoryBytes": 536870912,
+    "reserveBytes": 4294967296,
+    "admissionPhysicalAndCommitBytes": 4831838208,
+    "floorPhysicalAndCommitBytes": 1073741824,
+    "maximumControllerBudgetSeconds": 900,
+    "controllerWorkerDeadlineFromStartSeconds": 885,
+    "sealingDeadlineFromStartSeconds": 895,
+    "workerTimerMaximumMs": 870000,
+    "sharedCleanupWaitSeconds": 5,
+    "sampleIntervalSeconds": 1,
+    "maximumSamples": 880,
+    "maximumHeldOwnedProcesses": 64,
+    "workerHeartbeatSeconds": 5,
+    "perStreamMaximumBytes": 2097152,
+    "heapJustification": "One unchanged pure capture retains 24657 dependency records in the current local fixture; twelve original metadata/hash streams are preserved. 128MiB managed heap and total512MiB kernel Job cap target the bounded read-only operation. Admission4.5GiB=4GiB reserve+512MiB cap. Any exhaustion yields incomplete diagnostic with no retry or reduced boundary; all CI test profiles/admission6GiB remain unchanged.",
+    "CPUConcurrency": "Original metadata/read/hash concurrency12 retained; no global profile/affinity change. One controlled Node worker only.",
+    "uvThreadpoolSize": 12,
+    "IOJustification": "Original full-boundary algorithm already admits12 concurrent file hashes. Test only per-owned-Node libuv pool12 vs documented default4. No global settings or CI profiles changed. Same host comparison requires exact complete fingerprint equality with sealed original294173.4831ms capture. Cache/load/time differ, so no isolated historical causal attribution."
+  },
+  "commands": {
+    "validateOnly": {
+      "executable": "python",
+      "arguments": [
+        "-X",
+        "utf8",
+        "D:\\PayPlannerDiagnostics\\dependency-fingerprint-uv12-plan-20261103\\controller.py",
+        "--validate-plan"
+      ]
+    },
+    "futureSeparateScopedStartOnly": {
+      "executable": "python",
+      "arguments": [
+        "-X",
+        "utf8",
+        "D:\\PayPlannerDiagnostics\\dependency-fingerprint-uv12-plan-20261103\\controller.py",
+        "--execute"
+      ]
+    },
+    "controlledWorker": {
+      "executable": "D:\\PayPlannerRunner\\agent\\_work\\_tool\\node\\22.23.4\\x64\\node.exe",
+      "arguments": [
+        "--max-old-space-size=128",
+        "D:\\PayPlannerDiagnostics\\dependency-fingerprint-uv12-plan-20261103\\worker.mjs"
+      ]
+    }
+  },
+  "futureAuthorizationSchema": {
+    "file": "authorization.json (MUST NOT EXIST during preparation)",
+    "required": {
+      "enabled": true,
+      "scope": "one-retirement-dependency-fingerprint-uv12-5441ed9c",
+      "rootReviewedCompleteSource": true,
+      "maximumInvocations": 1,
+      "headSha": "5441ed9c68d6d9de13bf80e42eb106b2c0be4136",
+      "runId": 41509039583,
+      "attempt": 1,
+      "manifestSha256": "996d89bac0cb5834a4515f8fb374e8ad19bcfad9e66b22b3280ab4f5a78acae5",
+      "planManifestSha256": "SHA256 of this prepared manifest.json",
+      "nonce": "fresh 32 lowercase hexadecimal characters",
+      "issuedUtc": "aware UTC, <=120seconds old",
+      "expiresUtc": "aware UTC, >now and <=issued+15minutes",
+      "readinessPath": "new proof under D:/PayPlannerDiagnostics; never old v2 readiness",
+      "readinessSha256": "exact current proof SHA256"
+    }
+  },
+  "futureReadinessSchema": {
+    "scope": "one-retirement-dependency-fingerprint-uv12-5441ed9c",
+    "headSha": "5441ed9c68d6d9de13bf80e42eb106b2c0be4136",
+    "planManifestSha256": "exact prepared manifest hash",
+    "qualified": true,
+    "pinsAllMatch": true,
+    "intervalSeconds": 10,
+    "samples": "exactly5, strictly increasing aware UTC, gaps9.5..10.5seconds; first <=120seconds old and no future timestamp",
+    "eachSample": {
+      "utc": "aware UTC",
+      "availablePhysicalBytes": ">=4831838208",
+      "availableCommitBytes": ">=4831838208",
+      "workerCount": 0,
+      "identityUnknownCount": 0,
+      "oldMonitorCount": 0
+    },
+    "runnerBeforeAndAfter": {
+      "id": 21,
+      "status": "online",
+      "busy": false
+    }
+  },
+  "liveGuards": [
+    "Prepared script/plan/pins manifest exact hashes; new scope must match",
+    "Fresh separately supplied root grant and hash-bound new readiness; no active authorization created now",
+    "Exact local HEAD5441 and clean tracked checkout, small module/package-lock/package pins and Node executable hash; ordinary node_modules root metadata only before capture",
+    "Standard authenticated GitHub API must return exact current main5441, run41509039583 attempt1 completed, complete unpaginated <=100 job list all completed including job125544632697, runner21 online busyfalse",
+    "No spoofed GITHUB context, hook, service/host/profile changes, protected artifact store, old v2 file access or reuse",
+    "Deferred own-process Windows API selfcheck and closed selfcheck handle before node process creation; immediate RAM/commit>=4.5GiB and Worker0",
+    "Worker launched suspended with explicit inherited stream handle list, assigned to a fresh unnamed kill-on-close non-breakaway Job with total512MiB memory limit before resume",
+    "Worker checks its Node path/version, source/package pins, fresh ticket/root nonce and hashes again before importing the pinned module; no call to main/finalize/build/sourceInputs or stableEnvironment",
+    "Exactly one committed execution attempt, one Node creation maximum, one capture commitment maximum; every failure ends this attempt without retry",
+    "Runtime observation includes only global numeric availability, Worker candidate count, and held own Job members verified by kernel Job membership and PID/creation cutoff; unknowns remain separate",
+    "Any Worker appearance, identity unknown, physical/commit floor1GiB, log cap or deadline stops only this created Job/CreateProcess handle and records deliberateOwnedStop",
+    "Independent final owned cleanup even after prior abort; shared<=5seconds wait, handle closure status and residual/unknown receipt; no foreign owner cleanup",
+    "Native Node exit and deliberate diagnostic stop are separate; this is never a native test failure/fullCI/requalification of16 cases"
+  ],
+  "currentCounters": {
+    "captureInvocations": 0,
+    "applicationModuleImports": 0,
+    "nodeModulesTreeReadsOrHashes": 0,
+    "testsBuildApiStarted": 0,
+    "osSamples": 0,
+    "monitorsStarted": 0,
+    "activeAuthorizationCreated": false
+  },
+  "runtimeQualificationNow": "NONE: syntax-only preparation. Windows API support/job assignment/floor behavior must pass deferred guards; no runtime safety assertion follows from AST/check alone.",
+  "knownLimitations": [
+    "No OS disk snapshot: single-pass dependencies can change between file reads; exclusivity is an external prerequisite",
+    "Foreign short-lived CI processes between one-second Worker samples can be missed; no exclusive GitHub lease is acquired or claimed",
+    "Own short-lived descendants may be missed by sampling; kernel non-breakaway Job kill-on-close is the containment boundary, exhaustive historical process absence is not claimed",
+    "If the controller is forcibly killed, kernel close of its non-inherited Job handle terminates remaining owned members; no durable completion receipt is then guaranteed",
+    "OS scheduling/kernel stalls and filesystem operations cannot provide a real-time wall-clock guarantee. Worker timer/controller budgets and fail-closed cleanup target <15minutes; final evidence must report actual elapsed and any overrun",
+    "One failed capture/resource exhaustion is preserved, never fixed by dropping files, assertions, existing link rules, or rerunning automatically"
+  ],
+  "admissionScope": "Only this new pure read/hash diagnostic. Mandatory CI admission6GiB/reserve4/floor1 unchanged. Old prepared scope/grants/readiness are preserved and never rewritten."
+}

@@ -1,0 +1,34 @@
+{
+  "workspace": "D:\\PayPlannerRunner\\agent\\_work\\PayPlanner\\PayPlanner",
+  "headSha": "5441ed9c68d6d9de13bf80e42eb106b2c0be4136",
+  "runId": 41509039583,
+  "attempt": 1,
+  "failedJobId": 125544632697,
+  "manifestSha256": "996d89bac0cb5834a4515f8fb374e8ad19bcfad9e66b22b3280ab4f5a78acae5",
+  "files": {
+    "scripts/case-retirement-production-bundle.mjs": {
+      "sha256": "8166f0a56d48161ab441e559b7144921e694e606c743fc1690939976743c1fa0",
+      "bytes": 16008
+    },
+    "package-lock.json": {
+      "sha256": "c349e92f86fe39589ba25ced94f8008b741aa15ae68e1568f0a0eae946928ee9",
+      "bytes": 256070
+    },
+    "package.json": {
+      "sha256": "c465d0d3247bf381dc7fee2b97085fe16b4b02073c481696061912a551789f60",
+      "bytes": 6337
+    }
+  },
+  "node": {
+    "path": "D:\\PayPlannerRunner\\agent\\_work\\_tool\\node\\22.23.4\\x64\\node.exe",
+    "expectedVersion": "v22.23.4",
+    "sha256": "dccc52de28d8df2ee22d2062424f8c563070d95d8ad70c54c4bf01d590dec14f"
+  },
+  "lockMetadata": {
+    "lockfileVersion": 3,
+    "packageRecords": 492
+  },
+  "nodeModulesTreeReadOrHashed": false,
+  "captureInvocations": 0,
+  "preparedUtc": "2026-11-03T02:43:36.514693+00:00"
+}

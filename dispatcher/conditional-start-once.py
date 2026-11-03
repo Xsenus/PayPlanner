@@ -14,11 +14,11 @@ import sys
 
 sys.dont_write_bytecode = True
 D = datetime.timezone.utc
-ROOT = pathlib.Path('D:/PayPlannerDiagnostics/dependency-fingerprint-lowmem-plan-20261103')
-COLLECTOR = pathlib.Path('D:/PayPlannerDiagnostics/readiness-collector-checked-20261103/collector.py')
-SCOPE = 'one-retirement-dependency-fingerprint-512m-5441ed9c'
+ROOT = pathlib.Path('D:/PayPlannerDiagnostics/dependency-fingerprint-uv12-plan-20261103')
+COLLECTOR = pathlib.Path('D:/PayPlannerDiagnostics/uv12-readiness-collector-20261103/collector.py')
+SCOPE = 'one-retirement-dependency-fingerprint-uv12-5441ed9c'
 HEAD = '5441ed9c68d6d9de13bf80e42eb106b2c0be4136'
-MANIFEST = 'e960d8377d08ce38ea14628bb967b6a8d8e589810fba29064bf56cec399391a7'
+MANIFEST = 'd4bf1cb6294f14b1afd6d7b1d4f240a454fe327ed7aee5c510b592b4920a2f79'
 ADMISSION = 4831838208
 
 def now():
