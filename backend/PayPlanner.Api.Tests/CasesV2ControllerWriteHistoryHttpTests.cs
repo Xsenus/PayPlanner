@@ -229,7 +229,8 @@ public partial class CasesV2ControllerTests
         public object Create(ControllerContext context)
         {
             ControllerBase controller = context.ActionDescriptor.ControllerTypeInfo.AsType() == typeof(CasesController)
-                ? new CasesController(db) : CreateController(db, user);
+                ? new CasesController(db) : context.ActionDescriptor.ControllerTypeInfo.AsType() == typeof(PayPlanner.Api.Controllers.V1.CasesV1Controller)
+                    ? new PayPlanner.Api.Controllers.V1.CasesV1Controller(db) : CreateController(db, user);
             controller.ControllerContext = context; return controller;
         }
         public void Release(ControllerContext context, object controller) { }

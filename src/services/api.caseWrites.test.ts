@@ -13,6 +13,31 @@ const writers = [
   { name: 'V2', path: '/v2/cases/19/checked', write: (source: ClientCase) => apiService.updateCaseV2(19, { ...source, title: 'Моя правка' }, source) },
 ];
 
+const creators = [
+  { name: 'legacy', path: '/cases', create: () => apiService.createCase({ clientId: 3, title: 'Новое дело', status: 'Open' }) },
+  { name: 'V2', path: '/v2/cases', create: () => apiService.createCaseV2({ clientId: 3, title: 'Новое дело', status: 'Open' }) },
+];
+
+describe('case create write', () => {
+  it.each(creators)('$name accepts a thin creation reply and sends only ordinary case fields', async ({ path, create }) => {
+    const saved = { id: 104, clientId: 3, title: 'Новое дело', status: 'Open', client: { id: 3, name: 'Владелец' } };
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json(saved, { status: 201 })); vi.stubGlobal('fetch', fetch);
+    await expect(create()).resolves.toMatchObject(saved); expect(fetch).toHaveBeenCalledOnce();
+    const [url, options] = fetch.mock.calls[0]; expect(String(url).endsWith(path)).toBe(true); expect(options?.method).toBe('POST');
+    expect(JSON.parse(String(options?.body))).toEqual({ clientId: 3, title: 'Новое дело', status: 'Open' });
+  });
+
+  it.each(creators)('$name reports rejected related records without fallback or another POST', async ({ create }) => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json({ message: 'Создавайте связанные записи отдельно.' }, { status: 400 })); vi.stubGlobal('fetch', fetch);
+    await expect(create()).rejects.toMatchObject({ status: 400 }); expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it.each(creators)('$name does not replay creation after a lost response', async ({ create }) => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValue(new TypeError('Failed to fetch')); vi.stubGlobal('fetch', fetch);
+    await expect(create()).rejects.toThrow(); expect(fetch).toHaveBeenCalledOnce();
+  });
+});
+
 describe('case delete write', () => {
   it('accepts one successful no-content deletion', async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(null, { status: 204 })); vi.stubGlobal('fetch', fetch);

@@ -106,6 +106,7 @@ public class CasesController : ControllerBase
             return Unauthorized();
         }
 
+        if (CaseCreationInput.Validate(_db, model) is { } graphError) return graphError;
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
         if (ValidateCourtDetails(model) is { } courtError) return BadRequest(courtError);
@@ -115,7 +116,7 @@ public class CasesController : ControllerBase
         await _db.SaveChangesAsync(ct);
         await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, model.Id, User.GetUserId(), User.GetDisplayName(), ct);
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        return Created($"/api/cases/{model.Id}", model);
+        return Created($"/api/cases/{model.Id}", CaseEditSnapshot.ForReply(model));
     }
 
     [HttpPut("{id:int}")]

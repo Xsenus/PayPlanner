@@ -10646,6 +10646,7 @@ public partial class CasesV2Controller : ControllerBase
             return Unauthorized();
         }
 
+        if (CaseCreationInput.Validate(_db, model) is { } graphError) return graphError;
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
         if (!IsValidOurCourtRole(model.OurCourtRole)) return BadRequest("Укажите допустимую роль в судебном деле.");
@@ -10707,7 +10708,7 @@ public partial class CasesV2Controller : ControllerBase
                 ct);
         }
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        return Created($"/api/v2/cases/{model.Id}", model);
+        return Created($"/api/v2/cases/{model.Id}", CaseEditSnapshot.ForReply(model));
     }
 
     [HttpPut("{id:int}")]

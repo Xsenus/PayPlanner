@@ -5,6 +5,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Cases;
 
 namespace PayPlanner.Api.Controllers.V1;
 
@@ -92,12 +93,13 @@ public class CasesV1Controller : ControllerBase
             return Unauthorized();
         }
 
+        if (CaseCreationInput.Validate(_db, model) is { } graphError) return graphError;
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
 
         _db.ClientCases.Add(model);
         await _db.SaveChangesAsync(ct);
-        return Created($"/api/v1/cases/{model.Id}", model);
+        return Created($"/api/v1/cases/{model.Id}", CaseEditSnapshot.ForReply(model));
     }
 
     [HttpPut("{id:int}")]
