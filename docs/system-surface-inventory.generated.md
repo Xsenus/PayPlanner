@@ -1298,11 +1298,11 @@
 | PUT | api/v1/cases/{id:int} | CasesV1Controller | UpdateWithSource | backend/Controllers/V1/CasesV1Controller.cs:77 | [Authorize] | нет | docs/company-reference-ownership-checkpoint-2026-11-01.md |
 | PUT | api/v1/cases/{id:int}/checked | CasesV1Controller | UpdateWithSource | backend/Controllers/V1/CasesV1Controller.cs:78 | [Authorize] | нет | docs/company-reference-ownership-checkpoint-2026-11-01.md |
 | DELETE | api/v1/cases/{id:int} | CasesV1Controller | Delete | backend/Controllers/V1/CasesV1Controller.cs:143 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
-| GET | api/v1/clients | ClientsV1Controller | Get | backend/Controllers/V1/ClientsV1Controller.cs:54 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+| GET | api/v1/clients | ClientsV1Controller | Get | backend/Controllers/V1/ClientsV1Controller.cs:54 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/full-project-audit-2026-06-10.md |
 | GET | api/v1/clients/{id:int} | ClientsV1Controller | GetById | backend/Controllers/V1/ClientsV1Controller.cs:91 | [Authorize] | да | нет |
-| POST | api/v1/clients | ClientsV1Controller | Create | backend/Controllers/V1/ClientsV1Controller.cs:126 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| PUT | api/v1/clients/{id:int} | ClientsV1Controller | Update | backend/Controllers/V1/ClientsV1Controller.cs:158 | [Authorize] | да | нет |
-| DELETE | api/v1/clients/{id:int} | ClientsV1Controller | Delete | backend/Controllers/V1/ClientsV1Controller.cs:202 | [Authorize] | да | нет |
+| POST | api/v1/clients | ClientsV1Controller | Create | backend/Controllers/V1/ClientsV1Controller.cs:126 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/full-project-audit-2026-06-10.md |
+| PUT | api/v1/clients/{id:int} | ClientsV1Controller | Update | backend/Controllers/V1/ClientsV1Controller.cs:159 | [Authorize] | да | нет |
+| DELETE | api/v1/clients/{id:int} | ClientsV1Controller | Delete | backend/Controllers/V1/ClientsV1Controller.cs:203 | [Authorize] | да | нет |
 | GET | api/v1/payments | PaymentsV1Controller | Get | backend/Controllers/V1/PaymentsV1Controller.cs:50 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/payment-operation-key-checkpoint-2026-11-02.md |
 | GET | api/v1/payments/{id:int} | PaymentsV1Controller | GetById | backend/Controllers/V1/PaymentsV1Controller.cs:77 | [Authorize] | да | нет |
 | POST | api/v1/payments | PaymentsV1Controller | Create | backend/Controllers/V1/PaymentsV1Controller.cs:97 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/payment-operation-key-checkpoint-2026-11-02.md |
@@ -1442,11 +1442,11 @@
 | POST | position-templates | CasesV2Controller | CreatePositionTemplate | backend/Controllers/V2/CasesV2Controller.PositionTemplates.cs:53 | не задано | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
 | PUT | position-templates/{templateId:int} | CasesV2Controller | UpdatePositionTemplate | backend/Controllers/V2/CasesV2Controller.PositionTemplates.cs:96 | не задано | да | нет |
 | DELETE | position-templates/{templateId:int} | CasesV2Controller | ArchivePositionTemplate | backend/Controllers/V2/CasesV2Controller.PositionTemplates.cs:129 | не задано | да | нет |
-| GET | api/v2/clients | ClientsV2Controller | Get | backend/Controllers/V2/ClientsV2Controller.cs:92 | [Authorize] | да | docs/development-roadmap-merge-2026-10-27.md, docs/full-project-audit-2026-06-10.md, docs/payplanner-access-security-roadmap-2026-10-14.md |
+| GET | api/v2/clients | ClientsV2Controller | Get | backend/Controllers/V2/ClientsV2Controller.cs:92 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/development-roadmap-merge-2026-10-27.md, docs/full-project-audit-2026-06-10.md, docs/payplanner-access-security-roadmap-2026-10-14.md |
 | GET | api/v2/clients/{id:int} | ClientsV2Controller | GetById | backend/Controllers/V2/ClientsV2Controller.cs:532 | [Authorize] | да | docs/development-roadmap-merge-2026-10-27.md, docs/payplanner-access-security-roadmap-2026-10-14.md |
-| POST | api/v2/clients | ClientsV2Controller | Create | backend/Controllers/V2/ClientsV2Controller.cs:562 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/payplanner-access-security-roadmap-2026-10-14.md |
-| PUT | api/v2/clients/{id:int} | ClientsV2Controller | Update | backend/Controllers/V2/ClientsV2Controller.cs:594 | [Authorize] | да | docs/payplanner-access-security-roadmap-2026-10-14.md |
-| DELETE | api/v2/clients/{id:int} | ClientsV2Controller | Delete | backend/Controllers/V2/ClientsV2Controller.cs:638 | [Authorize] | да | docs/payplanner-access-security-roadmap-2026-10-14.md |
+| POST | api/v2/clients | ClientsV2Controller | Create | backend/Controllers/V2/ClientsV2Controller.cs:562 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/full-project-audit-2026-06-10.md, docs/payplanner-access-security-roadmap-2026-10-14.md |
+| PUT | api/v2/clients/{id:int} | ClientsV2Controller | Update | backend/Controllers/V2/ClientsV2Controller.cs:595 | [Authorize] | да | docs/payplanner-access-security-roadmap-2026-10-14.md |
+| DELETE | api/v2/clients/{id:int} | ClientsV2Controller | Delete | backend/Controllers/V2/ClientsV2Controller.cs:639 | [Authorize] | да | docs/payplanner-access-security-roadmap-2026-10-14.md |
 | GET | api/v2/payments | PaymentsV2Controller | Get | backend/Controllers/V2/PaymentsV2Controller.cs:66 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/max-finance-provenance-review-2026-10-15.md, docs/payment-operation-key-checkpoint-2026-11-02.md, docs/payplanner-financial-documents-roadmap-2026-10-14.md |
 | GET | api/v2/payments/export.csv | PaymentsV2Controller | ExportCsv | backend/Controllers/V2/PaymentsV2Controller.cs:290 | [Authorize] | да | нет |
 | GET | api/v2/payments/export.xls | PaymentsV2Controller | ExportExcel | backend/Controllers/V2/PaymentsV2Controller.cs:352 | [Authorize] | да | нет |

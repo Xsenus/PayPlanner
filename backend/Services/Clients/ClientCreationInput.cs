@@ -10,6 +10,7 @@ internal static class ClientCreationInput
 {
     public static IActionResult? Validate(PaymentContext db, Client model)
     {
+        if (model.Id != 0) return InvalidIdentity();
         // Addresses and passports form the client profile. Other entities have
         // their own authorized creation actions, as in the case input guard.
         foreach (var navigation in Relations(db, typeof(Client)))
@@ -19,10 +20,33 @@ internal static class ClientCreationInput
             if (HasValue(value)) return Invalid();
         }
         foreach (var address in model.Addresses ?? [])
+        {
             if (address is null || address.LegalEntityId.HasValue || HasOtherRelations(db, address, model)) return Invalid();
+            if (address.Id != 0 || address.ClientId is not (null or 0)) return InvalidIdentity();
+        }
         foreach (var passport in model.Passports ?? [])
+        {
             if (passport is null || HasOtherRelations(db, passport, model)) return Invalid();
+            if (passport.Id != 0 || passport.ClientId != 0) return InvalidIdentity();
+        }
         return null;
+    }
+
+    public static void InitializeServerStamps(Client model)
+    {
+        var utcNow = DateTime.UtcNow;
+        var now = new DateTime(utcNow.Ticks - utcNow.Ticks % 10, DateTimeKind.Utc);
+        model.CreatedAt = now;
+        foreach (var address in model.Addresses ?? [])
+        {
+            address.CreatedAt = now;
+            address.UpdatedAt = null;
+        }
+        foreach (var passport in model.Passports ?? [])
+        {
+            passport.CreatedAt = now;
+            passport.UpdatedAt = null;
+        }
     }
 
     private static bool HasOtherRelations<T>(PaymentContext db, T row, Client owner) where T : class
@@ -47,5 +71,10 @@ internal static class ClientCreationInput
     private static IActionResult Invalid() => new BadRequestObjectResult(new
     {
         message = "Связанные дела, платежи и другие записи создавайте отдельно. Адреса и паспортные данные должны принадлежать только новому клиенту."
+    });
+
+    private static IActionResult InvalidIdentity() => new BadRequestObjectResult(new
+    {
+        message = "Идентификаторы нового клиента, его адресов и паспортов назначаются автоматически. Создавайте профиль без идентификаторов прежних записей и их владельцев."
     });
 }

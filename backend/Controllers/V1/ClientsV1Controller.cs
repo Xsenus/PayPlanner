@@ -148,6 +148,7 @@ public class ClientsV1Controller : ControllerBase
         }
 
         model.ResponsibleUserId = responsibleUserId;
+        ClientCreationInput.InitializeServerStamps(model);
         _db.Clients.Add(model);
         await _db.SaveChangesAsync(ct);
         await _db.Entry(model).Reference(c => c.ResponsibleUser).LoadAsync(ct);
