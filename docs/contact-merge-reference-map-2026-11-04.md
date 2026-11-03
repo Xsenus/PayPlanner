@@ -2,6 +2,9 @@
 
 Срез 4 ноября 2026. Получен из обеих работающих EF-моделей, без чтения реальных записей. SQLite и PostgreSQL дают одинаковые **40 связей: Client17, LegalEntity21, ExternalContact2**. Использован тот же отбор principal/Id/single FK/table, что и `ContactsController.GetMergeReferences`; это карта существующего алгоритма, не разрешение переноса всех строк. Две проверки модели не открывают соединение с PostgreSQL и не являются native DB-тестами. 1304 исходника Models/Data/Migrations неизменны относительно76ffc66a.
 
+**Дополнение — история подписи и доставки:** [48проверок исходного профиля+4portable filesystem](company-reference-ownership-checkpoint-2026-11-01.md#объединение--сохранность-подписи-и-доставки). Все scalar поля6моделей, кроме canonical ClientId, ciphertext decrypt и source-файлы/manifest сохранены; explicit messenger renewal остаётся отдельным действием. Это не48на конечнойtestDLL, не real certificate/provider verification и не downstream permission policy. Нет application bug/fix в данной границе.
+
+
 **Дополнение 4 ноября — права основной собственной компании:** [адресный пакет85/85](company-reference-ownership-checkpoint-2026-11-01.md#объединение--права-основной-собственной-компании) закрывает обход CompanyProfileAccess через merge: CanView/CanEdit и employee assignment для primary из OwnCompanyRegistry; registry pinned для обоих действий. Это не новое правило финансовых переносов и не доказательство печати выданных документов после архива. Фактическая карта40связей ниже неизменна.
 
 
@@ -22,10 +25,10 @@
 | Client | `ClientContract.ClientId` | `ClientContracts.ClientId` | Финансовые связи контрагента | Решение прав и финансовая конкуренция открыты |
 | Client | `ClientPassport.ClientId` | `ClientPassports.ClientId` | Паспорт: неизменный ID и AAD | 4 проверки ciphertext/index/decrypt прошли; общие права ещё открыты |
 | Client | `ClientPortalAccount.ClientId` | `ClientPortalAccounts.ClientId` | Доступ в клиентский портал | Прежний отказ для дубля сохранён |
-| Client | `ElectronicSignatureEnvelope.ClientId` | `ElectronicSignatureEnvelopes.ClientId` | Подпись и доставка | Открыта проверка неизменяемости/получателя/повтора |
+| Client | `ElectronicSignatureEnvelope.ClientId` | `ElectronicSignatureEnvelopes.ClientId` | Подпись и доставка | Scalar/file/decrypt/replay/rollback проверены; права/встречные писатели открыты |
 | Client | `ExternalContact.LinkedClientId` | `ExternalContacts.LinkedClientId` | Профили и зависимые записи | Общие источники защищены; исторические/дочерние записи ещё открыты |
-| Client | `MessengerDocumentDelivery.ClientId` | `MessengerDocumentDeliveries.ClientId` | Подпись и доставка | Открыта проверка неизменяемости/получателя/повтора |
-| Client | `MessengerRecipientBinding.ClientId` | `MessengerRecipientBindings.ClientId` | Подпись и доставка | Открыта проверка неизменяемости/получателя/повтора |
+| Client | `MessengerDocumentDelivery.ClientId` | `MessengerDocumentDeliveries.ClientId` | Подпись и доставка | Scalar/file/decrypt/replay/rollback проверены; права/встречные писатели открыты |
+| Client | `MessengerRecipientBinding.ClientId` | `MessengerRecipientBindings.ClientId` | Подпись и доставка | Scalar/file/decrypt/replay/rollback проверены; права/встречные писатели открыты |
 | Client | `Payment.ClientId` | `Payments.ClientId` | Финансовые связи контрагента | Решение прав и финансовая конкуренция открыты |
 | Client | `Payment.ExpenseClientId` | `Payments.ExpenseClientId` | Финансовые связи контрагента | Решение прав и финансовая конкуренция открыты |
 | Client | `PowerOfAttorney.ClientId` | `PowersOfAttorney.ClientId` | Профили и зависимые записи | Общие источники защищены; исторические/дочерние записи ещё открыты |
