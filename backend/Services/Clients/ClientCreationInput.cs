@@ -37,6 +37,7 @@ internal static class ClientCreationInput
         var utcNow = DateTime.UtcNow;
         var now = new DateTime(utcNow.Ticks - utcNow.Ticks % 10, DateTimeKind.Utc);
         model.CreatedAt = now;
+        ResetComputedResponseFields(model);
         foreach (var address in model.Addresses ?? [])
         {
             address.CreatedAt = now;
@@ -47,6 +48,33 @@ internal static class ClientCreationInput
             passport.CreatedAt = now;
             passport.UpdatedAt = null;
         }
+    }
+
+    private static void ResetComputedResponseFields(Client model)
+    {
+        // A copied profile may carry counters, document links and audit overlays.
+        // These describe the old record, never the new client. Replace lists rather
+        // than clearing caller-owned collections; no query or graph traversal is needed.
+        model.ResponsibleUserName = null;
+        model.CasesCount = 0;
+        model.ContractsCount = 0;
+        model.InvoicesCount = 0;
+        model.ActsCount = 0;
+        model.PaymentsCount = 0;
+        model.RelatedCases = [];
+        model.RelatedContracts = [];
+        model.RelatedInvoices = [];
+        model.RelatedActs = [];
+        model.RelatedPayments = [];
+        model.AuditCreatedByUserId = null;
+        model.AuditCreatedByUserName = null;
+        model.AuditUpdatedAt = null;
+        model.AuditUpdatedByUserId = null;
+        model.AuditUpdatedByUserName = null;
+        model.AuditIsDeleted = false;
+        model.AuditDeletedAt = null;
+        model.AuditDeletedByUserId = null;
+        model.AuditDeletedByUserName = null;
     }
 
     private static bool HasOtherRelations<T>(PaymentContext db, T row, Client owner) where T : class

@@ -232,6 +232,7 @@ public partial class CasesV2ControllerTests
             {
                 var type when type == typeof(CasesController) => new CasesController(db),
                 var type when type == typeof(PayPlanner.Api.Controllers.V1.CasesV1Controller) => new PayPlanner.Api.Controllers.V1.CasesV1Controller(db),
+                var type when type == typeof(PayPlanner.Api.Controllers.ClientsController) => ClientsControllerTests.AtomicCreateController(db, user.Id),
                 var type when type == typeof(PayPlanner.Api.Controllers.V1.ClientsV1Controller) => new PayPlanner.Api.Controllers.V1.ClientsV1Controller(db),
                 var type when type == typeof(ClientsV2Controller) => new ClientsV2Controller(db),
                 var type when type == typeof(CashOrdersController) => new CashOrdersController(db),
