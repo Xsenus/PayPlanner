@@ -1,0 +1,10 @@
+{
+  "scope": "Finite root conditional diagnostic dispatcher code only; no grants or readiness included",
+  "files": [
+    {
+      "file": "conditional-start-once.py",
+      "bytes": 7128,
+      "sha256": "0ca59294f54bfda8a4b0d0773b70634dfa50d336cc2bf14b0e19bee7839e9016"
+    }
+  ]
+}
