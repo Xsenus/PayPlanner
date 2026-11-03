@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Companies;
 using PayPlanner.Api.Services.Payments;
 
 namespace PayPlanner.Api.Controllers;
@@ -79,9 +80,21 @@ public partial class ContactsController
     {
         var sources = new[] { pair.Primary, pair.Duplicate };
         var sourceClients = sources.OfType<Client>().ToArray(); var sourceLegal = sources.OfType<LegalEntity>().ToArray(); var sourceContacts = sources.OfType<ExternalContact>().ToArray();
+        if (sourceLegal.Length > 0 && _db.Database.IsNpgsql())
+        {
+            // Use the same registry lock order as document/profile writers.
+            var keys = new[] { "legalEntities.mainCompanyId", "legalEntities.mainCompanyIds", "legalEntities.defaultMainCompanyId" };
+            await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"SystemSettings\" WHERE \"Key\" = ANY ({keys}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
+        }
         await LockMergeRecordsAsync("client", sourceClients.Select(x => x.Id), execute, ct);
         await LockMergeRecordsAsync("external", sourceContacts.Select(x => x.Id), execute, ct);
         await LockMergeRecordsAsync("legal", sourceLegal.Select(x => x.Id), execute, ct);
+        if (pair.Primary is LegalEntity primaryCompany && (await OwnCompanyRegistry.LoadIdsAsync(_db, ct)).Contains(primaryCompany.Id))
+        {
+            var profile = await CompanyProfileAccess.ResolveAsync(_db, User, ct);
+            if (profile is null || !profile.CanEdit) return (null, Forbid());
+            if (!profile.CompanyIds.Contains(primaryCompany.Id)) return (null, NotFound());
+        }
         var owners = new HashSet<int>();
         void Owner(int? id, SectionAccessContext? access) { if (access is { Visibility.SeesAll: false } && id.HasValue) owners.Add(id.Value); }
         foreach (var x in sourceClients) Owner(x.ResponsibleUserId, clients);
