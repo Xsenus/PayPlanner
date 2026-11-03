@@ -519,6 +519,8 @@ public partial class ContactsController : ControllerBase
         [FromBody] PromoteContactRequest request,
         CancellationToken ct)
     {
+        if (string.Equals(request.Target?.Trim(), "client", StringComparison.OrdinalIgnoreCase))
+            return await PromoteClientContactAsync(id, request, ct);
         if (!string.Equals(request.Target?.Trim(), "legalentity", StringComparison.OrdinalIgnoreCase))
             return await PromoteExternalContactCoreAsync(id, request, ct);
         try
@@ -563,50 +565,7 @@ public partial class ContactsController : ControllerBase
 
         var target = request.Target?.Trim().ToLowerInvariant();
         var role = NormalizeRole(request.Role);
-        if (target == "client")
-        {
-            if (IsOrganizationContact(entity.ContactType))
-            {
-                return BadRequest("Организацию нужно оформить как юридическое лицо.");
-            }
-            if (await RequireClientsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
-            {
-                return forbidden;
-            }
-            if (entity.LinkedClientId.HasValue)
-            {
-                return Conflict("Для контакта уже создана полноценная карточка физического лица.");
-            }
-
-            var statusKey = string.Equals(role, "Supplier", StringComparison.Ordinal)
-                ? ClientStatusSystemKeys.Supplier
-                : ClientStatusSystemKeys.Client;
-            var statusId = await _db.ClientStatuses.AsNoTracking()
-                .Where(x => x.SystemKey == statusKey)
-                .Select(x => (int?)x.Id)
-                .FirstOrDefaultAsync(ct);
-            var phones = DeserializeStringList(entity.PhonesJson, entity.Phone);
-            var emails = DeserializeStringList(entity.EmailsJson, entity.Email);
-            var client = new Client
-            {
-                Name = entity.FullName,
-                Phone = phones.FirstOrDefault() ?? string.Empty,
-                Email = emails.FirstOrDefault() ?? string.Empty,
-                Company = entity.LegalEntity?.ShortName ?? entity.ParentContact?.FullName ?? string.Empty,
-                LegalEntityId = entity.LegalEntityId,
-                ResponsibleUserId = entity.ResponsibleUserId,
-                ClientStatusId = statusId,
-                IsClientAndSupplier = HasRole(entity.RolesJson, "Client") && string.Equals(role, "Supplier", StringComparison.Ordinal),
-                IsActive = entity.IsActive,
-                Notes = entity.Notes ?? string.Empty,
-                CreatedAt = DateTime.UtcNow,
-            };
-            _db.Clients.Add(client);
-            entity.LinkedClient = client;
-            entity.RolesJson = SerializeRoles(DeserializeRoles(entity.RolesJson).Append(role));
-            entity.UpdatedAt = DateTime.UtcNow;
-            await _db.SaveChangesAsync(ct);
-        }
+        if (target == "client") return await PromoteClientContactAsync(id, request, ct);
         else if (target == "legalentity")
         {
             if (!IsOrganizationContact(entity.ContactType))
