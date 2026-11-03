@@ -29,6 +29,8 @@ internal static partial class CaseEditTransaction
             // every supplied link under the same locks as an ordinary edit.
             var validation = await ValidateEditedLinksAsync(db, new ClientCase(), requested, access.Visibility, ct);
             if (validation is not null) return validation;
+            CaseCreationInput.InitializeServerState(requested, actorId.Value, actor.GetDisplayName());
+            requested.CanRevealSensitiveData = access.Permission.CanEdit;
             var result = await write();
             if (result is CreatedResult) await lease.CommitAsync(ct);
             return result;

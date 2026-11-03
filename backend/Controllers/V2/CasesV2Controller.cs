@@ -10631,8 +10631,6 @@ public partial class CasesV2Controller : ControllerBase
             {
                 model.FeeAmount = 0m;
             }
-            ApplyCaseControlState(model, model.IsUnderControl, User.GetUserId(), User.GetDisplayName());
-            ApplyHiddenFromExecutorMetadata(model, model.IsHiddenFromExecutor, User.GetUserId(), User.GetDisplayName());
             _db.ClientCases.Add(model);
             await _db.SaveChangesAsync(ct);
             await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, model.Id, User.GetUserId(), User.GetDisplayName(), ct);
