@@ -10607,47 +10607,38 @@ public partial class CasesV2Controller : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] ClientCase model, CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
+        var result = await CaseEditTransaction.RunCreateAsync(_db, User, model, async () =>
         {
-            return forbidden;
-        }
-
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
-
-        if (CaseCreationInput.Validate(_db, model) is { } graphError) return graphError;
-        var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
-        if (validation is not null) return validation;
-        if (!IsValidOurCourtRole(model.OurCourtRole)) return BadRequest("Укажите допустимую роль в судебном деле.");
-        if (!IsValidCourtPartyIdentifiers(model)) return BadRequest("ИНН должен содержать 10 или 12 цифр, ОГРН/ОГРНИП — 13 или 15 цифр.");
-        if (!IsValidCourtAmounts(model)) return BadRequest("Судебные суммы должны быть неотрицательными и содержать не более двух знаков после запятой.");
-        if (ClientCaseWritSubmissionRules.Validate(model.ClearExecutiveWritReceivedAt ? null : model.ExecutiveWritReceivedAt,
-                model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedAt,
-                model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedTo) is { } writError) return BadRequest(writError);
-        if (!TryNormalizeInactivityReminderState(
-                model.InactivityRemindersEnabled,
-                model.InactivityRemindersDisabledReason,
-                existingReason: null,
-                requireNewReason: !model.InactivityRemindersEnabled,
-                out var inactivityDisabledReason,
-                out var inactivityValidationError))
-        {
-            return BadRequest(inactivityValidationError);
-        }
-        model.InactivityRemindersDisabledReason = inactivityDisabledReason;
-        ApplyCaseDetails(model, model);
-        if (!await CanViewCaseFinanceAsync(ct))
-        {
-            model.FeeAmount = 0m;
-        }
-        ApplyCaseControlState(model, model.IsUnderControl, User.GetUserId(), User.GetDisplayName());
-        ApplyHiddenFromExecutorMetadata(model, model.IsHiddenFromExecutor, User.GetUserId(), User.GetDisplayName());
-        _db.ClientCases.Add(model);
-        await _db.SaveChangesAsync(ct);
-        await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, model.Id, User.GetUserId(), User.GetDisplayName(), ct);
+            if (!IsValidOurCourtRole(model.OurCourtRole)) return BadRequest("Укажите допустимую роль в судебном деле.");
+            if (!IsValidCourtPartyIdentifiers(model)) return BadRequest("ИНН должен содержать 10 или 12 цифр, ОГРН/ОГРНИП — 13 или 15 цифр.");
+            if (!IsValidCourtAmounts(model)) return BadRequest("Судебные суммы должны быть неотрицательными и содержать не более двух знаков после запятой.");
+            if (ClientCaseWritSubmissionRules.Validate(model.ClearExecutiveWritReceivedAt ? null : model.ExecutiveWritReceivedAt,
+                    model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedAt,
+                    model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedTo) is { } writError) return BadRequest(writError);
+            if (!TryNormalizeInactivityReminderState(
+                    model.InactivityRemindersEnabled,
+                    model.InactivityRemindersDisabledReason,
+                    existingReason: null,
+                    requireNewReason: !model.InactivityRemindersEnabled,
+                    out var inactivityDisabledReason,
+                    out var inactivityValidationError))
+            {
+                return BadRequest(inactivityValidationError);
+            }
+            model.InactivityRemindersDisabledReason = inactivityDisabledReason;
+            ApplyCaseDetails(model, model);
+            if (!await CanViewCaseFinanceAsync(ct))
+            {
+                model.FeeAmount = 0m;
+            }
+            ApplyCaseControlState(model, model.IsUnderControl, User.GetUserId(), User.GetDisplayName());
+            ApplyHiddenFromExecutorMetadata(model, model.IsHiddenFromExecutor, User.GetUserId(), User.GetDisplayName());
+            _db.ClientCases.Add(model);
+            await _db.SaveChangesAsync(ct);
+            await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, model.Id, User.GetUserId(), User.GetDisplayName(), ct);
+            return Created($"/api/v2/cases/{model.Id}", CaseEditSnapshot.ForReply(model));
+        }, ct);
+        if (result is not CreatedResult) return result;
         IReadOnlyCollection<int>? caseNotificationRecipients = null;
         if (_notificationService is not null
             && !ClientCaseStageClassifier.IsPretrial(model)
@@ -10680,7 +10671,7 @@ public partial class CasesV2Controller : ControllerBase
                 ct);
         }
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        return Created($"/api/v2/cases/{model.Id}", CaseEditSnapshot.ForReply(model));
+        return result;
     }
 
     [HttpPut("{id:int}")]
@@ -11106,38 +11097,6 @@ public partial class CasesV2Controller : ControllerBase
         }, ct);
         if (result is OkObjectResult && changedCasesCount > 0) await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return result;
-    }
-
-    private async Task<IActionResult?> ValidateCaseOwnerAsync(
-        int? clientId,
-        int? legalEntityId,
-        DataVisibilityAccess visibility,
-        CancellationToken ct)
-    {
-        var hasClient = clientId.HasValue && clientId.Value > 0;
-        var hasLegalEntity = legalEntityId.HasValue && legalEntityId.Value > 0;
-        if (hasClient == hasLegalEntity)
-        {
-            return BadRequest("У дела должен быть выбран ровно один владелец: клиент или юридическое лицо.");
-        }
-
-        if (hasClient && !await _db.Clients
-                .AsNoTracking()
-                .ApplyClientVisibility(visibility)
-                .AnyAsync(client => client.Id == clientId!.Value, ct))
-        {
-            return BadRequest($"Unknown clientId {clientId!.Value}");
-        }
-
-        if (hasLegalEntity && !await _db.LegalEntities
-                .AsNoTracking()
-                .ApplyLegalEntityVisibility(visibility)
-                .AnyAsync(entity => entity.Id == legalEntityId!.Value, ct))
-        {
-            return BadRequest($"Unknown legalEntityId {legalEntityId!.Value}");
-        }
-
-        return null;
     }
 
     private static void ApplyCaseDetails(ClientCase target, ClientCase source, bool preserveExistingText = false)

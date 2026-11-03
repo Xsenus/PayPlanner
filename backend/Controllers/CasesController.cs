@@ -29,16 +29,6 @@ public class CasesController : ControllerBase
         _realtimePublisher = realtimePublisher ?? NoOpRealtimeNotificationPublisher.Instance;
     }
 
-    private Task<DataVisibilityAccess?> ResolveCasesVisibilityAsync(CancellationToken ct)
-        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
-
-    private async Task<IActionResult?> RequireCasesPermissionAsync(
-        Func<RolePermissionValues, bool> isAllowed,
-        CancellationToken ct)
-        => await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Cases, isAllowed, ct)
-            ? null
-            : Forbid();
-
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] int? clientId, [FromQuery] int? legalEntityId, CancellationToken ct)
     {
@@ -84,29 +74,20 @@ public class CasesController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] ClientCase model, CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(permission => permission.CanCreate, ct) is { } forbidden)
+        var result = await CaseEditTransaction.RunCreateAsync(_db, User, model, async () =>
         {
-            return forbidden;
-        }
-
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
-
-        if (CaseCreationInput.Validate(_db, model) is { } graphError) return graphError;
-        var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
-        if (validation is not null) return validation;
-        if (ValidateCourtDetails(model) is { } courtError) return BadRequest(courtError);
-        if (ClientCaseWritSubmissionRules.Validate(model.ExecutiveWritReceivedAt, model.ExecutiveWritSubmittedAt, model.ExecutiveWritSubmittedTo) is { } writError) return BadRequest(writError);
-        ApplyCaseDetails(model, model);
-        if (!await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, static permission => permission.CanView, ct)) model.FeeAmount = 0m;
-        _db.ClientCases.Add(model);
-        await _db.SaveChangesAsync(ct);
-        await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, model.Id, User.GetUserId(), User.GetDisplayName(), ct);
+            if (ValidateCourtDetails(model) is { } courtError) return BadRequest(courtError);
+            if (ClientCaseWritSubmissionRules.Validate(model.ExecutiveWritReceivedAt, model.ExecutiveWritSubmittedAt, model.ExecutiveWritSubmittedTo) is { } writError) return BadRequest(writError);
+            ApplyCaseDetails(model, model);
+            if (!await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, static permission => permission.CanView, ct)) model.FeeAmount = 0m;
+            _db.ClientCases.Add(model);
+            await _db.SaveChangesAsync(ct);
+            await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, model.Id, User.GetUserId(), User.GetDisplayName(), ct);
+            return Created($"/api/cases/{model.Id}", CaseEditSnapshot.ForReply(model));
+        }, ct);
+        if (result is not CreatedResult) return result;
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        return Created($"/api/cases/{model.Id}", CaseEditSnapshot.ForReply(model));
+        return result;
     }
 
     [HttpPut("{id:int}")]
@@ -215,38 +196,6 @@ public class CasesController : ControllerBase
         }, ct);
         if (result is NoContentResult) await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return result;
-    }
-
-    private async Task<IActionResult?> ValidateCaseOwnerAsync(
-        int? clientId,
-        int? legalEntityId,
-        DataVisibilityAccess visibility,
-        CancellationToken ct)
-    {
-        var hasClient = clientId.HasValue && clientId.Value > 0;
-        var hasLegalEntity = legalEntityId.HasValue && legalEntityId.Value > 0;
-        if (hasClient == hasLegalEntity)
-        {
-            return BadRequest("У дела должен быть выбран ровно один владелец: клиент или юридическое лицо.");
-        }
-
-        if (hasClient && !await _db.Clients
-                .AsNoTracking()
-                .ApplyClientVisibility(visibility)
-                .AnyAsync(client => client.Id == clientId!.Value, ct))
-        {
-            return BadRequest($"Unknown clientId {clientId!.Value}");
-        }
-
-        if (hasLegalEntity && !await _db.LegalEntities
-                .AsNoTracking()
-                .ApplyLegalEntityVisibility(visibility)
-                .AnyAsync(entity => entity.Id == legalEntityId!.Value, ct))
-        {
-            return BadRequest($"Unknown legalEntityId {legalEntityId!.Value}");
-        }
-
-        return null;
     }
 
     private static void ApplyCaseDetails(ClientCase target, ClientCase source, bool preserveExistingText = false, bool canViewFinance = true)

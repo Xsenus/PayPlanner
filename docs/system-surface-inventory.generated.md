@@ -51,7 +51,7 @@
 | actsExpense | (permissions) => permissions.acts.canView | да | docs/full-project-audit-2026-06-10.md |
 | actCreate | (permissions) => permissions.acts.canView && permissions.acts.canCreate | да | docs/full-project-audit-2026-06-10.md |
 | actDetail | (permissions) => permissions.acts.canView | да | docs/full-project-audit-2026-06-10.md |
-| payments | (permissions) => permissions.payments.canView | да | docs/action-map-pay-32-individual-client-2026-10-12.md, docs/client-contract-invoice-act-payment-analysis.md, docs/company-reference-browser-matrix-2026-11-01.md, docs/final-acceptance-2026-06-10.md, docs/financial-cash-access-acceptance-report-2026-06-16.md, docs/full-project-audit-2026-06-10.md, docs/payment-operation-key-checkpoint-2026-11-02.md, docs/payplanner-visual-comparison-2026-10-23.md |
+| payments | (permissions) => permissions.payments.canView | да | docs/action-map-pay-32-individual-client-2026-10-12.md, docs/client-contract-invoice-act-payment-analysis.md, docs/company-reference-browser-matrix-2026-11-01.md, docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/final-acceptance-2026-06-10.md, docs/financial-cash-access-acceptance-report-2026-06-16.md, docs/full-project-audit-2026-06-10.md, docs/payment-operation-key-checkpoint-2026-11-02.md, docs/payplanner-visual-comparison-2026-10-23.md |
 | paymentsIncome | (permissions) => permissions.payments.canView | да | docs/full-project-audit-2026-06-10.md |
 | paymentsExpense | (permissions) => permissions.payments.canView | да | docs/full-project-audit-2026-06-10.md |
 | moneyBank | (permissions) => permissions.payments.canView | да | docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md |
@@ -513,8 +513,8 @@
 | GET | api/users/{id:int} | UsersController.GetUser | чувствительные данные или операция | backend/Controllers/UsersController.cs:115 |
 | GET | api/users/paged | UsersController.GetUsersPaged | чувствительные данные или операция | backend/Controllers/UsersController.cs:171 |
 | GET | api/users/roles | UsersController.GetRoles | чувствительные данные или операция | backend/Controllers/UsersController.cs:112 |
-| PUT | api/v1/cases/{id:int} | CasesV1Controller.UpdateWithSource | изменение данных | backend/Controllers/V1/CasesV1Controller.cs:97 |
-| PUT | api/v1/cases/{id:int}/checked | CasesV1Controller.UpdateWithSource | изменение данных | backend/Controllers/V1/CasesV1Controller.cs:98 |
+| PUT | api/v1/cases/{id:int} | CasesV1Controller.UpdateWithSource | изменение данных | backend/Controllers/V1/CasesV1Controller.cs:77 |
+| PUT | api/v1/cases/{id:int}/checked | CasesV1Controller.UpdateWithSource | изменение данных | backend/Controllers/V1/CasesV1Controller.cs:78 |
 | GET | api/yandex-calendar/auth/status/{state} | YandexCalendarController.GetAuthStatus | чувствительные данные или операция | backend/Controllers/YandexCalendarController.cs:65 |
 | DELETE | api/yandex-calendar/connection | YandexCalendarController.Disconnect | изменение данных | backend/Controllers/YandexCalendarController.cs:157 |
 | POST | api/yandex-calendar/sync-now | YandexCalendarController.SyncNow | изменение данных | backend/Controllers/YandexCalendarController.cs:127 |
@@ -605,12 +605,12 @@
 | GET | api/calendar-sync/settings | CalendarSyncController | GetSettings | backend/Controllers/CalendarSyncController.cs:74 | [Authorize] | нет | нет |
 | PUT | api/calendar-sync/settings | CalendarSyncController | UpdateSettings | backend/Controllers/CalendarSyncController.cs:78 | [Authorize]; [Authorize(Roles = "admin")] | да | нет |
 | GET | api/calendar-sync/logs | CalendarSyncController | GetLogs | backend/Controllers/CalendarSyncController.cs:137 | [Authorize]; [Authorize(Roles = "admin")] | да | нет |
-| GET | api/[controller] | CasesController | Get | backend/Controllers/CasesController.cs:42 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| GET | api/[controller]/{id:int} | CasesController | GetById | backend/Controllers/CasesController.cs:66 | [Authorize] | да | нет |
-| POST | api/[controller] | CasesController | Create | backend/Controllers/CasesController.cs:84 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/invoice-case-ownership-checkpoint-2026-10-31.md |
-| PUT | api/[controller]/{id:int} | CasesController | UpdateWithSource | backend/Controllers/CasesController.cs:112 | [Authorize] | да | нет |
-| PUT | api/[controller]/{id:int}/checked | CasesController | UpdateWithSource | backend/Controllers/CasesController.cs:113 | [Authorize] | да | нет |
-| DELETE | api/[controller]/{id:int} | CasesController | Delete | backend/Controllers/CasesController.cs:204 | [Authorize] | да | нет |
+| GET | api/[controller] | CasesController | Get | backend/Controllers/CasesController.cs:32 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+| GET | api/[controller]/{id:int} | CasesController | GetById | backend/Controllers/CasesController.cs:56 | [Authorize] | да | нет |
+| POST | api/[controller] | CasesController | Create | backend/Controllers/CasesController.cs:74 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/invoice-case-ownership-checkpoint-2026-10-31.md |
+| PUT | api/[controller]/{id:int} | CasesController | UpdateWithSource | backend/Controllers/CasesController.cs:93 | [Authorize] | да | нет |
+| PUT | api/[controller]/{id:int}/checked | CasesController | UpdateWithSource | backend/Controllers/CasesController.cs:94 | [Authorize] | да | нет |
+| DELETE | api/[controller]/{id:int} | CasesController | Delete | backend/Controllers/CasesController.cs:185 | [Authorize] | да | нет |
 | GET | api/cash-orders/cashbook | CashOrdersController | GetCashBook | backend/Controllers/CashOrdersController.cs:74 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
 | GET | api/cash-orders/cashbook/print | CashOrdersController | PrintCashBook | backend/Controllers/CashOrdersController.cs:119 | [Authorize] | да | нет |
 | GET | api/cash-orders/next-number | CashOrdersController | GetNextNumber | backend/Controllers/CashOrdersController.cs:161 | [Authorize] | да | нет |
@@ -1292,12 +1292,12 @@
 | PUT | api/user-settings/{key}/initialize | UserSettingsController | Initialize | backend/Controllers/UserSettingsController.cs:70 | [Authorize] | да | docs/shared-status-timezone-checkpoint-2026-11-02.md |
 | GET | api/user-settings/users/{userId:int}/{key} | UserSettingsController | GetForUser | backend/Controllers/UserSettingsController.cs:78 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
 | PUT | api/user-settings/users/{userId:int}/{key} | UserSettingsController | UpsertForUser | backend/Controllers/UserSettingsController.cs:91 | [Authorize]; [Authorize(Policy = "Admin")] | нет | нет |
-| GET | api/v1/cases | CasesV1Controller | Get | backend/Controllers/V1/CasesV1Controller.cs:30 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/full-project-audit-2026-06-10.md, docs/unpushed-changes-map-2026-10-03.md |
-| GET | api/v1/cases/{id:int} | CasesV1Controller | GetById | backend/Controllers/V1/CasesV1Controller.cs:56 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
-| POST | api/v1/cases | CasesV1Controller | Create | backend/Controllers/V1/CasesV1Controller.cs:73 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/full-project-audit-2026-06-10.md |
-| PUT | api/v1/cases/{id:int} | CasesV1Controller | UpdateWithSource | backend/Controllers/V1/CasesV1Controller.cs:97 | [Authorize] | нет | docs/company-reference-ownership-checkpoint-2026-11-01.md |
-| PUT | api/v1/cases/{id:int}/checked | CasesV1Controller | UpdateWithSource | backend/Controllers/V1/CasesV1Controller.cs:98 | [Authorize] | нет | docs/company-reference-ownership-checkpoint-2026-11-01.md |
-| DELETE | api/v1/cases/{id:int} | CasesV1Controller | Delete | backend/Controllers/V1/CasesV1Controller.cs:163 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
+| GET | api/v1/cases | CasesV1Controller | Get | backend/Controllers/V1/CasesV1Controller.cs:20 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/full-project-audit-2026-06-10.md, docs/unpushed-changes-map-2026-10-03.md |
+| GET | api/v1/cases/{id:int} | CasesV1Controller | GetById | backend/Controllers/V1/CasesV1Controller.cs:46 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
+| POST | api/v1/cases | CasesV1Controller | Create | backend/Controllers/V1/CasesV1Controller.cs:63 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/full-project-audit-2026-06-10.md |
+| PUT | api/v1/cases/{id:int} | CasesV1Controller | UpdateWithSource | backend/Controllers/V1/CasesV1Controller.cs:77 | [Authorize] | нет | docs/company-reference-ownership-checkpoint-2026-11-01.md |
+| PUT | api/v1/cases/{id:int}/checked | CasesV1Controller | UpdateWithSource | backend/Controllers/V1/CasesV1Controller.cs:78 | [Authorize] | нет | docs/company-reference-ownership-checkpoint-2026-11-01.md |
+| DELETE | api/v1/cases/{id:int} | CasesV1Controller | Delete | backend/Controllers/V1/CasesV1Controller.cs:143 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
 | GET | api/v1/clients | ClientsV1Controller | Get | backend/Controllers/V1/ClientsV1Controller.cs:54 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | GET | api/v1/clients/{id:int} | ClientsV1Controller | GetById | backend/Controllers/V1/ClientsV1Controller.cs:91 | [Authorize] | да | нет |
 | POST | api/v1/clients | ClientsV1Controller | Create | backend/Controllers/V1/ClientsV1Controller.cs:126 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
@@ -1426,11 +1426,11 @@
 | PUT | api/v2/cases/court-sync/settings | CasesV2Controller | UpdateCourtSyncSettings | backend/Controllers/V2/CasesV2Controller.cs:9029 | [Authorize] | да | нет |
 | POST | api/v2/cases/{id:int}/court-sync/run | CasesV2Controller | RunCourtSync | backend/Controllers/V2/CasesV2Controller.cs:9053 | [Authorize] | да | нет |
 | POST | api/v2/cases | CasesV2Controller | Create | backend/Controllers/V2/CasesV2Controller.cs:10607 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/case-registry-query-optimization.md, docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/full-project-audit-2026-06-10.md, docs/storage-resilience-runbook.md |
-| PUT | api/v2/cases/{id:int} | CasesV2Controller | UpdateWithSource | backend/Controllers/V2/CasesV2Controller.cs:10686 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/company-reference-ownership-checkpoint-2026-11-01.md |
-| PUT | api/v2/cases/{id:int}/checked | CasesV2Controller | UpdateWithSource | backend/Controllers/V2/CasesV2Controller.cs:10687 | [Authorize] | да | нет |
-| PATCH | api/v2/cases/{id:int}/control | CasesV2Controller | UpdateControl | backend/Controllers/V2/CasesV2Controller.cs:10840 | [Authorize] | да | нет |
-| DELETE | api/v2/cases/{id:int} | CasesV2Controller | Delete | backend/Controllers/V2/CasesV2Controller.cs:10879 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/company-reference-ownership-checkpoint-2026-11-01.md |
-| POST | api/v2/cases/bulk-update | CasesV2Controller | BulkUpdate | backend/Controllers/V2/CasesV2Controller.cs:10928 | [Authorize] | да | нет |
+| PUT | api/v2/cases/{id:int} | CasesV2Controller | UpdateWithSource | backend/Controllers/V2/CasesV2Controller.cs:10677 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/company-reference-ownership-checkpoint-2026-11-01.md |
+| PUT | api/v2/cases/{id:int}/checked | CasesV2Controller | UpdateWithSource | backend/Controllers/V2/CasesV2Controller.cs:10678 | [Authorize] | да | нет |
+| PATCH | api/v2/cases/{id:int}/control | CasesV2Controller | UpdateControl | backend/Controllers/V2/CasesV2Controller.cs:10831 | [Authorize] | да | нет |
+| DELETE | api/v2/cases/{id:int} | CasesV2Controller | Delete | backend/Controllers/V2/CasesV2Controller.cs:10870 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/company-reference-ownership-checkpoint-2026-11-01.md |
+| POST | api/v2/cases/bulk-update | CasesV2Controller | BulkUpdate | backend/Controllers/V2/CasesV2Controller.cs:10919 | [Authorize] | да | нет |
 | PUT | {id:int}/court-events/{courtEventId:int}/hearing-outcome | CasesV2Controller | RecordHearingOutcome | backend/Controllers/V2/CasesV2Controller.HearingOutcome.cs:18 | не задано | да | нет |
 | GET | {id:int}/hearing-preparation | CasesV2Controller | GetHearingPreparation | backend/Controllers/V2/CasesV2Controller.HearingPreparation.cs:32 | не задано | да | нет |
 | PUT | {id:int}/hearing-preparation | CasesV2Controller | UpdateHearingPreparation | backend/Controllers/V2/CasesV2Controller.HearingPreparation.cs:57 | не задано | да | нет |
