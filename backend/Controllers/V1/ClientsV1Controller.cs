@@ -130,6 +130,7 @@ public class ClientsV1Controller : ControllerBase
         {
             if (ClientCreationInput.Validate(_db, model) is { } graphError) return graphError;
             if (ClientBirthDateInput.Resolve(model, null, out var birthDate) is { } invalidDate) return invalidDate;
+            if (await ClientsController.ValidateWriteRequirementsAsync(new FormRequirementsService(_db), model, birthDate, true, ct) is { } missingFields) return missingFields;
             model.BirthDate = birthDate;
 
             model.ResponsibleUserId = responsibleUserId;
@@ -148,6 +149,7 @@ public class ClientsV1Controller : ControllerBase
         return ClientUpdateTransaction.RunAsync(_db, User, id, model, async (e, responsibleUserId) =>
         {
             if (ClientBirthDateInput.Resolve(model, e.BirthDate, out var birthDate) is { } invalidDate) return invalidDate;
+            if (await ClientsController.ValidateWriteRequirementsAsync(new FormRequirementsService(_db), model, birthDate, false, ct) is { } missingFields) return missingFields;
 
             e.Name = model.Name;
             e.Email = model.Email;

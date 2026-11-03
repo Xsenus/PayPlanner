@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -975,23 +976,7 @@ public class ClientsController : ControllerBase
         return ClientCreateTransaction.RunAsync(_db, User, model, async responsibleUserId =>
         {
             if (ClientBirthDateInput.Resolve(model, null, out var birthDate) is { } invalidDate) return invalidDate;
-            var requirementsModel = BuildClientRequirementsModel(model);
-            var quickRequirementsSection = IsLegalQuickClient(model, requirementsModel)
-                ? "clients-modal-legal"
-                : "clients-modal";
-            var requiredQuickFields = await _formRequirements.GetRequiredFieldsAsync(quickRequirementsSection, ct);
-            var missingCreate = await _formRequirements.GetMissingFieldsAsync(quickRequirementsSection, requirementsModel, ct);
-            if (quickRequirementsSection == "clients-modal-legal")
-            {
-                requiredQuickFields = requiredQuickFields
-                    .Where(field => LegalQuickClientRequirementFields.Contains(field))
-                    .ToList();
-                missingCreate = missingCreate
-                    .Where(field => LegalQuickClientRequirementFields.Contains(field))
-                    .ToList();
-            }
-            missingCreate = NormalizeQuickClientModalMissingFields(requiredQuickFields, requirementsModel, missingCreate);
-            if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
+            if (await ValidateWriteRequirementsAsync(_formRequirements, model, birthDate, true, ct) is { } missingCreate) return missingCreate;
 
             var entity = new Client
             {
@@ -1025,14 +1010,8 @@ public class ClientsController : ControllerBase
     {
         return ClientUpdateTransaction.RunAsync(_db, User, id, model, async (e, responsibleUserId) =>
         {
-            var missingUpdate = await _formRequirements.GetMissingFieldsAsync("clients", BuildClientRequirementsModel(model));
-            missingUpdate = missingUpdate
-                .Where(field => !string.Equals(field, "Email", StringComparison.OrdinalIgnoreCase)
-                    && !string.Equals(field, "Phone", StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
-
             if (ClientBirthDateInput.Resolve(model, e.BirthDate, out var birthDate) is { } invalidDate) return invalidDate;
+            if (await ValidateWriteRequirementsAsync(_formRequirements, model, birthDate, false, ct) is { } missingUpdate) return missingUpdate;
 
             e.Name = model.Name;
             e.Email = model.Email;
@@ -1338,7 +1317,37 @@ public class ClientsController : ControllerBase
         => model.LegalEntityId.HasValue
             || string.Equals(requirementsModel.Kind, "legal", StringComparison.OrdinalIgnoreCase);
 
-    private static ClientRequirementsModel BuildClientRequirementsModel(Client model)
+    internal static async Task<IActionResult?> ValidateWriteRequirementsAsync(IFormRequirementsService service, Client model,
+        DateTime? birthDate, bool create, CancellationToken ct)
+    {
+        // All client routes use the existing form rules and the birthday that
+        // will actually be saved, including an omitted retained birthday.
+        var requirements = BuildClientRequirementsModel(model, birthDate);
+        var section = create
+            ? (IsLegalQuickClient(model, requirements) ? "clients-modal-legal" : "clients-modal")
+            : "clients";
+        List<string> missing;
+        if (create)
+        {
+            var required = await service.GetRequiredFieldsAsync(section, ct);
+            missing = await service.GetMissingFieldsAsync(section, requirements, ct);
+            if (section == "clients-modal-legal")
+            {
+                required = required.Where(LegalQuickClientRequirementFields.Contains).ToList();
+                missing = missing.Where(LegalQuickClientRequirementFields.Contains).ToList();
+            }
+            missing = NormalizeQuickClientModalMissingFields(required, requirements, missing);
+        }
+        else
+        {
+            missing = (await service.GetMissingFieldsAsync(section, requirements, ct))
+                .Where(field => !string.Equals(field, "Email", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(field, "Phone", StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+        return missing.Count == 0 ? null : new BadRequestObjectResult(new { message = "Не заполнены обязательные поля", missingFields = missing });
+    }
+
+    private static ClientRequirementsModel BuildClientRequirementsModel(Client model, DateTime? birthDate)
     {
         var profilePayload = ExtractProfilePayloadFromNotes(model.Notes);
         var profile = DeserializeClientProfile<ClientRequirementsProfile>(profilePayload);
@@ -1361,7 +1370,7 @@ public class ClientsController : ControllerBase
             FirstName = profile?.FirstName,
             MiddleName = profile?.MiddleName,
             Gender = profile?.Gender,
-            BirthDate = profile?.BirthDate,
+            BirthDate = birthDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             Inn = profile?.Inn,
             Snils = profile?.Snils,
 
