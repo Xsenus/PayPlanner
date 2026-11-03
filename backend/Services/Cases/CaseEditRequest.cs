@@ -42,6 +42,21 @@ public sealed class CaseEditRequest : ClientCase
 
 internal static class CaseEditSnapshot
 {
+    private static readonly PropertyInfo[] ReplyScalars = typeof(ClientCase).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+        .Where(property => property.CanRead && property.CanWrite && property.GetIndexParameters().Length == 0
+            && (property.PropertyType == typeof(string) || property.PropertyType.IsValueType)).ToArray();
+
+    public static ClientCase ForReply(ClientCase source)
+    {
+        var reply = new ClientCase();
+        foreach (var property in ReplyScalars) property.SetValue(reply, property.GetValue(source));
+        // Match the existing V2 case captions without returning tracked owner/user graphs.
+        if (source.Client is { } client) reply.Client = new Client { Id = client.Id, Name = client.Name, ResponsibleUserId = client.ResponsibleUserId };
+        if (source.LegalEntity is { } legal) reply.LegalEntity = new LegalEntity { Id = legal.Id, ShortName = legal.ShortName, FullName = legal.FullName, ResponsibleUserId = legal.ResponsibleUserId };
+        if (source.ResponsibleUser is { } user) reply.ResponsibleUser = new User { Id = user.Id, FullName = user.FullName, Email = user.Email };
+        return reply;
+    }
+
     // Only fields ordinary editing can overwrite. Activity/view stamps and other
     // automatic metadata must not make an otherwise current editor stale.
     private static readonly string[] Fields =

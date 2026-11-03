@@ -14,6 +14,19 @@ const writers = [
 ];
 
 describe('checked case write source', () => {
+  it.each(writers)('$name accepts a saved case with only owner and responsible captions', async ({ write, path }) => {
+    const saved = { id: 19, clientId: 3, title: 'Моя правка', status: 'Open', responsibleUserId: 7,
+      strategy: '  Прежняя позиция  ', eventHistory: 'Прежняя история',
+      client: { id: 3, name: 'Клиент', responsibleUserId: 7 },
+      responsibleUser: { id: 7, fullName: 'Ответственный', email: 'member@example.local' } };
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json(saved)); vi.stubGlobal('fetch', fetch);
+    const source = original(); const result = await write(source);
+    expect(result).toMatchObject(saved); expect(fetch).toHaveBeenCalledOnce();
+    expect(String(fetch.mock.calls[0][0]).endsWith(path)).toBe(true);
+    expect(result.client).not.toHaveProperty('notes'); expect(result.responsibleUser).not.toHaveProperty('passwordHash');
+    expect(source).toMatchObject({ title: 'Исходное дело', payments: [{ id: 6 }] });
+  });
+
   it.each(writers)('$name sends original scalars separately from requested edits without a new read', async ({ path, write }) => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json({ id: 19 })); vi.stubGlobal('fetch', fetch);
     const source = original(); await write(source);

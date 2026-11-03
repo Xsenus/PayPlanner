@@ -10730,9 +10730,8 @@ public partial class CasesV2Controller : ControllerBase
             if (expectedSource is not null && !CaseEditSnapshot.TryMerge(e, model, expectedSource, canViewFinance, legacy: false))
                 return Conflict(new { message = "Дело изменилось после открытия редактора. Обновите данные перед сохранением." });
             var visibility = access.Visibility;
-            var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
+            var validation = await CaseEditTransaction.ValidateEditedLinksAsync(_db, e, model, visibility, ct);
             if (validation is not null) return validation;
-            if (!visibility.SeesAll) await CaseEditTransaction.LockVisibleOwnersAsync(_db, model, ct);
             if (!IsValidOurCourtRole(model.OurCourtRole)) return BadRequest("Укажите допустимую роль в судебном деле.");
             if (!IsValidCourtPartyIdentifiers(model)) return BadRequest("ИНН должен содержать 10 или 12 цифр, ОГРН/ОГРНИП — 13 или 15 цифр.");
             if (!IsValidCourtAmounts(model)) return BadRequest("Судебные суммы должны быть неотрицательными и содержать не более двух знаков после запятой.");
@@ -10764,6 +10763,8 @@ public partial class CasesV2Controller : ControllerBase
             {
                 return BadRequest("Перед закрытием дела выберите в настройках журнала задач ответственного за итоговые отчёты с доступом ко всем делам.");
             }
+            if (finalReportAssignee is not null && finalReportAssignee.Id != User.GetUserId())
+                await CaseEditTransaction.LockUserAccessAsync(_db, finalReportAssignee.Id, ct);
             previousNextHearingAt = e.NextHearingAt;
             previousCourtDecisionAt = e.CourtDecisionAt;
             var previousWritSubmittedAt = e.ExecutiveWritSubmittedAt;
@@ -10803,6 +10804,7 @@ public partial class CasesV2Controller : ControllerBase
                 _db.SetAuditReason(inactivityAuditReason);
             }
 
+            await CaseEditTransaction.LockLinkedTasksAsync(_db, [e.Id], ct);
             if (shouldCloseLinkedTasks)
             {
                 await ClientCaseTaskSyncService.CloseActiveTasksForClosedCaseAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);

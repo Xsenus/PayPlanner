@@ -135,9 +135,8 @@ public class CasesController : ControllerBase
             if (expectedSource is not null && !CaseEditSnapshot.TryMerge(e, model, expectedSource, true, legacy: true))
                 return Conflict(new { message = "Дело изменилось после открытия редактора. Обновите данные перед сохранением." });
             var visibility = access.Visibility;
-            var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
+            var validation = await CaseEditTransaction.ValidateEditedLinksAsync(_db, e, model, visibility, ct);
             if (validation is not null) return validation;
-            if (!visibility.SeesAll) await CaseEditTransaction.LockVisibleOwnersAsync(_db, model, ct);
             if (ValidateCourtDetails(model) is { } courtError) return BadRequest(courtError);
             var receivedAt = model.ClearExecutiveWritReceivedAt ? null : model.ExecutiveWritReceivedAt ?? e.ExecutiveWritReceivedAt;
             var submittedAt = model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedAt ?? e.ExecutiveWritSubmittedAt;
@@ -155,6 +154,8 @@ public class CasesController : ControllerBase
             {
                 return BadRequest("Перед закрытием дела выберите в настройках журнала задач ответственного за итоговые отчёты с доступом ко всем делам.");
             }
+            if (finalReportAssignee is not null && finalReportAssignee.Id != User.GetUserId())
+                await CaseEditTransaction.LockUserAccessAsync(_db, finalReportAssignee.Id, ct);
             previousCourtDecisionAt = e.CourtDecisionAt;
             var previousSubmittedAt = e.ExecutiveWritSubmittedAt;
             var previousSubmittedTo = e.ExecutiveWritSubmittedTo;
@@ -174,6 +175,7 @@ public class CasesController : ControllerBase
                 e.EventHistory = string.IsNullOrWhiteSpace(e.EventHistory) ? message : $"{e.EventHistory.TrimEnd()}\n{message}";
             }
 
+            await CaseEditTransaction.LockLinkedTasksAsync(_db, [e.Id], ct);
             if (shouldCloseLinkedTasks)
             {
                 await ClientCaseTaskSyncService.CloseActiveTasksForClosedCaseAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
@@ -201,7 +203,7 @@ public class CasesController : ControllerBase
                 User.GetDisplayName(), User.GetUserId() ?? 0, recipients, DateTime.UtcNow, ct);
         }
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        return Ok(savedCase);
+        return Ok(CaseEditSnapshot.ForReply(savedCase));
     }
 
     [HttpDelete("{id:int}")]
