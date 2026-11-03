@@ -139,7 +139,7 @@ class Job:
         self.raw_created = None; self.created_pid = None
         if not self.h: raise Failure('CreateJobObject')
         limit = Limits(); limit.basic.flags = 0x2000 | 0x200
-        limit.jobMemory = 2147483648  # 2 GiB, plus the preserved 4 GiB reserve.
+        limit.jobMemory = 536870912  # 512 MiB; admission preserves the separate 4 GiB reserve.
         if not set_job(self.h, 9, C.byref(limit), C.sizeof(limit)):
             err = Failure('SetInformationJobObject'); close(self.h); self.h = None; raise err
     def launch(self, executable, arguments, cwd, stdout, stderr):

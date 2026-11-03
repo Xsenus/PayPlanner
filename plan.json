@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "scope": "one-retirement-dependency-fingerprint-5441ed9c",
-  "status": "PREPARED_ONLY_PENDING_ROOT_FULL_STATIC_REVIEW_AND_NEW_SCOPED_START",
-  "preparedUtc": "2026-11-03T02:52:53.324310+00:00",
+  "scope": "one-retirement-dependency-fingerprint-512m-5441ed9c",
+  "status": "NEW_PURE_READ_ONLY_LOWER_MEMORY_SCOPE_ROOT_STATIC_REVIEWED_NOT_EXECUTED",
+  "preparedUtc": "2026-11-03T03:51:49.379826+00:00",
   "headSha": "5441ed9c68d6d9de13bf80e42eb106b2c0be4136",
   "runId": 41509039583,
   "attempt": 1,
@@ -23,10 +23,10 @@
     "failureCauseOfHistoricalCiProven": false
   },
   "resourceProfile": {
-    "nodeOldSpaceMiB": 512,
-    "nodeJobMemoryBytes": 2147483648,
+    "nodeOldSpaceMiB": 128,
+    "nodeJobMemoryBytes": 536870912,
     "reserveBytes": 4294967296,
-    "admissionPhysicalAndCommitBytes": 6442450944,
+    "admissionPhysicalAndCommitBytes": 4831838208,
     "floorPhysicalAndCommitBytes": 1073741824,
     "maximumControllerBudgetSeconds": 900,
     "controllerWorkerDeadlineFromStartSeconds": 885,
@@ -38,7 +38,7 @@
     "maximumHeldOwnedProcesses": 64,
     "workerHeartbeatSeconds": 5,
     "perStreamMaximumBytes": 2097152,
-    "heapJustification": "Capture retains path/hash records and twelve asynchronous file streams, not a Vite graph or .NET runtime. 512MiB V8 heap plus native/I/O overhead stays within the separate 2GiB Job cap, preserving the 4GiB admission reserve. Exhaustion yields an incomplete diagnostic; caps never trigger a reduced file boundary or retry.",
+    "heapJustification": "One unchanged pure capture retains 24657 dependency records in the current local fixture; twelve original metadata/hash streams are preserved. 128MiB managed heap and total512MiB kernel Job cap target the bounded read-only operation. Admission4.5GiB=4GiB reserve+512MiB cap. Any exhaustion yields incomplete diagnostic with no retry or reduced boundary; all CI test profiles/admission6GiB remain unchanged.",
     "CPUConcurrency": "Original metadata/read/hash concurrency12 retained; no global profile/affinity change. One controlled Node worker only."
   },
   "commands": {
@@ -47,7 +47,7 @@
       "arguments": [
         "-X",
         "utf8",
-        "D:\\PayPlannerDiagnostics\\dependency-fingerprint-plan-20261103-024331\\controller.py",
+        "D:\\PayPlannerDiagnostics\\dependency-fingerprint-lowmem-plan-20261103\\controller.py",
         "--validate-plan"
       ]
     },
@@ -56,15 +56,15 @@
       "arguments": [
         "-X",
         "utf8",
-        "D:\\PayPlannerDiagnostics\\dependency-fingerprint-plan-20261103-024331\\controller.py",
+        "D:\\PayPlannerDiagnostics\\dependency-fingerprint-lowmem-plan-20261103\\controller.py",
         "--execute"
       ]
     },
     "controlledWorker": {
       "executable": "D:\\PayPlannerRunner\\agent\\_work\\_tool\\node\\22.23.4\\x64\\node.exe",
       "arguments": [
-        "--max-old-space-size=512",
-        "D:\\PayPlannerDiagnostics\\dependency-fingerprint-plan-20261103-024331\\worker.mjs"
+        "--max-old-space-size=128",
+        "D:\\PayPlannerDiagnostics\\dependency-fingerprint-lowmem-plan-20261103\\worker.mjs"
       ]
     }
   },
@@ -72,7 +72,7 @@
     "file": "authorization.json (MUST NOT EXIST during preparation)",
     "required": {
       "enabled": true,
-      "scope": "one-retirement-dependency-fingerprint-5441ed9c",
+      "scope": "one-retirement-dependency-fingerprint-512m-5441ed9c",
       "rootReviewedCompleteSource": true,
       "maximumInvocations": 1,
       "headSha": "5441ed9c68d6d9de13bf80e42eb106b2c0be4136",
@@ -88,7 +88,7 @@
     }
   },
   "futureReadinessSchema": {
-    "scope": "one-retirement-dependency-fingerprint-5441ed9c",
+    "scope": "one-retirement-dependency-fingerprint-512m-5441ed9c",
     "headSha": "5441ed9c68d6d9de13bf80e42eb106b2c0be4136",
     "planManifestSha256": "exact prepared manifest hash",
     "qualified": true,
@@ -97,8 +97,8 @@
     "samples": "exactly5, strictly increasing aware UTC, gaps9.5..10.5seconds; first <=120seconds old and no future timestamp",
     "eachSample": {
       "utc": "aware UTC",
-      "availablePhysicalBytes": ">=6442450944",
-      "availableCommitBytes": ">=6442450944",
+      "availablePhysicalBytes": ">=4831838208",
+      "availableCommitBytes": ">=4831838208",
       "workerCount": 0,
       "identityUnknownCount": 0,
       "oldMonitorCount": 0
@@ -115,8 +115,8 @@
     "Exact local HEAD5441 and clean tracked checkout, small module/package-lock/package pins and Node executable hash; ordinary node_modules root metadata only before capture",
     "Standard authenticated GitHub API must return exact current main5441, run41509039583 attempt1 completed, complete unpaginated <=100 job list all completed including job125544632697, runner21 online busyfalse",
     "No spoofed GITHUB context, hook, service/host/profile changes, protected artifact store, old v2 file access or reuse",
-    "Deferred own-process Windows API selfcheck and closed selfcheck handle before node process creation; immediate RAM/commit>=6GiB and Worker0",
-    "Worker launched suspended with explicit inherited stream handle list, assigned to a fresh unnamed kill-on-close non-breakaway Job with total2GiB memory limit before resume",
+    "Deferred own-process Windows API selfcheck and closed selfcheck handle before node process creation; immediate RAM/commit>=4.5GiB and Worker0",
+    "Worker launched suspended with explicit inherited stream handle list, assigned to a fresh unnamed kill-on-close non-breakaway Job with total512MiB memory limit before resume",
     "Worker checks its Node path/version, source/package pins, fresh ticket/root nonce and hashes again before importing the pinned module; no call to main/finalize/build/sourceInputs or stableEnvironment",
     "Exactly one committed execution attempt, one Node creation maximum, one capture commitment maximum; every failure ends this attempt without retry",
     "Runtime observation includes only global numeric availability, Worker candidate count, and held own Job members verified by kernel Job membership and PID/creation cutoff; unknowns remain separate",
@@ -141,5 +141,6 @@
     "If the controller is forcibly killed, kernel close of its non-inherited Job handle terminates remaining owned members; no durable completion receipt is then guaranteed",
     "OS scheduling/kernel stalls and filesystem operations cannot provide a real-time wall-clock guarantee. Worker timer/controller budgets and fail-closed cleanup target <15minutes; final evidence must report actual elapsed and any overrun",
     "One failed capture/resource exhaustion is preserved, never fixed by dropping files, assertions, existing link rules, or rerunning automatically"
-  ]
+  ],
+  "admissionScope": "Only this new pure read/hash diagnostic. Mandatory CI admission6GiB/reserve4/floor1 unchanged. Old prepared scope/grants/readiness are preserved and never rewritten."
 }

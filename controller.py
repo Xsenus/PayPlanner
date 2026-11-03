@@ -10,8 +10,8 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent
-SCOPE = 'one-retirement-dependency-fingerprint-5441ed9c'
-ADMISSION, FLOOR = 6442450944, 1073741824
+SCOPE = 'one-retirement-dependency-fingerprint-512m-5441ed9c'
+ADMISSION, FLOOR = 4831838208, 1073741824
 
 class Guard(Exception): pass
 def now(): return D.datetime.now(D.timezone.utc)
@@ -156,7 +156,7 @@ def execute(plan, pins):
         if abort is None: abort = {'reason': reason, 'utc': now().isoformat(), 'deliberateOwnedStop': False}
     try:
         save('launch-committed.json', {'maximumInvocations': 1, 'processCreated': False})
-        job.launch(pins['node']['path'], ['--max-old-space-size=512', str(ROOT / 'worker.mjs')],
+        job.launch(pins['node']['path'], ['--max-old-space-size=128', str(ROOT / 'worker.mjs')],
             ROOT, ROOT / 'worker.stdout.jsonl', ROOT / 'worker.stderr.log')
         while True:
             resource = native.system_memory(); owned = job.sample()

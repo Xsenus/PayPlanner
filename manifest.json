@@ -1,16 +1,16 @@
 {
   "schema": 1,
-  "scope": "one-retirement-dependency-fingerprint-5441ed9c",
+  "scope": "one-retirement-dependency-fingerprint-512m-5441ed9c",
   "files": [
     {
       "file": "controller.py",
-      "sha256": "8c0f0f3dbb76381b00168e99b4d83c72e66e663ac3cc301a7a376b73f11e7eeb",
-      "bytes": 16592
+      "sha256": "fff37345be4956629cd47064a7fcf46456fb7d8ded7e3fa2a63ef648016c3ca3",
+      "bytes": 16597
     },
     {
       "file": "win_owned.py",
-      "sha256": "eb82a84ed7cabf2d1ace52cb80e0144147298203e87eefd64cbf58500f1efffd",
-      "bytes": 12806
+      "sha256": "c4314ce20e43bd9bec6177378adc5b2d05c615c0af5fffca3431eb3ec2051364",
+      "bytes": 12821
     },
     {
       "file": "worker.mjs",
@@ -19,8 +19,8 @@
     },
     {
       "file": "plan.json",
-      "sha256": "f27a4b54eacaed28ff29598c4d18d4e4d64f3573d8a3c0848e089cd2de13b3e6",
-      "bytes": 8811
+      "sha256": "5d57cc5ae59b88ace094b93ed6d702ae31c2fc7b248feed80f4103c78c068eda",
+      "bytes": 8963
     },
     {
       "file": "pins.json",
