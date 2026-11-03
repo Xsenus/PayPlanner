@@ -90,7 +90,7 @@ public class ClientsV2Controller : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> Get(
+    public Task<IActionResult> Get(
         [FromQuery] string? search,
         [FromQuery] bool? isActive,
         [FromQuery] int? id,
@@ -114,6 +114,32 @@ public class ClientsV2Controller : ControllerBase
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default,
         [FromQuery] string? counterpartyRole = null)
+        => ClientReadTransaction.RunAsync(_db, User, () => GetCoreAsync(search, isActive, id, name, email, phone, company, address, notes, legalEntityId, legalEntityShortName, legalEntityFullName, legalEntityInn, legalEntityOgrn, legalEntityKpp, clientStatusId, clientStatus, sortBy, sortDir, page, pageSize, ct, counterpartyRole), ct);
+
+    private async Task<IActionResult> GetCoreAsync(
+        string? search,
+        bool? isActive,
+        int? id,
+        string? name,
+        string? email,
+        string? phone,
+        string? company,
+        string? address,
+        string? notes,
+        int? legalEntityId,
+        string? legalEntityShortName,
+        string? legalEntityFullName,
+        string? legalEntityInn,
+        string? legalEntityOgrn,
+        string? legalEntityKpp,
+        int? clientStatusId,
+        string? clientStatus,
+        string? sortBy,
+        string? sortDir,
+        int page = 1,
+        int pageSize = 50,
+        CancellationToken ct = default,
+        string? counterpartyRole = null)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 500);
@@ -530,7 +556,10 @@ public class ClientsV2Controller : ControllerBase
     }
 
     [HttpGet("{id:int}")]
-    public async Task<IActionResult> GetById(int id, CancellationToken ct)
+    public Task<IActionResult> GetById(int id, CancellationToken ct)
+        => ClientReadTransaction.RunAsync(_db, User, () => GetByIdCoreAsync(id, ct), ct);
+
+    private async Task<IActionResult> GetByIdCoreAsync(int id, CancellationToken ct)
     {
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)

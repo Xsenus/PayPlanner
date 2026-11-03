@@ -229,14 +229,19 @@ public class ClientsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetAll(CancellationToken ct)
+    public Task<IActionResult> GetAll(CancellationToken ct)
     {
         var rateLimitResult = EnforceFullClientListRateLimit();
         if (rateLimitResult is not null)
         {
-            return rateLimitResult;
+            return Task.FromResult<IActionResult>(rateLimitResult);
         }
 
+        return ClientReadTransaction.RunAsync(_db, User, () => GetAllCoreAsync(ct), ct);
+    }
+
+    private async Task<IActionResult> GetAllCoreAsync(CancellationToken ct)
+    {
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
@@ -279,7 +284,10 @@ public class ClientsController : ControllerBase
     }
 
     [HttpGet("{id:int}")]
-    public async Task<IActionResult> GetById(int id, CancellationToken ct)
+    public Task<IActionResult> GetById(int id, CancellationToken ct)
+        => ClientReadTransaction.RunAsync(_db, User, () => GetByIdCoreAsync(id, ct), ct);
+
+    private async Task<IActionResult> GetByIdCoreAsync(int id, CancellationToken ct)
     {
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
@@ -314,11 +322,18 @@ public class ClientsController : ControllerBase
     }
 
     [HttpGet("{id:int}/stats")]
-    public async Task<IActionResult> GetStats(
+    public Task<IActionResult> GetStats(
         int id,
         [FromQuery] int? caseId,
         CancellationToken ct,
         [FromQuery] string? clientRole = null)
+        => ClientReadTransaction.RunAsync(_db, User, () => GetStatsCoreAsync(id, caseId, ct, clientRole), ct);
+
+    private async Task<IActionResult> GetStatsCoreAsync(
+        int id,
+        int? caseId,
+        CancellationToken ct,
+        string? clientRole = null)
     {
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
@@ -412,10 +427,16 @@ public class ClientsController : ControllerBase
     }
 
     [HttpGet("{id:int}/case-finance-summaries")]
-    public async Task<IActionResult> GetCaseFinanceSummaries(
+    public Task<IActionResult> GetCaseFinanceSummaries(
         int id,
         CancellationToken ct,
         [FromQuery] string? clientRole = null)
+        => ClientReadTransaction.RunAsync(_db, User, () => GetCaseFinanceSummariesCoreAsync(id, ct, clientRole), ct);
+
+    private async Task<IActionResult> GetCaseFinanceSummariesCoreAsync(
+        int id,
+        CancellationToken ct,
+        string? clientRole = null)
     {
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
@@ -538,10 +559,17 @@ public class ClientsController : ControllerBase
     }
 
     [HttpGet("{id:int}/case-expense-details")]
-    public async Task<IActionResult> GetCaseExpenseDetails(
+    public Task<IActionResult> GetCaseExpenseDetails(
         int id,
         [FromQuery] int? caseId,
         [FromQuery] string? clientRole = null,
+        CancellationToken ct = default)
+        => ClientReadTransaction.RunAsync(_db, User, () => GetCaseExpenseDetailsCoreAsync(id, caseId, clientRole, ct), ct);
+
+    private async Task<IActionResult> GetCaseExpenseDetailsCoreAsync(
+        int id,
+        int? caseId,
+        string? clientRole = null,
         CancellationToken ct = default)
     {
         var access = await GetCurrentAccessAsync(ct);

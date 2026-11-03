@@ -52,12 +52,21 @@ public class ClientsV1Controller : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> Get(
+    public Task<IActionResult> Get(
         [FromQuery] string? search,
         [FromQuery] bool? isActive,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
         [FromQuery] int? limit,
+        CancellationToken ct)
+        => ClientReadTransaction.RunAsync(_db, User, () => GetCoreAsync(search, isActive, sortBy, sortDir, limit, ct), ct);
+
+    private async Task<IActionResult> GetCoreAsync(
+        string? search,
+        bool? isActive,
+        string? sortBy,
+        string? sortDir,
+        int? limit,
         CancellationToken ct)
     {
         if (await RequireClientsPermissionAsync(permission => permission.CanView, ct) is { } forbidden)
@@ -89,7 +98,10 @@ public class ClientsV1Controller : ControllerBase
     }
 
     [HttpGet("{id:int}")]
-    public async Task<IActionResult> GetById(int id, CancellationToken ct)
+    public Task<IActionResult> GetById(int id, CancellationToken ct)
+        => ClientReadTransaction.RunAsync(_db, User, () => GetByIdCoreAsync(id, ct), ct);
+
+    private async Task<IActionResult> GetByIdCoreAsync(int id, CancellationToken ct)
     {
         if (await RequireClientsPermissionAsync(permission => permission.CanView, ct) is { } forbidden)
         {
