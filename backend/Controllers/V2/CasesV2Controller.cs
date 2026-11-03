@@ -10971,207 +10971,184 @@ public partial class CasesV2Controller : ControllerBase
     [HttpPost("bulk-update")]
     public async Task<IActionResult> BulkUpdate([FromBody] BulkUpdateCasesRequest request, CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
-
-        var ids = (request.Ids ?? Array.Empty<int>())
-            .Where(id => id > 0)
-            .Distinct()
-            .Take(500)
-            .ToArray();
-        if (ids.Length == 0)
-        {
-            return BadRequest("Выберите дела для группового изменения.");
-        }
-
-        var nextStage = NormalizeOptional(request.Stage);
-        var nextPriority = NormalizeOptional(request.Priority);
-        if (request.Status is null
-            && !request.ResponsibleUserId.HasValue
-            && nextStage is null
-            && nextPriority is null
-            && !request.IsHiddenFromExecutor.HasValue
-            && !request.InactivityRemindersEnabled.HasValue
-            && !request.IsUnderControl.HasValue)
-        {
-            return BadRequest("Укажите новый статус, ответственного, стадию, приоритет, режим доступа, автоконтроль или контроль.");
-        }
-
-        User? nextResponsible = null;
-        if (request.ResponsibleUserId.HasValue)
-        {
-            nextResponsible = await _db.Users
-                .AsNoTracking()
-                .FirstOrDefaultAsync(user => user.Id == request.ResponsibleUserId.Value && user.IsActive, ct);
-        }
-
-        if (request.ResponsibleUserId.HasValue && nextResponsible is null)
-        {
-            return BadRequest($"Unknown responsibleUserId {request.ResponsibleUserId.Value}");
-        }
-
-        if (nextStage is not null && nextStage.Length > 160)
-        {
-            return BadRequest("Стадия дела слишком длинная.");
-        }
-
-        if (nextPriority is not null && !AllowedCasePriorities.Contains(nextPriority))
-        {
-            return BadRequest("Некорректный приоритет дела.");
-        }
-
-        var cases = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .Include(item => item.ResponsibleUser)
-            .Where(item => ids.Contains(item.Id))
-            .ToListAsync(ct);
-        if (cases.Count == 0)
-        {
-            return NotFound();
-        }
-
-        var requiresInactivityDisableReason =
-            request.InactivityRemindersEnabled == false &&
-            cases.Any(item => item.InactivityRemindersEnabled);
-        if (requiresInactivityDisableReason &&
-            string.IsNullOrWhiteSpace(request.InactivityRemindersDisabledReason))
-        {
-            return BadRequest("Укажите причину выключения автоконтроля.");
-        }
-        var inactivityDisabledReason = request.InactivityRemindersEnabled == false
-            ? Truncate(request.InactivityRemindersDisabledReason?.Trim() ?? string.Empty, 1000)
-            : string.Empty;
-
-        var casesClosedByUpdate = new List<int>();
-        var casesReopenedByUpdate = new List<int>();
-        var courtCaseIds = request.Status.HasValue && IsFinishedCaseStatus(request.Status.Value)
-            ? await ClientCaseFinalReportTaskService.FilterCourtCaseIdsAsync(_db, cases, ct)
-            : [];
-        var requiresFinalReportAssignee = request.Status.HasValue && IsFinishedCaseStatus(request.Status.Value)
-            && cases.Any(item => !IsFinishedCaseStatus(item.Status) && courtCaseIds.Contains(item.Id));
-        var finalReportAssignee = request.Status.HasValue && IsFinishedCaseStatus(request.Status.Value)
-            && requiresFinalReportAssignee
-                ? await ClientCaseFinalReportTaskService.ResolveAssigneeAsync(_db, ct)
-                : null;
-        if (requiresFinalReportAssignee && finalReportAssignee is null)
-        {
-            return BadRequest("Перед закрытием дел выберите в настройках журнала задач ответственного за итоговые отчёты с доступом ко всем делам.");
-        }
+        var ids = (request.Ids ?? Array.Empty<int>()).Where(id => id > 0).Distinct().Take(501).Order().ToArray();
         var changedCasesCount = 0;
-        var actorUserId = User.GetUserId();
-        var actorName = User.GetDisplayName();
-        foreach (var item in cases)
+        var result = await CaseEditTransaction.RunManyAsync(_db, User, ids, async (cases, access) =>
         {
-            var changes = new List<string>();
-            if (request.Status is not null)
+            if (request.Status.HasValue && !Enum.IsDefined(request.Status.Value)) return BadRequest("Некорректный статус дела.");
+            var nextStage = NormalizeOptional(request.Stage);
+            var nextPriority = NormalizeOptional(request.Priority);
+            if (request.Status is null
+                && !request.ResponsibleUserId.HasValue
+                && nextStage is null
+                && nextPriority is null
+                && !request.IsHiddenFromExecutor.HasValue
+                && !request.InactivityRemindersEnabled.HasValue
+                && !request.IsUnderControl.HasValue)
             {
-                if (!IsFinishedCaseStatus(item.Status) && IsFinishedCaseStatus(request.Status.Value))
-                {
-                    casesClosedByUpdate.Add(item.Id);
-                }
-                if (IsFinishedCaseStatus(item.Status) && !IsFinishedCaseStatus(request.Status.Value))
-                {
-                    casesReopenedByUpdate.Add(item.Id);
-                }
-
-                if (item.Status != request.Status.Value)
-                {
-                    changes.Add($"статус «{FormatCaseStatus(item.Status)}» → «{FormatCaseStatus(request.Status.Value)}»");
-                    item.Status = request.Status.Value;
-                }
+                return BadRequest("Укажите новый статус, ответственного, стадию, приоритет, режим доступа, автоконтроль или контроль.");
             }
 
+            User? nextResponsible = null;
             if (request.ResponsibleUserId.HasValue)
             {
-                if (item.ResponsibleUserId != request.ResponsibleUserId.Value)
+                await CaseEditTransaction.LockUsersAsync(_db, [request.ResponsibleUserId.Value], ct);
+                nextResponsible = await _db.Users
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(user => user.Id == request.ResponsibleUserId.Value && user.IsActive, ct);
+            }
+
+            if (request.ResponsibleUserId.HasValue && nextResponsible is null)
+            {
+                return BadRequest($"Unknown responsibleUserId {request.ResponsibleUserId.Value}");
+            }
+
+            if (nextStage is not null && nextStage.Length > 160)
+            {
+                return BadRequest("Стадия дела слишком длинная.");
+            }
+
+            if (nextPriority is not null && !AllowedCasePriorities.Contains(nextPriority))
+            {
+                return BadRequest("Некорректный приоритет дела.");
+            }
+
+            var requiresInactivityDisableReason =
+                request.InactivityRemindersEnabled == false &&
+                cases.Any(item => item.InactivityRemindersEnabled);
+            if (requiresInactivityDisableReason &&
+                string.IsNullOrWhiteSpace(request.InactivityRemindersDisabledReason))
+            {
+                return BadRequest("Укажите причину выключения автоконтроля.");
+            }
+            var inactivityDisabledReason = request.InactivityRemindersEnabled == false
+                ? Truncate(request.InactivityRemindersDisabledReason?.Trim() ?? string.Empty, 1000)
+                : string.Empty;
+
+            var casesClosedByUpdate = new List<int>();
+            var casesReopenedByUpdate = new List<int>();
+            var courtCaseIds = request.Status.HasValue && IsFinishedCaseStatus(request.Status.Value)
+                ? await ClientCaseFinalReportTaskService.FilterCourtCaseIdsAsync(_db, cases, ct)
+                : [];
+            var requiresFinalReportAssignee = request.Status.HasValue && IsFinishedCaseStatus(request.Status.Value)
+                && cases.Any(item => !IsFinishedCaseStatus(item.Status) && courtCaseIds.Contains(item.Id));
+            var finalReportAssignee = request.Status.HasValue && IsFinishedCaseStatus(request.Status.Value)
+                && requiresFinalReportAssignee
+                    ? await ClientCaseFinalReportTaskService.ResolveAssigneeAsync(_db, ct)
+                    : null;
+            if (requiresFinalReportAssignee && finalReportAssignee is null)
+            {
+                return BadRequest("Перед закрытием дел выберите в настройках журнала задач ответственного за итоговые отчёты с доступом ко всем делам.");
+            }
+            if (finalReportAssignee is not null && finalReportAssignee.Id != User.GetUserId())
+                await CaseEditTransaction.LockUserAccessAsync(_db, finalReportAssignee.Id, ct);
+
+            var actorUserId = User.GetUserId();
+            var actorName = User.GetDisplayName();
+            foreach (var item in cases)
+            {
+                var changes = new List<string>();
+                if (request.Status is not null)
                 {
-                    changes.Add($"ответственный «{FormatCaseResponsible(item.ResponsibleUser)}» → «{FormatCaseResponsible(nextResponsible)}»");
-                    item.ResponsibleUserId = request.ResponsibleUserId.Value;
+                    if (!IsFinishedCaseStatus(item.Status) && IsFinishedCaseStatus(request.Status.Value))
+                    {
+                        casesClosedByUpdate.Add(item.Id);
+                    }
+                    if (IsFinishedCaseStatus(item.Status) && !IsFinishedCaseStatus(request.Status.Value))
+                    {
+                        casesReopenedByUpdate.Add(item.Id);
+                    }
+
+                    if (item.Status != request.Status.Value)
+                    {
+                        changes.Add($"статус «{FormatCaseStatus(item.Status)}» → «{FormatCaseStatus(request.Status.Value)}»");
+                        item.Status = request.Status.Value;
+                    }
+                }
+
+                if (request.ResponsibleUserId.HasValue)
+                {
+                    if (item.ResponsibleUserId != request.ResponsibleUserId.Value)
+                    {
+                        changes.Add($"ответственный «{FormatCaseResponsible(item.ResponsibleUser)}» → «{FormatCaseResponsible(nextResponsible)}»");
+                        item.ResponsibleUserId = request.ResponsibleUserId.Value;
+                    }
+                }
+
+                if (nextStage is not null && !string.Equals(item.Stage, nextStage, StringComparison.Ordinal))
+                {
+                    changes.Add($"стадия «{FormatCaseTextValue(item.Stage)}» → «{nextStage}»");
+                    item.Stage = nextStage;
+                }
+
+                if (nextPriority is not null && !string.Equals(item.Priority, nextPriority, StringComparison.OrdinalIgnoreCase))
+                {
+                    changes.Add($"приоритет «{FormatCasePriority(item.Priority)}» → «{FormatCasePriority(nextPriority)}»");
+                    item.Priority = nextPriority;
+                }
+
+                if (request.IsHiddenFromExecutor.HasValue && item.IsHiddenFromExecutor != request.IsHiddenFromExecutor.Value)
+                {
+                    var nextHidden = request.IsHiddenFromExecutor.Value;
+                    changes.Add(nextHidden ? "доступ: скрыто от исполнителя" : "доступ: открыто исполнителю");
+                    item.IsHiddenFromExecutor = nextHidden;
+                    if (nextHidden)
+                    {
+                        ApplyHiddenFromExecutorMetadata(item, true, actorUserId, actorName);
+                    }
+                    else
+                    {
+                        ApplyHiddenFromExecutorMetadata(item, false, actorUserId, actorName);
+                    }
+                }
+
+                if (request.InactivityRemindersEnabled.HasValue && item.InactivityRemindersEnabled != request.InactivityRemindersEnabled.Value)
+                {
+                    var nextEnabled = request.InactivityRemindersEnabled.Value;
+                    changes.Add(nextEnabled
+                        ? "автоконтроль: включен"
+                        : $"автоконтроль: выключен, причина «{inactivityDisabledReason}»");
+                    item.InactivityRemindersEnabled = nextEnabled;
+                    item.InactivityRemindersDisabledReason = nextEnabled ? string.Empty : inactivityDisabledReason;
+                }
+
+                if (request.IsUnderControl.HasValue && ApplyCaseControlState(item, request.IsUnderControl.Value, actorUserId, actorName))
+                {
+                    changes.Add(request.IsUnderControl.Value ? "контроль: включен" : "контроль: выключен");
+                }
+
+                if (changes.Count > 0)
+                {
+                    changedCasesCount++;
+                    AppendCaseEvent(item, $"Массовое изменение: {string.Join("; ", changes)}. Изменил: {actorName}.");
                 }
             }
 
-            if (nextStage is not null && !string.Equals(item.Stage, nextStage, StringComparison.Ordinal))
+            if (changedCasesCount > 0)
             {
-                changes.Add($"стадия «{FormatCaseTextValue(item.Stage)}» → «{nextStage}»");
-                item.Stage = nextStage;
+                _db.SetAuditReason(BuildBulkUpdateAuditReason(request, nextResponsible, nextStage, nextPriority, changedCasesCount));
             }
 
-            if (nextPriority is not null && !string.Equals(item.Priority, nextPriority, StringComparison.OrdinalIgnoreCase))
+            await CaseEditTransaction.LockLinkedTasksAsync(_db, casesClosedByUpdate.Concat(casesReopenedByUpdate).Distinct().Order().ToArray(), ct);
+            if (casesClosedByUpdate.Count > 0)
             {
-                changes.Add($"приоритет «{FormatCasePriority(item.Priority)}» → «{FormatCasePriority(nextPriority)}»");
-                item.Priority = nextPriority;
-            }
-
-            if (request.IsHiddenFromExecutor.HasValue && item.IsHiddenFromExecutor != request.IsHiddenFromExecutor.Value)
-            {
-                var nextHidden = request.IsHiddenFromExecutor.Value;
-                changes.Add(nextHidden ? "доступ: скрыто от исполнителя" : "доступ: открыто исполнителю");
-                item.IsHiddenFromExecutor = nextHidden;
-                if (nextHidden)
+                await ClientCaseTaskSyncService.CloseActiveTasksForClosedCasesAsync(_db, casesClosedByUpdate, User.GetUserId(), User.GetDisplayName(), ct);
+                var courtCasesClosedByUpdate = casesClosedByUpdate.Where(courtCaseIds.Contains).ToArray();
+                if (courtCasesClosedByUpdate.Length > 0)
                 {
-                    ApplyHiddenFromExecutorMetadata(item, true, actorUserId, actorName);
-                }
-                else
-                {
-                    ApplyHiddenFromExecutorMetadata(item, false, actorUserId, actorName);
+                    await ClientCaseFinalReportTaskService.CreateForClosedCasesAsync(_db, courtCasesClosedByUpdate, finalReportAssignee!, actorUserId, actorName, ct);
                 }
             }
-
-            if (request.InactivityRemindersEnabled.HasValue && item.InactivityRemindersEnabled != request.InactivityRemindersEnabled.Value)
+            if (casesReopenedByUpdate.Count > 0)
             {
-                var nextEnabled = request.InactivityRemindersEnabled.Value;
-                changes.Add(nextEnabled
-                    ? "автоконтроль: включен"
-                    : $"автоконтроль: выключен, причина «{inactivityDisabledReason}»");
-                item.InactivityRemindersEnabled = nextEnabled;
-                item.InactivityRemindersDisabledReason = nextEnabled ? string.Empty : inactivityDisabledReason;
+                await ClientCaseFinalReportTaskService.CancelForReopenedCasesAsync(_db, casesReopenedByUpdate, actorUserId, actorName, ct);
             }
 
-            if (request.IsUnderControl.HasValue && ApplyCaseControlState(item, request.IsUnderControl.Value, actorUserId, actorName))
-            {
-                changes.Add(request.IsUnderControl.Value ? "контроль: включен" : "контроль: выключен");
-            }
-
-            if (changes.Count > 0)
-            {
-                changedCasesCount++;
-                AppendCaseEvent(item, $"Массовое изменение: {string.Join("; ", changes)}. Изменил: {actorName}.");
-            }
-        }
-
-        if (changedCasesCount > 0)
-        {
-            _db.SetAuditReason(BuildBulkUpdateAuditReason(request, nextResponsible, nextStage, nextPriority, changedCasesCount));
-        }
-
-        if (casesClosedByUpdate.Count > 0)
-        {
-            await ClientCaseTaskSyncService.CloseActiveTasksForClosedCasesAsync(_db, casesClosedByUpdate, User.GetUserId(), User.GetDisplayName(), ct);
-            var courtCasesClosedByUpdate = casesClosedByUpdate.Where(courtCaseIds.Contains).ToArray();
-            if (courtCasesClosedByUpdate.Length > 0)
-            {
-                await ClientCaseFinalReportTaskService.CreateForClosedCasesAsync(_db, courtCasesClosedByUpdate, finalReportAssignee!, actorUserId, actorName, ct);
-            }
-        }
-        if (casesReopenedByUpdate.Count > 0)
-        {
-            await ClientCaseFinalReportTaskService.CancelForReopenedCasesAsync(_db, casesReopenedByUpdate, actorUserId, actorName, ct);
-        }
-
-        await _db.SaveChangesAsync(ct);
-        if (changedCasesCount > 0)
-        {
-            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        }
-        return Ok(new { updated = cases.Count, requested = ids.Length });
+            await _db.SaveChangesAsync(ct);
+            return Ok(new { updated = cases.Count, requested = ids.Length });
+        }, ct);
+        if (result is OkObjectResult && changedCasesCount > 0) await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        return result;
     }
 
     private async Task<IActionResult?> ValidateCaseOwnerAsync(

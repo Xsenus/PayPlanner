@@ -10,6 +10,8 @@ import { apiService } from '../../services/api';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { useDialog } from '../../hooks/useDialog';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useDocumentDeliveryOwner } from '../../hooks/useDocumentDeliveryOwner';
+import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import type { ActResponsible, ClientCase, ClientCaseAccessRequest } from '../../types';
@@ -419,7 +421,6 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   const [bulkStage, setBulkStage] = useState('');
   const [bulkPriority, setBulkPriority] = useState('');
   const [bulkControlState, setBulkControlState] = useState<'keep' | 'on' | 'off'>('keep');
-  const [bulkSaving, setBulkSaving] = useState(false);
   const [creatingTaskCaseId, setCreatingTaskCaseId] = useState<number | null>(null);
   const [controlCaseId, setControlCaseId] = useState<number | null>(null);
   const [courtSyncCaseId, setCourtSyncCaseId] = useState<number | null>(null);
@@ -461,6 +462,12 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     defaultPageSize: 25,
     maxPageSize: 200,
   });
+
+  const canBulkEditCases = canEditCases && (isAdmin() || permissions.cases.canView);
+  const bulkActionOwner = useDocumentDeliveryOwner(JSON.stringify([user?.id, user?.role?.id, canBulkEditCases,
+    selectedIds, bulkStatus, bulkResponsibleUserId, bulkStage, bulkPriority, bulkControlState,
+    page, pageSize, search, status, caseScope, activityFilter, caseType, responsibleUserId, priority, from, to, minFee, maxFee, sortBy, sortDir, items.map(item => item.id)]));
+  const bulkSaving = bulkActionOwner.busy;
 
   useEffect(() => {
     if (canViewFinance) {
@@ -875,87 +882,53 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     setSelectedIds((current) => Array.from(new Set([...current, ...items.map((item) => item.id)])));
   };
 
-  const applyBulkUpdate = async () => {
-    if (
-      selectedIds.length === 0
-      || (!bulkStatus && !bulkResponsibleUserId && !bulkStage.trim() && !bulkPriority && bulkControlState === 'keep')
-    ) {
-      return;
-    }
-
-    setBulkSaving(true);
+  const runBulkCaseUpdate = async (payload: Parameters<typeof apiService.bulkUpdateCases>[0], kind: 'apply' | 'archive' | 'one') => {
+    const operation = canBulkEditCases ? bulkActionOwner.begin(kind) : null;
+    if (!operation) return;
     setError(null);
     setNotice(null);
     try {
-      await apiService.bulkUpdateCases({
-        ids: selectedIds,
-        status: bulkStatus || undefined,
-        responsibleUserId: bulkResponsibleUserId ? Number(bulkResponsibleUserId) : undefined,
-        stage: bulkStage.trim() || undefined,
-        priority: bulkPriority || undefined,
-        isUnderControl: bulkControlState === 'keep' ? undefined : bulkControlState === 'on',
-      });
-      const selectedCount = selectedIds.length;
-      setSelectedIds([]);
-      setBulkStatus('');
-      setBulkResponsibleUserId('');
-      setBulkStage('');
-      setBulkPriority('');
-      setBulkControlState('keep');
-      setNotice(`Массовое изменение применено: обновлено дел ${selectedCount}.`);
-      setReloadToken((value) => value + 1);
+      const result = await awaitOwnedUiResult(() => apiService.bulkUpdateCases(payload), operation.isCurrent);
+      const expected = new Set(payload.ids).size;
+      if (!result || !Number.isSafeInteger(result.updated) || result.updated < 1 || result.updated > expected
+        || !Number.isSafeInteger(result.requested) || result.requested !== expected) {
+        throw new Error('Не удалось подтвердить результат массового изменения. Обновите список дел перед повторной попыткой.');
+      }
+      if (kind === 'one') {
+        setSelectedIds(current => current.filter(id => id !== payload.ids[0]));
+        setNotice('Дело отправлено в архив.');
+      } else {
+        setSelectedIds([]);
+        setBulkStatus(''); setBulkResponsibleUserId(''); setBulkStage(''); setBulkPriority(''); setBulkControlState('keep');
+        const partial = result.updated !== result.requested;
+        setNotice(kind === 'apply'
+          ? partial ? `Массовое изменение применено: обработано дел ${result.updated} из ${result.requested}. Остальные дела недоступны или удалены.` : `Массовое изменение применено: обновлено дел ${result.updated}.`
+          : partial ? `В архив отправлено дел: ${result.updated} из ${result.requested}. Остальные дела недоступны или удалены.` : `В архив отправлено дел: ${result.updated}.`);
+      }
+      setReloadToken(value => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось выполнить групповое изменение дел.');
-    } finally {
-      setBulkSaving(false);
-    }
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(extractDisplayErrorMessage(err, 'Не удалось выполнить групповое изменение дел.'));
+    } finally { operation.finish(); }
+  };
+
+  const applyBulkUpdate = async () => {
+    if (selectedIds.length === 0 || (!bulkStatus && !bulkResponsibleUserId && !bulkStage.trim() && !bulkPriority && bulkControlState === 'keep')) return;
+    await runBulkCaseUpdate({
+      ids: selectedIds,
+      status: bulkStatus || undefined,
+      responsibleUserId: bulkResponsibleUserId ? Number(bulkResponsibleUserId) : undefined,
+      stage: bulkStage.trim() || undefined,
+      priority: bulkPriority || undefined,
+      isUnderControl: bulkControlState === 'keep' ? undefined : bulkControlState === 'on',
+    }, 'apply');
   };
 
   const archiveSelectedCases = async () => {
-    if (selectedIds.length === 0) {
-      return;
-    }
-
-    setBulkSaving(true);
-    setError(null);
-    setNotice(null);
-    try {
-      await apiService.bulkUpdateCases({
-        ids: selectedIds,
-        status: 'Closed',
-      });
-      const selectedCount = selectedIds.length;
-      setSelectedIds([]);
-      setBulkStatus('');
-      setBulkResponsibleUserId('');
-      setBulkStage('');
-      setBulkPriority('');
-      setBulkControlState('keep');
-      setNotice(`В архив отправлено дел: ${selectedCount}.`);
-      setReloadToken((value) => value + 1);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось отправить выбранные дела в архив.');
-    } finally {
-      setBulkSaving(false);
-    }
+    if (selectedIds.length > 0) await runBulkCaseUpdate({ ids: selectedIds, status: 'Closed' }, 'archive');
   };
 
   const archiveCase = async (id: number) => {
-    setBulkSaving(true);
-    setError(null);
-    try {
-      await apiService.bulkUpdateCases({
-        ids: [id],
-        status: 'Closed',
-      });
-      setSelectedIds((current) => current.filter((itemId) => itemId !== id));
-      setNotice('Дело отправлено в архив.');
-      setReloadToken((value) => value + 1);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось отправить дело в архив.');
-    } finally {
-      setBulkSaving(false);
-    }
+    await runBulkCaseUpdate({ ids: [id], status: 'Closed' }, 'one');
   };
 
   const createTaskForCase = async (item: ClientCase) => {

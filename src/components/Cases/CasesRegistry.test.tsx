@@ -6,6 +6,7 @@ import { apiService } from '../../services/api';
 import type { ClientCase } from '../../types';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
 import { CasesRegistry } from './CasesRegistry';
+import { documentCopyTestSession } from '../../test/documentCopySession';
 
 const authState = vi.hoisted(() => ({
   user: {
@@ -19,6 +20,7 @@ const authState = vi.hoisted(() => ({
 
 const permissionsState = vi.hoisted(() => ({
   casesCanExport: true,
+  casesCanEdit: true,
   clientsCanView: true,
   legalEntitiesCanView: true,
   paymentsCanView: true,
@@ -112,7 +114,7 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       calculator: { ...section },
       legalEntities: { ...section, canView: permissionsState.legalEntitiesCanView },
       clients: { ...section, canView: permissionsState.clientsCanView },
-      cases: { ...section, canExport: permissionsState.casesCanExport },
+      cases: { ...section, canExport: permissionsState.casesCanExport, canEdit: permissionsState.casesCanEdit },
       accounts: { ...section },
       acts: { ...section },
       payments: { ...section, canView: permissionsState.paymentsCanView },
@@ -179,6 +181,7 @@ describe('CasesRegistry', () => {
     dialogMock.prompt.mockResolvedValue('\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0435 \u0417\u0435\u043c\u0446\u043e\u0432');
     authState.isAdmin = true;
     permissionsState.casesCanExport = true;
+    permissionsState.casesCanEdit = true;
     permissionsState.clientsCanView = true;
     permissionsState.legalEntitiesCanView = true;
     permissionsState.paymentsCanView = true;
@@ -796,6 +799,56 @@ describe('CasesRegistry', () => {
       });
     });
     expect(await screen.findByText('Массовое изменение применено: обновлено дел 1.')).toBeTruthy();
+  });
+
+  it.each(['apply', 'archive'])('case bulk boundary: %s reports the visible subset instead of the selected count', async action => {
+    vi.mocked(apiService.getCasesV2).mockResolvedValue({ items: [createCase(), createCase({ id: 2, caseNumber: '2026-002', title: 'Второе дело' })], total: 2, page: 1, pageSize: 25 });
+    vi.mocked(apiService.bulkUpdateCases).mockResolvedValue({ updated: 1, requested: 2 });
+    render(<CasesRegistry />); await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getAllByLabelText('Выбрать дело 2026-001')[0]); fireEvent.click(screen.getAllByLabelText('Выбрать дело 2026-002')[0]);
+    if (action === 'apply') { fireEvent.change(screen.getByDisplayValue('Не менять статус'), { target: { value: 'OnHold' } }); fireEvent.click(screen.getByRole('button', { name: 'Применить' })); }
+    else fireEvent.click(screen.getByText('В архив', { selector: 'button' }));
+    expect(await screen.findByText(action === 'apply' ? 'Массовое изменение применено: обработано дел 1 из 2. Остальные дела недоступны или удалены.' : 'В архив отправлено дел: 1 из 2. Остальные дела недоступны или удалены.')).toBeTruthy();
+    expect(apiService.bulkUpdateCases).toHaveBeenCalledOnce();
+  });
+
+  it('case bulk boundary: an old login response cannot clear the new selection or reload its view', async () => {
+    const session = documentCopyTestSession(); let resolve!: (value: { updated: number; requested: number }) => void;
+    vi.mocked(apiService.bulkUpdateCases).mockReturnValue(new Promise(done => { resolve = done; }));
+    try {
+      render(<CasesRegistry />); await screen.findByText('ЗЕМЦОВ - банкротство');
+      fireEvent.click(screen.getAllByLabelText('Выбрать дело 2026-001')[0]); fireEvent.change(screen.getByDisplayValue('Не менять статус'), { target: { value: 'OnHold' } }); fireEvent.click(screen.getByRole('button', { name: 'Применить' }));
+      await waitFor(() => expect(apiService.bulkUpdateCases).toHaveBeenCalledOnce()); const reads = vi.mocked(apiService.getCasesV2).mock.calls.length;
+      session.replace('actor'); await act(async () => resolve({ updated: 1, requested: 1 }));
+      expect(screen.queryByText('Массовое изменение применено: обновлено дел 1.')).toBeNull();
+      expect((screen.getAllByLabelText('Выбрать дело 2026-001')[0] as HTMLInputElement).checked).toBe(true); expect(apiService.getCasesV2).toHaveBeenCalledTimes(reads);
+    } finally { session.restore(); }
+  });
+
+  it('case bulk boundary: an unconfirmed result retains selection and offers no automatic replay', async () => {
+    vi.mocked(apiService.bulkUpdateCases).mockResolvedValue({ updated: 2, requested: 1 });
+    render(<CasesRegistry />); await screen.findByText('ЗЕМЦОВ - банкротство'); fireEvent.click(screen.getAllByLabelText('Выбрать дело 2026-001')[0]); fireEvent.change(screen.getByDisplayValue('Не менять статус'), { target: { value: 'OnHold' } }); fireEvent.click(screen.getByRole('button', { name: 'Применить' }));
+    expect(await screen.findByText('Не удалось подтвердить результат массового изменения. Обновите список дел перед повторной попыткой.')).toBeTruthy();
+    expect((screen.getAllByLabelText('Выбрать дело 2026-001')[0] as HTMLInputElement).checked).toBe(true); expect(apiService.bulkUpdateCases).toHaveBeenCalledOnce();
+  });
+
+  it.each((['selection', 'role', 'permission', 'draft', 'login', 'unmount'] as const).flatMap(change => ['success', 'error'].map(outcome => ({ change, outcome }))))('case bulk ownership: late $outcome cannot follow $change', async ({ change, outcome }) => {
+    const session = documentCopyTestSession(); let resolve!: (value: { updated: number; requested: number }) => void; let reject!: (error: Error) => void;
+    vi.mocked(apiService.bulkUpdateCases).mockReturnValue(new Promise((done, fail) => { resolve = done; reject = fail; }));
+    try {
+      const view = render(<CasesRegistry />); await screen.findByText('ЗЕМЦОВ - банкротство');
+      fireEvent.click(screen.getAllByLabelText('Выбрать дело 2026-001')[0]); fireEvent.change(screen.getByDisplayValue('Не менять статус'), { target: { value: 'OnHold' } }); fireEvent.click(screen.getByRole('button', { name: 'Применить' }));
+      await waitFor(() => expect(apiService.bulkUpdateCases).toHaveBeenCalledOnce());
+      if (change === 'selection') fireEvent.click(screen.getAllByLabelText('Выбрать дело 2026-001')[0]);
+      else if (change === 'role') { authState.user.role.id = 2; view.rerender(<CasesRegistry />); }
+      else if (change === 'permission') { authState.isAdmin = false; permissionsState.casesCanEdit = false; view.rerender(<CasesRegistry />); }
+      else if (change === 'draft') fireEvent.change(screen.getByLabelText('Массово сменить стадию'), { target: { value: 'Новый черновик' } });
+      else if (change === 'login') session.replace('actor');
+      else view.unmount();
+      await act(async () => { if (outcome === 'success') resolve({ updated: 1, requested: 1 }); else reject(new Error('Ошибка прежнего действия')); });
+      expect(screen.queryByText('Массовое изменение применено: обновлено дел 1.')).toBeNull(); expect(screen.queryByText('Ошибка прежнего действия')).toBeNull(); expect(apiService.bulkUpdateCases).toHaveBeenCalledOnce();
+      if (change === 'draft') expect((screen.getByLabelText('Массово сменить стадию') as HTMLInputElement).value).toBe('Новый черновик');
+    } finally { authState.user.role.id = 1; authState.isAdmin = true; permissionsState.casesCanEdit = true; session.restore(); }
   });
 
   it('archives selected cases through the bulk actions panel', async () => {

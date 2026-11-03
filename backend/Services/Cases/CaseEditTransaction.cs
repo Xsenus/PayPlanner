@@ -8,7 +8,7 @@ using PayPlanner.Api.Services.Payments;
 
 namespace PayPlanner.Api.Services.Cases;
 
-internal static class CaseEditTransaction
+internal static partial class CaseEditTransaction
 {
     public static async Task<IActionResult> RunAsync(PaymentContext db, ClaimsPrincipal actor, int id,
         Func<ClientCase, SectionAccessContext, Task<IActionResult>> write, CancellationToken ct)

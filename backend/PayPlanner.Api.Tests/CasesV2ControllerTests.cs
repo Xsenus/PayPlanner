@@ -7519,9 +7519,9 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Equal(2, GetAnonymousInt(ok.Value, "updated"));
         Assert.Equal(3, GetAnonymousInt(ok.Value, "requested"));
 
-        await db.Entry(visibleByClient).ReloadAsync();
-        await db.Entry(visibleByCaseResponsible).ReloadAsync();
-        await db.Entry(hiddenCase).ReloadAsync();
+        visibleByClient = await db.ClientCases.AsNoTracking().SingleAsync(row => row.Id == visibleByClient.Id);
+        visibleByCaseResponsible = await db.ClientCases.AsNoTracking().SingleAsync(row => row.Id == visibleByCaseResponsible.Id);
+        hiddenCase = await db.ClientCases.AsNoTracking().SingleAsync(row => row.Id == hiddenCase.Id);
 
         Assert.Equal(ClientCaseStatus.OnHold, visibleByClient.Status);
         Assert.Equal(nextResponsible.Id, visibleByClient.ResponsibleUserId);
