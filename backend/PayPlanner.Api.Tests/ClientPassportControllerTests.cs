@@ -1,7 +1,9 @@
 using System.Data.Common;
 using System.Reflection;
+using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -44,7 +46,7 @@ public sealed class ClientPassportControllerTests
         var result = await fixture.Controller.Get(404, CancellationToken.None);
 
         Assert.IsType<NotFoundResult>(result);
-        Assert.Single(fixture.Recorder.Commands);
+        AssertBoundedPassportLookup(fixture.Recorder.Commands);
     }
 
     [Fact]
@@ -57,7 +59,7 @@ public sealed class ClientPassportControllerTests
         var result = await fixture.Controller.Get(client.Id, CancellationToken.None);
 
         Assert.IsType<NoContentResult>(result);
-        Assert.Single(fixture.Recorder.Commands);
+        AssertBoundedPassportLookup(fixture.Recorder.Commands);
     }
 
     [Fact]
@@ -84,7 +86,7 @@ public sealed class ClientPassportControllerTests
 
         Assert.Equal("1234", response.Series);
         Assert.Equal("567890", response.Number);
-        var command = Assert.Single(fixture.Recorder.Commands);
+        var command = AssertBoundedPassportLookup(fixture.Recorder.Commands);
         Assert.DoesNotContain("Encrypted", command, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("BlindIndex", command, StringComparison.OrdinalIgnoreCase);
         var json = JsonSerializer.Serialize(response);
@@ -127,7 +129,7 @@ public sealed class ClientPassportControllerTests
         Assert.Equal("540-001", response.DepartmentCode);
         Assert.Equal("Новосибирск", response.BirthPlacePassport);
         Assert.Equal("54", response.BirthPlaceFias);
-        Assert.Equal(1, fixture.Recorder.Commands.Count(command => command.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase)));
+        AssertBoundedPassportLookup(fixture.Recorder.Commands);
         Assert.Equal(1, fixture.Recorder.Commands.Count(command => command.TrimStart().StartsWith("UPDATE", StringComparison.OrdinalIgnoreCase)));
     }
 
@@ -146,7 +148,7 @@ public sealed class ClientPassportControllerTests
         var response = Assert.IsType<ClientPassportResponse>(result.Value);
         Assert.True(response.Id > 0);
         Assert.True(response.IsPrimary);
-        Assert.Equal(1, fixture.Recorder.Commands.Count(command => command.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase)));
+        AssertBoundedPassportLookup(fixture.Recorder.Commands);
         Assert.Equal(1, fixture.Recorder.Commands.Count(command => command.TrimStart().StartsWith("INSERT", StringComparison.OrdinalIgnoreCase)));
         Assert.Equal(1, await fixture.Db.ClientPassports.AsNoTracking().CountAsync(item => item.ClientId == client.Id));
     }
@@ -162,7 +164,7 @@ public sealed class ClientPassportControllerTests
             CancellationToken.None);
 
         Assert.IsType<NotFoundResult>(result);
-        Assert.Single(fixture.Recorder.Commands);
+        AssertBoundedPassportLookup(fixture.Recorder.Commands);
         Assert.False(await fixture.Db.ClientPassports.AsNoTracking().AnyAsync());
     }
 
@@ -210,7 +212,7 @@ public sealed class ClientPassportControllerTests
             var client = new Client { Name = "PostgreSQL паспорт" };
             db.Clients.Add(client);
             await db.SaveChangesAsync();
-            var controller = new ClientPassportController(db);
+            var controller = await AuthenticatedControllerAsync(db);
 
             var created = Assert.IsType<OkObjectResult>(await controller.Upsert(
                 client.Id,
@@ -230,6 +232,26 @@ public sealed class ClientPassportControllerTests
         }
     }
 
+    private static string AssertBoundedPassportLookup(List<string> commands)
+    {
+        var selects = commands.Where(command => command.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.Equal(2, selects.Count);
+        var payload = Assert.Single(selects, command => command.Contains("FROM \"Clients\"", StringComparison.Ordinal));
+        Assert.Single(selects, command => command.Contains("FROM \"Users\"", StringComparison.Ordinal));
+        return payload;
+    }
+
+    private static async Task<ClientPassportController> AuthenticatedControllerAsync(PaymentContext db)
+    {
+        var role = await db.Roles.FirstOrDefaultAsync(row => row.Name == "admin") ?? new Role { Name = "admin" };
+        var user = new User { Role = role, Email = "passport-controller@example.local", FullName = "Синтетический администратор", PasswordHash = "isolated", IsActive = true, IsApproved = true };
+        db.Users.Add(user); await db.SaveChangesAsync();
+        return new ClientPassportController(db)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin")], "passport-unit")) } },
+        };
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -239,12 +261,12 @@ public sealed class ClientPassportControllerTests
             _connection = connection;
             Db = db;
             Recorder = recorder;
-            Controller = new ClientPassportController(db);
+            Controller = null!;
         }
 
         public PaymentContext Db { get; }
         public RecordingCommandInterceptor Recorder { get; }
-        public ClientPassportController Controller { get; }
+        public ClientPassportController Controller { get; private set; }
 
         public static async Task<Fixture> CreateAsync()
         {
@@ -257,8 +279,9 @@ public sealed class ClientPassportControllerTests
                 .Options;
             var db = new PaymentContext(options, useObjectAuditModel: false);
             await db.Database.EnsureCreatedAsync();
+            var fixture = new Fixture(connection, db, recorder) { Controller = await AuthenticatedControllerAsync(db) };
             recorder.Commands.Clear();
-            return new Fixture(connection, db, recorder);
+            return fixture;
         }
 
         public async Task<Client> AddClientAsync()

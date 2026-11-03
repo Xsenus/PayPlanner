@@ -7,7 +7,7 @@ using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
-using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Clients;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -25,18 +25,19 @@ public class ClientPassportController : ControllerBase
     }
 
     /// <summary>
-    /// Возвращает основной паспорт клиента одним SQL-запросом и проецирует
+    /// Проверяет актуальный допуск и возвращает основной паспорт одной целевой
+    /// выборкой, проецируя
     /// только поля, разрешённые интерфейсу. Отсутствующий клиент даёт 404,
     /// а клиент без паспорта — 204.
     /// </summary>
     [HttpGet]
     public async Task<IActionResult> Get(int clientId, CancellationToken ct)
     {
-        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
-        if (visibility is null) return Forbid();
+        var (access, failure) = await ClientPassportAccess.ReadAsync(_db, User, ct);
+        if (failure is not null) return failure;
         var lookup = await _db.Clients
             .AsNoTracking()
-            .ApplyClientVisibility(visibility)
+            .ApplyClientVisibility(access!.Visibility)
             .Where(client => client.Id == clientId)
             .Select(client => new
             {
@@ -74,45 +75,31 @@ public class ClientPassportController : ControllerBase
     /// </summary>
     [HttpPut]
     [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Edit)]
-    public async Task<IActionResult> Upsert(int clientId, [FromBody] UpsertClientPassportRequest model, CancellationToken ct)
+    public Task<IActionResult> Upsert(int clientId, [FromBody] UpsertClientPassportRequest model, CancellationToken ct)
     {
-        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
-        if (visibility is null) return Forbid();
-        var lookup = await _db.Clients
-            .ApplyClientVisibility(visibility)
-            .Where(client => client.Id == clientId)
-            .Select(client => new
-            {
-                Passport = client.Passports
-                    .OrderByDescending(passport => passport.IsPrimary)
-                    .ThenByDescending(passport => passport.UpdatedAt)
-                    .ThenByDescending(passport => passport.CreatedAt)
-                    .FirstOrDefault(),
-            })
-            .SingleOrDefaultAsync(ct);
-        if (lookup is null) return NotFound();
-
-        var entity = lookup.Passport;
-        if (entity is null)
+        return ClientPassportAccess.WriteAsync(_db, User, clientId, async entity =>
         {
-            entity = new ClientPassport { ClientId = clientId, IsPrimary = true };
-            _db.ClientPassports.Add(entity);
-        }
+            if (entity is null)
+            {
+                entity = new ClientPassport { ClientId = clientId, IsPrimary = true };
+                _db.ClientPassports.Add(entity);
+            }
 
-        entity.Series = Normalize(model.Series);
-        entity.Number = Normalize(model.Number);
-        entity.IssuedBy = Normalize(model.IssuedBy);
-        entity.IssuedAt = model.IssuedAt;
-        entity.DepartmentCode = Normalize(model.DepartmentCode);
-        entity.BirthPlacePassport = Normalize(model.BirthPlacePassport);
-        entity.BirthPlaceFias = Normalize(model.BirthPlaceFias);
-        entity.ValidFrom = model.ValidFrom;
-        entity.ValidTo = model.ValidTo;
-        entity.IsPrimary = true;
-        entity.UpdatedAt = DateTime.UtcNow;
+            entity.Series = Normalize(model.Series);
+            entity.Number = Normalize(model.Number);
+            entity.IssuedBy = Normalize(model.IssuedBy);
+            entity.IssuedAt = model.IssuedAt;
+            entity.DepartmentCode = Normalize(model.DepartmentCode);
+            entity.BirthPlacePassport = Normalize(model.BirthPlacePassport);
+            entity.BirthPlaceFias = Normalize(model.BirthPlaceFias);
+            entity.ValidFrom = model.ValidFrom;
+            entity.ValidTo = model.ValidTo;
+            entity.IsPrimary = true;
+            entity.UpdatedAt = DateTime.UtcNow;
 
-        await _db.SaveChangesAsync(ct);
-        return Ok(ToResponse(entity));
+            await _db.SaveChangesAsync(ct);
+            return Ok(ToResponse(entity));
+        }, ct);
     }
 
     /// <summary>Удаляет внешние пробелы и приводит пустое значение к null.</summary>

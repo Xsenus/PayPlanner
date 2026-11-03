@@ -96,8 +96,10 @@ public sealed class ClientPassportHttpAccessTests
         await db.SaveChangesAsync();
         Assert.Equal(HttpStatusCode.NotFound, (await client.PutAsJsonAsync($"/api/clients/{hidden.Id}/passport", new { number = "333333" })).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/clients/{own.Id}/passport", new { number = "444444" })).StatusCode);
-        permission.CanView = false;
-        await db.SaveChangesAsync();
+        // Each request may discard tracked reads; revoke the durable permission,
+        // rather than mutating an instance detached by the previous request.
+        await db.RolePermissions.Where(item => item.Id == permission.Id).ExecuteUpdateAsync(set => set.SetProperty(item => item.CanView, false));
+        Assert.False(await db.RolePermissions.AsNoTracking().Where(item => item.Id == permission.Id).Select(item => item.CanView).SingleAsync());
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/clients/{own.Id}/passport")).StatusCode);
         Assert.Equal("222222", await db.ClientPassports.Where(item => item.ClientId == hidden.Id).Select(item => item.Number).SingleAsync());
     }
