@@ -13,6 +13,27 @@ const writers = [
   { name: 'V2', path: '/v2/cases/19/checked', write: (source: ClientCase) => apiService.updateCaseV2(19, { ...source, title: 'Моя правка' }, source) },
 ];
 
+describe('case delete write', () => {
+  it('accepts one successful no-content deletion', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(null, { status: 204 })); vi.stubGlobal('fetch', fetch);
+    await expect(apiService.deleteCase(19)).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledOnce(); expect(String(fetch.mock.calls[0][0]).endsWith('/cases/19')).toBe(true);
+    expect(fetch.mock.calls[0][1]?.method).toBe('DELETE');
+  });
+
+  it.each([400, 403, 404, 409, 503])('HTTP %s keeps the failure and never falls back or replays deletion', async status => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json({ message: 'Дело и связи сохранены. Обновите карточку.' }, { status })); vi.stubGlobal('fetch', fetch);
+    await expect(apiService.deleteCase(19)).rejects.toMatchObject({ status });
+    expect(fetch).toHaveBeenCalledOnce(); expect(String(fetch.mock.calls[0][0]).endsWith('/cases/19')).toBe(true);
+    expect(fetch.mock.calls[0][1]?.method).toBe('DELETE');
+  });
+
+  it('does not replay deletion after a lost response', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValue(new TypeError('Failed to fetch')); vi.stubGlobal('fetch', fetch);
+    await expect(apiService.deleteCase(19)).rejects.toThrow(); expect(fetch).toHaveBeenCalledOnce();
+  });
+});
+
 describe('checked case write source', () => {
   it.each(writers)('$name accepts a saved case with only owner and responsible captions', async ({ write, path }) => {
     const saved = { id: 19, clientId: 3, title: 'Моя правка', status: 'Open', responsibleUserId: 7,

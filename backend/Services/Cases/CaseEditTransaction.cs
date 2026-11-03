@@ -10,8 +10,16 @@ namespace PayPlanner.Api.Services.Cases;
 
 internal static partial class CaseEditTransaction
 {
-    public static async Task<IActionResult> RunAsync(PaymentContext db, ClaimsPrincipal actor, int id,
+    public static Task<IActionResult> RunAsync(PaymentContext db, ClaimsPrincipal actor, int id,
         Func<ClientCase, SectionAccessContext, Task<IActionResult>> write, CancellationToken ct)
+        => RunSingleAsync(db, actor, id, write, ct, deleting: false);
+
+    public static Task<IActionResult> RunDeleteAsync(PaymentContext db, ClaimsPrincipal actor, int id,
+        Func<ClientCase, SectionAccessContext, Task<IActionResult>> write, CancellationToken ct)
+        => RunSingleAsync(db, actor, id, write, ct, deleting: true);
+
+    private static async Task<IActionResult> RunSingleAsync(PaymentContext db, ClaimsPrincipal actor, int id,
+        Func<ClientCase, SectionAccessContext, Task<IActionResult>> write, CancellationToken ct, bool deleting)
     {
         var actorId = actor.GetUserId();
         if (actor.Identity?.IsAuthenticated != true || actorId is not > 0) return new UnauthorizedResult();
@@ -22,7 +30,8 @@ internal static partial class CaseEditTransaction
             if (!await db.Users.AsNoTracking().AnyAsync(user => user.Id == actorId.Value && user.IsActive && user.IsApproved, ct))
                 return new UnauthorizedResult();
             var access = await db.ResolveSectionAccessAsync(actor, RolePermissionCatalog.Cases, ct, requireApprovedUser: true);
-            if (access?.Permission is not { CanView: true, CanEdit: true }) return new ForbidResult();
+            if (access?.Permission is not { CanView: true } permission
+                || !(deleting ? permission.CanDelete : permission.CanEdit)) return new ForbidResult();
             var clientCase = await db.ClientCases.ApplyClientCaseVisibility(access.Visibility).FirstOrDefaultAsync(row => row.Id == id, ct);
             if (clientCase is null) return new NotFoundResult();
             if (db.Database.IsNpgsql())
@@ -30,14 +39,25 @@ internal static partial class CaseEditTransaction
                 await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"ClientCases\" WHERE \"Id\" = {id} FOR UPDATE NOWAIT", ct);
                 if (!access.Visibility.SeesAll) await LockVisibleOwnersAsync(db, clientCase, ct);
             }
+            if (deleting)
+            {
+                await LockLinkedTasksAsync(db, [id], ct);
+                if (db.Database.IsNpgsql())
+                    await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"ClientCaseId\" = {id} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);
+            }
             var result = await write(clientCase, access);
-            if (result is OkObjectResult) await lease.CommitAsync(ct);
+            if (deleting ? result is NoContentResult : result is OkObjectResult) await lease.CommitAsync(ct);
             return result;
         }
         catch (Exception error) when (!ct.IsCancellationRequested && BalanceApplicationLease.IsConflict(error)
             && (lease?.CommitStarted != true || BalanceApplicationLease.IsDefiniteDatabaseAbort(error)))
         {
-            return new ConflictObjectResult(new { message = "Дело или права доступа изменены либо сейчас заняты. Обновите карточку перед сохранением." });
+            return new ConflictObjectResult(new
+            {
+                message = deleting
+                ? "Дело, связанные записи или права доступа изменены либо сейчас заняты. Обновите карточку перед удалением."
+                : "Дело или права доступа изменены либо сейчас заняты. Обновите карточку перед сохранением."
+            });
         }
         finally
         {

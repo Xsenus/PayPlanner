@@ -209,31 +209,17 @@ public class CasesController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
+        var result = await CaseEditTransaction.RunDeleteAsync(_db, User, id, async (e, _) =>
         {
-            return forbidden;
-        }
-
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
-
-        var e = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (e is null) return NotFound();
-
-        var payments = await _db.Payments.Where(p => p.ClientCaseId == id).ToListAsync(ct);
-        foreach (var p in payments) p.ClientCaseId = null;
-
-        await _db.SaveChangesAsync(ct);
-
-        _db.ClientCases.Remove(e);
-        await _db.SaveChangesAsync(ct);
-        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        return NoContent();
+            var payments = await _db.Payments.Where(p => p.ClientCaseId == id).ToListAsync(ct);
+            foreach (var p in payments) p.ClientCaseId = null;
+            await _db.SaveChangesAsync(ct);
+            _db.ClientCases.Remove(e);
+            await _db.SaveChangesAsync(ct);
+            return NoContent();
+        }, ct);
+        if (result is NoContentResult) await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        return result;
     }
 
     private async Task<IActionResult?> ValidateCaseOwnerAsync(

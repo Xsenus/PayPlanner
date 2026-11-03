@@ -10906,68 +10906,50 @@ public partial class CasesV2Controller : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanDelete, ct) is { } forbidden)
+        var result = await CaseEditTransaction.RunDeleteAsync(_db, User, id, async (e, _) =>
         {
-            return forbidden;
-        }
-
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
-
-        await using var deleteTransaction = await _db.Database.BeginTransactionAsync(ct);
-        if (!await _db.ClientCases.ApplyClientCaseVisibility(visibility).AnyAsync(c => c.Id == id, ct)) return NotFound();
-        if (await _db.ClientCases.Where(c => c.Id == id)
-            .ExecuteUpdateAsync(s => s.SetProperty(c => c.Title, c => c.Title), ct) != 1)
-            return NotFound();
-        var e = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (e is null) return NotFound();
-
-        // Soft-deleted cases can be restored from the audit; their document
-        // objects must stay intact. A hard delete follows attachment retention.
-        if (!_db.UseObjectAuditModel && _productStorageDeletion is not null)
-        {
-            var lastId = 0;
-            while (true)
+            // Soft-deleted cases can be restored from the audit; their document
+            // objects must stay intact. A hard delete follows attachment retention.
+            if (!_db.UseObjectAuditModel && _productStorageDeletion is not null)
             {
-                var documents = await _db.ClientCaseDocuments.AsNoTracking().Where(d => d.ClientCaseId == id && d.Id > lastId)
-                    .OrderBy(d => d.Id).Take(128).ToListAsync(ct);
-                if (documents.Count == 0) break;
-                foreach (var document in documents)
+                var lastId = 0;
+                while (true)
                 {
-                    var deletion = await _productStorageDeletion.DeleteAsync(LegacyStorageSources.CaseDocuments,
-                        document.Id, document.OriginalFileName, document.ContentType,
-                        _caseDocumentStorage.ResolvePath(document.StoragePath), User.GetUserId(), ct);
-                    if (deletion is not ("legacy" or "deleted"))
-                        return StatusCode(deletion == "conflict" ? 409 : 503,
-                            new { message = "Не удалось безопасно удалить документы. Дело и связи платежей сохранены." });
-                    lastId = document.Id;
+                    var documents = await _db.ClientCaseDocuments.AsNoTracking().Where(d => d.ClientCaseId == id && d.Id > lastId)
+                        .OrderBy(d => d.Id).Take(128).ToListAsync(ct);
+                    if (documents.Count == 0) break;
+                    foreach (var document in documents)
+                    {
+                        var deletion = await _productStorageDeletion.DeleteAsync(LegacyStorageSources.CaseDocuments,
+                            document.Id, document.OriginalFileName, document.ContentType,
+                            _caseDocumentStorage.ResolvePath(document.StoragePath), User.GetUserId(), ct);
+                        if (deletion is not ("legacy" or "deleted"))
+                            return StatusCode(deletion == "conflict" ? 409 : 503,
+                                new { message = "Не удалось безопасно удалить документы. Дело и связи платежей сохранены." });
+                        lastId = document.Id;
+                    }
                 }
             }
-        }
 
-        var payments = await _db.Payments.Where(p => p.ClientCaseId == id).ToListAsync(ct);
-        foreach (var p in payments) p.ClientCaseId = null;
-        await _db.SaveChangesAsync(ct);
-
-        var cascadeTiming = _db.ChangeTracker.CascadeDeleteTiming;
-        try
-        {
-            if (_db.UseObjectAuditModel) _db.ChangeTracker.CascadeDeleteTiming = CascadeTiming.OnSaveChanges;
-            _db.ClientCases.Remove(e);
+            var payments = await _db.Payments.Where(p => p.ClientCaseId == id).ToListAsync(ct);
+            foreach (var p in payments) p.ClientCaseId = null;
             await _db.SaveChangesAsync(ct);
-        }
-        finally
-        {
-            _db.ChangeTracker.CascadeDeleteTiming = cascadeTiming;
-        }
-        await deleteTransaction.CommitAsync(ct);
-        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        return NoContent();
+
+            var cascadeTiming = _db.ChangeTracker.CascadeDeleteTiming;
+            try
+            {
+                if (_db.UseObjectAuditModel) _db.ChangeTracker.CascadeDeleteTiming = CascadeTiming.OnSaveChanges;
+                _db.ClientCases.Remove(e);
+                await _db.SaveChangesAsync(ct);
+            }
+            finally
+            {
+                _db.ChangeTracker.CascadeDeleteTiming = cascadeTiming;
+            }
+            return NoContent();
+        }, ct);
+        if (result is NoContentResult) await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        return result;
     }
 
     [HttpPost("bulk-update")]
