@@ -6,7 +6,7 @@ using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
-using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Clients;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -26,8 +26,9 @@ public class PowerOfAttorneyController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> Get(int clientId, CancellationToken ct)
     {
-        var clients = await GetVisibleClientsAsync(permission => permission.CanView, ct);
-        if (clients is null) return Forbid();
+        var (access, failure) = await ClientPowerOfAttorneyTransaction.ResolveAsync(_db, User, ClientPowerOperation.View, ct);
+        if (failure is not null) return failure;
+        var clients = _db.Clients.ApplyClientVisibility(access!.Visibility);
         var result = await clients
             .AsNoTracking()
             .Where(client => client.Id == clientId)
@@ -41,13 +42,9 @@ public class PowerOfAttorneyController : ControllerBase
 
     [HttpPost]
     [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Create)]
-    public async Task<IActionResult> Create(int clientId, [FromBody] UpsertPowerOfAttorneyRequest model, CancellationToken ct)
+    public Task<IActionResult> Create(int clientId, [FromBody] UpsertPowerOfAttorneyRequest model, CancellationToken ct)
+        => ClientPowerOfAttorneyTransaction.RunAsync(_db, User, clientId, null, ClientPowerOperation.Create, async _ =>
     {
-        var clients = await GetVisibleClientsAsync(permission => permission.CanCreate, ct);
-        if (clients is null) return Forbid();
-        var clientExists = await clients.AsNoTracking().AnyAsync(c => c.Id == clientId, ct);
-        if (!clientExists) return NotFound();
-
         var entity = new PowerOfAttorney
         {
             ClientId = clientId,
@@ -62,18 +59,14 @@ public class PowerOfAttorneyController : ControllerBase
         _db.PowersOfAttorney.Add(entity);
         await _db.SaveChangesAsync(ct);
         return Created($"/api/clients/{clientId}/powers-of-attorney/{entity.Id}", entity);
-    }
+    }, ct);
 
     [HttpPut("{id:int}")]
     [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Edit)]
-    public async Task<IActionResult> Update(int clientId, int id, [FromBody] UpsertPowerOfAttorneyRequest model, CancellationToken ct)
+    public Task<IActionResult> Update(int clientId, int id, [FromBody] UpsertPowerOfAttorneyRequest model, CancellationToken ct)
+        => ClientPowerOfAttorneyTransaction.RunAsync(_db, User, clientId, id, ClientPowerOperation.Edit, async existing =>
     {
-        var clients = await GetVisibleClientsAsync(permission => permission.CanEdit, ct);
-        if (clients is null) return Forbid();
-        var entity = await _db.PowersOfAttorney.FirstOrDefaultAsync(x => x.ClientId == clientId && x.Id == id
-            && clients.Any(client => client.Id == x.ClientId), ct);
-        if (entity is null) return NotFound();
-
+        var entity = existing!;
         entity.Number = (model.Number ?? string.Empty).Trim();
         entity.IssuedAt = model.IssuedAt.GetValueOrDefault();
         entity.ValidUntil = model.ValidUntil;
@@ -84,29 +77,19 @@ public class PowerOfAttorneyController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
         return Ok(entity);
-    }
+    }, ct);
 
     [HttpDelete("{id:int}")]
     [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Delete)]
-    public async Task<IActionResult> Delete(int clientId, int id, CancellationToken ct)
+    public Task<IActionResult> Delete(int clientId, int id, CancellationToken ct)
+        => ClientPowerOfAttorneyTransaction.RunAsync(_db, User, clientId, id, ClientPowerOperation.Delete, async existing =>
     {
-        var clients = await GetVisibleClientsAsync(permission => permission.CanDelete, ct);
-        if (clients is null) return Forbid();
-        var entity = await _db.PowersOfAttorney.FirstOrDefaultAsync(x => x.ClientId == clientId && x.Id == id
-            && clients.Any(client => client.Id == x.ClientId), ct);
-        if (entity is null) return NotFound();
-
+        var entity = existing!;
         _db.PowersOfAttorney.Remove(entity);
         await _db.SaveChangesAsync(ct);
         return NoContent();
-    }
+    }, ct);
 
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private async Task<IQueryable<Client>?> GetVisibleClientsAsync(Func<RolePermissionValues, bool> isAllowed, CancellationToken ct)
-    {
-        var access = await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Clients, ct, requireApprovedUser: true);
-        return access is null || access.Permission is not null && !isAllowed(access.Permission)
-            ? null : _db.Clients.ApplyClientVisibility(access.Visibility);
-    }
 }
