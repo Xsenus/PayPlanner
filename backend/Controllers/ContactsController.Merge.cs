@@ -363,6 +363,25 @@ public partial class ContactsController
                     conflicts.Add("Организация указана как основная компания CRM. Сначала измените настройку основной компании.");
             }
         }
+        if (conflicts.Count == 0 && pair.Duplicate is LegalEntity duplicateCompany)
+        {
+            // Persistent banking, branch and money history identifies an own company
+            // even when current registration settings no longer list it.
+            var protectedHistory = await _db.LegalEntities.AsNoTracking().Where(x => x.Id == duplicateCompany.Id)
+                .Select(x => new
+                {
+                    Bank = _db.CompanyBankAccountBindings.IgnoreQueryFilters().Any(binding => binding.LegalEntityId == x.Id)
+                        || _db.BankConnections.IgnoreQueryFilters().Any(connection => connection.LegalEntityId == x.Id),
+                    Own = _db.CompanyBranches.IgnoreQueryFilters().Any(branch => branch.LegalEntityId == x.Id)
+                        || _db.MoneyAccounts.IgnoreQueryFilters().Any(account => account.CompanyId == x.Id)
+                        || _db.CashOrders.IgnoreQueryFilters().Any(order => order.CompanyId == x.Id)
+                        || _db.CashInventories.IgnoreQueryFilters().Any(inventory => inventory.CompanyId == x.Id)
+                        || _db.BankStatementImportBatches.IgnoreQueryFilters().Any(batch => batch.CompanyId == x.Id)
+                        || _db.MoneyBalanceReconciliationResults.IgnoreQueryFilters().Any(result => result.CompanyId == x.Id),
+                }).SingleAsync(ct);
+            if (protectedHistory.Bank) conflicts.Add("У организации есть банковские подключения или история подтверждений счетов. Перенос требует отдельной проверки; объединение не выполнено.");
+            else if (protectedHistory.Own) conflicts.Add("Организация используется как собственная компания в подразделениях или денежных данных. Её историю нельзя перенести обычным объединением контактов.");
+        }
         return conflicts;
     }
 
