@@ -42,6 +42,25 @@ public sealed class CaseEditRequest : ClientCase
 
 internal static class CaseEditSnapshot
 {
+    private static readonly PropertyInfo[] V1Properties = new[] { nameof(ClientCase.Title), nameof(ClientCase.Description), nameof(ClientCase.Status), nameof(ClientCase.ClientId), nameof(ClientCase.LegalEntityId) }
+        .Select(name => typeof(ClientCase).GetProperty(name)!).ToArray();
+
+    public static bool TryMergeV1(ClientCase current, ClientCase requested, ClientCase original)
+    {
+        if (original.Id != current.Id) return false;
+        if (current.ClientId != original.ClientId && requested.ClientId != current.ClientId) return false;
+        if (current.LegalEntityId != original.LegalEntityId && requested.LegalEntityId != current.LegalEntityId) return false;
+        var replacements = new List<(PropertyInfo Property, object? Value)>();
+        foreach (var property in V1Properties)
+        {
+            var actual = property.GetValue(current); var wanted = property.GetValue(requested); var before = property.GetValue(original);
+            if (Same(wanted, before)) replacements.Add((property, actual));
+            else if (!Same(actual, before) && !Same(actual, wanted)) return false;
+        }
+        foreach (var (property, value) in replacements) property.SetValue(requested, value);
+        return true;
+    }
+
     private static readonly PropertyInfo[] ReplyScalars = typeof(ClientCase).GetProperties(BindingFlags.Public | BindingFlags.Instance)
         .Where(property => property.CanRead && property.CanWrite && property.GetIndexParameters().Length == 0
             && (property.PropertyType == typeof(string) || property.PropertyType.IsValueType)).ToArray();

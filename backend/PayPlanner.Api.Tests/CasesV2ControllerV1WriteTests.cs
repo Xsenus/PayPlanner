@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Controllers.V1;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Cases;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -14,8 +15,10 @@ public partial class CasesV2ControllerTests
     private static Task<IActionResult> UpdateV1CaseAsync(PaymentContext db, User user, ClientCase source, ClientCase input, CancellationToken ct)
         => new CasesV1Controller(db) { ControllerContext = CreateController(db, user).ControllerContext }.Update(source.Id, input, ct);
 
-    private static ClientCase V1CaseInput(ClientCase source, ClientCaseStatus? status = null)
-        => new() { ClientId = source.ClientId, LegalEntityId = source.LegalEntityId, Title = source.Title, Description = source.Description, Status = status ?? source.Status };
+    private static CaseEditRequest V1CaseInput(ClientCase source, ClientCaseStatus? status = null)
+    {
+        var input = EditRequest(source); input.Status = status ?? source.Status; return input;
+    }
 
     [Theory]
     [InlineData(false, false)]
@@ -130,7 +133,7 @@ public partial class CasesV2ControllerTests
         var owner = reply.GetProperty("client"); var leaks = owner.TryGetProperty("notes", out var notes) && notes.ValueKind == System.Text.Json.JsonValueKind.String && notes.GetString() == privateNote;
         Assert.True(!leaks, $"HTTP {(int)closed.StatusCode}; leakedOwnerNotes={leaks}"); Assert.Equal("Синтетический клиент", owner.GetProperty("name").GetString());
         var report = await db.TaskJournalItems.AsNoTracking().SingleAsync(row => row.IsCaseFinalReport); Assert.Equal("new", report.Status); Assert.Equal(user.Id, report.AssigneeUserId); Assert.Equal("done", (await db.TaskJournalItems.AsNoTracking().SingleAsync(row => row.Title == "Открытая задача 1")).Status);
-        input.Status = ClientCaseStatus.Open; using var reopened = await client.PutAsJsonAsync($"/api/v1/cases/{source.Id}", input); Assert.Equal(HttpStatusCode.OK, reopened.StatusCode); Assert.Equal("cancelled", (await db.TaskJournalItems.AsNoTracking().SingleAsync(row => row.IsCaseFinalReport)).Status);
+        input = V1CaseInput(await db.ClientCases.AsNoTracking().SingleAsync(row => row.Id == source.Id), ClientCaseStatus.Open); using var reopened = await client.PutAsJsonAsync($"/api/v1/cases/{source.Id}", input); Assert.Equal(HttpStatusCode.OK, reopened.StatusCode); Assert.Equal("cancelled", (await db.TaskJournalItems.AsNoTracking().SingleAsync(row => row.IsCaseFinalReport)).Status);
         var tasks = await db.TaskJournalItems.AsNoTracking().ToArrayAsync(); Assert.Equal(4, tasks.Length); Assert.Equal("Сохранённый результат", Assert.Single(tasks, row => row.Title == "Завершённая задача").Result); Assert.Equal("new", Assert.Single(tasks, row => row.ClientCaseId == ids[1]).Status);
         var actual = await db.ClientCases.AsNoTracking().SingleAsync(row => row.Id == source.Id); Assert.Equal(ClientCaseStatus.Open, actual.Status); Assert.Equal(source.EventHistory, actual.EventHistory); Assert.Equal(source.CourtClaimAmount, actual.CourtClaimAmount); Assert.Equal(privateNote, (await db.Clients.AsNoTracking().SingleAsync()).Notes); Assert.Empty(await db.Payments.ToArrayAsync());
     }

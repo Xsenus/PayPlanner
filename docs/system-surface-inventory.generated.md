@@ -7,9 +7,9 @@
 
 - Разделов frontend: 55.
 - Backend-контроллеров: 98.
-- HTTP endpoints: 968; с прямой тестовой связью: 684.
-- HTTP endpoints с точной ссылкой из документации: 276; критичных без такой ссылки: 527.
-- Критичных endpoints без прямой тестовой связи: 236.
+- HTTP endpoints: 969; с прямой тестовой связью: 683.
+- HTTP endpoints с точной ссылкой из документации: 277; критичных без такой ссылки: 527.
+- Критичных endpoints без прямой тестовой связи: 238.
 - Реальных HTML-форм: 21; с найденной тестовой связью: 19.
 - Фоновых сервисов: 35; с найденной тестовой связью: 28.
 - Исходящих HTTP-интеграций: 12; с найденной тестовой связью: 12.
@@ -241,7 +241,7 @@
 | UserActivityController | backend/Controllers/UserActivityController.cs | 10 | [Authorize] | да |
 | UsersController | backend/Controllers/UsersController.cs | 11 | [Authorize(Policy = "Admin")] | да |
 | UserSettingsController | backend/Controllers/UserSettingsController.cs | 5 | [Authorize] | да |
-| CasesV1Controller | backend/Controllers/V1/CasesV1Controller.cs | 5 | [Authorize] | да |
+| CasesV1Controller | backend/Controllers/V1/CasesV1Controller.cs | 6 | [Authorize] | да |
 | ClientsV1Controller | backend/Controllers/V1/ClientsV1Controller.cs | 5 | [Authorize] | да |
 | PaymentsV1Controller | backend/Controllers/V1/PaymentsV1Controller.cs | 5 | [Authorize] | да |
 | CasesV2Controller | backend/Controllers/V2/CasesV2Controller.Appeal.cs | 4 | не задано | да |
@@ -513,6 +513,8 @@
 | GET | api/users/{id:int} | UsersController.GetUser | чувствительные данные или операция | backend/Controllers/UsersController.cs:115 |
 | GET | api/users/paged | UsersController.GetUsersPaged | чувствительные данные или операция | backend/Controllers/UsersController.cs:171 |
 | GET | api/users/roles | UsersController.GetRoles | чувствительные данные или операция | backend/Controllers/UsersController.cs:112 |
+| PUT | api/v1/cases/{id:int} | CasesV1Controller.UpdateWithSource | изменение данных | backend/Controllers/V1/CasesV1Controller.cs:97 |
+| PUT | api/v1/cases/{id:int}/checked | CasesV1Controller.UpdateWithSource | изменение данных | backend/Controllers/V1/CasesV1Controller.cs:98 |
 | GET | api/yandex-calendar/auth/status/{state} | YandexCalendarController.GetAuthStatus | чувствительные данные или операция | backend/Controllers/YandexCalendarController.cs:65 |
 | DELETE | api/yandex-calendar/connection | YandexCalendarController.Disconnect | изменение данных | backend/Controllers/YandexCalendarController.cs:157 |
 | POST | api/yandex-calendar/sync-now | YandexCalendarController.SyncNow | изменение данных | backend/Controllers/YandexCalendarController.cs:127 |
@@ -1293,8 +1295,9 @@
 | GET | api/v1/cases | CasesV1Controller | Get | backend/Controllers/V1/CasesV1Controller.cs:30 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/full-project-audit-2026-06-10.md, docs/unpushed-changes-map-2026-10-03.md |
 | GET | api/v1/cases/{id:int} | CasesV1Controller | GetById | backend/Controllers/V1/CasesV1Controller.cs:56 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
 | POST | api/v1/cases | CasesV1Controller | Create | backend/Controllers/V1/CasesV1Controller.cs:73 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/full-project-audit-2026-06-10.md |
-| PUT | api/v1/cases/{id:int} | CasesV1Controller | Update | backend/Controllers/V1/CasesV1Controller.cs:97 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
-| DELETE | api/v1/cases/{id:int} | CasesV1Controller | Delete | backend/Controllers/V1/CasesV1Controller.cs:150 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
+| PUT | api/v1/cases/{id:int} | CasesV1Controller | UpdateWithSource | backend/Controllers/V1/CasesV1Controller.cs:97 | [Authorize] | нет | docs/company-reference-ownership-checkpoint-2026-11-01.md |
+| PUT | api/v1/cases/{id:int}/checked | CasesV1Controller | UpdateWithSource | backend/Controllers/V1/CasesV1Controller.cs:98 | [Authorize] | нет | docs/company-reference-ownership-checkpoint-2026-11-01.md |
+| DELETE | api/v1/cases/{id:int} | CasesV1Controller | Delete | backend/Controllers/V1/CasesV1Controller.cs:163 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
 | GET | api/v1/clients | ClientsV1Controller | Get | backend/Controllers/V1/ClientsV1Controller.cs:54 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | GET | api/v1/clients/{id:int} | ClientsV1Controller | GetById | backend/Controllers/V1/ClientsV1Controller.cs:91 | [Authorize] | да | нет |
 | POST | api/v1/clients | ClientsV1Controller | Create | backend/Controllers/V1/ClientsV1Controller.cs:126 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |

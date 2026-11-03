@@ -95,11 +95,24 @@ public class CasesV1Controller : ControllerBase
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] ClientCase model, CancellationToken ct)
+    [HttpPut("{id:int}/checked")]
+    public Task<IActionResult> UpdateWithSource(int id, [FromBody] CaseV1EditRequest model, CancellationToken ct)
+        => model.ExpectedSource is not { HasObservedFields: true } source
+            ? Task.FromResult<IActionResult>(BadRequest(new { message = "Для сохранения нужны исходные данные дела: название, описание, статус и владелец. Обновите карточку." }))
+            : UpdateCoreAsync(id, model, source.ToCase(), ct);
+
+    // Trusted in-process callers retain the existing business entry point.
+    [NonAction]
+    public Task<IActionResult> Update(int id, ClientCase model, CancellationToken ct)
+        => UpdateCoreAsync(id, model, null, ct);
+
+    private async Task<IActionResult> UpdateCoreAsync(int id, ClientCase model, ClientCase? expectedSource, CancellationToken ct)
     {
         return await CaseEditTransaction.RunAsync(_db, User, id, async (e, access) =>
         {
-            // V1 changes only these owner fields; its other supplied case fields stay ignored.
+            if (expectedSource is not null && !CaseEditSnapshot.TryMergeV1(e, model, expectedSource))
+                return Conflict(new { message = "Дело изменилось после открытия редактора. Обновите данные перед сохранением." });
+            // The responsible user is not one of the fields edited by V1.
             var links = new ClientCase { ClientId = model.ClientId, LegalEntityId = model.LegalEntityId, ResponsibleUserId = e.ResponsibleUserId };
             var validation = await CaseEditTransaction.ValidateEditedLinksAsync(_db, e, links, access.Visibility, ct);
             if (validation is not null) return validation;
@@ -108,8 +121,8 @@ public class CasesV1Controller : ControllerBase
                 && model.Status is ClientCaseStatus.Closed or ClientCaseStatus.Lost;
             var shouldCancelFinalReport = e.Status is ClientCaseStatus.Closed or ClientCaseStatus.Lost
                 && model.Status is not (ClientCaseStatus.Closed or ClientCaseStatus.Lost);
-            var isCourtCase = shouldCloseLinkedTasks && (ClientCaseFinalReportTaskService.HasCourtFields(model)
-                || (await ClientCaseFinalReportTaskService.FilterCourtCaseIdsAsync(_db, [e], ct)).Contains(e.Id));
+            var isCourtCase = shouldCloseLinkedTasks
+                && (await ClientCaseFinalReportTaskService.FilterCourtCaseIdsAsync(_db, [e], ct)).Contains(e.Id);
             var finalReportAssignee = isCourtCase
                 ? await ClientCaseFinalReportTaskService.ResolveAssigneeAsync(_db, ct)
                 : null;
