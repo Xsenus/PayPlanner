@@ -1113,10 +1113,11 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     action();
   };
 
-  const updateCase = async (patch: Partial<ClientCase>) => {
+  const updateCase = async (patch: Partial<ClientCase>, originalSource?: ClientCase) => {
     if (!editingCase) return;
 
-    const updated = await apiService.updateCaseV2(editingCase.id, buildCaseUpdatePayload(editingCase, patch), editingCase);
+    const source = originalSource ?? editingCase;
+    const updated = await apiService.updateCaseV2(editingCase.id, buildCaseUpdatePayload(source, patch), source);
     setItems((current) => current.map((item) => (item.id === updated.id ? updated : item)));
     setEditingCase(null);
     setNotice('Дело обновлено.');

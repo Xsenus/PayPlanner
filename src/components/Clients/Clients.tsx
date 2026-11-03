@@ -963,16 +963,17 @@ function ClientsScreen({ context, onOpenContract, onOpenInvoice, onOpenAct, onOp
     setCaseModalOpen(true);
   };
 
-  const saveCase = async (patch: Partial<ClientCase>): Promise<void> => {
+  const saveCase = async (patch: Partial<ClientCase>, originalSource?: ClientCase): Promise<void> => {
     if (!caseModalOpen || !caseClientId || (caseMode === 'edit' && !editingCase) || !caseOwner.capture()) throw new StaleUiOperationError();
     if (caseMode === 'edit' ? !canEditClientCases : !canCreateClientCases) throw new StaleUiOperationError();
     const operation = caseOwner.begin('save'); if (!operation) throw new Error('Сохранение дела уже выполняется.');
 
-    const base = buildCaseUpdatePayload(editingCase, { ...patch, clientId: caseClientId, legalEntityId: null });
+    const source = originalSource ?? editingCase;
+    const base = buildCaseUpdatePayload(source, { ...patch, clientId: caseClientId, legalEntityId: null });
 
     try {
     if (caseMode === 'edit' && editingCase) {
-      const updated = await awaitOwnedUiResult(() => apiService.updateCase(editingCase.id, base, editingCase), operation.isCurrent);
+      const updated = await awaitOwnedUiResult(() => apiService.updateCase(editingCase.id, base, source!), operation.isCurrent);
       if (!updated || updated.id !== editingCase.id || updated.clientId !== caseClientId) throw new Error('Не удалось подтвердить сохранённое дело. Обновите карточку.');
       latestList.current.setClients((prev) =>
         prev.map((c) =>

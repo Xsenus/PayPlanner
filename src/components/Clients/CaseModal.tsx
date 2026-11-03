@@ -1,4 +1,4 @@
-import { caseDateInput, caseHearingInput, caseNullableTextInput, caseTextInput } from '../../utils/caseEditInput';
+import { captureCaseEditSource, caseDateInput, caseHearingInput, caseNullableTextInput, caseTextInput, caseWritSubmissionInput } from '../../utils/caseEditInput';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
@@ -33,7 +33,7 @@ interface CaseModalProps {
   isOpen: boolean;
   onClose: () => void;
   caseData: ClientCase; // для create передаём «пустой» кейс
-  onSave: (patch: Partial<ClientCase>) => Promise<void> | void;
+  onSave: (patch: Partial<ClientCase>, originalSource?: ClientCase) => Promise<void> | void;
   onPositionReviewed?: (review: Pick<ClientCase, 'positionReviewedAt' | 'positionReviewedByUserId' | 'positionReviewedByName'>) => void;
   onNextHearingConfirmed?: (confirmation: Pick<ClientCase, 'nextHearingConfirmedForAt' | 'nextHearingConfirmedAt' | 'nextHearingConfirmedByUserId' | 'nextHearingConfirmedByName'>) => void;
   onDelete?: () => Promise<void> | void;
@@ -282,6 +282,8 @@ export function CaseModal({
   const { confirm, prompt } = useDialog();
   const caseActionOwner = useDocumentDeliveryOwner(JSON.stringify([isOpen, caseData.id, caseData.clientId, caseData.legalEntityId, allowEdit, canViewFinance, canUseContactRelatedParties, canUseLegalEntityRelatedParties, canCreateTasks, user?.id, user?.role?.id]));
   const { capture: captureCaseOwner } = caseActionOwner;
+  const draftScope = useRef<string | null>(null);
+  const draftSource = useRef(caseData);
   const [readClosed, setReadClosed] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -421,6 +423,9 @@ export function CaseModal({
   }, [canUseContactRelatedParties, canUseLegalEntityRelatedParties, relatedPartyMode]);
 
   useEffect(() => {
+    if (draftScope.current === caseActionOwner.scope) return;
+    draftScope.current = caseActionOwner.scope;
+    draftSource.current = captureCaseEditSource(caseData);
     setReadClosed(false); hearingEdited.current = false; historyEdited.current = false; historySource.current = caseData.eventHistory; activityEdited.current = false;
     setTitle(caseData.title ?? '');
     setDescription(caseData.description ?? '');
@@ -499,6 +504,11 @@ export function CaseModal({
     setRelatedPartyRole('Участник');
     setErrorState(null);
   }, [caseData, isOpen, caseActionOwner.scope, setDocumentsError, setRelatedPartiesError]);
+
+  useEffect(() => {
+    setPositionReview({ positionReviewedAt: caseData.positionReviewedAt ?? null, positionReviewedByUserId: caseData.positionReviewedByUserId ?? null, positionReviewedByName: caseData.positionReviewedByName ?? '' });
+    setHearingConfirmation({ nextHearingConfirmedForAt: caseData.nextHearingConfirmedForAt ?? null, nextHearingConfirmedAt: caseData.nextHearingConfirmedAt ?? null, nextHearingConfirmedByUserId: caseData.nextHearingConfirmedByUserId ?? null, nextHearingConfirmedByName: caseData.nextHearingConfirmedByName ?? '' });
+  }, [caseData]);
 
   const readEnabled = isOpen && !readClosed && caseData.id > 0 && captureAuthSessionIdentity().authenticated;
   const readOwned = useCallback(<T,>(signal: AbortSignal, operation: () => Promise<T>) => {
@@ -715,7 +725,7 @@ export function CaseModal({
   };
 
   const handleSave = async () => {
-    if (!isOpen || !caseActionOwner.capture()) return;
+    if (!isOpen || draftScope.current !== caseActionOwner.scope || !caseActionOwner.capture()) return;
     if (!allowEdit) {
       setError('Недостаточно прав для редактирования дела.');
       return;
@@ -729,64 +739,63 @@ export function CaseModal({
     const operation = caseActionOwner.begin('save'); if (!operation) return;
     setError(null);
     try {
+      const source = draftSource.current;
       const patch: Partial<ClientCase> = {
-        title: caseTextInput(title, caseData.title),
-        description: caseTextInput(description, caseData.description),
+        title: caseTextInput(title, source.title),
+        description: caseTextInput(description, source.description),
         status,
-        caseNumber: caseTextInput(caseNumber, caseData.caseNumber),
-        caseType: caseTextInput(caseType, caseData.caseType),
-        stage: caseTextInput(stage, caseData.stage),
+        caseNumber: caseTextInput(caseNumber, source.caseNumber),
+        caseType: caseTextInput(caseType, source.caseType),
+        stage: caseTextInput(stage, source.stage),
         responsibleUserId: responsibleUserId ? Number(responsibleUserId) : null,
-        startDate: caseDateInput(startDate, caseData.startDate),
-        dueDate: caseDateInput(dueDate, caseData.dueDate),
+        startDate: caseDateInput(startDate, source.startDate),
+        dueDate: caseDateInput(dueDate, source.dueDate),
         ...(canViewFinance ? { feeAmount: Number(feeAmount.replace(',', '.')) || 0 } : {}),
         priority,
-        courtName: caseTextInput(courtName, caseData.courtName),
+        courtName: caseTextInput(courtName, source.courtName),
         courtClaimAmount: parseCourtAmountInput(courtClaimAmount),
         courtAwardedAmount: parseCourtAmountInput(courtAwardedAmount),
         courtStateFeeAmount: parseCourtAmountInput(courtStateFeeAmount),
         clearCourtClaimAmount: !courtClaimAmount.trim(),
         clearCourtAwardedAmount: !courtAwardedAmount.trim(),
         clearCourtStateFeeAmount: !courtStateFeeAmount.trim(),
-        courtCaseNumber: caseTextInput(courtCaseNumber, caseData.courtCaseNumber),
-        courtUrl: caseTextInput(courtUrl, caseData.courtUrl),
-        nextHearingAt: caseHearingInput(nextHearingAt, caseData.nextHearingAt, timeZoneId),
-        claimant: caseTextInput(claimant, caseData.claimant),
-        claimantInn: caseNullableTextInput(claimantInn, caseData.claimantInn),
-        claimantOgrn: caseNullableTextInput(claimantOgrn, caseData.claimantOgrn),
-        ourCourtRole: ourCourtRole === (caseData.ourCourtRole ?? '') ? caseData.ourCourtRole ?? null : ourCourtRole,
-        defendant: caseTextInput(defendant, caseData.defendant),
-        defendantInn: caseNullableTextInput(defendantInn, caseData.defendantInn),
-        defendantOgrn: caseNullableTextInput(defendantOgrn, caseData.defendantOgrn),
-        thirdParties: caseTextInput(thirdParties, caseData.thirdParties),
-        representatives: caseTextInput(representatives, caseData.representatives),
-        judgeName: caseTextInput(judgeName, caseData.judgeName),
-        courtroom: caseTextInput(courtroom, caseData.courtroom),
-        courtSecretaryContacts: caseTextInput(courtSecretaryContacts, caseData.courtSecretaryContacts),
-        claimFiledAt: caseDateInput(claimFiledAt, caseData.claimFiledAt),
-        courtRegisteredAt: caseDateInput(courtRegisteredAt, caseData.courtRegisteredAt),
+        courtCaseNumber: caseTextInput(courtCaseNumber, source.courtCaseNumber),
+        courtUrl: caseTextInput(courtUrl, source.courtUrl),
+        nextHearingAt: caseHearingInput(nextHearingAt, source.nextHearingAt, timeZoneId),
+        claimant: caseTextInput(claimant, source.claimant),
+        claimantInn: caseNullableTextInput(claimantInn, source.claimantInn),
+        claimantOgrn: caseNullableTextInput(claimantOgrn, source.claimantOgrn),
+        ourCourtRole: ourCourtRole === (source.ourCourtRole ?? '') ? source.ourCourtRole ?? null : ourCourtRole,
+        defendant: caseTextInput(defendant, source.defendant),
+        defendantInn: caseNullableTextInput(defendantInn, source.defendantInn),
+        defendantOgrn: caseNullableTextInput(defendantOgrn, source.defendantOgrn),
+        thirdParties: caseTextInput(thirdParties, source.thirdParties),
+        representatives: caseTextInput(representatives, source.representatives),
+        judgeName: caseTextInput(judgeName, source.judgeName),
+        courtroom: caseTextInput(courtroom, source.courtroom),
+        courtSecretaryContacts: caseTextInput(courtSecretaryContacts, source.courtSecretaryContacts),
+        claimFiledAt: caseDateInput(claimFiledAt, source.claimFiledAt),
+        courtRegisteredAt: caseDateInput(courtRegisteredAt, source.courtRegisteredAt),
         clearCourtRegisteredAt: !courtRegisteredAt,
-        courtDecisionAt: caseDateInput(courtDecisionAt, caseData.courtDecisionAt),
-        courtDecisionEffectiveAt: caseDateInput(courtDecisionEffectiveAt, caseData.courtDecisionEffectiveAt),
+        courtDecisionAt: caseDateInput(courtDecisionAt, source.courtDecisionAt),
+        courtDecisionEffectiveAt: caseDateInput(courtDecisionEffectiveAt, source.courtDecisionEffectiveAt),
         clearCourtDecisionEffectiveAt: !courtDecisionEffectiveAt,
-        executiveWritReceivedAt: caseDateInput(executiveWritReceivedAt, caseData.executiveWritReceivedAt),
+        executiveWritReceivedAt: caseDateInput(executiveWritReceivedAt, source.executiveWritReceivedAt),
         clearExecutiveWritReceivedAt: !executiveWritReceivedAt,
-        executiveWritSubmittedAt: caseDateInput(executiveWritSubmittedAt, caseData.executiveWritSubmittedAt),
-        executiveWritSubmittedTo: executiveWritSubmittedAt ? executiveWritSubmittedTo : '',
-        clearExecutiveWritSubmission: !executiveWritSubmittedAt,
-        appealDeadlineAt: caseDateInput(appealDeadlineAt, caseData.appealDeadlineAt),
-        cassationDeadlineAt: caseDateInput(cassationDeadlineAt, caseData.cassationDeadlineAt),
-        motionDeadlineAt: caseDateInput(motionDeadlineAt, caseData.motionDeadlineAt),
-        objectionDeadlineAt: caseDateInput(objectionDeadlineAt, caseData.objectionDeadlineAt),
-        documentsSummary: caseTextInput(documentsSummary, caseData.documentsSummary),
+        ...caseWritSubmissionInput(executiveWritSubmittedAt, executiveWritSubmittedTo, source),
+        appealDeadlineAt: caseDateInput(appealDeadlineAt, source.appealDeadlineAt),
+        cassationDeadlineAt: caseDateInput(cassationDeadlineAt, source.cassationDeadlineAt),
+        motionDeadlineAt: caseDateInput(motionDeadlineAt, source.motionDeadlineAt),
+        objectionDeadlineAt: caseDateInput(objectionDeadlineAt, source.objectionDeadlineAt),
+        documentsSummary: caseTextInput(documentsSummary, source.documentsSummary),
         eventHistory: caseTextInput(eventHistory, historySource.current),
-        strategy: caseTextInput(strategy, caseData.strategy),
+        strategy: caseTextInput(strategy, source.strategy),
         inactivityRemindersEnabled: activity.inactivityRemindersEnabled,
         inactivityRemindersDisabledReason: activity.inactivityRemindersEnabled
           ? ''
           : activity.inactivityRemindersDisabledReason?.trim(),
       };
-      await awaitOwnedUiResult(() => Promise.resolve(onSave(patch)), operation.isCurrent);
+      await awaitOwnedUiResult(() => Promise.resolve(onSave(patch, source)), operation.isCurrent);
       handleClose();
     } catch (e: unknown) {
       if (operation.isCurrent() && !(e instanceof StaleUiOperationError)) setError(extractDisplayErrorMessage(e, 'Не удалось сохранить дело.'));

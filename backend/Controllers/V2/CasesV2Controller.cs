@@ -10739,7 +10739,7 @@ public partial class CasesV2Controller : ControllerBase
             var submittedAt = model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedAt ?? e.ExecutiveWritSubmittedAt;
             var submittedTo = model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedTo ?? e.ExecutiveWritSubmittedTo;
             var receivedAt = model.ClearExecutiveWritReceivedAt ? null : model.ExecutiveWritReceivedAt ?? e.ExecutiveWritReceivedAt;
-            if (ClientCaseWritSubmissionRules.Validate(receivedAt, submittedAt, submittedTo) is { } writError) return BadRequest(writError);
+            if (ClientCaseWritSubmissionRules.ValidateEdit(e, receivedAt, submittedAt, submittedTo) is { } writError) return BadRequest(writError);
             var inactivityStateChanged = e.InactivityRemindersEnabled != model.InactivityRemindersEnabled;
             if (!TryNormalizeInactivityReminderState(
                     model.InactivityRemindersEnabled,
@@ -11271,7 +11271,8 @@ public partial class CasesV2Controller : ControllerBase
         else
         {
             if (source.ExecutiveWritSubmittedAt.HasValue) target.ExecutiveWritSubmittedAt = source.ExecutiveWritSubmittedAt;
-            if (source.ExecutiveWritSubmittedTo is not null) target.ExecutiveWritSubmittedTo = source.ExecutiveWritSubmittedTo.Trim().ToLowerInvariant();
+            if (source.ExecutiveWritSubmittedTo is not null && (!preserveExistingText || source.ExecutiveWritSubmittedTo != target.ExecutiveWritSubmittedTo))
+                target.ExecutiveWritSubmittedTo = source.ExecutiveWritSubmittedTo.Trim().ToLowerInvariant();
         }
         target.AppealDeadlineAt = ResolveProceduralDeadline(
             source.AppealDeadlineAt,

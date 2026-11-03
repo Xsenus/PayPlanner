@@ -1,4 +1,4 @@
-import { caseDateInput, caseHearingInput, caseNullableTextInput, caseTextInput } from '../../utils/caseEditInput';
+import { captureCaseEditSource, caseDateInput, caseHearingInput, caseNullableTextInput, caseTextInput, caseWritSubmissionInput } from '../../utils/caseEditInput';
 import { buildCaseUpdatePayload } from '../../utils/caseEditPayload';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
@@ -1290,7 +1290,7 @@ function buildCourtComplaintDraft(instance = 'first', complaint?: ClientCaseCour
 
 function buildCaseEditDraft(caseItem: ClientCase, timeZoneId = activeCaseTimeZoneId): CaseEditDraft {
   return {
-    originalSource: Object.fromEntries(Object.entries(caseItem).filter(([, value]) => value === null || ['string', 'number', 'boolean'].includes(typeof value))) as unknown as ClientCase,
+    originalSource: captureCaseEditSource(caseItem),
     timeZoneId,
     title: caseItem.title ?? '',
     description: caseItem.description ?? '',
@@ -1385,9 +1385,7 @@ function buildCasePatchFromEditDraft(draft: CaseEditDraft): Partial<ClientCase> 
     clearCourtDecisionEffectiveAt: !draft.courtDecisionEffectiveAt,
     executiveWritReceivedAt: caseDateInput(draft.executiveWritReceivedAt, draft.originalSource.executiveWritReceivedAt),
     clearExecutiveWritReceivedAt: !draft.executiveWritReceivedAt,
-    executiveWritSubmittedAt: caseDateInput(draft.executiveWritSubmittedAt, draft.originalSource.executiveWritSubmittedAt),
-    executiveWritSubmittedTo: draft.executiveWritSubmittedAt ? draft.executiveWritSubmittedTo : '',
-    clearExecutiveWritSubmission: !draft.executiveWritSubmittedAt,
+    ...caseWritSubmissionInput(draft.executiveWritSubmittedAt, draft.executiveWritSubmittedTo, draft.originalSource),
     appealDeadlineAt: caseDateInput(draft.appealDeadlineAt, draft.originalSource.appealDeadlineAt),
     cassationDeadlineAt: caseDateInput(draft.cassationDeadlineAt, draft.originalSource.cassationDeadlineAt),
     motionDeadlineAt: caseDateInput(draft.motionDeadlineAt, draft.originalSource.motionDeadlineAt),

@@ -5228,7 +5228,7 @@ function ClientDetailScreen({
     [clientId],
   );
 
-  const saveCase = async (patch: Partial<ClientCase>): Promise<void> => {
+  const saveCase = async (patch: Partial<ClientCase>, originalSource?: ClientCase): Promise<void> => {
     if (caseMode === "edit" && editingCase) {
       if (!casePermissions.canEdit) {
         showPermissionWarning("Недостаточно прав для редактирования дел.");
@@ -5239,10 +5239,11 @@ function ClientDetailScreen({
       return;
     }
 
-    const base = buildCaseUpdatePayload(editingCase, { ...patch, clientId: clientId, legalEntityId: null });
+    const source = originalSource ?? editingCase;
+    const base = buildCaseUpdatePayload(source, { ...patch, clientId: clientId, legalEntityId: null });
 
     if (caseMode === "edit" && editingCase) {
-      const updated = await apiService.updateCase(editingCase.id, base, editingCase);
+      const updated = await apiService.updateCase(editingCase.id, base, source!);
       setCasesLocal((prev) =>
         (prev ?? []).map((item) =>
           item.id === updated.id ? { ...item, ...updated } : item,

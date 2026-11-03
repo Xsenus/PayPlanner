@@ -86,8 +86,9 @@ describe('client page action ownership', () => {
   });
   it('client action regression: a normal case update retains its payload and updates only the matching cached case', async () => {
     vi.mocked(apiService.updateCase).mockResolvedValue({ ...caseRow(11), title: 'Сохранённое дело', feeAmount: 12.125 }); render(<Clients />); const props = await openCase();
-    await act(async () => { await props.onSave({ title: 'Сохранённое дело', feeAmount: 12.125, clearCourtClaimAmount: true }); });
-    expect(apiService.updateCase).toHaveBeenCalledWith(11, expect.objectContaining({ clientId: 1, title: 'Сохранённое дело', feeAmount: 12.125, clearCourtClaimAmount: true }), expect.objectContaining({ id: 11 })); expect(apiService.updateCase).toHaveBeenCalledOnce();
+    const original = { ...props.caseData, description: 'Описание при открытии' };
+    await act(async () => { await props.onSave({ title: 'Сохранённое дело', feeAmount: 12.125, clearCourtClaimAmount: true }, original); });
+    expect(apiService.updateCase).toHaveBeenCalledWith(11, expect.objectContaining({ clientId: 1, title: 'Сохранённое дело', feeAmount: 12.125, clearCourtClaimAmount: true, description: original.description }), expect.objectContaining({ id: 11, description: original.description })); expect(apiService.updateCase).toHaveBeenCalledOnce();
     expect(screen.queryByTestId('case-fixture')).toBeNull(); expect(screen.getByText('Сохранённое дело')).toBeTruthy(); expect(screen.getByText('Дело 12')).toBeTruthy(); expect(apiService.getClientsV2).toHaveBeenCalledOnce();
   });
   it('client action regression: create and delete cases preserve their client and do not issue redundant list reads', async () => {

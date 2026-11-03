@@ -77,6 +77,31 @@ function createCase(overrides: Partial<ClientCase> = {}): ClientCase {
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: Error) => void; const promise = new Promise<T>((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; }
 
 describe('CaseModal', () => {
+  it.each(['bank', 'fssp'] as const)('case draft boundary: keeps an untouched historical writ destination without a date (%s)', async destination => {
+    const onSave = vi.fn();
+    render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase({ executiveWritSubmittedAt: null, executiveWritSubmittedTo: destination })} onSave={onSave} />);
+    await act(async () => {});
+    fireEvent.change(screen.getByLabelText('Название дела'), { target: { value: 'Другое название' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0][0]).toMatchObject({ title: 'Другое название', executiveWritSubmittedAt: null, executiveWritSubmittedTo: destination, clearExecutiveWritSubmission: false });
+  });
+
+  it.each(['metadata', 'business'])('case draft boundary: retains input and its original snapshot on same-case %s refresh', async refresh => {
+    const onSave = vi.fn(); const original = createCase({ title: 'Исходное название', nextHearingAt: '2099-12-01T10:00:00Z' });
+    const props = { isOpen: true, onClose: vi.fn(), caseData: original, onSave };
+    const view = render(<CaseModal {...props} />); await act(async () => {});
+    fireEvent.change(screen.getByLabelText('Название дела'), { target: { value: 'Мой черновик' } });
+    fireEvent.change(screen.getByLabelText('Следующее заседание'), { target: { value: '2099-12-02T11:30' } });
+    view.rerender(<CaseModal {...props} caseData={{ ...original, title: refresh === 'business' ? 'Чужая новая правка' : original.title, positionReviewedAt: '2026-11-03T01:00:00Z', positionReviewedByName: 'Юрист' }} />);
+    expect((screen.getByLabelText('Название дела') as HTMLInputElement).value).toBe('Мой черновик');
+    expect((screen.getByLabelText('Следующее заседание') as HTMLInputElement).value).toBe('2099-12-02T11:30');
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0][0].title).toBe('Мой черновик');
+    expect(onSave.mock.calls[0][1]).toMatchObject({ id: original.id, title: original.title, nextHearingAt: original.nextHearingAt });
+  });
+
   it('caller lookup retry: a failed responsible catalogue keeps its selected ID and draft while retrying', async () => {
     const retry = vi.fn();
     const props = { isOpen: true, caseData: createCase({ responsibleUserId: 5, responsibleUserName: 'Прежний ответственный' }), onClose: vi.fn(), onSave: vi.fn(),
@@ -111,7 +136,7 @@ describe('CaseModal', () => {
     fireEvent.change(screen.getByLabelText('Крайний срок'), { target: { value: '2026-12-03' } });
     fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Новая позиция' } });
     fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', [key]: true }); await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ caseNumber: 'НОВЫЙ-2026', feeAmount: 123.45, courtClaimAmount: 12.34, courtAwardedAmount: 56.78, courtStateFeeAmount: null, clearCourtStateFeeAmount: true, dueDate: '2026-12-03', strategy: 'Новая позиция' }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ caseNumber: 'НОВЫЙ-2026', feeAmount: 123.45, courtClaimAmount: 12.34, courtAwardedAmount: 56.78, courtStateFeeAmount: null, clearCourtStateFeeAmount: true, dueDate: '2026-12-03', strategy: 'Новая позиция' }), expect.objectContaining({ id: 1 }));
   });
   it('case draft baseline: keyboard save respects a newly revoked edit permission', async () => {
     const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn() }; const view = render(<CaseModal {...props} />); await act(async () => {}); view.rerender(<CaseModal {...props} allowEdit={false} />);
@@ -140,7 +165,7 @@ describe('CaseModal', () => {
   it('case draft boundary: a previous case save cannot close the new case or block its save', async () => {
     const pending = deferred<void>(); const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(undefined) }; const view = render(<CaseModal {...props} />); await act(async () => {});
     fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true }); view.rerender(<CaseModal {...props} caseData={createCase({ id: 2, title: 'Другое дело' })} />); await act(async () => pending.resolve(undefined)); expect(props.onClose).not.toHaveBeenCalled();
-    fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true }); await waitFor(() => expect(props.onSave).toHaveBeenCalledTimes(2)); expect(props.onSave).toHaveBeenLastCalledWith(expect.objectContaining({ title: 'Другое дело' }));
+    fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true }); await waitFor(() => expect(props.onSave).toHaveBeenCalledTimes(2)); expect(props.onSave).toHaveBeenLastCalledWith(expect.objectContaining({ title: 'Другое дело' }), expect.objectContaining({ id: 2 }));
   });
   it.each(['sync', 'async'] as const)('case draft boundary: a current %s failure permits one explicit retry', async mode => {
     const onSave = vi.fn().mockResolvedValue(undefined); if (mode === 'sync') onSave.mockImplementationOnce(() => { throw new Error('Повторите сохранение'); }); else onSave.mockRejectedValueOnce(new Error('Повторите сохранение'));
@@ -387,7 +412,7 @@ describe('CaseModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       strategy: 'Исходная позиция\n\nИзучить материалы',
-    })));
+    }), expect.objectContaining({ id: 1 })));
   });
 
   it('does not offer position editing or templates in a read-only legacy card', () => {
@@ -676,7 +701,7 @@ describe('CaseModal', () => {
       documentsSummary: 'Паспорт, договор',
       eventHistory: 'Заявление принято',
       strategy: 'Подать ходатайство',
-    }));
+    }), expect.objectContaining({ id: 1 }));
   });
 
   it('requires and saves a reason when inactivity control is disabled', async () => {
@@ -701,7 +726,7 @@ describe('CaseModal', () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       inactivityRemindersEnabled: false,
       inactivityRemindersDisabledReason: 'Работа временно ведётся вне CRM',
-    }));
+    }), expect.objectContaining({ id: 1 }));
   });
 
   it('loads case documents and uploads selected file with type and status', async () => {
@@ -803,7 +828,7 @@ describe('CaseModal', () => {
       executiveWritReceivedAt: '2026-10-03',
       executiveWritSubmittedAt: null,
       clearExecutiveWritSubmission: true,
-    })));
+    }), expect.objectContaining({ id: 1 })));
   });
 
   it('prevents saving a writ submission dated before its receipt', async () => {

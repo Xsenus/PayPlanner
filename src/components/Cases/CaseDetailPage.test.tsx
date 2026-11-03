@@ -2518,6 +2518,17 @@ describe('CaseDetailPage', () => {
     });
   });
 
+  it.each(['bank', 'fssp'] as const)('case draft boundary: full editor preserves an untouched historical writ destination without a date (%s)', async destination => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ executiveWritSubmittedAt: null, executiveWritSubmittedTo: destination }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.change(screen.getByLabelText('Название дела'), { target: { value: 'Другое название' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u }).at(-1) as HTMLElement);
+    await waitFor(() => expect(apiService.updateCaseV2).toHaveBeenCalled());
+    expect(vi.mocked(apiService.updateCaseV2).mock.calls[0][1]).toMatchObject({ title: 'Другое название', executiveWritSubmittedAt: null, executiveWritSubmittedTo: destination, clearExecutiveWritSubmission: false });
+  });
+
   it('prevents submitting the writ before its receipt in the full editor', async () => {
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ executiveWritReceivedAt: '2026-10-03' }));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);

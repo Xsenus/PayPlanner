@@ -2536,16 +2536,17 @@ export function LegalEntityModal({
     setCaseModalOpen(true);
   };
 
-  const saveLegalEntityCase = async (patch: Partial<ClientCase>) => {
+  const saveLegalEntityCase = async (patch: Partial<ClientCase>, originalSource?: ClientCase) => {
     const operation = isOpen && caseModalOpen && deleteSession.authenticated && currentLegalEntityId
       && canMutateRelated('cases', caseMode === 'edit' ? 'canEdit' : 'canCreate') ? relatedCaseOwner.begin('save') : null;
     if (!operation) throw new StaleUiOperationError();
     try {
 
-      const payload: LegalEntityCasePayload = buildCaseUpdatePayload(editingCase, { ...patch, clientId: null, legalEntityId: currentLegalEntityId });
+      const source = originalSource ?? editingCase;
+      const payload: LegalEntityCasePayload = buildCaseUpdatePayload(source, { ...patch, clientId: null, legalEntityId: currentLegalEntityId });
 
       if (caseMode === "edit" && editingCase) {
-        await updateLegalEntityCase(editingCase.id, payload, operation.isCurrent, editingCase);
+        await updateLegalEntityCase(editingCase.id, payload, operation.isCurrent, source!);
         if (!operation.isCurrent()) throw new StaleUiOperationError();
         setCaseFinanceReloadToken((value) => value + 1);
         return;

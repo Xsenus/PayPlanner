@@ -432,7 +432,7 @@ describe('LegalEntityModal integration', () => {
 
   describe('related write ownership', () => {
     type Kind = 'case' | 'invoice' | 'act';
-    type Child = { onSave: (payload: Partial<ClientCase>) => Promise<void>; onSubmit: (payload: InvoiceInput | ActInput) => Promise<void>; onDelete?: () => Promise<void>; onClose: () => void; onNextHearingConfirmed?: (value: Partial<ClientCase>) => void; submitting?: boolean; errorMessage?: string | null; caseData?: ClientCase; initialValues?: Partial<ActInput> };
+    type Child = { onSave: (payload: Partial<ClientCase>, originalSource?: ClientCase) => Promise<void>; onSubmit: (payload: InvoiceInput | ActInput) => Promise<void>; onDelete?: () => Promise<void>; onClose: () => void; onNextHearingConfirmed?: (value: Partial<ClientCase>) => void; submitting?: boolean; errorMessage?: string | null; caseData?: ClientCase; initialValues?: Partial<ActInput> };
     const kindSection = { case: 'cases', invoice: 'accounts', act: 'acts' } as const;
     const kindLabel = { case: 'Дело', invoice: 'Счёт', act: 'Акт' };
     const fixture = { case: 'related-case-fixture', invoice: 'invoice-lookup-fixture', act: 'act-lookup-fixture' };
@@ -527,8 +527,9 @@ describe('LegalEntityModal integration', () => {
     it('case exact parent: legal entity preserves complete edits and explicit empty dates', async () => {
       const source = { ...row, strategy: '  Исходная позиция  ', eventHistory: '  История  ', nextHearingAt: '2099-11-03T12:34:56.1234567Z', isUnderControl: true };
       vi.mocked(apiService.getCasesV1).mockResolvedValue([source]); render(<LegalEntityModal {...propsFor('page')} />); fireEvent.click(await screen.findByTitle('Редактировать дело')); await screen.findByTestId(fixture.case);
-      await act(async () => { await child('case').onSave({ title: 'Правка юриста', strategy: source.strategy, eventHistory: source.eventHistory, nextHearingAt: null, courtRegisteredAt: null, clearCourtRegisteredAt: true, documentsSummary: 'Новые материалы', courtClaimAmount: 123.45 }); });
-      expect(apiService.updateCase).toHaveBeenCalledWith(81, expect.objectContaining({ legalEntityId: 9, clientId: null, strategy: source.strategy, eventHistory: source.eventHistory, nextHearingAt: null, courtRegisteredAt: null, clearCourtRegisteredAt: true, documentsSummary: 'Новые материалы', courtClaimAmount: 123.45, isUnderControl: true }), expect.objectContaining({ id: 81, eventHistory: source.eventHistory }));
+      const original = { ...source, description: 'Описание при открытии' };
+      await act(async () => { await child('case').onSave({ title: 'Правка юриста', strategy: source.strategy, eventHistory: source.eventHistory, nextHearingAt: null, courtRegisteredAt: null, clearCourtRegisteredAt: true, documentsSummary: 'Новые материалы', courtClaimAmount: 123.45 }, original); });
+      expect(apiService.updateCase).toHaveBeenCalledWith(81, expect.objectContaining({ legalEntityId: 9, clientId: null, strategy: source.strategy, eventHistory: source.eventHistory, nextHearingAt: null, courtRegisteredAt: null, clearCourtRegisteredAt: true, documentsSummary: 'Новые материалы', courtClaimAmount: 123.45, isUnderControl: true, description: original.description }), expect.objectContaining({ id: 81, eventHistory: source.eventHistory, description: original.description }));
     });
     it.each(['invoice', 'act'] as const)('related write edit: current %s keeps its existing ID and update payload', async kind => {
       if (kind === 'invoice') vi.mocked(apiService.getInvoices).mockResolvedValue({ items: [{ id: 82, invoiceEntityId: 82, number: 'INV-EDIT', type: 'Income', date: '2026-10-31', legalEntityId: 9, amount: 100, status: 'Pending' } as Invoice], total: 1, page: 1, pageSize: 5 });

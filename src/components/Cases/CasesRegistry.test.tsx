@@ -67,6 +67,7 @@ vi.mock('../../services/api', () => ({
     runCaseCourtSync: vi.fn(),
     createCaseV2: vi.fn(),
     updateCaseV2: vi.fn(),
+    reviewCasePosition: vi.fn(),
     updateCaseControl: vi.fn(),
     getCaseDocumentTemplates: vi.fn(),
     getCasePositionTemplates: vi.fn(),
@@ -1056,6 +1057,23 @@ describe('CasesRegistry', () => {
         }), expect.objectContaining({ id: 1 })
       );
     });
+  });
+
+  it('case draft boundary: registry review updates metadata while retaining input and the original save source', async () => {
+    const source = createCase({ strategy: 'Исходная позиция' });
+    vi.mocked(apiService.getCasesV2).mockResolvedValue({ items: [source], total: 1, page: 1, pageSize: 25 });
+    vi.mocked(apiService.reviewCasePosition).mockResolvedValue({ positionReviewedAt: '2026-11-03T01:00:00Z', positionReviewedByUserId: 7, positionReviewedByName: 'Юрист' });
+    render(<CasesRegistry />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.contextMenu(screen.getAllByRole('button', { name: '2026-001' })[0], { clientX: 160, clientY: 220 });
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Редактировать дело' }));
+    fireEvent.change(await screen.findByLabelText('Название дела'), { target: { value: 'Несохранённый черновик' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Подтвердить проверку позиции' }));
+    await screen.findByText(/Позиция проверена.*Юрист/);
+    expect((screen.getByLabelText('Название дела') as HTMLInputElement).value).toBe('Несохранённый черновик');
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(apiService.updateCaseV2).toHaveBeenCalledWith(source.id, expect.objectContaining({ title: 'Несохранённый черновик' }), expect.objectContaining({ title: source.title })));
+    expect(vi.mocked(apiService.updateCaseV2).mock.lastCall![2]?.positionReviewedAt).toBe(source.positionReviewedAt);
   });
 
   it('renders a compact mobile case list with the key fields', async () => {

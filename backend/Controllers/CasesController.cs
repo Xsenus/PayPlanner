@@ -142,7 +142,7 @@ public class CasesController : ControllerBase
             var receivedAt = model.ClearExecutiveWritReceivedAt ? null : model.ExecutiveWritReceivedAt ?? e.ExecutiveWritReceivedAt;
             var submittedAt = model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedAt ?? e.ExecutiveWritSubmittedAt;
             var submittedTo = model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedTo ?? e.ExecutiveWritSubmittedTo;
-            if (ClientCaseWritSubmissionRules.Validate(receivedAt, submittedAt, submittedTo) is { } writError) return BadRequest(writError);
+            if (ClientCaseWritSubmissionRules.ValidateEdit(e, receivedAt, submittedAt, submittedTo) is { } writError) return BadRequest(writError);
 
             var shouldCloseLinkedTasks = !IsFinishedCaseStatus(e.Status) && IsFinishedCaseStatus(model.Status);
             var shouldCancelFinalReport = IsFinishedCaseStatus(e.Status) && !IsFinishedCaseStatus(model.Status);
@@ -330,7 +330,8 @@ public class CasesController : ControllerBase
         else
         {
             if (source.ExecutiveWritSubmittedAt.HasValue) target.ExecutiveWritSubmittedAt = source.ExecutiveWritSubmittedAt;
-            if (source.ExecutiveWritSubmittedTo is not null) target.ExecutiveWritSubmittedTo = source.ExecutiveWritSubmittedTo.Trim().ToLowerInvariant();
+            if (source.ExecutiveWritSubmittedTo is not null && (!preserveExistingText || source.ExecutiveWritSubmittedTo != target.ExecutiveWritSubmittedTo))
+                target.ExecutiveWritSubmittedTo = source.ExecutiveWritSubmittedTo.Trim().ToLowerInvariant();
         }
         target.AppealDeadlineAt = source.AppealDeadlineAt;
         target.MotionDeadlineAt = source.MotionDeadlineAt;
