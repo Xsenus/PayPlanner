@@ -579,50 +579,30 @@ public class ClientsV2Controller : ControllerBase
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] Client model, CancellationToken ct)
+    public Task<IActionResult> Update(int id, [FromBody] Client model, CancellationToken ct)
     {
-        if (await RequireClientsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        return ClientUpdateTransaction.RunAsync(_db, User, id, model, async (e, responsibleUserId) =>
         {
-            return forbidden;
-        }
+            if (ClientBirthDateInput.Resolve(model, e.BirthDate, out var birthDate) is { } invalidDate) return invalidDate;
 
-        var access = await GetCurrentAccessAsync(ct);
-        if (access is null)
-        {
-            return Unauthorized();
-        }
+            e.Name = model.Name;
+            e.Email = model.Email;
+            e.Phone = model.Phone;
+            e.Company = model.Company;
+            e.Address = model.Address;
+            e.Notes = model.Notes;
+            e.BirthDate = birthDate;
+            e.IsActive = model.IsActive;
+            e.LegalEntityId = model.LegalEntityId;
+            e.ResponsibleUserId = responsibleUserId;
+            e.ClientStatusId = model.ClientStatusId;
+            e.IsClientAndSupplier = model.IsClientAndSupplier;
 
-        var e = await BuildVisibleClientsQuery(access)
-            .FirstOrDefaultAsync(c => c.Id == id, ct);
-        if (e is null) return NotFound();
-
-        var responsibleUserId = access.IsAdmin
-            ? model.ResponsibleUserId
-            : e.ResponsibleUserId;
-        if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
-        {
-            return BadRequest($"Ответственный #{responsibleUserId} не найден");
-        }
-
-        if (ClientBirthDateInput.Resolve(model, e.BirthDate, out var birthDate) is { } invalidDate) return invalidDate;
-
-        e.Name = model.Name;
-        e.Email = model.Email;
-        e.Phone = model.Phone;
-        e.Company = model.Company;
-        e.Address = model.Address;
-        e.Notes = model.Notes;
-        e.BirthDate = birthDate;
-        e.IsActive = model.IsActive;
-        e.LegalEntityId = model.LegalEntityId;
-        e.ResponsibleUserId = responsibleUserId;
-        e.ClientStatusId = model.ClientStatusId;
-        e.IsClientAndSupplier = model.IsClientAndSupplier;
-
-        await _db.SaveChangesAsync(ct);
-        await _db.Entry(e).Reference(c => c.ResponsibleUser).LoadAsync(ct);
-        e.ResponsibleUserName = FormatResponsibleUserName(e.ResponsibleUser);
-        return Ok(e);
+            await _db.SaveChangesAsync(ct);
+            await _db.Entry(e).Reference(c => c.ResponsibleUser).LoadAsync(ct);
+            e.ResponsibleUserName = FormatResponsibleUserName(e.ResponsibleUser);
+            return Ok(e);
+        }, ct);
     }
 
     [HttpDelete("{id:int}")]

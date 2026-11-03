@@ -1021,74 +1021,38 @@ public class ClientsController : ControllerBase
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] Client model, CancellationToken ct)
+    public Task<IActionResult> Update(int id, [FromBody] Client model, CancellationToken ct)
     {
-        var missingUpdate = await _formRequirements.GetMissingFieldsAsync("clients", BuildClientRequirementsModel(model));
-        missingUpdate = missingUpdate
-            .Where(field => !string.Equals(field, "Email", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(field, "Phone", StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
-
-        var access = await GetCurrentAccessAsync(ct);
-        if (access is null)
+        return ClientUpdateTransaction.RunAsync(_db, User, id, model, async (e, responsibleUserId) =>
         {
-            return AccessDenied();
-        }
+            var missingUpdate = await _formRequirements.GetMissingFieldsAsync("clients", BuildClientRequirementsModel(model));
+            missingUpdate = missingUpdate
+                .Where(field => !string.Equals(field, "Email", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(field, "Phone", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
 
-        if (await RequireClientsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
+            if (ClientBirthDateInput.Resolve(model, e.BirthDate, out var birthDate) is { } invalidDate) return invalidDate;
 
-        var e = await BuildVisibleClientsQuery(access)
-            .FirstOrDefaultAsync(c => c.Id == id, ct);
-        if (e is null) return NotFound();
-        if (model.LegalEntityId.HasValue)
-        {
-            var exists = await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.Id == model.LegalEntityId.Value);
-            if (!exists)
-            {
-                return BadRequest($"Юридическое лицо #{model.LegalEntityId.Value} не найдено");
-            }
-        }
-
-        if (model.ClientStatusId.HasValue)
-        {
-            var statusExists = await _db.ClientStatuses.AsNoTracking().AnyAsync(s => s.Id == model.ClientStatusId.Value);
-            if (!statusExists)
-            {
-                return BadRequest($"Статус клиента #{model.ClientStatusId.Value} не найден");
-            }
-        }
-        var responsibleUserId = access.IsAdmin
-            ? model.ResponsibleUserId
-            : e.ResponsibleUserId;
-        if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
-        {
-            return BadRequest($"Ответственный #{responsibleUserId} не найден");
-        }
-
-        if (ClientBirthDateInput.Resolve(model, e.BirthDate, out var birthDate) is { } invalidDate) return invalidDate;
-
-        e.Name = model.Name;
-        e.Email = model.Email;
-        e.Phone = model.Phone;
-        e.Company = model.Company;
-        e.Address = model.Address;
-        e.Notes = model.Notes;
-        e.BirthDate = birthDate;
-        var profilePayload = ExtractProfilePayloadFromNotes(model.Notes);
-        await SyncClientAddressesAsync(e, profilePayload);
-        await SyncClientPassportAsync(e, profilePayload);
-        e.IsActive = model.IsActive;
-        e.LegalEntityId = model.LegalEntityId;
-        e.ResponsibleUserId = responsibleUserId;
-        e.ClientStatusId = model.ClientStatusId;
-        e.IsClientAndSupplier = model.IsClientAndSupplier;
-        await _db.SaveChangesAsync(ct);
-        var response = await LoadClientResponseAsync(e.Id, ct);
-        return Ok(response);
+            e.Name = model.Name;
+            e.Email = model.Email;
+            e.Phone = model.Phone;
+            e.Company = model.Company;
+            e.Address = model.Address;
+            e.Notes = model.Notes;
+            e.BirthDate = birthDate;
+            var profilePayload = ExtractProfilePayloadFromNotes(model.Notes);
+            await SyncClientAddressesAsync(e, profilePayload);
+            await SyncClientPassportAsync(e, profilePayload);
+            e.IsActive = model.IsActive;
+            e.LegalEntityId = model.LegalEntityId;
+            e.ResponsibleUserId = responsibleUserId;
+            e.ClientStatusId = model.ClientStatusId;
+            e.IsClientAndSupplier = model.IsClientAndSupplier;
+            await _db.SaveChangesAsync(ct);
+            var response = await LoadClientResponseAsync(e.Id, ct);
+            return Ok(response);
+        }, ct);
     }
 
 
