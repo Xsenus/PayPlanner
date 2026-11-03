@@ -893,6 +893,9 @@ public class CashOrdersController : ControllerBase
             return forbidden;
         }
 
+        if (model.Client is not null || model.Payment is not null || model.MoneyOperation is not null || model.Invoice is not null)
+            return BadRequest("Связанные платежи, денежные операции, счета и клиентов создавайте отдельно. Для ордера по существующему документу используйте действие в исходной записи.");
+
         if (model.Amount <= 0m)
         {
             return BadRequest("Сумма кассового ордера должна быть больше нуля.");

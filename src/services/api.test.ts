@@ -871,6 +871,16 @@ describe('apiService cash order reads', () => {
 });
 
 describe('extractResponseErrorMessage', () => {
+  it.each(['application/json', 'application/problem+json'])('reads a JSON string error for %s', async contentType => {
+    const response = new Response(JSON.stringify('  Связанные записи создавайте отдельно.  '), { status: 400, headers: { 'Content-Type': contentType } });
+    await expect(extractResponseErrorMessage(response)).resolves.toBe('Связанные записи создавайте отдельно.');
+  });
+
+  it('keeps an empty JSON string error empty', async () => {
+    const response = new Response(JSON.stringify('   '), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    await expect(extractResponseErrorMessage(response)).resolves.toBe('');
+  });
+
   it('prefers problem details detail field for API errors', async () => {
     const response = new Response(
       JSON.stringify({

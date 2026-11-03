@@ -2874,7 +2874,10 @@ export async function extractResponseErrorMessage(response: Response): Promise<s
             missingFields?: string[];
             errors?: Record<string, string[] | string>;
           }
+        | string
         | null;
+
+      if (typeof payload === 'string') return payload.trim();
 
       const detail = payload?.detail?.trim();
       if (detail) {

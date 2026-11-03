@@ -621,15 +621,15 @@
 | POST | api/cash-orders/from-payment/{paymentId:int} | CashOrdersController | CreateFromPayment | backend/Controllers/CashOrdersController.cs:696 | [Authorize] | да | нет |
 | POST | api/cash-orders/from-money-operation/{operationId:int} | CashOrdersController | CreateFromMoneyOperation | backend/Controllers/CashOrdersController.cs:768 | [Authorize] | да | нет |
 | POST | api/cash-orders | CashOrdersController | Create | backend/Controllers/CashOrdersController.cs:888 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/full-project-audit-2026-06-10.md, docs/report-inventory-2026-08-09.md |
-| PUT | api/cash-orders/{id:int} | CashOrdersController | Update | backend/Controllers/CashOrdersController.cs:964 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| DELETE | api/cash-orders/{id:int} | CashOrdersController | Delete | backend/Controllers/CashOrdersController.cs:1028 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| POST | api/cash-orders/{id:int}/post | CashOrdersController | Post | backend/Controllers/CashOrdersController.cs:1062 | [Authorize] | да | нет |
-| POST | api/cash-orders/{id:int}/cancel | CashOrdersController | Cancel | backend/Controllers/CashOrdersController.cs:1147 | [Authorize] | да | нет |
-| POST | api/cash-orders/{id:int}/copy | CashOrdersController | Copy | backend/Controllers/CashOrdersController.cs:1184 | [Authorize] | да | нет |
-| GET | api/cash-orders/{id:int}/print | CashOrdersController | Print | backend/Controllers/CashOrdersController.cs:1275 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| GET | api/cash-orders/payment/{paymentId:int}/print | CashOrdersController | PrintForPayment | backend/Controllers/CashOrdersController.cs:1305 | [Authorize] | да | нет |
-| GET | api/cash-orders/{id:int}/pdf | CashOrdersController | DownloadPdf | backend/Controllers/CashOrdersController.cs:1347 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| GET | api/cash-orders/{id:int}/word | CashOrdersController | DownloadWord | backend/Controllers/CashOrdersController.cs:1385 | [Authorize] | да | нет |
+| PUT | api/cash-orders/{id:int} | CashOrdersController | Update | backend/Controllers/CashOrdersController.cs:967 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| DELETE | api/cash-orders/{id:int} | CashOrdersController | Delete | backend/Controllers/CashOrdersController.cs:1031 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| POST | api/cash-orders/{id:int}/post | CashOrdersController | Post | backend/Controllers/CashOrdersController.cs:1065 | [Authorize] | да | нет |
+| POST | api/cash-orders/{id:int}/cancel | CashOrdersController | Cancel | backend/Controllers/CashOrdersController.cs:1150 | [Authorize] | да | нет |
+| POST | api/cash-orders/{id:int}/copy | CashOrdersController | Copy | backend/Controllers/CashOrdersController.cs:1187 | [Authorize] | да | нет |
+| GET | api/cash-orders/{id:int}/print | CashOrdersController | Print | backend/Controllers/CashOrdersController.cs:1278 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| GET | api/cash-orders/payment/{paymentId:int}/print | CashOrdersController | PrintForPayment | backend/Controllers/CashOrdersController.cs:1308 | [Authorize] | да | нет |
+| GET | api/cash-orders/{id:int}/pdf | CashOrdersController | DownloadPdf | backend/Controllers/CashOrdersController.cs:1350 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| GET | api/cash-orders/{id:int}/word | CashOrdersController | DownloadWord | backend/Controllers/CashOrdersController.cs:1388 | [Authorize] | да | нет |
 | GET |  | ClientBalancesController | GetSummary | backend/Controllers/ClientBalancesController.cs:56 | не задано | да | нет |
 | GET | transactions | ClientBalancesController | GetTransactions | backend/Controllers/ClientBalancesController.cs:77 | не задано | да | docs/bank-integrations-api-verification-2026-10-09.md, docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/delete-behavior-contract-2026-06-10.md |
 | GET | applications/{requestId:guid} | ClientBalancesController | GetApplication | backend/Controllers/ClientBalancesController.cs:115 | не задано | да | docs/balance-application-cancel-fence-checkpoint-2026-10-31.md, docs/balance-application-managed-route-checkpoint-2026-10-31.md, docs/balance-application-recovery-checkpoint-2026-10-31.md |
