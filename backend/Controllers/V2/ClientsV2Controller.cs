@@ -565,6 +565,8 @@ public class ClientsV2Controller : ControllerBase
         return ClientCreateTransaction.RunAsync(_db, User, model, async responsibleUserId =>
         {
             if (ClientCreationInput.Validate(_db, model) is { } graphError) return graphError;
+            if (ClientBirthDateInput.Resolve(model, null, out var birthDate) is { } invalidDate) return invalidDate;
+            model.BirthDate = birthDate;
 
             model.ResponsibleUserId = responsibleUserId;
             ClientCreationInput.InitializeServerStamps(model);
@@ -602,12 +604,15 @@ public class ClientsV2Controller : ControllerBase
             return BadRequest($"Ответственный #{responsibleUserId} не найден");
         }
 
+        if (ClientBirthDateInput.Resolve(model, e.BirthDate, out var birthDate) is { } invalidDate) return invalidDate;
+
         e.Name = model.Name;
         e.Email = model.Email;
         e.Phone = model.Phone;
         e.Company = model.Company;
         e.Address = model.Address;
         e.Notes = model.Notes;
+        e.BirthDate = birthDate;
         e.IsActive = model.IsActive;
         e.LegalEntityId = model.LegalEntityId;
         e.ResponsibleUserId = responsibleUserId;

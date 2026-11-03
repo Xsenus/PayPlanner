@@ -974,6 +974,7 @@ public class ClientsController : ControllerBase
     {
         return ClientCreateTransaction.RunAsync(_db, User, model, async responsibleUserId =>
         {
+            if (ClientBirthDateInput.Resolve(model, null, out var birthDate) is { } invalidDate) return invalidDate;
             var requirementsModel = BuildClientRequirementsModel(model);
             var quickRequirementsSection = IsLegalQuickClient(model, requirementsModel)
                 ? "clients-modal-legal"
@@ -1000,7 +1001,7 @@ public class ClientsController : ControllerBase
                 Company = model.Company,
                 Address = model.Address,
                 Notes = model.Notes,
-                BirthDate = ParseClientBirthDate(model.Notes),
+                BirthDate = birthDate,
                 IsActive = model.IsActive,
                 LegalEntityId = model.LegalEntityId,
                 ResponsibleUserId = responsibleUserId,
@@ -1068,13 +1069,15 @@ public class ClientsController : ControllerBase
             return BadRequest($"Ответственный #{responsibleUserId} не найден");
         }
 
+        if (ClientBirthDateInput.Resolve(model, e.BirthDate, out var birthDate) is { } invalidDate) return invalidDate;
+
         e.Name = model.Name;
         e.Email = model.Email;
         e.Phone = model.Phone;
         e.Company = model.Company;
         e.Address = model.Address;
         e.Notes = model.Notes;
-        e.BirthDate = ParseClientBirthDate(model.Notes);
+        e.BirthDate = birthDate;
         var profilePayload = ExtractProfilePayloadFromNotes(model.Notes);
         await SyncClientAddressesAsync(e, profilePayload);
         await SyncClientPassportAsync(e, profilePayload);
@@ -1113,19 +1116,6 @@ public class ClientsController : ControllerBase
         var raw = notes.Trim();
         if (!raw.StartsWith(CLIENT_PROFILE_NOTES_PREFIX, StringComparison.Ordinal)) return null;
         return raw[CLIENT_PROFILE_NOTES_PREFIX.Length..].Trim();
-    }
-
-    private static DateTime? ParseClientBirthDate(string? notes)
-    {
-        var profile = DeserializeClientProfile<ClientRequirementsProfile>(ExtractProfilePayloadFromNotes(notes));
-        return DateTime.TryParseExact(
-            profile?.BirthDate,
-            "yyyy-MM-dd",
-            System.Globalization.CultureInfo.InvariantCulture,
-            System.Globalization.DateTimeStyles.None,
-            out var birthDate)
-            ? birthDate.Date
-            : null;
     }
 
     private async Task SyncClientAddressesAsync(Client client, string? profilePayload)
