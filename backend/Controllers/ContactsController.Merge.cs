@@ -41,12 +41,15 @@ public partial class ContactsController
         [FromBody] ContactMergeRequest request,
         CancellationToken ct)
     {
-        var (pair, error) = await ResolveMergePairAsync(request, ct);
-        if (error is not null) return error;
+        return await RunMergeBoundaryAsync(async () =>
+        {
+            var (pair, error) = await ResolveMergePairAsync(request, ct);
+            if (error is not null) return error;
 
-        var conflicts = await GetMergeConflictsAsync(pair!, ct);
-        var links = await CountMergeReferencesAsync(pair!, ct);
-        return Ok(BuildMergePreview(pair!, conflicts, links));
+            var conflicts = await GetMergeConflictsAsync(pair!, ct);
+            var links = await CountMergeReferencesAsync(pair!, ct);
+            return Ok(BuildMergePreview(pair!, conflicts, links));
+        }, false, ct);
     }
 
     [HttpPost("merge")]
@@ -54,120 +57,118 @@ public partial class ContactsController
         [FromBody] ContactMergeRequest request,
         CancellationToken ct)
     {
-        await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-        var (pair, error) = await ResolveMergePairAsync(request, ct);
-        if (error is not null) return error;
-
-        var conflicts = await GetMergeConflictsAsync(pair!, ct);
-        if (conflicts.Count > 0)
+        return await RunMergeBoundaryAsync(async () =>
         {
-            return Conflict(BuildMergePreview(pair!, conflicts, 0));
-        }
+            var (pair, error) = await ResolveMergePairAsync(request, ct, execute: true);
+            if (error is not null) return error;
 
-        var links = await CountMergeReferencesAsync(pair!, ct);
-        try
-        {
-            int? replacementFullProfileId = null;
-            if (pair!.Primary is Client or LegalEntity && pair.Duplicate is ExternalContact externalDuplicate)
+            var conflicts = await GetMergeConflictsAsync(pair!, ct);
+            if (conflicts.Count > 0)
             {
-                await MergeExternalIntoFullProfileAsync(pair, externalDuplicate, ct);
+                return Conflict(BuildMergePreview(pair!, conflicts, 0));
             }
-            else if (pair.Primary is ExternalContact primaryQuick && pair.Duplicate is Client or LegalEntity)
+
+            var links = await CountMergeReferencesAsync(pair!, ct);
+            try
             {
-                replacementFullProfileId = await CreateReplacementFullProfileAsync(primaryQuick, pair.Duplicate, ct);
-            }
-            else if (pair.Primary is ExternalContact primaryExternal && pair.Duplicate is ExternalContact duplicateExternal)
-            {
-                var linkedClientId = !primaryExternal.LinkedClientId.HasValue ? duplicateExternal.LinkedClientId : null;
-                var linkedLegalEntityId = !primaryExternal.LinkedLegalEntityId.HasValue ? duplicateExternal.LinkedLegalEntityId : null;
-                if (linkedClientId.HasValue || linkedLegalEntityId.HasValue)
+                int? replacementFullProfileId = null;
+                if (pair!.Primary is Client or LegalEntity && pair.Duplicate is ExternalContact externalDuplicate)
                 {
-                    if (linkedClientId.HasValue) duplicateExternal.LinkedClientId = null;
-                    if (linkedLegalEntityId.HasValue) duplicateExternal.LinkedLegalEntityId = null;
-                    await _db.SaveChangesAsync(ct);
-                    primaryExternal.LinkedClientId = linkedClientId ?? primaryExternal.LinkedClientId;
-                    primaryExternal.LinkedLegalEntityId = linkedLegalEntityId ?? primaryExternal.LinkedLegalEntityId;
+                    await MergeExternalIntoFullProfileAsync(pair, externalDuplicate, ct);
                 }
-            }
-            MergeContactFields(pair!);
-            await _db.SaveChangesAsync(ct);
-
-            // Keep one primary passport/address after the dependent rows move.
-            // The selected card's primary value wins; all other rows are retained.
-            if (pair.Primary is Client primaryClient && pair.Duplicate is Client duplicateClient)
-            {
-                await _db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"ClientPassports\" SET \"IsPrimary\" = 0 WHERE \"ClientId\" = {duplicateClient.Id} AND EXISTS (SELECT 1 FROM \"ClientPassports\" WHERE \"ClientId\" = {primaryClient.Id} AND \"IsPrimary\" = 1)", ct);
-                await _db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"AddressRecords\" SET \"IsPrimary\" = 0 WHERE \"ClientId\" = {duplicateClient.Id} AND EXISTS (SELECT 1 FROM \"AddressRecords\" WHERE \"ClientId\" = {primaryClient.Id} AND \"IsPrimary\" = 1)", ct);
-            }
-            else if (pair.Primary is LegalEntity primaryLegal && pair.Duplicate is LegalEntity duplicateLegal)
-            {
-                await _db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"AddressRecords\" SET \"IsPrimary\" = 0 WHERE \"LegalEntityId\" = {duplicateLegal.Id} AND EXISTS (SELECT 1 FROM \"AddressRecords\" AS \"main\" WHERE \"main\".\"LegalEntityId\" = {primaryLegal.Id} AND \"main\".\"Type\" = \"AddressRecords\".\"Type\" AND \"main\".\"IsPrimary\" = 1)", ct);
-            }
-
-            var destinationId = replacementFullProfileId
-                ?? (pair.Primary is Client or LegalEntity && pair.Duplicate is ExternalContact
-                    ? await GetCanonicalExternalIdAsync(pair, ct)
-                    : GetMergeId(pair.Primary));
-            foreach (var reference in GetMergeReferences(pair!))
-            {
-                var sql = $"UPDATE {reference.SqlTable} SET {reference.SqlColumn} = {{0}} WHERE {reference.SqlColumn} = {{1}}";
-                await _db.Database.ExecuteSqlRawAsync(sql, [destinationId, GetMergeId(pair.Duplicate)], ct);
-            }
-            if (replacementFullProfileId.HasValue && pair.Primary is ExternalContact selectedQuick)
-            {
-                if (pair.Duplicate is Client) selectedQuick.LinkedClientId = replacementFullProfileId;
-                else selectedQuick.LinkedLegalEntityId = replacementFullProfileId;
-            }
-
-            // Mark the duplicate directly: Remove() would apply EF's client-side
-            // SetNull/Cascade rules to any already tracked dependents, undoing the
-            // foreign-key transfer that was just committed in this transaction.
-            var archived = _db.Entry(pair!.Duplicate);
-            archived.Property("IsDeleted").CurrentValue = true;
-            archived.Property("DeletedAt").CurrentValue = DateTime.UtcNow;
-            archived.Property("DeletedByUserId").CurrentValue = int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var deletedById) ? deletedById : null;
-            archived.Property("DeletedByUserName").CurrentValue = User.Identity?.Name;
-            _db.ObjectAuditEvents.Add(new ObjectAuditEvent
-            {
-                ObjectType = "contact-merge",
-                ObjectId = GetMergeId(pair.Primary),
-                Action = "merged",
-                Description = $"Объединены карточки #{GetMergeId(pair.Duplicate)} ({GetMergeSourceType(pair.Duplicate)}) и #{GetMergeId(pair.Primary)} ({GetMergeSourceType(pair.Primary)}); дубль помещён в архив.",
-                ActorUserId = int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var actorId) ? actorId : null,
-                ActorUserName = User.Identity?.Name,
-                MetadataJson = JsonSerializer.Serialize(new
+                else if (pair.Primary is ExternalContact primaryQuick && pair.Duplicate is Client or LegalEntity)
                 {
-                    primarySourceType = GetMergeSourceType(pair.Primary),
-                    primarySourceId = GetMergeId(pair.Primary),
-                    duplicateSourceType = GetMergeSourceType(pair.Duplicate),
-                    duplicateSourceId = GetMergeId(pair.Duplicate),
-                    replacementFullProfileId,
-                    affectedLinks = links,
-                }),
-                CreatedAt = DateTime.UtcNow,
-            });
-            await _db.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
-            return Ok(BuildMergePreview(pair, [], links));
-        }
-        catch (DbException)
-        {
-            await transaction.RollbackAsync(ct);
-            return Conflict(new { message = "Связи карточек конфликтуют. Данные не изменены; проверьте одинаковые договоры, профильные записи и связанные контакты." });
-        }
-        catch (DbUpdateException)
-        {
-            await transaction.RollbackAsync(ct);
-            return Conflict(new { message = "Не удалось безопасно перенести все связи. Данные не изменены; проверьте связанные карточки и повторите попытку." });
-        }
-        catch (InvalidOperationException mergeError)
-        {
-            await transaction.RollbackAsync(ct);
-            return Conflict(new { message = mergeError.Message });
-        }
+                    replacementFullProfileId = await CreateReplacementFullProfileAsync(primaryQuick, pair.Duplicate, ct);
+                }
+                else if (pair.Primary is ExternalContact primaryExternal && pair.Duplicate is ExternalContact duplicateExternal)
+                {
+                    var linkedClientId = !primaryExternal.LinkedClientId.HasValue ? duplicateExternal.LinkedClientId : null;
+                    var linkedLegalEntityId = !primaryExternal.LinkedLegalEntityId.HasValue ? duplicateExternal.LinkedLegalEntityId : null;
+                    if (linkedClientId.HasValue || linkedLegalEntityId.HasValue)
+                    {
+                        if (linkedClientId.HasValue) duplicateExternal.LinkedClientId = null;
+                        if (linkedLegalEntityId.HasValue) duplicateExternal.LinkedLegalEntityId = null;
+                        await _db.SaveChangesAsync(ct);
+                        primaryExternal.LinkedClientId = linkedClientId ?? primaryExternal.LinkedClientId;
+                        primaryExternal.LinkedLegalEntityId = linkedLegalEntityId ?? primaryExternal.LinkedLegalEntityId;
+                    }
+                }
+                MergeContactFields(pair!);
+                await _db.SaveChangesAsync(ct);
+
+                // Keep one primary passport/address after the dependent rows move.
+                // The selected card's primary value wins; all other rows are retained.
+                if (pair.Primary is Client primaryClient && pair.Duplicate is Client duplicateClient)
+                {
+                    await _db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"ClientPassports\" SET \"IsPrimary\" = {false} WHERE \"ClientId\" = {duplicateClient.Id} AND EXISTS (SELECT 1 FROM \"ClientPassports\" WHERE \"ClientId\" = {primaryClient.Id} AND \"IsPrimary\" = {true})", ct);
+                    await _db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"AddressRecords\" SET \"IsPrimary\" = {false} WHERE \"ClientId\" = {duplicateClient.Id} AND EXISTS (SELECT 1 FROM \"AddressRecords\" WHERE \"ClientId\" = {primaryClient.Id} AND \"IsPrimary\" = {true})", ct);
+                }
+                else if (pair.Primary is LegalEntity primaryLegal && pair.Duplicate is LegalEntity duplicateLegal)
+                {
+                    await _db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"AddressRecords\" SET \"IsPrimary\" = {false} WHERE \"LegalEntityId\" = {duplicateLegal.Id} AND EXISTS (SELECT 1 FROM \"AddressRecords\" AS \"main\" WHERE \"main\".\"LegalEntityId\" = {primaryLegal.Id} AND \"main\".\"Type\" = \"AddressRecords\".\"Type\" AND \"main\".\"IsPrimary\" = {true})", ct);
+                }
+
+                var destinationId = replacementFullProfileId
+                    ?? (pair.Primary is Client or LegalEntity && pair.Duplicate is ExternalContact
+                        ? await GetCanonicalExternalIdAsync(pair, ct)
+                        : GetMergeId(pair.Primary));
+                foreach (var reference in GetMergeReferences(pair!))
+                {
+                    var sql = $"UPDATE {reference.SqlTable} SET {reference.SqlColumn} = {{0}} WHERE {reference.SqlColumn} = {{1}}";
+                    await _db.Database.ExecuteSqlRawAsync(sql, [destinationId, GetMergeId(pair.Duplicate)], ct);
+                }
+                if (replacementFullProfileId.HasValue && pair.Primary is ExternalContact selectedQuick)
+                {
+                    if (pair.Duplicate is Client) selectedQuick.LinkedClientId = replacementFullProfileId;
+                    else selectedQuick.LinkedLegalEntityId = replacementFullProfileId;
+                }
+
+                // Mark the duplicate directly: Remove() would apply EF's client-side
+                // SetNull/Cascade rules to any already tracked dependents, undoing the
+                // foreign-key transfer that was just committed in this transaction.
+                var archived = _db.Entry(pair!.Duplicate);
+                archived.Property("IsDeleted").CurrentValue = true;
+                archived.Property("DeletedAt").CurrentValue = DateTime.UtcNow;
+                archived.Property("DeletedByUserId").CurrentValue = int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var deletedById) ? deletedById : null;
+                archived.Property("DeletedByUserName").CurrentValue = User.Identity?.Name;
+                _db.ObjectAuditEvents.Add(new ObjectAuditEvent
+                {
+                    ObjectType = "contact-merge",
+                    ObjectId = GetMergeId(pair.Primary),
+                    Action = "merged",
+                    Description = $"Объединены карточки #{GetMergeId(pair.Duplicate)} ({GetMergeSourceType(pair.Duplicate)}) и #{GetMergeId(pair.Primary)} ({GetMergeSourceType(pair.Primary)}); дубль помещён в архив.",
+                    ActorUserId = int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var actorId) ? actorId : null,
+                    ActorUserName = User.Identity?.Name,
+                    MetadataJson = JsonSerializer.Serialize(new
+                    {
+                        primarySourceType = GetMergeSourceType(pair.Primary),
+                        primarySourceId = GetMergeId(pair.Primary),
+                        duplicateSourceType = GetMergeSourceType(pair.Duplicate),
+                        duplicateSourceId = GetMergeId(pair.Duplicate),
+                        replacementFullProfileId,
+                        affectedLinks = links,
+                    }),
+                    CreatedAt = DateTime.UtcNow,
+                });
+                await _db.SaveChangesAsync(ct);
+                return Ok(BuildMergePreview(pair, [], links));
+            }
+            catch (DbException)
+            {
+                return Conflict(new { message = "Связи карточек конфликтуют. Данные не изменены; проверьте одинаковые договоры, профильные записи и связанные контакты." });
+            }
+            catch (DbUpdateException)
+            {
+                return Conflict(new { message = "Не удалось безопасно перенести все связи. Данные не изменены; проверьте связанные карточки и повторите попытку." });
+            }
+            catch (InvalidOperationException mergeError)
+            {
+                return Conflict(new { message = mergeError.Message });
+            }
+        }, true, ct);
     }
 
-    private async Task<(MergePair? Pair, ActionResult? Error)> ResolveMergePairAsync(ContactMergeRequest request, CancellationToken ct)
+    private async Task<(MergePair? Pair, ActionResult? Error)> ResolveMergePairAsync(ContactMergeRequest request, CancellationToken ct, bool execute = false)
     {
         if (request is null || string.IsNullOrWhiteSpace(request.PrimarySourceType)
             || string.IsNullOrWhiteSpace(request.DuplicateSourceType)
@@ -191,82 +192,44 @@ public partial class ContactsController
             var fullId = sourceType == "external" ? request.DuplicateSourceId : request.PrimarySourceId;
             if (fullType is not ("client" or "legal") || sourceType != "external" && duplicateType != "external")
                 return (null, BadRequest(new { message = "Человека нельзя объединить с организацией." }));
-            var createsFullProfile = sourceType == "external";
-            if (!await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Clients,
-                    permission => permission.CanView && permission.CanEdit && permission.CanDelete
-                        && (!createsFullProfile || permission.CanCreate), ct)
-                || fullType == "legal" && !await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.LegalEntities,
-                    permission => permission.CanView && permission.CanEdit && permission.CanDelete
-                        && (!createsFullProfile || permission.CanCreate), ct))
-                return (null, Forbid());
-            var mixedAccess = await GetCurrentAccessAsync(ct);
-            var external = await BuildVisibleExternalContactsQuery(mixedAccess)
-                .FirstOrDefaultAsync(x => x.Id == quickId && x.IsActive, ct);
+            var action = sourceType == "external" ? MergeAction.CreateMerge : MergeAction.Merge;
+            var clientsAccess = await MergeSectionAsync(RolePermissionCatalog.Clients, action, ct);
+            var legalAccess = fullType == "legal" ? await MergeSectionAsync(RolePermissionCatalog.LegalEntities, action, ct) : null;
+            if (clientsAccess is null || fullType == "legal" && legalAccess is null) return (null, Forbid());
+            var external = await BuildVisibleExternalContactsQuery(clientsAccess.Visibility).FirstOrDefaultAsync(x => x.Id == quickId && x.IsActive, ct);
             if (external is null) return (null, NotFound());
             if (fullType == "client")
             {
-                var client = await _db.Clients.ApplyClientVisibility(mixedAccess)
-                    .FirstOrDefaultAsync(x => x.Id == fullId && x.IsActive, ct);
+                var client = await _db.Clients.ApplyClientVisibility(clientsAccess.Visibility).FirstOrDefaultAsync(x => x.Id == fullId && x.IsActive, ct);
                 if (client is null) return (null, NotFound());
-                if (IsOrganizationContact(external.ContactType))
-                    return (null, BadRequest(new { message = "Человека нельзя объединить с организацией." }));
-                return (sourceType == "external"
-                    ? new MergePair("external+client", external, client)
-                    : new MergePair("client+external", client, external), null);
+                if (IsOrganizationContact(external.ContactType)) return (null, BadRequest(new { message = "Человека нельзя объединить с организацией." }));
+                return await AdmitMergePairAsync(sourceType == "external" ? new MergePair("external+client", external, client) : new MergePair("client+external", client, external), clientsAccess, null, execute, ct);
             }
-            var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.LegalEntities, ct);
-            var legal = await _db.LegalEntities.ApplyLegalEntityVisibility(visibility)
-                .FirstOrDefaultAsync(x => x.Id == fullId, ct);
+            var legal = await _db.LegalEntities.ApplyLegalEntityVisibility(legalAccess!.Visibility).FirstOrDefaultAsync(x => x.Id == fullId, ct);
             if (legal is null) return (null, NotFound());
-            if (!IsOrganizationContact(external.ContactType))
-                return (null, BadRequest(new { message = "Человека нельзя объединить с организацией." }));
-            return (sourceType == "external"
-                ? new MergePair("external+legal", external, legal)
-                : new MergePair("legal+external", legal, external), null);
+            if (!IsOrganizationContact(external.ContactType)) return (null, BadRequest(new { message = "Человека нельзя объединить с организацией." }));
+            return await AdmitMergePairAsync(sourceType == "external" ? new MergePair("external+legal", external, legal) : new MergePair("legal+external", legal, external), clientsAccess, legalAccess, execute, ct);
         }
-
         var section = sourceType == "legal" ? RolePermissionCatalog.LegalEntities : RolePermissionCatalog.Clients;
-        if (!await _db.HasUserSectionPermissionAsync(User, section,
-                static permission => permission.CanView && permission.CanEdit && permission.CanDelete, ct))
-        {
-            return (null, Forbid());
-        }
-
+        var access = await MergeSectionAsync(section, MergeAction.Merge, ct);
+        if (access is null) return (null, Forbid());
         if (sourceType == "legal")
         {
-            var visibility = await _db.ResolveDataVisibilityAsync(User, section, ct);
-            var records = await _db.LegalEntities.ApplyLegalEntityVisibility(visibility)
-                .Where(x => x.Id == request.PrimarySourceId || x.Id == request.DuplicateSourceId)
-                .ToListAsync(ct);
+            var records = await _db.LegalEntities.ApplyLegalEntityVisibility(access.Visibility).Where(x => x.Id == request.PrimarySourceId || x.Id == request.DuplicateSourceId).ToListAsync(ct);
             if (records.Count != 2) return (null, NotFound());
-            return (new MergePair(sourceType,
-                records.Single(x => x.Id == request.PrimarySourceId),
-                records.Single(x => x.Id == request.DuplicateSourceId)), null);
+            return await AdmitMergePairAsync(new MergePair(sourceType, records.Single(x => x.Id == request.PrimarySourceId), records.Single(x => x.Id == request.DuplicateSourceId)), null, access, execute, ct);
         }
-
-        var access = await GetCurrentAccessAsync(ct);
         if (sourceType == "client")
         {
-            var records = await _db.Clients.ApplyClientVisibility(access)
-                .Where(x => (x.Id == request.PrimarySourceId || x.Id == request.DuplicateSourceId) && x.IsActive)
-                .ToListAsync(ct);
+            var records = await _db.Clients.ApplyClientVisibility(access.Visibility).Where(x => (x.Id == request.PrimarySourceId || x.Id == request.DuplicateSourceId) && x.IsActive).ToListAsync(ct);
             if (records.Count != 2) return (null, NotFound());
-            return (new MergePair(sourceType,
-                records.Single(x => x.Id == request.PrimarySourceId),
-                records.Single(x => x.Id == request.DuplicateSourceId)), null);
+            return await AdmitMergePairAsync(new MergePair(sourceType, records.Single(x => x.Id == request.PrimarySourceId), records.Single(x => x.Id == request.DuplicateSourceId)), access, null, execute, ct);
         }
-
-        var contacts = await BuildVisibleExternalContactsQuery(access)
-            .Where(x => (x.Id == request.PrimarySourceId || x.Id == request.DuplicateSourceId) && x.IsActive)
-            .ToListAsync(ct);
+        var contacts = await BuildVisibleExternalContactsQuery(access.Visibility).Where(x => (x.Id == request.PrimarySourceId || x.Id == request.DuplicateSourceId) && x.IsActive).ToListAsync(ct);
         if (contacts.Count != 2) return (null, NotFound());
-        var primary = contacts.Single(x => x.Id == request.PrimarySourceId);
-        var duplicate = contacts.Single(x => x.Id == request.DuplicateSourceId);
-        if (IsOrganizationContact(primary.ContactType) != IsOrganizationContact(duplicate.ContactType))
-        {
-            return (null, BadRequest(new { message = "Человека нельзя объединить с организацией." }));
-        }
-        return (new MergePair(sourceType, primary, duplicate), null);
+        var primary = contacts.Single(x => x.Id == request.PrimarySourceId); var duplicate = contacts.Single(x => x.Id == request.DuplicateSourceId);
+        if (IsOrganizationContact(primary.ContactType) != IsOrganizationContact(duplicate.ContactType)) return (null, BadRequest(new { message = "Человека нельзя объединить с организацией." }));
+        return await AdmitMergePairAsync(new MergePair(sourceType, primary, duplicate), access, null, execute, ct);
     }
 
     private async Task<List<string>> GetMergeConflictsAsync(MergePair pair, CancellationToken ct)

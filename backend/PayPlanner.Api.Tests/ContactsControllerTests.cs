@@ -441,6 +441,8 @@ public class ContactsControllerTests
     {
         await using var db = await CreateContextAsync();
         var user = await CreateClientUserAsync(db, "merge-mixed-organization", true, true, true, true, true);
+        db.RolePermissions.Add(new RolePermission { RoleId = user.RoleId, Section = RolePermissionCatalog.LegalEntities, CanView = true, ViewScope = DataVisibilityScope.Own });
+        await db.SaveChangesAsync();
         var firstOrganization = await CreateLegalEntityAsync(db, user.Id, "ООО Первое");
         var secondOrganization = await CreateLegalEntityAsync(db, user.Id, "ООО Второе");
         var client = await CreateClientAsync(db, user.Id);
