@@ -261,63 +261,34 @@ public partial class ContactsController : ControllerBase
             return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missing });
         }
 
-        var access = await GetCurrentAccessAsync(ct);
-        if (access is null)
+        return await UpdateClientContactAtomicallyAsync(id, request.LegalEntityId, async (client, legalEntity) =>
         {
-            return Unauthorized();
-        }
+            var normalizedPhones = NormalizeStringList(request.Phones, request.Phone);
+            var normalizedEmails = NormalizeStringList(request.Emails, request.Email);
 
-        if (await RequireClientsPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
+            client.Name = request.FullName.Trim();
+            client.Phone = normalizedPhones.FirstOrDefault() ?? string.Empty;
+            client.Email = normalizedEmails.FirstOrDefault() ?? string.Empty;
+            client.LegalEntityId = request.LegalEntityId;
+            client.Company = legalEntity?.ShortName
+                ?? (client.LegalEntityId.HasValue ? string.Empty : client.Company);
 
-        var client = await _db.Clients
-            .ApplyClientVisibility(access)
-            .Include(x => x.LegalEntity)
-            .Include(x => x.ResponsibleUser)
-            .FirstOrDefaultAsync(x => x.Id == id, ct);
+            var profile = GetOrCreateClientProfileObject(client.Notes);
+            SetStringArray(profile, "phones", normalizedPhones);
+            SetStringArray(profile, "emails", normalizedEmails);
+            SetString(profile, "contactPosition", request.Position);
+            SetString(profile, "contactPowerOfAttorney", request.PowerOfAttorney);
+            SetString(profile, "contactNotes", request.Notes);
+            profile["syncToPhonebook"] = request.SyncToPhonebook;
+            client.Notes = SerializeClientProfileObject(profile);
 
-        if (client is null)
-        {
-            return NotFound();
-        }
+            await _db.SaveChangesAsync(ct);
 
-        LegalEntity? legalEntity = null;
-        if (request.LegalEntityId.HasValue)
-        {
-            legalEntity = await ResolveVisibleLegalEntityAsync(request.LegalEntityId.Value, ct);
-            if (legalEntity is null)
-            {
-                return BadRequest("Указанное юридическое лицо не найдено.");
-            }
-        }
+            await _db.Entry(client).Reference(x => x.LegalEntity).LoadAsync(ct);
+            await _db.Entry(client).Reference(x => x.ResponsibleUser).LoadAsync(ct);
 
-        var normalizedPhones = NormalizeStringList(request.Phones, request.Phone);
-        var normalizedEmails = NormalizeStringList(request.Emails, request.Email);
-
-        client.Name = request.FullName.Trim();
-        client.Phone = normalizedPhones.FirstOrDefault() ?? string.Empty;
-        client.Email = normalizedEmails.FirstOrDefault() ?? string.Empty;
-        client.LegalEntityId = request.LegalEntityId;
-        client.Company = legalEntity?.ShortName
-            ?? (client.LegalEntityId.HasValue ? string.Empty : client.Company);
-
-        var profile = GetOrCreateClientProfileObject(client.Notes);
-        SetStringArray(profile, "phones", normalizedPhones);
-        SetStringArray(profile, "emails", normalizedEmails);
-        SetString(profile, "contactPosition", request.Position);
-        SetString(profile, "contactPowerOfAttorney", request.PowerOfAttorney);
-        SetString(profile, "contactNotes", request.Notes);
-        profile["syncToPhonebook"] = request.SyncToPhonebook;
-        client.Notes = SerializeClientProfileObject(profile);
-
-        await _db.SaveChangesAsync(ct);
-
-        await _db.Entry(client).Reference(x => x.LegalEntity).LoadAsync(ct);
-        await _db.Entry(client).Reference(x => x.ResponsibleUser).LoadAsync(ct);
-
-        return Ok(MapClientContact(client));
+            return Ok(MapClientContact(client));
+        }, ct);
     }
 
     [HttpPost("external")]
