@@ -42,16 +42,9 @@ public class CasesController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] int? clientId, [FromQuery] int? legalEntityId, CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(permission => permission.CanView, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
+        var access = await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Cases, ct);
+        if (access?.Permission is not { CanView: true } permission) return Forbid();
+        var visibility = access.Visibility;
 
         var q = _db.ClientCases
             .Include(c => c.Client)
@@ -65,22 +58,17 @@ public class CasesController : ControllerBase
             .ThenBy(c => c.LegalEntityId ?? int.MaxValue)
             .ThenBy(c => c.CreatedAt)
             .ToListAsync(ct);
+        if (items.Count > 0) CaseResponsePrivacy.ApplyToRead(items, permission.CanEdit,
+            await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, static value => value.CanView, ct));
         return Ok(items);
     }
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(permission => permission.CanView, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
+        var access = await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Cases, ct);
+        if (access?.Permission is not { CanView: true } permission) return Forbid();
+        var visibility = access.Visibility;
 
         var entity = await _db.ClientCases
             .Include(c => c.Client)
@@ -88,7 +76,8 @@ public class CasesController : ControllerBase
             .ApplyClientCaseVisibility(visibility)
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == id, ct);
-
+        if (entity is not null) CaseResponsePrivacy.ApplyToRead([entity], permission.CanEdit,
+            await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, static value => value.CanView, ct));
         return entity is not null ? Ok(entity) : NotFound();
     }
 
@@ -112,6 +101,7 @@ public class CasesController : ControllerBase
         if (ValidateCourtDetails(model) is { } courtError) return BadRequest(courtError);
         if (ClientCaseWritSubmissionRules.Validate(model.ExecutiveWritReceivedAt, model.ExecutiveWritSubmittedAt, model.ExecutiveWritSubmittedTo) is { } writError) return BadRequest(writError);
         ApplyCaseDetails(model, model);
+        if (!await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, static permission => permission.CanView, ct)) model.FeeAmount = 0m;
         _db.ClientCases.Add(model);
         await _db.SaveChangesAsync(ct);
         await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, model.Id, User.GetUserId(), User.GetDisplayName(), ct);
@@ -131,9 +121,11 @@ public class CasesController : ControllerBase
     public async Task<IActionResult> Update(int id, ClientCase model, CancellationToken ct, ClientCase? expectedSource = null)
     {
         DateTime? previousCourtDecisionAt = null;
+        var canViewFinance = false;
         var result = await CaseEditTransaction.RunAsync(_db, User, id, async (e, access) =>
         {
-            if (expectedSource is not null && !CaseEditSnapshot.TryMerge(e, model, expectedSource, true, legacy: true))
+            canViewFinance = await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, static permission => permission.CanView, ct);
+            if (expectedSource is not null && !CaseEditSnapshot.TryMerge(e, model, expectedSource, canViewFinance, legacy: true))
                 return Conflict(new { message = "Дело изменилось после открытия редактора. Обновите данные перед сохранением." });
             var visibility = access.Visibility;
             var validation = await CaseEditTransaction.ValidateEditedLinksAsync(_db, e, model, visibility, ct);
@@ -165,7 +157,7 @@ public class CasesController : ControllerBase
             e.Status = model.Status;
             e.ClientId = model.ClientId;
             e.LegalEntityId = model.LegalEntityId;
-            ApplyCaseDetails(e, model, preserveExistingText: true);
+            ApplyCaseDetails(e, model, preserveExistingText: true, canViewFinance: canViewFinance);
             CaseConfirmationResetPersistence.Apply(_db, e);
             if (previousSubmittedAt != e.ExecutiveWritSubmittedAt
                 || !string.Equals(previousSubmittedTo, e.ExecutiveWritSubmittedTo, StringComparison.Ordinal))
@@ -204,7 +196,9 @@ public class CasesController : ControllerBase
                 User.GetDisplayName(), User.GetUserId() ?? 0, recipients, DateTime.UtcNow, ct);
         }
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        return Ok(CaseEditSnapshot.ForReply(savedCase));
+        var reply = CaseEditSnapshot.ForReply(savedCase);
+        if (!canViewFinance) CaseResponsePrivacy.HideFinanceData([reply]);
+        return Ok(reply);
     }
 
     [HttpDelete("{id:int}")]
@@ -255,7 +249,7 @@ public class CasesController : ControllerBase
         return null;
     }
 
-    private static void ApplyCaseDetails(ClientCase target, ClientCase source, bool preserveExistingText = false)
+    private static void ApplyCaseDetails(ClientCase target, ClientCase source, bool preserveExistingText = false, bool canViewFinance = true)
     {
         string Text(string? existing, string? incoming) => preserveExistingText && string.Equals(existing, incoming, StringComparison.Ordinal)
             ? existing!
@@ -267,7 +261,7 @@ public class CasesController : ControllerBase
         target.ResponsibleUserId = source.ResponsibleUserId;
         target.StartDate = source.StartDate;
         target.DueDate = source.DueDate;
-        target.FeeAmount = source.FeeAmount;
+        if (canViewFinance) target.FeeAmount = source.FeeAmount;
         target.Priority = string.IsNullOrWhiteSpace(source.Priority) ? "normal" : source.Priority.Trim();
         target.CourtName = Text(target.CourtName, source.CourtName);
         if (source.OurCourtRole is not null) target.OurCourtRole = source.OurCourtRole.Trim().ToLowerInvariant();

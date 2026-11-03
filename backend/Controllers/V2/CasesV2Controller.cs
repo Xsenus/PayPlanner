@@ -260,36 +260,7 @@ public partial class CasesV2Controller : ControllerBase
     }
 
     private static void HideCaseSensitiveData(ClientCase clientCase)
-    {
-        if (clientCase.Client is not null)
-        {
-            clientCase.Client.Phone = string.Empty;
-            clientCase.Client.Email = string.Empty;
-            clientCase.Client.Address = string.Empty;
-            clientCase.Client.Notes = string.Empty;
-
-            if (clientCase.Client.LegalEntity is not null)
-            {
-                HideLegalEntitySensitiveData(clientCase.Client.LegalEntity);
-            }
-        }
-
-        if (clientCase.LegalEntity is not null)
-        {
-            HideLegalEntitySensitiveData(clientCase.LegalEntity);
-        }
-    }
-
-    private static void HideLegalEntitySensitiveData(LegalEntity legalEntity)
-    {
-        legalEntity.Inn = null;
-        legalEntity.Kpp = null;
-        legalEntity.Ogrn = null;
-        legalEntity.Address = null;
-        legalEntity.Phone = null;
-        legalEntity.Email = null;
-        legalEntity.Director = null;
-    }
+        => CaseResponsePrivacy.HideSensitiveData(clientCase);
 
     [HttpGet]
     public async Task<IActionResult> Get(
@@ -3274,6 +3245,7 @@ public partial class CasesV2Controller : ControllerBase
             }
             await ApplyTaskSummaryAsync([entity], ct, includeInactivityControlSummary: true);
             PopulateResponsibleViewAliases([entity]);
+            CaseResponsePrivacy.KeepResponsibleCaption(entity);
             var canRevealSensitiveData = await CanRevealCaseSensitiveDataAsync(ct);
             entity.CanRevealSensitiveData = canRevealSensitiveData;
             if (!canRevealSensitiveData)
@@ -11537,22 +11509,7 @@ public partial class CasesV2Controller : ControllerBase
     }
 
     private static void HideCaseFinanceData(IEnumerable<ClientCase> cases)
-    {
-        foreach (var clientCase in cases)
-        {
-            clientCase.FeeAmount = 0m;
-            clientCase.IncomeTotal = 0m;
-            clientCase.IncomePaid = 0m;
-            clientCase.IncomeOutstanding = 0m;
-            clientCase.IncomeCount = 0;
-            clientCase.ExpenseTotal = 0m;
-            clientCase.ExpensePaid = 0m;
-            clientCase.ExpenseOutstanding = 0m;
-            clientCase.ExpenseCount = 0;
-            clientCase.Payments = new List<Payment>();
-            clientCase.InvoiceClientCases = new List<InvoiceClientCase>();
-        }
-    }
+        => CaseResponsePrivacy.HideFinanceData(cases);
 
     private async Task ApplyTaskSummaryAsync(
         IReadOnlyCollection<ClientCase> cases,

@@ -37,16 +37,9 @@ public class CasesV1Controller : ControllerBase
         [FromQuery] string? sortDir,
         CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(permission => permission.CanView, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
+        var access = await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Cases, ct);
+        if (access?.Permission is not { CanView: true } permission) return Forbid();
+        var visibility = access.Visibility;
 
         var q = _db.ClientCases.AsQueryable()
             .WithCaseIncludes()
@@ -54,28 +47,26 @@ public class CasesV1Controller : ControllerBase
             .ApplyCaseFilters(clientId, legalEntityId, status, search)
             .ApplyCaseSort(sortBy, sortDir);
 
-        return Ok(await q.AsNoTracking().ToListAsync(ct));
+        var items = await q.AsNoTracking().ToListAsync(ct);
+        if (items.Count > 0) CaseResponsePrivacy.ApplyToRead(items, permission.CanEdit,
+            await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, static value => value.CanView, ct));
+        return Ok(items);
     }
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(permission => permission.CanView, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
+        var access = await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Cases, ct);
+        if (access?.Permission is not { CanView: true } permission) return Forbid();
+        var visibility = access.Visibility;
 
         var entity = await _db.ClientCases
             .WithCaseIncludes()
             .ApplyClientCaseVisibility(visibility)
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (entity is not null) CaseResponsePrivacy.ApplyToRead([entity], permission.CanEdit,
+            await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, static value => value.CanView, ct));
         return entity is not null ? Ok(entity) : NotFound();
     }
 
@@ -97,6 +88,7 @@ public class CasesV1Controller : ControllerBase
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
 
+        if (!await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, static permission => permission.CanView, ct)) model.FeeAmount = 0m;
         _db.ClientCases.Add(model);
         await _db.SaveChangesAsync(ct);
         return Created($"/api/v1/cases/{model.Id}", CaseEditSnapshot.ForReply(model));
@@ -149,7 +141,9 @@ public class CasesV1Controller : ControllerBase
             }
 
             await _db.SaveChangesAsync(ct);
-            return Ok(CaseEditSnapshot.ForReply(e));
+            var reply = CaseEditSnapshot.ForReply(e);
+            if (!await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, static permission => permission.CanView, ct)) CaseResponsePrivacy.HideFinanceData([reply]);
+            return Ok(reply);
         }, ct);
     }
 

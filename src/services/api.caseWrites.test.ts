@@ -18,6 +18,25 @@ const creators = [
   { name: 'V2', path: '/v2/cases', create: () => apiService.createCaseV2({ clientId: 3, title: 'Новое дело', status: 'Open' }) },
 ];
 
+describe('case privacy round trip', () => {
+  it('keeps a masked fee in the root write snapshot and accepts a masked saved reply', async () => {
+    const source = { ...original(), feeAmount: 0, canRevealSensitiveData: false };
+    const saved = { ...source, title: 'Моя правка', client: { id: 3, name: 'Клиент' } };
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json(saved)); vi.stubGlobal('fetch', fetch);
+    await expect(apiService.updateCase(19, { ...source, title: 'Моя правка' }, source)).resolves.toMatchObject({ feeAmount: 0, title: 'Моя правка' });
+    expect(fetch).toHaveBeenCalledOnce(); expect(String(fetch.mock.calls[0][0]).endsWith('/cases/19/checked')).toBe(true);
+    const body = JSON.parse(String(fetch.mock.calls[0][1]?.body)); expect(body.feeAmount).toBe(0); expect(body.expectedSource.feeAmount).toBe(0);
+    expect(body.expectedSource).not.toHaveProperty('client'); expect(body.expectedSource).not.toHaveProperty('payments'); expect(source.feeAmount).toBe(0); expect(source.title).toBe('Исходное дело');
+  });
+
+  it.each([403, 409])('HTTP %s cannot bypass privacy through another save route', async status => {
+    const source = { ...original(), feeAmount: 0 };
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json({ message: 'Сохранение не подтверждено.' }, { status })); vi.stubGlobal('fetch', fetch);
+    await expect(apiService.updateCase(19, { ...source, title: 'Моя правка' }, source)).rejects.toMatchObject({ status }); expect(fetch).toHaveBeenCalledOnce();
+    expect(String(fetch.mock.calls[0][0]).endsWith('/cases/19/checked')).toBe(true); expect(source.feeAmount).toBe(0);
+  });
+});
+
 describe('case create write', () => {
   it.each(creators)('$name accepts a thin creation reply and sends only ordinary case fields', async ({ path, create }) => {
     const saved = { id: 104, clientId: 3, title: 'Новое дело', status: 'Open', client: { id: 3, name: 'Владелец' } };
