@@ -560,36 +560,20 @@ public class ClientsV2Controller : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] Client model, CancellationToken ct)
+    public Task<IActionResult> Create([FromBody] Client model, CancellationToken ct)
     {
-        if (await RequireClientsPermissionAsync(permission => permission.CanCreate, ct) is { } forbidden)
+        return ClientCreateTransaction.RunAsync(_db, User, model, async responsibleUserId =>
         {
-            return forbidden;
-        }
+            if (ClientCreationInput.Validate(_db, model) is { } graphError) return graphError;
 
-        var access = await GetCurrentAccessAsync(ct);
-        if (access is null)
-        {
-            return Unauthorized();
-        }
-
-        if (ClientCreationInput.Validate(_db, model) is { } graphError) return graphError;
-
-        var responsibleUserId = access.IsAdmin
-            ? (model.ResponsibleUserId ?? access.UserId)
-            : access.UserId;
-        if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
-        {
-            return BadRequest($"Ответственный #{responsibleUserId} не найден");
-        }
-
-        model.ResponsibleUserId = responsibleUserId;
-        ClientCreationInput.InitializeServerStamps(model);
-        _db.Clients.Add(model);
-        await _db.SaveChangesAsync(ct);
-        await _db.Entry(model).Reference(c => c.ResponsibleUser).LoadAsync(ct);
-        model.ResponsibleUserName = FormatResponsibleUserName(model.ResponsibleUser);
-        return Created($"/api/v2/clients/{model.Id}", model);
+            model.ResponsibleUserId = responsibleUserId;
+            ClientCreationInput.InitializeServerStamps(model);
+            _db.Clients.Add(model);
+            await _db.SaveChangesAsync(ct);
+            await _db.Entry(model).Reference(c => c.ResponsibleUser).LoadAsync(ct);
+            model.ResponsibleUserName = FormatResponsibleUserName(model.ResponsibleUser);
+            return Created($"/api/v2/clients/{model.Id}", model);
+        }, ct);
     }
 
     [HttpPut("{id:int}")]

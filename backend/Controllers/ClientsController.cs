@@ -9,6 +9,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Clients;
 using PayPlanner.Api.Services.LegalEntities;
 
 namespace PayPlanner.Api.Controllers;
@@ -969,87 +970,53 @@ public class ClientsController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] Client model, CancellationToken ct)
+    public Task<IActionResult> Create([FromBody] Client model, CancellationToken ct)
     {
-        var requirementsModel = BuildClientRequirementsModel(model);
-        var quickRequirementsSection = IsLegalQuickClient(model, requirementsModel)
-            ? "clients-modal-legal"
-            : "clients-modal";
-        var requiredQuickFields = await _formRequirements.GetRequiredFieldsAsync(quickRequirementsSection, ct);
-        var missingCreate = await _formRequirements.GetMissingFieldsAsync(quickRequirementsSection, requirementsModel, ct);
-        if (quickRequirementsSection == "clients-modal-legal")
+        return ClientCreateTransaction.RunAsync(_db, User, model, async responsibleUserId =>
         {
-            requiredQuickFields = requiredQuickFields
-                .Where(field => LegalQuickClientRequirementFields.Contains(field))
-                .ToList();
-            missingCreate = missingCreate
-                .Where(field => LegalQuickClientRequirementFields.Contains(field))
-                .ToList();
-        }
-        missingCreate = NormalizeQuickClientModalMissingFields(requiredQuickFields, requirementsModel, missingCreate);
-        if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
-
-        var access = await GetCurrentAccessAsync(ct);
-        if (access is null)
-        {
-            return AccessDenied();
-        }
-
-        if (await RequireClientsPermissionAsync(permission => permission.CanCreate, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-
-        if (model.LegalEntityId.HasValue)
-        {
-            var exists = await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.Id == model.LegalEntityId.Value);
-            if (!exists)
+            var requirementsModel = BuildClientRequirementsModel(model);
+            var quickRequirementsSection = IsLegalQuickClient(model, requirementsModel)
+                ? "clients-modal-legal"
+                : "clients-modal";
+            var requiredQuickFields = await _formRequirements.GetRequiredFieldsAsync(quickRequirementsSection, ct);
+            var missingCreate = await _formRequirements.GetMissingFieldsAsync(quickRequirementsSection, requirementsModel, ct);
+            if (quickRequirementsSection == "clients-modal-legal")
             {
-                return BadRequest($"Юридическое лицо #{model.LegalEntityId.Value} не найдено");
+                requiredQuickFields = requiredQuickFields
+                    .Where(field => LegalQuickClientRequirementFields.Contains(field))
+                    .ToList();
+                missingCreate = missingCreate
+                    .Where(field => LegalQuickClientRequirementFields.Contains(field))
+                    .ToList();
             }
-        }
+            missingCreate = NormalizeQuickClientModalMissingFields(requiredQuickFields, requirementsModel, missingCreate);
+            if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
 
-        if (model.ClientStatusId.HasValue)
-        {
-            var statusExists = await _db.ClientStatuses.AsNoTracking().AnyAsync(s => s.Id == model.ClientStatusId.Value);
-            if (!statusExists)
+            var entity = new Client
             {
-                return BadRequest($"Статус клиента #{model.ClientStatusId.Value} не найден");
-            }
-        }
+                Name = model.Name,
+                Email = model.Email,
+                Phone = model.Phone,
+                Company = model.Company,
+                Address = model.Address,
+                Notes = model.Notes,
+                BirthDate = ParseClientBirthDate(model.Notes),
+                IsActive = model.IsActive,
+                LegalEntityId = model.LegalEntityId,
+                ResponsibleUserId = responsibleUserId,
+                ClientStatusId = model.ClientStatusId,
+                IsClientAndSupplier = model.IsClientAndSupplier,
+            };
 
-        var responsibleUserId = access.IsAdmin
-            ? (model.ResponsibleUserId ?? access.UserId)
-            : access.UserId;
-        if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
-        {
-            return BadRequest($"Ответственный #{responsibleUserId} не найден");
-        }
-
-        var entity = new Client
-        {
-            Name = model.Name,
-            Email = model.Email,
-            Phone = model.Phone,
-            Company = model.Company,
-            Address = model.Address,
-            Notes = model.Notes,
-            BirthDate = ParseClientBirthDate(model.Notes),
-            IsActive = model.IsActive,
-            LegalEntityId = model.LegalEntityId,
-            ResponsibleUserId = responsibleUserId,
-            ClientStatusId = model.ClientStatusId,
-            IsClientAndSupplier = model.IsClientAndSupplier,
-        };
-
-        _db.Clients.Add(entity);
-        await _db.SaveChangesAsync(ct);
-        var profilePayload = ExtractProfilePayloadFromNotes(model.Notes);
-        await SyncClientAddressesAsync(entity, profilePayload);
-        await SyncClientPassportAsync(entity, profilePayload);
-        await _db.SaveChangesAsync(ct);
-        var response = await LoadClientResponseAsync(entity.Id, ct);
-        return Created($"/api/clients/{entity.Id}", response);
+            _db.Clients.Add(entity);
+            await _db.SaveChangesAsync(ct);
+            var profilePayload = ExtractProfilePayloadFromNotes(model.Notes);
+            await SyncClientAddressesAsync(entity, profilePayload);
+            await SyncClientPassportAsync(entity, profilePayload);
+            await _db.SaveChangesAsync(ct);
+            var response = await LoadClientResponseAsync(entity.Id, ct);
+            return Created($"/api/clients/{entity.Id}", response);
+        }, ct);
     }
 
     [HttpPut("{id:int}")]
