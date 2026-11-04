@@ -134,6 +134,7 @@ public partial class CasesV2ControllerTests
         await using var database = postgres ? await modelTemplate.CreateDatabaseAsync() : null;
         await using var db = postgres ? new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(database!.ConnectionString).Options) : await CreateContextAsync();
         var (actor, ids) = await SeedBulkCasesAsync(db); await GrantSectionPermissionAsync(db, actor, RolePermissionCatalog.Clients, viewScope: DataVisibilityScope.Own);
+        await GrantSectionPermissionAsync(db, actor, RolePermissionCatalog.LegalEntities);
         if (admin) await db.Roles.Where(row => row.Id == actor.RoleId).ExecuteUpdateAsync(set => set.SetProperty(row => row.Name, "admin"));
         var assignee = await CreateUserAsync(db, "client-atomic-assignee@example.local", "Ответственный"); var legal = new LegalEntity { ShortName = "Доступная организация", ResponsibleUserId = actor.Id }; var status = new ClientStatusEntity { Name = "Прежний допустимый статус", IsActive = false };
         db.AddRange(legal, status); await db.SaveChangesAsync(); var input = ClientCreateProfile(route); input.ResponsibleUserId = assignee.Id; input.LegalEntityId = legal.Id; input.ClientStatusId = status.Id;

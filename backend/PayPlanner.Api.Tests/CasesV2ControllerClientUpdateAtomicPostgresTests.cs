@@ -26,6 +26,7 @@ public partial class CasesV2ControllerTests
         await using var seed = Open(); var (actor, ids, client) = await SeedBirthdayClientAsync(seed);
         var other = await CreateUserAsync(seed, "update-race-other@example.local", "Другой ответственный");
         var legal = new LegalEntity { ShortName = "Организация при изменении", ResponsibleUserId = actor.Id }; var status = new ClientStatusEntity { Name = "Статус при изменении" }; seed.AddRange(legal, status); await seed.SaveChangesAsync();
+        await GrantSectionPermissionAsync(seed, actor, RolePermissionCatalog.LegalEntities, viewScope: target == "department" ? DataVisibilityScope.Department : DataVisibilityScope.All);
         if (target == "assignee") await seed.Roles.Where(row => row.Id == actor.RoleId).ExecuteUpdateAsync(set => set.SetProperty(row => row.Name, "admin"));
         if (target == "first-permission") await seed.RolePermissions.Where(row => row.RoleId == actor.RoleId).ExecuteDeleteAsync();
         if (target == "department")

@@ -18,7 +18,9 @@ internal static class ClientCreateTransaction
         BalanceApplicationLease? lease = null;
         try
         {
-            lease = await BalanceApplicationLease.BeginAsync(db, actorId.Value, ct);
+            lease = requested.LegalEntityId is > 0
+                ? await BalanceApplicationLease.BeginWithSettingsSnapshotAsync(db, actorId.Value, ct)
+                : await BalanceApplicationLease.BeginAsync(db, actorId.Value, ct);
             var access = await db.ResolveSectionAccessAsync(actor, RolePermissionCatalog.Clients, ct, requireApprovedUser: true);
             if (access is null)
             {
@@ -42,12 +44,9 @@ internal static class ClientCreateTransaction
             var usersToLock = new HashSet<int> { responsible };
             if (requested.LegalEntityId is int legalId)
             {
-                var legal = legalId > 0 ? await db.LegalEntities.AsNoTracking().ApplyLegalEntityVisibility(access.Visibility)
-                    .Where(row => row.Id == legalId).Select(row => new { row.Id, row.ResponsibleUserId }).SingleOrDefaultAsync(ct) : null;
+                var legal = await ClientLegalReferences.FindSelectionAsync(db, actor, legalId, ct);
                 if (legal is null) return new BadRequestObjectResult($"Юридическое лицо #{legalId} не найдено или недоступно");
-                if (db.Database.IsNpgsql())
-                    await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"LegalEntities\" WHERE \"Id\" = {legalId} FOR SHARE NOWAIT", ct);
-                if (!access.Visibility.SeesAll && legal.ResponsibleUserId is int ownerId) usersToLock.Add(ownerId);
+                if (legal.OwnerToPin is int ownerId) usersToLock.Add(ownerId);
             }
             if (requested.ClientStatusId is int statusId)
             {

@@ -137,6 +137,13 @@ public partial class CasesV2ControllerTests
         var seed = await SeedLegalReferenceAsync(db, state); var before = JsonSerializer.Serialize(await db.LegalEntities.AsNoTracking().SingleAsync());
         using var server = RequiredClientServer(db, seed.Actor); using var http = server.CreateClient(); http.DefaultRequestHeaders.Add("X-Confirmation-User", seed.Actor.Id.ToString());
         recorder.Armed = true; using var response = await SendRequiredClientAsync(http, 0, create, seed.Client, new Client { Name = "Разрешённое сохранение", LegalEntityId = seed.Legal.Id, ResponsibleUserId = seed.Actor.Id }); recorder.Armed = false;
+        if (create && !LegalReferenceVisible(state))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode); Assert.Equal(3, await db.Clients.CountAsync());
+            Assert.DoesNotContain(LegalReferenceSecret, await response.Content.ReadAsStringAsync());
+            Assert.Equal(before, JsonSerializer.Serialize(await db.LegalEntities.AsNoTracking().SingleAsync()));
+            recorder.AssertNoInlineAssets(); Assert.Null(db.Database.CurrentTransaction); return;
+        }
         Assert.True(response.StatusCode == (create ? HttpStatusCode.Created : HttpStatusCode.OK), $"HTTP={(int)response.StatusCode};body={await response.Content.ReadAsStringAsync()}");
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync()); AssertLegalReferenceJson(json.RootElement, seed, state, 9); recorder.AssertNoInlineAssets();
         var id = json.RootElement.GetProperty("id").GetInt32(); Assert.Equal("Разрешённое сохранение", await db.Clients.Where(x => x.Id == id).Select(x => x.Name).SingleAsync()); Assert.Equal(seed.Legal.Id, await db.Clients.Where(x => x.Id == id).Select(x => x.LegalEntityId).SingleAsync());
@@ -153,6 +160,11 @@ public partial class CasesV2ControllerTests
         await using var db = postgres ? new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(database!.ConnectionString).Options) : await CreateContextAsync();
         var seed = await SeedLegalReferenceAsync(db, "hidden"); using var server = RequiredClientServer(db, seed.Actor); using var http = server.CreateClient(); http.DefaultRequestHeaders.Add("X-Confirmation-User", seed.Actor.Id.ToString());
         using var response = await SendRequiredClientAsync(http, route, create, seed.Client, new Client { Name = "Сохранение без раскрытия", LegalEntityId = seed.Legal.Id, ResponsibleUserId = seed.Actor.Id });
+        if (create)
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode); Assert.Equal(3, await db.Clients.CountAsync());
+            Assert.DoesNotContain(LegalReferenceSecret, await response.Content.ReadAsStringAsync()); Assert.Null(db.Database.CurrentTransaction); return;
+        }
         Assert.Equal(create ? HttpStatusCode.Created : HttpStatusCode.OK, response.StatusCode); using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync()); AssertLegalReferenceJson(json.RootElement, seed, "hidden", route); Assert.Null(db.Database.CurrentTransaction);
     }
 

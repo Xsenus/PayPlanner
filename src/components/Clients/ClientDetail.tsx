@@ -5883,13 +5883,16 @@ function ClientDetailScreen({
         );
         return;
       }
-      if (profile.kind === "legal" && !selectedLegalEntity) {
+      const retainingHiddenLegal = profile.kind === "legal" && !selectedLegalEntity
+        && Number(clientFormState.legalEntityId) > 0
+        && Number(clientFormState.legalEntityId) === clientData?.legalEntityId;
+      if (profile.kind === "legal" && !selectedLegalEntity && !retainingHiddenLegal) {
         toast.error('Не удалось подтвердить название выбранной организации. Повторите загрузку списка.', 'Проверка данных');
         return;
       }
       try {
         await handleUpdateClient({
-          name: buildClientDisplayName(
+          name: retainingHiddenLegal ? (clientData?.name ?? "") : buildClientDisplayName(
             profile,
             selectedLegalEntity?.shortName ??
               selectedLegalEntity?.fullName ??
@@ -5899,7 +5902,7 @@ function ClientDetailScreen({
           phone: normalizedPhones[0] ?? "",
           company:
             profile.kind === "legal"
-              ? (selectedLegalEntity?.shortName ?? "Юридическое лицо")
+              ? retainingHiddenLegal ? (clientData?.company ?? "") : (selectedLegalEntity?.shortName ?? "Юридическое лицо")
               : "",
           address: primaryAddress,
           notes: `${CLIENT_PROFILE_NOTES_PREFIX}${serializeClientExtendedProfile(profile)}`,

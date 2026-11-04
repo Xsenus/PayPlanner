@@ -2388,6 +2388,55 @@ describe('ClientDetail integration', () => {
     expect(apiService.getLegalEntitiesPaged).not.toHaveBeenCalled();
     expect(document.querySelector<HTMLSelectElement>('select[name="legalEntityId"]')?.value).toBe('21');
   });
+  async function editHiddenLinkedClient(access: 'no-view' | 'denied-page', originalId: number | null = 21) {
+    permissionsResult.legalEntities.canView = access === 'denied-page';
+    permissionsResult.companyProfile.canView = false;
+    const client: Client = { ...linkedLookupClient(), name: 'Сохранённое имя клиента', company: 'Сохранённая компания', legalEntityId: originalId, legalEntity: null };
+    vi.mocked(apiService.getClient).mockResolvedValue(client);
+    vi.mocked(apiService.getLegalEntitiesPaged).mockRejectedValue(new Error('HTTP 403 - Доступ закрыт'));
+    vi.mocked(apiService.updateClient).mockResolvedValue(client);
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    if (access === 'denied-page') await screen.findByText('Недостаточно прав для выполнения действия.');
+    return client;
+  }
+  it.each(['no-view', 'denied-page'] as const)('company retained link: %s can save without disclosing or replacing the stored name', async access => {
+    await editHiddenLinkedClient(access);
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(apiService.updateClient).toHaveBeenCalledOnce());
+    expect(vi.mocked(apiService.updateClient).mock.calls[0][1]).toMatchObject({ legalEntityId: 21, name: 'Сохранённое имя клиента', company: 'Сохранённая компания' });
+    expect(apiService.getLegalEntity).not.toHaveBeenCalled();
+    if (access === 'no-view') expect(apiService.getLegalEntitiesPaged).not.toHaveBeenCalled();
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith('Изменения карточки клиента сохранены.', 'Клиент обновлен'));
+  });
+  it.each([null, 21])('company retained link: a new unconfirmed ID cannot use the original %s link exception', async originalId => {
+    permissionsResult.legalEntities.canView = true;
+    const client: Client = { ...linkedLookupClient(), legalEntityId: originalId, legalEntity: null };
+    vi.mocked(apiService.getClient).mockResolvedValue(client);
+    vi.mocked(apiService.getLegalEntitiesPaged)
+      .mockResolvedValueOnce({ items: [{ ...linkedLookupEntity, id: 99 }], total: 1, page: 1, pageSize: 20 })
+      .mockRejectedValueOnce(new Error('HTTP 403 - Доступ закрыт'));
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    await waitFor(() => expect(document.querySelector('select[name="legalEntityId"] option[value="99"]')).not.toBeNull());
+    const select = document.querySelector<HTMLSelectElement>('select[name="legalEntityId"]')!;
+    fireEvent.change(select, { target: { value: '99' } });
+    fireEvent.change(screen.getByLabelText('Поиск юридического лица клиента'), { target: { value: 'закрыто' } });
+    await screen.findByText('Недостаточно прав для выполнения действия.'); expect(select.value).toBe('99');
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith('Не удалось подтвердить название выбранной организации. Повторите загрузку списка.', 'Проверка данных'));
+    expect(apiService.updateClient).not.toHaveBeenCalled();
+  });
+  it('company retained link: a server refusal preserves the form and allows an explicit retry', async () => {
+    const client = await editHiddenLinkedClient('no-view');
+    vi.mocked(apiService.updateClient).mockRejectedValueOnce(new Error('Юридическое лицо #21 не найдено или недоступно')).mockResolvedValueOnce(client);
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith('Юридическое лицо #21 не найдено или недоступно', 'Ошибка сохранения'));
+    expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveProperty('disabled', false); expect(toastSuccessMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith('Изменения карточки клиента сохранены.', 'Клиент обновлен'));
+    expect(apiService.updateClient).toHaveBeenCalledTimes(2);
+  });
   it('company lookup baseline: changing the query aborts the obsolete page request', async () => {
     let finish!: (value: Awaited<ReturnType<typeof apiService.getLegalEntitiesPaged>>) => void;
     vi.mocked(apiService.getLegalEntitiesPaged).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));

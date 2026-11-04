@@ -22,6 +22,11 @@ internal sealed class BalanceApplicationLease : IAsyncDisposable
     public static Task<BalanceApplicationLease> BeginAsync(PaymentContext db, int actorId, CancellationToken ct)
         => BeginCoreAsync(db, actorId, ct);
 
+    // A new company binding must also exclude the first registry insertion.
+    // Take the table lock before any actor SELECT establishes the PG snapshot.
+    public static Task<BalanceApplicationLease> BeginWithSettingsSnapshotAsync(PaymentContext db, int actorId, CancellationToken ct)
+        => BeginCoreAsync(db, actorId, ct, pinSettings: true);
+
     // A trusted background job has no interactive actor to impersonate. It still
     // owns the same clean transaction and payment locks as interactive writers.
     public static Task<BalanceApplicationLease> BeginSystemAsync(PaymentContext db, CancellationToken ct)
@@ -33,7 +38,7 @@ internal sealed class BalanceApplicationLease : IAsyncDisposable
     public static Task<BalanceApplicationLease> BeginWithTrackedReadsAsync(PaymentContext db, int? actorId, CancellationToken ct)
         => BeginCoreAsync(db, actorId, ct, clearTracker: false);
 
-    private static async Task<BalanceApplicationLease> BeginCoreAsync(PaymentContext db, int? actorId, CancellationToken ct, bool clearTracker = true)
+    private static async Task<BalanceApplicationLease> BeginCoreAsync(PaymentContext db, int? actorId, CancellationToken ct, bool clearTracker = true, bool pinSettings = false)
     {
         if (db.Database.CurrentTransaction is not null || db.ChangeTracker.HasChanges())
             throw new BalanceApplicationConflictException();
@@ -43,6 +48,8 @@ internal sealed class BalanceApplicationLease : IAsyncDisposable
             if (db.Database.IsNpgsql())
             {
                 lease = new(db, await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct));
+                if (pinSettings)
+                    await db.Database.ExecuteSqlRawAsync("LOCK TABLE \"SystemSettings\" IN SHARE MODE NOWAIT", ct);
                 if (actorId.HasValue)
                 {
                     await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = {actorId.Value} FOR SHARE NOWAIT", ct);

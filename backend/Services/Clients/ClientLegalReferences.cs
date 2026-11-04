@@ -10,15 +10,34 @@ namespace PayPlanner.Api.Services.Clients;
 
 // A visible client does not grant access to its linked counterparty/company.
 // Reuse the same two authorities as the dedicated legal-entity detail action.
-internal sealed class ClientLegalReferences(IQueryable<int> allowedIds)
+internal sealed class ClientLegalReferences(IQueryable<int> allowedIds, bool pinResponsibleUser = false)
 {
     public IQueryable<int> AllowedIds { get; } = allowedIds;
+
+    internal sealed record Selection(int Id, int? OwnerToPin);
+
+    // Called inside the existing client write lease, never a nested read lease.
+    public static async Task<Selection?> FindSelectionAsync(PaymentContext db, ClaimsPrincipal? actor, int id, CancellationToken ct)
+    {
+        if (id <= 0) return null;
+        if (db.Database.CurrentTransaction is null) throw new InvalidOperationException("Client selection requires its write lease.");
+        var access = await ResolveAsync(db, actor, ct, [id]);
+        var selected = await db.LegalEntities.AsNoTracking()
+            .Where(row => row.Id == id && access.AllowedIds.Contains(row.Id))
+            .Select(row => new Selection(row.Id, access.PinResponsibleUser ? row.ResponsibleUserId : null)).SingleOrDefaultAsync(ct);
+        if (selected is not null && db.Database.IsNpgsql())
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"LegalEntities\" WHERE \"Id\" = {id} FOR SHARE NOWAIT", ct);
+        return selected;
+    }
+
+    private bool PinResponsibleUser { get; } = pinResponsibleUser;
 
     public static async Task<ClientLegalReferences> ResolveAsync(PaymentContext db, ClaimsPrincipal? actor,
         CancellationToken ct, IReadOnlyCollection<int>? relevantIds = null,
         IReadOnlyDictionary<string, DataVisibilityAccess?>? visibilityBySection = null)
     {
         var ownIds = await OwnCompanyRegistry.LoadIdsAsync(db, ct);
+        var pinOwnerForSelection = false;
         var needCounterparties = relevantIds is null || relevantIds.Any(id => !ownIds.Contains(id));
         var allowed = db.LegalEntities.AsNoTracking().Where(_ => false).Select(row => row.Id);
         if (needCounterparties)
@@ -26,6 +45,7 @@ internal sealed class ClientLegalReferences(IQueryable<int> allowedIds)
             var visibility = visibilityBySection is not null && visibilityBySection.TryGetValue(RolePermissionCatalog.LegalEntities, out var resolved)
                 ? resolved
                 : await db.ResolveDataVisibilityAsync(actor, RolePermissionCatalog.LegalEntities, ct);
+            pinOwnerForSelection = visibility is { SeesAll: false };
             allowed = db.LegalEntities.AsNoTracking().ApplyLegalEntityVisibility(visibility)
                 .Where(row => !ownIds.Contains(row.Id)).Select(row => row.Id);
         }
@@ -39,7 +59,7 @@ internal sealed class ClientLegalReferences(IQueryable<int> allowedIds)
                 allowed = needCounterparties ? allowed.Concat(own) : own;
             }
         }
-        return new ClientLegalReferences(allowed);
+        return new ClientLegalReferences(allowed, pinOwnerForSelection);
     }
 
     public static async Task PopulateAsync(PaymentContext db, ClaimsPrincipal? actor, IReadOnlyList<Client> clients,

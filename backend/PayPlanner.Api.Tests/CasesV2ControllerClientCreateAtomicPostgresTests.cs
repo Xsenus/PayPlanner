@@ -25,6 +25,7 @@ public partial class CasesV2ControllerTests
         PostgreSqlPaymentContext Open(params IInterceptor[] hooks) => new(new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(database.ConnectionString).AddInterceptors(hooks).Options);
         await using var seed = Open(); var (actor, ids) = await SeedBulkCasesAsync(seed); await GrantSectionPermissionAsync(seed, actor, RolePermissionCatalog.Clients);
         var otherUser = await CreateUserAsync(seed, "client-race-other@example.local", "Другой сотрудник");
+        await GrantSectionPermissionAsync(seed, actor, RolePermissionCatalog.LegalEntities, viewScope: target == "department" ? DataVisibilityScope.Department : DataVisibilityScope.All);
         if (target == "assignee") await seed.Roles.Where(row => row.Id == actor.RoleId).ExecuteUpdateAsync(set => set.SetProperty(row => row.Name, "admin"));
         var legal = new LegalEntity { ShortName = "Организация нового клиента", ResponsibleUserId = actor.Id }; var status = new ClientStatusEntity { Name = "Статус нового клиента" }; seed.AddRange(legal, status); await seed.SaveChangesAsync();
         if (target == "department")
