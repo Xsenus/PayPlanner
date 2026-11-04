@@ -492,6 +492,8 @@ function ClientsScreen({ context, onOpenContract, onOpenInvoice, onOpenAct, onOp
   const [filterSettings, setFilterSettings] = useState<ClientTableFilterSettings>(() =>
     loadFilterSettings(filterSettingsStorageKey, tableLayoutStorageKey),
   );
+  const filterSettingsEdited = useRef(false);
+  const lastSavedFilterSettings = useRef(JSON.stringify(filterSettings));
   const [page, setPage] = useState(1);
 
   const filterableColumns = useMemo(
@@ -572,6 +574,7 @@ function ClientsScreen({ context, onOpenContract, onOpenInvoice, onOpenAct, onOp
   const { clients, loading, refreshing, error: clientsError, total, createClient, updateClient, setClients, refresh } =
     useClients(clientsQueryOptions);
   const directoryDenied = isHttpErrorStatus(clientsError, 401) || isHttpErrorStatus(clientsError, 403);
+  const { capture: captureFilterSettings } = useDocumentDeliveryOwner(JSON.stringify([authorityScope, directoryDenied]));
   const screenOwner = useDocumentDeliveryOwner(JSON.stringify([authorityScope, directoryDenied]));
   const { capture: captureScreenOwner } = screenOwner;
   const captureScreen = useCallback(() => canViewClients && !directoryDenied ? captureScreenOwner() : null, [canViewClients, directoryDenied, captureScreenOwner]);
@@ -1031,55 +1034,59 @@ function ClientsScreen({ context, onOpenContract, onOpenInvoice, onOpenAct, onOp
   };
 
   useEffect(() => {
-    let active = true;
+    const owner = canViewClients && !directoryDenied ? captureFilterSettings() : null;
+    setFilterSettingsLoaded(false);
+    if (!owner) return;
+    const controller = new AbortController();
+    const current = () => owner.isCurrent() && !controller.signal.aborted;
+    const apply = (value: string) => {
+      if (!current() || filterSettingsEdited.current) return;
+      const normalized = normalizeFilterSettings(JSON.parse(value) as Partial<ClientTableFilterSettings>);
+      lastSavedFilterSettings.current = JSON.stringify(normalized);
+      setFilterSettings(normalized);
+      saveFilterSettings(filterSettingsStorageKey, normalized);
+    };
     const loadFilterSettingsFromServer = async () => {
       try {
-        const response = await apiService.getUserSetting(FILTER_SETTINGS_DB_KEY);
-        if (active && response?.value) {
-          const parsed = JSON.parse(response.value) as Partial<ClientTableFilterSettings>;
-          const normalized = normalizeFilterSettings(parsed);
-          setFilterSettings(normalized);
-          saveFilterSettings(filterSettingsStorageKey, normalized);
-          return;
-        }
-
-        const legacyResponse = await apiService.getUserSetting(TABLE_SETTINGS_DB_KEY);
-        if (active && legacyResponse?.value) {
-          const parsed = JSON.parse(legacyResponse.value) as LegacyClientTableSettings;
-          const normalized = normalizeFilterSettings(parsed);
-          setFilterSettings(normalized);
-          saveFilterSettings(filterSettingsStorageKey, normalized);
-        }
+        const response = await awaitOwnedUiResult(() => apiService.getUserSetting(FILTER_SETTINGS_DB_KEY, { signal: controller.signal }), current);
+        if (response?.value) { apply(response.value); return; }
+        const legacyResponse = await awaitOwnedUiResult(() => apiService.getUserSetting(TABLE_SETTINGS_DB_KEY, { signal: controller.signal }), current);
+        if (legacyResponse?.value) apply(legacyResponse.value);
       } catch {
-        /** */
+        // Keep the local draft; a failed read must not initialize server settings.
       } finally {
-        if (active) setFilterSettingsLoaded(true);
+        if (current()) setFilterSettingsLoaded(true);
       }
     };
-
     void loadFilterSettingsFromServer();
-    return () => {
-      active = false;
-    };
-  }, [filterSettingsStorageKey]);
+    return () => controller.abort();
+  }, [filterSettingsStorageKey, captureFilterSettings, canViewClients, directoryDenied]);
 
   useEffect(() => {
+    const owner = canViewClients && !directoryDenied ? captureFilterSettings() : null;
+    if (!owner) return;
     saveFilterSettings(filterSettingsStorageKey, filterSettings);
-    if (!filterSettingsLoaded) return;
-    if (filterSaveTimerRef.current) {
-      window.clearTimeout(filterSaveTimerRef.current);
-    }
-
+    const serialized = JSON.stringify(filterSettings);
+    if (!filterSettingsLoaded || serialized === lastSavedFilterSettings.current) return;
+    const controller = new AbortController();
+    const current = () => owner.isCurrent() && !controller.signal.aborted;
     filterSaveTimerRef.current = window.setTimeout(() => {
-      void apiService.upsertUserSetting(FILTER_SETTINGS_DB_KEY, JSON.stringify(filterSettings));
+      if (!current()) return;
+      void (async () => {
+        try {
+          await awaitOwnedUiResult(() => apiService.upsertUserSetting(FILTER_SETTINGS_DB_KEY, serialized, { signal: controller.signal }), current);
+          if (current()) lastSavedFilterSettings.current = serialized;
+        } catch {
+          // A later explicit edit may retry; no stale completion or unhandled rejection.
+        }
+      })();
     }, 600);
-
     return () => {
-      if (filterSaveTimerRef.current) {
-        window.clearTimeout(filterSaveTimerRef.current);
-      }
+      if (filterSaveTimerRef.current !== null) window.clearTimeout(filterSaveTimerRef.current);
+      filterSaveTimerRef.current = null;
+      controller.abort();
     };
-  }, [filterSettings, filterSettingsLoaded, filterSettingsStorageKey]);
+  }, [filterSettings, filterSettingsLoaded, filterSettingsStorageKey, captureFilterSettings, canViewClients, directoryDenied]);
 
   useEffect(() => {
     if (viewMode !== 'table') {
@@ -1104,11 +1111,15 @@ function ClientsScreen({ context, onOpenContract, onOpenInvoice, onOpenAct, onOp
   );
 
   const handleFilterColumnsChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    if (!canViewClients || directoryDenied || !captureFilterSettings()) return;
+    filterSettingsEdited.current = true;
     const selected = Array.from(event.target.selectedOptions).map((option) => option.value as ColumnId);
     setFilterSettings((prev) => ({ ...prev, filterColumns: selected }));
   };
 
   const handleFilterValueChange = (columnId: ColumnId, value: string) => {
+    if (!canViewClients || directoryDenied || !captureFilterSettings()) return;
+    filterSettingsEdited.current = true;
     setFilterSettings((prev) => ({
       ...prev,
       filters: { ...prev.filters, [columnId]: value },
@@ -1116,6 +1127,8 @@ function ClientsScreen({ context, onOpenContract, onOpenInvoice, onOpenAct, onOp
   };
 
   const resetFilters = () => {
+    if (!canViewClients || directoryDenied || !captureFilterSettings()) return;
+    filterSettingsEdited.current = true;
     setFilterSettings(DEFAULT_FILTER_SETTINGS);
     setPage(1);
   };
