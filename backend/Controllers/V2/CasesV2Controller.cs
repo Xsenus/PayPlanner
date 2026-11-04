@@ -8987,7 +8987,8 @@ public partial class CasesV2Controller : ControllerBase
         [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] ClientCaseCourtSyncRunRequest? request,
         CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        if (!await HasCurrentCourtCheckActorAsync(ct)) return Unauthorized();
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView && permission.CanEdit, ct) is { } forbidden)
         {
             return forbidden;
         }
@@ -9006,6 +9007,7 @@ public partial class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
+        var expectedSource = CourtCheckSource.Capture(clientCase);
         var actorName = User.GetDisplayName();
         var checkedAt = DateTime.UtcNow;
         var hasCourtBinding =
@@ -9020,17 +9022,44 @@ public partial class CasesV2Controller : ControllerBase
             ? string.Empty
             : $" Комментарий: {manualComment}.";
         if (!hasCourtBinding && !manualOnly)
+            return await RecordCourtCheckAsync(id, expectedSource, checkedAt, actorName, manualOnly, manualCommentSuffix, ct);
+
+        var courtSyncProvider = manualOnly ? null : ResolveCourtSyncProvider(clientCase.CourtUrl);
+        if (courtSyncProvider is ICourtSyncCaseReader caseReader && !string.IsNullOrWhiteSpace(clientCase.CourtUrl))
         {
-            const string missingBindingMessage = "Ручная проверка судебного источника не выполнена: в деле не указан номер дела в суде или ссылка на первоисточник.";
-            AppendCaseEvent(clientCase, $"{missingBindingMessage} Инициатор: {actorName}.");
+            SudrfCourtCaseData courtData;
+            try
+            {
+                courtData = await caseReader.ReadCaseAsync(
+                    new CourtSyncCaseBinding(clientCase.CourtUrl, clientCase.CourtCaseNumber, clientCase.JudicialUid), ct);
+            }
+            catch (SudrfCourtSyncException ex)
+            {
+                return await RecordCourtCheckAsync(id, expectedSource, checkedAt, actorName, manualOnly, manualCommentSuffix, ct,
+                    failureReason: ex.Message, providerName: courtSyncProvider.Label);
+            }
+            ct.ThrowIfCancellationRequested();
+            var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(clientCase, ct);
+            var syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, sourceTimeZone, actorName, checkedAt, ct);
+            MarkCourtSyncSuccess(clientCase, checkedAt);
+            var syncMessage = !syncResult.HasChanges
+                ? $"Судебный источник проверен: новых изменений не найдено. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}."
+                : $"Судебный источник обновлен: {FormatCourtSyncResult(syncResult)}";
+
+            AppendCaseEvent(clientCase, $"{syncMessage} Инициатор: {actorName}.");
+            _db.SetAuditReason($"Обновление дела #{clientCase.Id} из судебного источника {courtSyncProvider.Label}.");
             await _db.SaveChangesAsync(ct);
+            if (syncResult.HasChanges)
+            {
+                await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+            }
 
             return Ok(new ClientCaseCourtSyncRunDto
             {
                 ClientCaseId = clientCase.Id,
-                Status = "binding-required",
-                HasCourtBinding = false,
-                Message = missingBindingMessage,
+                Status = "external-sync-completed",
+                HasCourtBinding = true,
+                Message = syncMessage,
                 CheckedAt = checkedAt,
                 CheckedByUserId = User.GetUserId(),
                 CheckedByUserName = actorName,
@@ -9038,115 +9067,23 @@ public partial class CasesV2Controller : ControllerBase
                 CourtCaseNumber = clientCase.CourtCaseNumber,
                 JudicialUid = clientCase.JudicialUid,
                 CourtUrl = clientCase.CourtUrl,
+                SyncedFromExternalSource = true,
+                UpdatedFields = syncResult.ChangedFields,
+                CreatedCourtEvents = syncResult.CreatedCourtEvents,
+                UpdatedCourtEvents = syncResult.UpdatedCourtEvents,
+                CreatedCourtParties = syncResult.CreatedCourtParties,
+                CreatedCourtActDocuments = syncResult.CreatedCourtActDocuments,
+                PendingCourtActDocuments = syncResult.PendingCourtActDocuments,
+                CreatedProceduralDeadlines = syncResult.CreatedProceduralDeadlines,
+                NewItems = syncResult.NewItems,
+                ChangedItems = syncResult.ChangedItems,
+                RemovedItems = syncResult.RemovedItems,
+                ConflictItems = syncResult.ConflictItems,
+                NextHearingAt = clientCase.NextHearingAt,
             });
         }
 
-        var courtSyncProvider = manualOnly ? null : ResolveCourtSyncProvider(clientCase.CourtUrl);
-        if (courtSyncProvider is ICourtSyncCaseReader caseReader && !string.IsNullOrWhiteSpace(clientCase.CourtUrl))
-        {
-            try
-            {
-                var courtData = await caseReader.ReadCaseAsync(
-                    new CourtSyncCaseBinding(clientCase.CourtUrl, clientCase.CourtCaseNumber, clientCase.JudicialUid),
-                    ct);
-                var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(clientCase, ct);
-                var syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, sourceTimeZone, actorName, checkedAt, ct);
-                MarkCourtSyncSuccess(clientCase, checkedAt);
-                var syncMessage = !syncResult.HasChanges
-                    ? $"Судебный источник проверен: новых изменений не найдено. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}."
-                    : $"Судебный источник обновлен: {FormatCourtSyncResult(syncResult)}";
-
-                AppendCaseEvent(clientCase, $"{syncMessage} Инициатор: {actorName}.");
-                _db.SetAuditReason($"Обновление дела #{clientCase.Id} из судебного источника {courtSyncProvider.Label}.");
-                await _db.SaveChangesAsync(ct);
-                if (syncResult.HasChanges)
-                {
-                    await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-                }
-
-                return Ok(new ClientCaseCourtSyncRunDto
-                {
-                    ClientCaseId = clientCase.Id,
-                    Status = "external-sync-completed",
-                    HasCourtBinding = true,
-                    Message = syncMessage,
-                    CheckedAt = checkedAt,
-                    CheckedByUserId = User.GetUserId(),
-                    CheckedByUserName = actorName,
-                    CourtName = clientCase.CourtName,
-                    CourtCaseNumber = clientCase.CourtCaseNumber,
-                    JudicialUid = clientCase.JudicialUid,
-                    CourtUrl = clientCase.CourtUrl,
-                    SyncedFromExternalSource = true,
-                    UpdatedFields = syncResult.ChangedFields,
-                    CreatedCourtEvents = syncResult.CreatedCourtEvents,
-                    UpdatedCourtEvents = syncResult.UpdatedCourtEvents,
-                    CreatedCourtParties = syncResult.CreatedCourtParties,
-                    CreatedCourtActDocuments = syncResult.CreatedCourtActDocuments,
-                    PendingCourtActDocuments = syncResult.PendingCourtActDocuments,
-                    CreatedProceduralDeadlines = syncResult.CreatedProceduralDeadlines,
-                    NewItems = syncResult.NewItems,
-                    ChangedItems = syncResult.ChangedItems,
-                    RemovedItems = syncResult.RemovedItems,
-                    ConflictItems = syncResult.ConflictItems,
-                    NextHearingAt = clientCase.NextHearingAt,
-                });
-            }
-            catch (SudrfCourtSyncException ex)
-            {
-                var errorMessage = $"Проверка судебного источника не выполнена: {ex.Message} Проверьте ссылку на карточку дела суда и повторите попытку.";
-                MarkCourtSyncFailure(clientCase, checkedAt, ex.Message);
-                AppendCaseEvent(clientCase, $"{errorMessage} Инициатор: {actorName}.");
-                await NotifyCourtSyncFailedForCaseAsync(
-                    clientCase,
-                    courtSyncProvider.Label,
-                    errorMessage,
-                    User.GetUserId(),
-                    actorName,
-                    ct);
-                await _db.SaveChangesAsync(ct);
-
-                return Ok(new ClientCaseCourtSyncRunDto
-                {
-                    ClientCaseId = clientCase.Id,
-                    Status = "external-sync-error",
-                    HasCourtBinding = true,
-                    Message = errorMessage,
-                    CheckedAt = checkedAt,
-                    CheckedByUserId = User.GetUserId(),
-                    CheckedByUserName = actorName,
-                    CourtName = clientCase.CourtName,
-                    CourtCaseNumber = clientCase.CourtCaseNumber,
-                    JudicialUid = clientCase.JudicialUid,
-                    CourtUrl = clientCase.CourtUrl,
-                });
-            }
-        }
-
-        var status = "manual-check-recorded";
-        var message = manualOnly
-            ? $"Ручная проверка судебного источника зафиксирована без автоматического обновления. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}.{manualCommentSuffix}"
-            : string.IsNullOrWhiteSpace(clientCase.CourtUrl)
-                ? $"Ручная проверка судебного источника зафиксирована: для автоматического обновления добавьте ссылку на карточку дела суда. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}.{manualCommentSuffix}"
-                : $"Ручная проверка судебного источника зафиксирована: выбранный источник пока не поддерживает автоматическое чтение карточки. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}.{manualCommentSuffix}";
-
-        AppendCaseEvent(clientCase, $"{message} Инициатор: {actorName}.");
-        await _db.SaveChangesAsync(ct);
-
-        return Ok(new ClientCaseCourtSyncRunDto
-        {
-            ClientCaseId = clientCase.Id,
-            Status = status,
-            HasCourtBinding = hasCourtBinding,
-            Message = message,
-            CheckedAt = checkedAt,
-            CheckedByUserId = User.GetUserId(),
-            CheckedByUserName = actorName,
-            CourtName = clientCase.CourtName,
-            CourtCaseNumber = clientCase.CourtCaseNumber,
-            JudicialUid = clientCase.JudicialUid,
-            CourtUrl = clientCase.CourtUrl,
-        });
+        return await RecordCourtCheckAsync(id, expectedSource, checkedAt, actorName, manualOnly, manualCommentSuffix, ct);
     }
 
     private static void MarkCourtSyncSuccess(ClientCase clientCase, DateTime checkedAt)

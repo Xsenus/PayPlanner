@@ -10208,7 +10208,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Contains("выбранный источник пока не поддерживает автоматическое чтение карточки", dto.Message, StringComparison.Ordinal);
         Assert.Equal("Владелец", dto.CheckedByUserName);
 
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         Assert.Contains("Ручная проверка судебного источника зафиксирована", clientCase.EventHistory, StringComparison.Ordinal);
         Assert.Contains("Инициатор: Владелец", clientCase.EventHistory, StringComparison.Ordinal);
     }
@@ -10328,7 +10328,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Contains("без автоматического обновления", dto.Message, StringComparison.Ordinal);
         Assert.Contains("Комментарий: Проверено по телефону суда, изменений нет.", dto.Message, StringComparison.Ordinal);
 
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         Assert.Equal("Текущий суд", clientCase.CourtName);
         Assert.Contains("Проверено по телефону суда, изменений нет.", clientCase.EventHistory, StringComparison.Ordinal);
         Assert.Equal(0, await db.ClientCaseCourtEvents.CountAsync(item => item.ClientCaseId == clientCase.Id));
@@ -11684,15 +11684,21 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);
         Assert.Equal("external-sync-error", dto.Status);
+        clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         Assert.NotNull(clientCase.CourtSyncFailureStartedAt);
         Assert.Equal(clientCase.CourtSyncLastAttemptAt, clientCase.CourtSyncFailureStartedAt);
         Assert.Equal("Источник временно недоступен", clientCase.CourtSyncLastError);
 
+        owner = await db.Users.Include(item => item.Role).SingleAsync(item => item.Id == owner.Id);
         owner.Role!.Name = "admin";
         clientCase.CourtSyncFailureStartedAt = DateTime.UtcNow.AddHours(-25);
         await db.SaveChangesAsync();
         var failureStartedAt = clientCase.CourtSyncFailureStartedAt;
+        controller = CreateController(db, owner,
+            sudrfCourtSyncService: new ThrowingSudrfCourtSyncService("Источник временно недоступен"),
+            notificationService: CreateNotificationService(db));
         await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None);
+        clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         Assert.Equal(failureStartedAt, clientCase.CourtSyncFailureStartedAt);
         var adminWarning = await db.UserNotifications.SingleAsync(item => item.Type == UserNotificationTypes.SystemAdminWarning);
         Assert.Equal(owner.Id, adminWarning.RecipientUserId);
@@ -11706,6 +11712,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
                 CaseNumber = clientCase.CourtCaseNumber,
             }));
         await recoveredController.RunCourtSync(clientCase.Id, null, CancellationToken.None);
+        clientCase = await db.ClientCases.AsNoTracking().SingleAsync(item => item.Id == clientCase.Id);
         Assert.Null(clientCase.CourtSyncFailureStartedAt);
         Assert.Equal(clientCase.CourtSyncLastAttemptAt, clientCase.CourtSyncLastSuccessAt);
         Assert.Empty(clientCase.CourtSyncLastError);
@@ -12485,7 +12492,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.False(dto.HasCourtBinding);
         Assert.Contains("не указан номер дела в суде", dto.Message, StringComparison.Ordinal);
 
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         Assert.Contains("Ручная проверка судебного источника не выполнена", clientCase.EventHistory, StringComparison.Ordinal);
     }
 
