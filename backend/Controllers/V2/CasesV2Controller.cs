@@ -3589,7 +3589,7 @@ public partial class CasesV2Controller : ControllerBase
 
         var savedInstances = await _db.ClientCaseCourtInstances
             .AsNoTracking()
-            .Include(item => item.Complaints.Where(complaint => !complaint.IsArchived))
+            .Include(item => item.Complaints.Where(complaint => complaint.ClientCaseId == id && !complaint.IsArchived))
             .Where(item => item.ClientCaseId == id)
             .ToListAsync(ct);
         var hasSavedLaterInstance = savedInstances.Any(item => item.Instance != "first");
@@ -3642,7 +3642,7 @@ public partial class CasesV2Controller : ControllerBase
         }
 
         var courtInstance = await _db.ClientCaseCourtInstances
-            .Include(item => item.Complaints.Where(complaint => !complaint.IsArchived))
+            .Include(item => item.Complaints.Where(complaint => complaint.ClientCaseId == id && !complaint.IsArchived))
             .FirstOrDefaultAsync(item => item.ClientCaseId == id && item.Instance == normalizedInstance, ct);
         var inheritCaseFields = normalizedInstance != "first" || courtInstance is null
             && !await _db.ClientCaseCourtInstances.AsNoTracking()
@@ -3800,6 +3800,7 @@ public partial class CasesV2Controller : ControllerBase
             .FirstOrDefaultAsync(item =>
                 item.Id == complaintId &&
                 item.ClientCaseId == id &&
+                item.CourtInstance.ClientCaseId == id &&
                 item.CourtInstance.Instance == normalizedInstance &&
                 !item.IsArchived,
                 ct);
@@ -3871,6 +3872,7 @@ public partial class CasesV2Controller : ControllerBase
             .FirstOrDefaultAsync(item =>
                 item.Id == complaintId &&
                 item.ClientCaseId == id &&
+                item.CourtInstance.ClientCaseId == id &&
                 item.CourtInstance.Instance == normalizedInstance &&
                 !item.IsArchived,
                 ct);
@@ -13772,7 +13774,8 @@ public partial class CasesV2Controller : ControllerBase
             UpdatedByUserId = item.UpdatedByUserId,
             UpdatedByUserName = item.UpdatedByUserName,
             Complaints = item.Complaints
-                .Where(complaint => !complaint.IsArchived)
+                .Where(complaint => complaint.ClientCaseId == item.ClientCaseId
+                    && complaint.CourtInstanceId == item.Id && !complaint.IsArchived)
                 .OrderByDescending(complaint => complaint.FiledAt ?? complaint.CreatedAt)
                 .ThenByDescending(complaint => complaint.Id)
                 .Select(MapCourtComplaint)
