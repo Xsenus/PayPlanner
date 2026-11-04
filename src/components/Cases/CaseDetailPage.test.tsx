@@ -10,7 +10,7 @@ function detailViewStateKey(caseId: number) {
   return `pp.case-detail.${caseId}.view.v2.${encodeURIComponent(captureAuthSessionIdentity().actor!)}`;
 }
 import { apiService } from '../../services/api';
-import type { ClientCase, ClientCaseCourtEvent, ClientCaseDocument, ClientCaseWorkOrder } from '../../types';
+import type { ClientCase, ClientCaseRelatedParty, ClientCaseCourtEvent, ClientCaseDocument, ClientCaseWorkOrder } from '../../types';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
 import { CaseDetailPage, CourtSourceProvenance } from './CaseDetailPage';
 const detailAuth = vi.hoisted(() => ({ user: { id: 7, role: { id: 10 } } }));
@@ -6151,6 +6151,300 @@ describe('CaseDetailPage', () => {
     expect(apiService.generateCaseDocumentTemplate).not.toHaveBeenCalled();
     expect(apiService.uploadCaseDocument).not.toHaveBeenCalled();
     expect(dialogMock.confirm).not.toHaveBeenCalled();
+  });
+
+
+  async function choosePageParticipantSource() {
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
+    await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '25')).toBe(true));
+    fireEvent.change(screen.getByLabelText('Участник дела'), { target: { value: '25' } });
+    return screen.getByRole('button', { name: /^Добавить$/u });
+  }
+
+  async function showPageArchivedParticipant(overrides: Partial<ClientCaseRelatedParty> = {}) {
+    vi.mocked(apiService.getCaseRelatedParties).mockImplementation(async (_caseId, includeArchived) => includeArchived ? [{
+      id: 42, clientCaseId: 15, sourceType: 'client', sourceId: 31, clientId: 31,
+      displayName: 'Архивный участник', role: 'Третье лицо', notes: 'Сохранённое основание',
+      createdAt: '2026-05-01T00:00:00Z', isArchived: true, ...overrides,
+    }] : []);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Показать архив' }));
+    return await screen.findByRole('button', { name: 'Восстановить связь с участником Архивный участник' });
+  }
+
+  it('page participant owner baseline: readonly access hides add and relation mutations', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit={false} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    await screen.findByRole('heading', { name: 'Связанные лица' });
+    expect(screen.queryByRole('button', { name: /^Добавить$/u })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Удалить связь с участником Земцов Виктор Александрович' })).toBeNull();
+    expect(apiService.getClients).not.toHaveBeenCalled();
+    expect(apiService.getLegalEntitiesPaged).not.toHaveBeenCalled();
+    expect(apiService.getContacts).not.toHaveBeenCalled();
+  });
+
+  it('page participant owner baseline: a replaced login cannot use the old add control', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    const add = await choosePageParticipantSource();
+    session.replace('actor');
+    fireEvent.click(add);
+    expect(apiService.addCaseRelatedParty).not.toHaveBeenCalled();
+  });
+
+  it('page participant owner baseline: pending add reserves one write before duplicate clicks', async () => {
+    vi.mocked(apiService.addCaseRelatedParty).mockReturnValue(new Promise(() => {}));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    const add = await choosePageParticipantSource();
+    act(() => { fireEvent.click(add); fireEvent.click(add); });
+    expect(apiService.addCaseRelatedParty).toHaveBeenCalledOnce();
+  });
+
+  it('page participant owner baseline: a pending header write blocks add', async () => {
+    vi.mocked(apiService.bulkUpdateCases).mockReturnValue(new Promise(() => {}));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    const add = await choosePageParticipantSource();
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/u }));
+    fireEvent.click(add);
+    expect(apiService.addCaseRelatedParty).not.toHaveBeenCalled();
+  });
+
+  it('page participant owner baseline: source changes clear an equal ID from another directory', async () => {
+    vi.mocked(apiService.getClients).mockResolvedValue([{ id: 25, name: 'Клиент 25', phone: '', email: '', company: '', address: '', notes: '', isActive: true, createdAt: '2026-05-01T00:00:00Z' }]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '25')).toBe(true));
+    fireEvent.change(screen.getByLabelText('Участник дела'), { target: { value: '25' } });
+    fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
+    expect(screen.getByLabelText('Участник дела')).toHaveProperty('value', '');
+    expect(apiService.addCaseRelatedParty).not.toHaveBeenCalled();
+  });
+
+  it('page participant owner baseline: an old delete prompt cannot dispatch after case replacement', async () => {
+    let approve!: (value: boolean) => void;
+    dialogMock.confirm.mockReturnValue(new Promise(resolve => { approve = resolve; }));
+    const props = { caseId: 15, onBack: vi.fn() };
+    const view = render(<CaseDetailPage {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Удалить связь с участником Земцов Виктор Александрович' }));
+    view.rerender(<CaseDetailPage {...props} caseId={16} />);
+    await act(async () => approve(true));
+    expect(apiService.deleteCaseRelatedParty).not.toHaveBeenCalled();
+  });
+
+  it('page participant owner baseline: a replaced actor invalidates a pending delete prompt before render', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    let approve!: (value: boolean) => void;
+    dialogMock.confirm.mockReturnValue(new Promise(resolve => { approve = resolve; }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Удалить связь с участником Земцов Виктор Александрович' }));
+    session.replace('actor');
+    await act(async () => approve(true));
+    expect(apiService.deleteCaseRelatedParty).not.toHaveBeenCalled();
+  });
+
+  it('page participant owner baseline: delete confirmation prevents a second prompt and add', async () => {
+    dialogMock.confirm.mockReturnValue(new Promise(() => {}));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    const add = await choosePageParticipantSource();
+    const remove = await screen.findByRole('button', { name: 'Удалить связь с участником Земцов Виктор Александрович' });
+    act(() => { fireEvent.click(remove); fireEvent.click(remove); fireEvent.click(add); });
+    expect(dialogMock.confirm).toHaveBeenCalledOnce();
+    expect(apiService.addCaseRelatedParty).not.toHaveBeenCalled();
+  });
+
+  it('page participant owner baseline: cached restore cannot dispatch for a replaced actor', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    const restore = await showPageArchivedParticipant();
+    session.replace('actor');
+    fireEvent.click(restore);
+    expect(apiService.addCaseRelatedParty).not.toHaveBeenCalled();
+  });
+
+  it('page participant owner baseline: pending restore excludes a second restoration', async () => {
+    vi.mocked(apiService.addCaseRelatedParty).mockReturnValue(new Promise(() => {}));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    const restore = await showPageArchivedParticipant();
+    act(() => { fireEvent.click(restore); fireEvent.click(restore); });
+    expect(apiService.addCaseRelatedParty).toHaveBeenCalledOnce();
+  });
+
+  it('page participant owner baseline: list failures are explicit and do not pretend to be empty', async () => {
+    vi.mocked(apiService.getCaseRelatedParties).mockRejectedValue(new Error('Private server diagnostics'));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    await waitFor(() => expect(screen.queryByText('Загрузка участников дела...')).toBeNull());
+    expect(screen.queryByRole('alert')).not.toBeNull();
+    expect(screen.queryByText(/Private server diagnostics/u)).toBeNull();
+    expect(screen.queryByText('Связанные лица пока не добавлены.')).toBeNull();
+  });
+
+  it('page participant owner baseline: stale contact disclosure cannot reveal the old party phone', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    const reveal = await screen.findByRole('button', { name: 'Показать контакты' });
+    session.replace('actor');
+    fireEvent.click(reveal);
+    expect(screen.queryByText(/\+79991234567/u)).toBeNull();
+  });
+
+  it('page participant owner baseline: stale audit disclosure cannot start a private read', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    const audit = await screen.findByRole('button', { name: 'История участника Земцов Виктор Александрович' });
+    session.replace('actor');
+    fireEvent.click(audit);
+    expect(apiService.getObjectAuditHistory).not.toHaveBeenCalled();
+  });
+
+
+  it('page participant owner: current failure preserves source, role and notes for explicit retry', async () => {
+    vi.mocked(apiService.addCaseRelatedParty).mockRejectedValueOnce(new Error('Ошибка связи'));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    const add = await choosePageParticipantSource();
+    fireEvent.change(screen.getByLabelText('Роль участника'), { target: { value: '  Третье лицо  ' } });
+    fireEvent.change(screen.getByLabelText('Основание связи участника'), { target: { value: '  Основание  ' } });
+    const reads = vi.mocked(apiService.getCaseV2).mock.calls.length;
+    fireEvent.click(add);
+    await screen.findByText('Ошибка связи');
+    expect(screen.getByLabelText('Участник дела')).toHaveProperty('value', '25');
+    expect(screen.getByLabelText('Роль участника')).toHaveProperty('value', '  Третье лицо  ');
+    expect(apiService.getCaseV2).toHaveBeenCalledTimes(reads);
+    fireEvent.click(add);
+    await waitFor(() => expect(apiService.addCaseRelatedParty).toHaveBeenCalledTimes(2));
+    const calls = vi.mocked(apiService.addCaseRelatedParty).mock.calls;
+    expect(calls[1]).toEqual(calls[0]);
+    expect(calls[1]).toEqual([15, { sourceType: 'legalEntity', sourceId: 25, role: 'Третье лицо', notes: 'Основание' }]);
+  });
+
+  it('page participant owner: loaded source membership is required before an injected selection can be sent', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    const add = await choosePageParticipantSource();
+    const select = screen.getByLabelText('Участник дела') as HTMLSelectElement;
+    select.add(new Option('Прежняя запись', '9999'));
+    fireEvent.change(select, { target: { value: '9999' } });
+    fireEvent.click(add);
+    expect(apiService.addCaseRelatedParty).not.toHaveBeenCalled();
+    expect(await screen.findByText('Выберите участника дела из текущего справочника.')).toBeTruthy();
+  });
+
+  it('page participant owner: case-source scope replacement invalidates its old confirmation', async () => {
+    let approve!: (value: boolean) => void;
+    dialogMock.confirm.mockReturnValue(new Promise(resolve => { approve = resolve; }));
+    const props = { caseId: 15, onBack: vi.fn(), caseAccessKey: 'sources-before' };
+    const view = render(<CaseDetailPage {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Удалить связь с участником Земцов Виктор Александрович' }));
+    const signal = dialogMock.confirm.mock.calls[0][0].signal as AbortSignal;
+    view.rerender(<CaseDetailPage {...props} caseAccessKey="sources-after" />);
+    expect(signal.aborted).toBe(true);
+    await act(async () => approve(true));
+    expect(apiService.deleteCaseRelatedParty).not.toHaveBeenCalled();
+  });
+
+  it('page participant owner: deleting a relation uses case edit independently of document deletion', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canDelete={false} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Удалить связь с участником Земцов Виктор Александрович' }));
+    await waitFor(() => expect(apiService.deleteCaseRelatedParty).toHaveBeenCalledExactlyOnceWith(15, 1));
+  });
+
+  it.each([null, 0])('page participant owner: legacy sourceId=%s restores through its unambiguous stored FK', async sourceId => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    const restore = await showPageArchivedParticipant({ sourceId });
+    fireEvent.click(restore);
+    await waitFor(() => expect(apiService.addCaseRelatedParty).toHaveBeenCalledExactlyOnceWith(15, {
+      sourceType: 'client', sourceId: 31, role: 'Третье лицо', notes: 'Сохранённое основание',
+    }));
+  });
+
+  it.each([
+    { sourceId: null, clientId: null }, { sourceId: -1 }, { sourceId: 31.5 }, { sourceId: 32 },
+  ])('page participant owner: inconsistent archived source %j is rejected without guessing', async overrides => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    const restore = await showPageArchivedParticipant(overrides);
+    fireEvent.click(restore);
+    expect(apiService.addCaseRelatedParty).not.toHaveBeenCalled();
+    expect(await screen.findByText('Не удалось однозначно определить участника. Обновите карточку дела.')).toBeTruthy();
+  });
+
+  it('page participant owner: list retry reads only current participants and hides raw diagnostics', async () => {
+    vi.mocked(apiService.getCaseRelatedParties).mockRejectedValueOnce(new Error('Private diagnostics'));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    const retry = await screen.findByRole('button', { name: 'Повторить загрузку участников' });
+    const directoryReads = vi.mocked(apiService.getClients).mock.calls.length;
+    const caseReads = vi.mocked(apiService.getCaseV2).mock.calls.length;
+    fireEvent.click(retry);
+    await screen.findByRole('heading', { name: 'Связанные лица' });
+    expect(apiService.getCaseRelatedParties).toHaveBeenCalledTimes(2);
+    expect(apiService.getCaseRelatedParties).toHaveBeenLastCalledWith(15, false, { signal: expect.any(AbortSignal) });
+    expect(apiService.getClients).toHaveBeenCalledTimes(directoryReads);
+    expect(apiService.getCaseV2).toHaveBeenCalledTimes(caseReads);
+    expect(screen.queryByText('Private diagnostics')).toBeNull();
+  });
+
+  it('page participant owner: a stale retry cannot issue a read after an actor replacement', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    vi.mocked(apiService.getCaseRelatedParties).mockRejectedValue(new Error('Unavailable'));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    const retry = await screen.findByRole('button', { name: 'Повторить загрузку участников' });
+    session.replace('actor');
+    fireEvent.click(retry);
+    expect(apiService.getCaseRelatedParties).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([{ id: 1, clientCaseId: 16 }, { id: 0, clientCaseId: 15 }])('page participant owner: unexpected row %j is an explicit load refusal', async row => {
+    vi.mocked(apiService.getCaseRelatedParties).mockResolvedValue([{ ...row, sourceType: 'client', sourceId: 12, displayName: 'Чужая строка', createdAt: '2026-05-01T00:00:00Z' }]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    await screen.findByRole('alert');
+    expect(screen.queryByText('Чужая строка')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Добавить$/u })).toHaveProperty('disabled', true);
+  });
+
+  it('page participant owner: cancelled delete releases the reservation for the next explicit attempt', async () => {
+    dialogMock.confirm.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    const remove = await screen.findByRole('button', { name: 'Удалить связь с участником Земцов Виктор Александрович' });
+    fireEvent.click(remove);
+    await waitFor(() => expect(remove).toHaveProperty('disabled', false));
+    expect(apiService.deleteCaseRelatedParty).not.toHaveBeenCalled();
+    fireEvent.click(remove);
+    await waitFor(() => expect(apiService.deleteCaseRelatedParty).toHaveBeenCalledExactlyOnceWith(15, 1));
+  });
+
+  it('page participant owner: late add failure cannot show its message after the actor changed', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    let reject!: (error: Error) => void;
+    vi.mocked(apiService.addCaseRelatedParty).mockReturnValue(new Promise((_, fail) => { reject = fail; }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    const add = await choosePageParticipantSource();
+    fireEvent.click(add);
+    session.replace('actor');
+    await act(async () => reject(new Error('Private old response')));
+    expect(screen.queryByText('Private old response')).toBeNull();
+  });
+
+  it('page participant owner: a harmless parent render and token refresh preserve the selected draft without extra reads', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    const props = { caseId: 15, onBack: vi.fn() };
+    const view = render(<CaseDetailPage {...props} />);
+    await choosePageParticipantSource();
+    fireEvent.change(screen.getByLabelText('Роль участника'), { target: { value: 'Мой черновик' } });
+    const reads = vi.mocked(apiService.getCaseRelatedParties).mock.calls.length;
+    session.refresh();
+    view.rerender(<CaseDetailPage {...props} />);
+    expect(screen.getByLabelText('Участник дела')).toHaveProperty('value', '25');
+    expect(screen.getByLabelText('Роль участника')).toHaveProperty('value', 'Мой черновик');
+    expect(apiService.getCaseRelatedParties).toHaveBeenCalledTimes(reads);
   });
 
 });

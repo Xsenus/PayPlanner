@@ -1555,6 +1555,8 @@ function CaseDetailScreen({
   );
   const [relatedParties, setRelatedParties] = useState<ClientCaseRelatedParty[]>([]);
   const [showArchivedParties, setShowArchivedParties] = useState(false);
+  const [participantsLoadError, setParticipantsLoadError] = useState(false);
+  const [participantReadAttempt, setParticipantReadAttempt] = useState(0);
   const [loadedDocuments, setDocuments] = useState<ClientCaseDocument[]>([]);
   const documents = useMemo(() => loadedDocuments.filter(document => document.clientCaseId === caseId), [loadedDocuments, caseId]);
   const [courtEvents, setCourtEvents] = useState<ClientCaseCourtEvent[]>([]);
@@ -1696,6 +1698,8 @@ function CaseDetailScreen({
   const childCaseOwner = useNestedCaseOperationOwner(JSON.stringify(['case-detail-children', caseId, taskAccessKey, canEdit, canDelete, canViewFinance, canViewTasks, editPageOpen]),
     { ...screenOwner, begin: beginCaseOperation }, caseItem?.id === caseId);
   const savingCaseEdit = childCaseOwner.kind === 'case-edit:save';
+  const participantDeletePrompt = useRef<AbortController | null>(null);
+  useEffect(() => () => participantDeletePrompt.current?.abort(), [childCaseOwner.scope]);
   const documentReadOwner = useDocumentDeliveryOwner(JSON.stringify(['case-document-content', screenOwner.scope]));
   const documentContentRead = useRef<AbortController | null>(null);
   const documentDeletePrompt = useRef<AbortController | null>(null);
@@ -2145,12 +2149,20 @@ function CaseDetailScreen({
     const readController = new AbortController();
     const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
     setParticipantsLoading(true);
+    setParticipantsLoadError(false);
     apiService.getCaseRelatedParties(caseId, showArchivedParties, { signal: readController.signal })
       .then((items) => {
-        if (isReadCurrent()) setRelatedParties(items);
+        if (!isReadCurrent()) return;
+        if (!Array.isArray(items) || items.some(party => !party || party.clientCaseId !== caseId || !Number.isSafeInteger(party.id) || party.id <= 0)) {
+          throw new Error('Не удалось подтвердить список участников дела.');
+        }
+        setRelatedParties(items);
       })
       .catch(() => {
-        if (isReadCurrent()) setRelatedParties([]);
+        if (isReadCurrent()) {
+          setRelatedParties([]);
+          setParticipantsLoadError(true);
+        }
       })
       .finally(() => {
         if (isReadCurrent()) setParticipantsLoading(false);
@@ -2159,10 +2171,10 @@ function CaseDetailScreen({
     return () => {
       readController.abort();
     };
-  }, [captureScreen, activeTab, caseId, reloadToken, headerReloadToken, showArchivedParties]);
+  }, [captureScreen, activeTab, caseId, reloadToken, headerReloadToken, showArchivedParties, participantReadAttempt]);
 
   useEffect(() => {
-    if (activeTab !== 'participants') return;
+    if (activeTab !== 'participants' || !canEdit) return;
 
     const owner = captureScreen();
     if (!owner) return;
@@ -2209,7 +2221,7 @@ function CaseDetailScreen({
     return () => {
       readController.abort();
     };
-  }, [captureScreen, activeTab]);
+  }, [captureScreen, activeTab, canEdit]);
 
   useEffect(() => {
     if (activeTab !== 'documents'
@@ -3625,85 +3637,97 @@ function CaseDetailScreen({
   };
 
   const addParticipant = async () => {
-    if (!caseItem) return;
-
+    if (!caseItem || !canEdit || !captureScreen() || participantsLoading || participantsLoadError || participantDirectoryLoading) return;
     const sourceId = Number(participantSourceId);
-    if (!Number.isInteger(sourceId) || sourceId <= 0) {
-      setError('Выберите участника дела из справочника.');
+    if (!Number.isSafeInteger(sourceId) || sourceId <= 0
+      || !participantOptions.some(option => option.sourceId === sourceId && option.sourceType === participantSourceType)) {
+      setError('Выберите участника дела из текущего справочника.');
       return;
     }
-
+    const operation = childCaseOwner.begin('participant:add');
+    if (!operation) return;
     setAddingParticipant(true);
     setError(null);
+    setNotice(null);
     try {
-      await apiService.addCaseRelatedParty(caseItem.id, {
+      await awaitOwnedUiResult(() => apiService.addCaseRelatedParty(caseItem.id, {
         sourceType: participantSourceType,
         sourceId,
         role: participantRole.trim() || undefined,
         notes: participantNotes.trim() || undefined,
-      });
+      }), operation.isCurrent);
       setParticipantSourceId('');
       setParticipantRole('');
       setParticipantNotes('');
       setActiveTab('participants');
       setReloadToken((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось добавить участника дела.');
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(extractDisplayErrorMessage(err, 'Не удалось добавить участника дела.'));
     } finally {
-      setAddingParticipant(false);
+      if (operation.isCurrent()) setAddingParticipant(false);
+      operation.finish();
     }
   };
 
   const deleteParticipant = async (party: ClientCaseRelatedParty) => {
-    if (!caseItem) return;
-    const approved = await confirm({
-      title: 'Удалить участника из дела?',
-      description: `Связь с участником «${party.displayName}» будет удалена из карточки дела.`,
-      confirmLabel: 'Удалить',
-      cancelLabel: 'Отмена',
-      variant: 'danger',
-    });
-    if (!approved) return;
-
+    if (!caseItem || !canEdit || party.clientCaseId !== caseItem.id || party.isArchived || participantsLoading || participantsLoadError) return;
+    const operation = childCaseOwner.begin('participant:delete');
+    if (!operation) return;
+    const controller = new AbortController();
+    participantDeletePrompt.current = controller;
     setDeletingParticipantId(party.id);
     setError(null);
     setNotice(null);
     try {
-      await apiService.deleteCaseRelatedParty(caseItem.id, party.id);
+      const approved = await awaitOwnedUiResult(() => confirm({
+        title: 'Удалить участника из дела?',
+        description: `Связь с участником «${party.displayName}» будет удалена из карточки дела.`,
+        confirmLabel: 'Удалить',
+        cancelLabel: 'Отмена',
+        variant: 'danger',
+        signal: controller.signal,
+      }), operation.isCurrent);
+      if (!approved) return;
+      await awaitOwnedUiResult(() => apiService.deleteCaseRelatedParty(caseItem.id, party.id), operation.isCurrent);
       setNotice(`Связь с участником «${party.displayName}» удалена.`);
       setReloadToken((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось удалить связь с участником дела.');
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(extractDisplayErrorMessage(err, 'Не удалось удалить связь с участником дела.'));
     } finally {
-      setDeletingParticipantId(null);
+      if (participantDeletePrompt.current === controller) participantDeletePrompt.current = null;
+      controller.abort();
+      if (operation.isCurrent()) setDeletingParticipantId(null);
+      operation.finish();
     }
   };
 
   const restoreParticipant = async (party: ClientCaseRelatedParty) => {
-    if (!caseItem) return;
-
+    if (!caseItem || !canEdit || !captureScreen() || party.clientCaseId !== caseItem.id || !party.isArchived || participantsLoading || participantsLoadError) return;
     const sourceId = getRelatedPartySourceId(party);
-    if (!sourceId) {
-      setError('Не удалось определить источник архивной связи для восстановления.');
+    const linkedSourceId = getRelatedPartySourceId({ ...party, sourceId: null });
+    if (!Number.isSafeInteger(sourceId) || !sourceId || sourceId <= 0 || (linkedSourceId != null && sourceId !== linkedSourceId)) {
+      setError('Не удалось однозначно определить участника. Обновите карточку дела.');
       return;
     }
-
+    const operation = childCaseOwner.begin('participant:restore');
+    if (!operation) return;
     setRestoringParticipantId(party.id);
     setError(null);
     setNotice(null);
     try {
-      await apiService.addCaseRelatedParty(caseItem.id, {
+      await awaitOwnedUiResult(() => apiService.addCaseRelatedParty(caseItem.id, {
         sourceType: party.sourceType as ParticipantSourceType,
         sourceId,
         role: party.role?.trim() || undefined,
         notes: party.notes?.trim() || undefined,
-      });
+      }), operation.isCurrent);
       setNotice(`Связь с участником «${party.displayName}» восстановлена.`);
       setReloadToken((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось восстановить связь с участником дела.');
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(extractDisplayErrorMessage(err, 'Не удалось восстановить связь с участником дела.'));
     } finally {
-      setRestoringParticipantId(null);
+      if (operation.isCurrent()) setRestoringParticipantId(null);
+      operation.finish();
     }
   };
 
@@ -4499,7 +4523,8 @@ function CaseDetailScreen({
 
           {activeTab === 'participants' ? (
             <div className="space-y-4">
-              <section className="rounded-xl border border-slate-200 p-4">
+              {canEdit ? (
+              <fieldset disabled={pageBusy} className="min-w-0 rounded-xl border border-slate-200 p-4">
                 <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Добавить участника</h2>
                 <div className="mt-4 grid gap-3 md:grid-cols-[180px_1.4fr_1fr_auto]">
                   <label className="text-sm font-medium text-slate-700">
@@ -4561,7 +4586,7 @@ function CaseDetailScreen({
                   <button
                     type="button"
                     onClick={() => void addParticipant()}
-                    disabled={addingParticipant}
+                    disabled={addingParticipant || pageBusy || participantsLoading || participantsLoadError || participantDirectoryLoading}
                     className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 md:self-end">
                     {addingParticipant ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserRound className="h-4 w-4" />} Добавить
                   </button>
@@ -4581,19 +4606,29 @@ function CaseDetailScreen({
                     {participantDirectoryError}
                   </div>
                 ) : null}
-              </section>
+              </fieldset>
+              ) : <p className="text-sm text-slate-600">Для изменения связей участников нужно право редактирования дела.</p>}
               {participantsLoading ? (
                 <LoadingBlock label="Загрузка участников дела..." />
+              ) : participantsLoadError ? (
+                <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                  Не удалось загрузить участников дела.
+                  <button type="button" onClick={() => { if (captureScreen() && !pageBusy) setParticipantReadAttempt(value => value + 1); }} disabled={pageBusy} className="font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600">
+                    Повторить загрузку участников
+                  </button>
+                </div>
               ) : (
                 <RelatedParties
                   parties={relatedParties}
+                  actionOwner={childCaseOwner}
+                  busy={pageBusy}
                   canRevealContacts={canRevealCaseSensitiveData}
                   showArchived={showArchivedParties}
                   onToggleArchived={() => setShowArchivedParties((value) => !value)}
                   onOpenClient={(clientId) => onOpenClient?.(clientId, caseItem.id)}
                   onOpenLegalEntity={(legalEntityId) => onOpenLegalEntity?.(legalEntityId, caseItem.id)}
-                  onDelete={(party) => void deleteParticipant(party)}
-                  onRestore={(party) => void restoreParticipant(party)}
+                  onDelete={canEdit ? (party) => void deleteParticipant(party) : undefined}
+                  onRestore={canEdit ? (party) => void restoreParticipant(party) : undefined}
                   deletingPartyId={deletingParticipantId}
                   restoringPartyId={restoringParticipantId}
                 />
@@ -6892,6 +6927,8 @@ function getRelatedPartyContactLine(party: ClientCaseRelatedParty, showContacts:
 
 function RelatedParties({
   parties,
+  actionOwner,
+  busy,
   canRevealContacts,
   showArchived,
   onToggleArchived,
@@ -6903,6 +6940,8 @@ function RelatedParties({
   restoringPartyId,
 }: {
   parties: ClientCaseRelatedParty[];
+  actionOwner: CaseOperationParent;
+  busy: boolean;
   canRevealContacts: boolean;
   showArchived: boolean;
   onToggleArchived: () => void;
@@ -6917,12 +6956,13 @@ function RelatedParties({
   const [auditPartyId, setAuditPartyId] = useState<number | null>(null);
   const auditParty = parties.find((party) => party.id === auditPartyId) ?? null;
   const contactsVisible = canRevealContacts && showContacts;
+  if (!actionOwner.capture()) return null;
 
   return (
     <section className="rounded-xl border border-slate-200 p-4">
       <button
         type="button"
-        onClick={onToggleArchived}
+        onClick={() => { if (actionOwner.capture()) onToggleArchived(); }}
         className="mb-3 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
         {showArchived ? 'Скрыть архив' : 'Показать архив'}
       </button>
@@ -6931,7 +6971,7 @@ function RelatedParties({
         {parties.some((party) => party.phone || party.email) ? (
           <button
             type="button"
-            onClick={() => canRevealContacts && setShowContacts((value) => !value)}
+            onClick={() => { if (canRevealContacts && actionOwner.capture()) setShowContacts((value) => !value); }}
             disabled={!canRevealContacts}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">
             {!canRevealContacts ? <LockKeyhole className="h-3.5 w-3.5" /> : null}
@@ -6964,7 +7004,7 @@ function RelatedParties({
             {party.notes ? <div className="mt-2 text-xs text-slate-500">{party.notes}</div> : null}
             <button
               type="button"
-              onClick={() => setAuditPartyId((current) => (current === party.id ? null : party.id))}
+              onClick={() => { if (actionOwner.capture()) setAuditPartyId((current) => (current === party.id ? null : party.id)); }}
               aria-label={`${auditPartyId === party.id ? 'Скрыть историю' : 'История'} участника ${party.displayName}`}
               className="mt-3 rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-white">
               {auditPartyId === party.id ? 'Скрыть историю' : 'История'}
@@ -6991,7 +7031,7 @@ function RelatedParties({
               <button
                 type="button"
                 onClick={() => onRestore(party)}
-                disabled={restoringPartyId === party.id}
+                disabled={busy || restoringPartyId === party.id}
                 aria-label={`Восстановить связь с участником ${party.displayName}`}
                 className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
                 {restoringPartyId === party.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
@@ -7002,7 +7042,7 @@ function RelatedParties({
               <button
                 type="button"
                 onClick={() => onDelete(party)}
-                disabled={deletingPartyId === party.id}
+                disabled={busy || deletingPartyId === party.id}
                 aria-label={`Удалить связь с участником ${party.displayName}`}
                 className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-rose-100 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50">
                 {deletingPartyId === party.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}

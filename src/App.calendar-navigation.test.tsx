@@ -11,6 +11,9 @@ const permissionsState = vi.hoisted(() => ({
   paymentsCanView: true,
   casesCanView: true,
   casesCanExport: true,
+  clientsCanView: true,
+  auditCanView: true,
+  yandexViewScope: 'all' as 'all' | 'own',
   yandexCanCreate: true,
   tasksCanView: true,
   accountsCanCreate: true,
@@ -75,7 +78,7 @@ vi.mock('./hooks/useRolePermissions', () => {
         reports: currentSection,
         calculator: currentSection,
         legalEntities: { ...currentSection, canView: permissionsState.loaded && permissionsState.legalEntitiesCanView },
-        clients: currentSection,
+        clients: { ...currentSection, canView: permissionsState.loaded && permissionsState.clientsCanView },
         cases: { ...currentSection, canView: permissionsState.loaded && permissionsState.casesCanView, canExport: permissionsState.loaded && permissionsState.casesCanExport },
         requests: currentSection,
         accounts: { ...currentSection, canView: permissionsState.loaded && permissionsState.accountsCanView, canCreate: permissionsState.loaded && permissionsState.accountsCanCreate },
@@ -84,9 +87,9 @@ vi.mock('./hooks/useRolePermissions', () => {
         contracts: currentSection,
         dictionaries: currentSection,
         roles: currentSection,
-        audit: currentSection,
+        audit: { ...currentSection, canView: permissionsState.loaded && permissionsState.auditCanView },
         integrations: currentSection,
-        yandexDisk: { ...currentSection, canCreate: permissionsState.loaded && permissionsState.yandexCanCreate },
+        yandexDisk: { ...currentSection, canCreate: permissionsState.loaded && permissionsState.yandexCanCreate, viewScope: permissionsState.yandexViewScope },
         s3Storage: currentSection,
       };
     },
@@ -183,12 +186,14 @@ vi.mock('./components/Tasks/TaskJournal', () => ({
 vi.mock('./components/Cases/CaseDetailPage', () => ({
   CaseDetailPage: ({
     caseId,
+    caseAccessKey,
     canSendToYandexDisk,
     onOpenFinance,
     onBack,
     backLabel,
   }: {
     caseId: number;
+    caseAccessKey?: string;
     canSendToYandexDisk?: boolean;
     onOpenFinance?: (caseItem: { id: number; clientId: number | null; legalEntityId: number | null }) => void;
     onBack?: () => void;
@@ -196,6 +201,7 @@ vi.mock('./components/Cases/CaseDetailPage', () => ({
   }) => (
     <section data-testid="case-detail">
       <span>case {caseId}</span>
+      <span data-testid="case-access-key">{caseAccessKey}</span>
       <span data-testid="case-disk-admission">{canSendToYandexDisk ? 'allowed' : 'denied'}</span>
       <span>{window.sessionStorage.getItem(`pp.case-detail.${caseId}.view.v1`)}</span>
       <button type="button" onClick={onBack}>{backLabel ?? 'back from case'}</button>
@@ -301,6 +307,9 @@ describe('App calendar client navigation', () => {
     permissionsState.paymentsCanView = true;
     permissionsState.casesCanView = true;
     permissionsState.casesCanExport = true;
+    permissionsState.clientsCanView = true;
+    permissionsState.auditCanView = true;
+    permissionsState.yandexViewScope = 'all';
     permissionsState.yandexCanCreate = true;
     permissionsState.tasksCanView = true;
     permissionsState.accountsCanCreate = true;
@@ -799,6 +808,19 @@ describe('App calendar client navigation', () => {
     window.history.replaceState({}, '', '/cases/164');
     render(<App />);
     expect((await screen.findByTestId('case-disk-admission')).textContent).toBe(canExport && canCreate ? 'allowed' : 'denied');
+  });
+
+
+  it.each(['clients', 'legalEntities', 'audit', 'yandexDisk'] as const)('case source admission baseline: %s changes invalidate the active case context', async section => {
+    window.history.replaceState({}, '', '/cases/164');
+    const view = render(<App />);
+    const previous = (await screen.findByTestId('case-access-key')).textContent;
+    if (section === 'clients') permissionsState.clientsCanView = false;
+    if (section === 'legalEntities') permissionsState.legalEntitiesCanView = false;
+    if (section === 'audit') permissionsState.auditCanView = false;
+    if (section === 'yandexDisk') permissionsState.yandexViewScope = 'own';
+    view.rerender(<App />);
+    expect(screen.getByTestId('case-access-key').textContent).not.toBe(previous);
   });
 
 });

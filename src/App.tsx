@@ -1533,7 +1533,7 @@ function AppContent() {
         return (
           <CaseDetailPage
             caseId={selectedCaseId}
-            caseAccessKey={JSON.stringify([permissions.cases, permissions.payments, taskAccessRevision])}
+            caseAccessKey={JSON.stringify([permissions.cases, permissions.clients, permissions.legalEntities, permissions.audit, permissions.yandexDisk, permissions.payments, taskAccessRevision])}
             onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: 'caseDetail' }) : undefined}
             canEdit={permissions.cases.canEdit}
             canDelete={permissions.cases.canDelete}
