@@ -10876,6 +10876,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             notificationService: CreateNotificationService(db));
 
         Assert.IsType<OkObjectResult>((await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None)).Result);
+        clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         Assert.Null(clientCase.NextHearingConfirmedForAt);
         Assert.Null(clientCase.NextHearingConfirmedAt);
         var notification = await db.UserNotifications.SingleAsync(item =>
@@ -11202,6 +11203,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);
         Assert.Equal("external-sync-completed", dto.Status);
         Assert.True(dto.SyncedFromExternalSource);
+        clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         Assert.NotNull(clientCase.CourtSyncLastAttemptAt);
         Assert.Equal(clientCase.CourtSyncLastAttemptAt, clientCase.CourtSyncLastSuccessAt);
         Assert.Null(clientCase.CourtSyncFailureStartedAt);
@@ -11220,7 +11222,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Empty(dto.ConflictItems);
         Assert.Contains("обновлены поля", dto.Message, StringComparison.Ordinal);
 
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         Assert.Equal("Хабаровский краевой суд", clientCase.CourtName);
         Assert.Equal("33а-3390/2026", clientCase.CourtCaseNumber);
         Assert.Equal("27RS0001-01-2026-000123-45", clientCase.JudicialUid);
@@ -11493,7 +11495,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);
         Assert.Equal(4, dto.CreatedCourtEvents);
 
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         Assert.Equal(new DateTime(2026, 8, 21), clientCase.CourtDecisionAt);
 
         var events = await db.ClientCaseCourtEvents
@@ -11628,7 +11630,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Equal("external-sync-completed", dto.Status);
         Assert.Equal(expectedUtcHearingAt, dto.NextHearingAt);
 
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         Assert.Equal(expectedUtcHearingAt, clientCase.NextHearingAt);
         var courtEvent = await db.ClientCaseCourtEvents.SingleAsync(item => item.ClientCaseId == clientCase.Id);
         Assert.Equal(expectedUtcHearingAt, courtEvent.ScheduledAt);
@@ -11898,6 +11900,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Contains("новых изменений не найдено", dto.Message, StringComparison.Ordinal);
 
         Assert.Equal(1, await db.ClientCaseCourtEvents.CountAsync(item => item.ClientCaseId == clientCase.Id));
+        courtEvent = await db.ClientCaseCourtEvents.SingleAsync(item => item.Id == courtEvent.Id);
         Assert.StartsWith("sudrf-event-", courtEvent.ExternalKey, StringComparison.Ordinal);
         Assert.Empty(await db.ClientCaseCourtEventHistory.Where(item => item.ClientCaseCourtEventId == courtEvent.Id).ToListAsync());
         Assert.Empty(await db.UserNotifications.ToListAsync());

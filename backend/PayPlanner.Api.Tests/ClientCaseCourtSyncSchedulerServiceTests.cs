@@ -17,6 +17,33 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class ClientCaseCourtSyncSchedulerServiceTests
 {
+    [Theory]
+    [InlineData(1)]
+    [InlineData(7)]
+    public async Task RunOnceAsync_UsesCurrentAdminAuthVersion(int version)
+    {
+        await using var fixture = await SchedulerFixture.CreateAsync();
+        await fixture.SeedUserAsync("admin", "admin@synthetic.local", authTokenVersion: version);
+        var id = await fixture.SeedCaseAsync("https://court.test/case-1");
+        Assert.Equal(1, await fixture.Scheduler.RunOnceAsync(CancellationToken.None));
+        Assert.Equal([id], fixture.Provider.ReadCaseIds);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_DropsCachedPermissionBeforeNextCase()
+    {
+        await using var fixture = await SchedulerFixture.CreateAsync();
+        var adminId = await fixture.SeedUserAsync("admin", "admin@synthetic.local");
+        var first = await fixture.SeedCaseAsync("https://court.test/case-1");
+        await fixture.SeedCaseAsync("https://court.test/case-2");
+        fixture.Provider.BeforeReply = async () =>
+        {
+            if (fixture.Provider.ReadCaseIds.Count == 1) await fixture.ChangeRoleNameAsync(adminId, "former-admin");
+        };
+        Assert.Equal(0, await fixture.Scheduler.RunOnceAsync(CancellationToken.None));
+        Assert.Equal([first], fixture.Provider.ReadCaseIds);
+    }
+
     [Fact]
     public async Task RunOnceAsync_UsesDatabaseAdminInsteadOfFirstActiveUser()
     {
@@ -173,7 +200,7 @@ public sealed class ClientCaseCourtSyncSchedulerServiceTests
             return new SchedulerFixture(connection, serviceProvider, provider, notificationRecorder, scheduler);
         }
 
-        public async Task<int> SeedUserAsync(string roleName, string email, bool canViewCases = true)
+        public async Task<int> SeedUserAsync(string roleName, string email, bool canViewCases = true, int authTokenVersion = 0)
         {
             await using var scope = _services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
@@ -184,6 +211,7 @@ public sealed class ClientCaseCourtSyncSchedulerServiceTests
                 PasswordHash = "test",
                 IsActive = true,
                 IsApproved = true,
+                AuthTokenVersion = authTokenVersion,
                 Role = new Role
                 {
                     Name = roleName,
@@ -201,6 +229,14 @@ public sealed class ClientCaseCourtSyncSchedulerServiceTests
             db.Users.Add(user);
             await db.SaveChangesAsync();
             return user.Id;
+        }
+
+        public async Task ChangeRoleNameAsync(int userId, string name)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+            var roleId = await db.Users.Where(user => user.Id == userId).Select(user => user.RoleId).SingleAsync();
+            await db.Roles.Where(role => role.Id == roleId).ExecuteUpdateAsync(set => set.SetProperty(role => role.Name, name));
         }
 
         public async Task<int> SeedCaseAsync(string courtUrl, int? responsibleUserId = null)
@@ -258,6 +294,7 @@ public sealed class ClientCaseCourtSyncSchedulerServiceTests
     {
         public List<int> ReadCaseIds { get; } = [];
         public string? FailureMessage { get; set; }
+        public Func<Task>? BeforeReply { get; set; }
         public string Key => "test";
         public string Label => "Тестовый судебный источник";
         public string SourceType => "test";
@@ -273,17 +310,18 @@ public sealed class ClientCaseCourtSyncSchedulerServiceTests
         public bool CanHandle(string? sourceUrl)
             => sourceUrl?.Contains("court.test", StringComparison.OrdinalIgnoreCase) == true;
 
-        public Task<SudrfCourtCaseData> ReadCaseAsync(CourtSyncCaseBinding binding, CancellationToken ct)
+        public async Task<SudrfCourtCaseData> ReadCaseAsync(CourtSyncCaseBinding binding, CancellationToken ct)
         {
             var caseId = int.Parse(binding.SourceUrl.Split('-').Last(), System.Globalization.CultureInfo.InvariantCulture);
             ReadCaseIds.Add(caseId);
+            if (BeforeReply is not null) await BeforeReply();
             if (FailureMessage is not null) throw new SudrfCourtSyncException(FailureMessage);
-            return Task.FromResult(new SudrfCourtCaseData
+            return new SudrfCourtCaseData
             {
                 SourceUrl = binding.SourceUrl,
                 CourtName = "Тестовый суд",
                 CaseNumber = binding.CourtCaseNumber ?? string.Empty,
-            });
+            };
         }
     }
 

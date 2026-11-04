@@ -193,37 +193,37 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
         var environment = scope.ServiceProvider.GetService<IWebHostEnvironment>();
         var storage = scope.ServiceProvider.GetRequiredService<ICaseDocumentStorage>();
         var sudrf = scope.ServiceProvider.GetRequiredService<ISudrfCourtSyncService>();
-        var controller = new CasesV2Controller(
-            db,
-            environment,
-            storage,
-            sudrf,
-            notificationService: scope.ServiceProvider.GetService<INotificationService>(),
-            courtSyncProviderRegistry: registry,
-            courtSyncMetrics: metrics,
-            configuration: scope.ServiceProvider.GetService<IConfiguration>(),
-            managedCaseUploads: scope.ServiceProvider.GetService<IManagedCaseDocumentUploadService>(),
-            realtimePublisher: realtimePublisher)
-        {
-            ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext
-                {
-                    User = new ClaimsPrincipal(new ClaimsIdentity(
-                    [
-                        new Claim(ClaimTypes.NameIdentifier, admin.Id.ToString()),
-                        new Claim(ClaimTypes.Name, "Система"),
-                        new Claim(ClaimTypes.Email, admin.Email),
-                        new Claim(ClaimTypes.Role, "admin"),
-                    ], "CourtSyncScheduler")),
-                },
-            },
-        };
-
         var processed = 0;
         foreach (var caseId in caseIds)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var controller = new CasesV2Controller(
+                db,
+                environment,
+                storage,
+                sudrf,
+                notificationService: scope.ServiceProvider.GetService<INotificationService>(),
+                courtSyncProviderRegistry: registry,
+                courtSyncMetrics: metrics,
+                configuration: scope.ServiceProvider.GetService<IConfiguration>(),
+                managedCaseUploads: scope.ServiceProvider.GetService<IManagedCaseDocumentUploadService>(),
+                realtimePublisher: realtimePublisher)
+            {
+                ControllerContext = new ControllerContext
+                {
+                    HttpContext = new DefaultHttpContext
+                    {
+                        User = new ClaimsPrincipal(new ClaimsIdentity(
+                        [
+                            new Claim(ClaimTypes.NameIdentifier, admin.Id.ToString()),
+                            new Claim(ClaimTypes.Name, "Система"),
+                            new Claim(ClaimTypes.Email, admin.Email),
+                            new Claim(ClaimTypes.Role, "admin"),
+                            AuthSessionClaims.CreateTokenVersionClaim(admin.AuthTokenVersion),
+                        ], "CourtSyncScheduler")),
+                    },
+                },
+            };
             var result = await controller.RunCourtSync(caseId, null, cancellationToken);
             if (result.Result is OkObjectResult)
             {

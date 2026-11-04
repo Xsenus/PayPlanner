@@ -9000,6 +9000,7 @@ public partial class CasesV2Controller : ControllerBase
         }
 
         var clientCase = await _db.ClientCases
+            .AsNoTracking()
             .ApplyClientCaseVisibility(visibility)
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (clientCase is null)
@@ -9008,6 +9009,7 @@ public partial class CasesV2Controller : ControllerBase
         }
 
         var expectedSource = CourtCheckSource.Capture(clientCase);
+        var expectedCourtFields = CourtSyncCaseState.Capture(clientCase);
         var actorName = User.GetDisplayName();
         var checkedAt = DateTime.UtcNow;
         var hasCourtBinding =
@@ -9039,8 +9041,17 @@ public partial class CasesV2Controller : ControllerBase
                     failureReason: ex.Message, providerName: courtSyncProvider.Label);
             }
             ct.ThrowIfCancellationRequested();
-            var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(clientCase, ct);
-            var syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, sourceTimeZone, actorName, checkedAt, ct);
+            var acceptance = await WithCurrentCourtCheckAsync(id, expectedSource, async currentCase =>
+            {
+                if (CourtSyncCaseState.Capture(currentCase) != expectedCourtFields)
+                    return Conflict(new { message = "Судебные сведения дела изменились во время ожидания. Обновите дело перед повторной проверкой." });
+                var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(currentCase, ct);
+                _db.SetAuditReason($"Обновление дела #{currentCase.Id} из судебного источника {courtSyncProvider.Label}.");
+                return Ok(await PrepareSudrfCourtSyncAsync(currentCase, courtData, sourceTimeZone, actorName, checkedAt, ct));
+            }, ct);
+            if (acceptance is not OkObjectResult { Value: CourtSyncPrepared prepared }) return (ActionResult)acceptance;
+            clientCase = prepared.Case;
+            var syncResult = await prepared.CompleteAsync();
             MarkCourtSyncSuccess(clientCase, checkedAt);
             var syncMessage = !syncResult.HasChanges
                 ? $"Судебный источник проверен: новых изменений не найдено. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}."
@@ -9159,6 +9170,14 @@ public partial class CasesV2Controller : ControllerBase
     }
 
     private async Task<CourtSyncApplyResult> ApplySudrfCourtSyncAsync(
+        ClientCase clientCase, SudrfCourtCaseData courtData, TimeZoneInfo? sourceTimeZone,
+        string actorName, DateTime checkedAt, CancellationToken ct)
+    {
+        var prepared = await PrepareSudrfCourtSyncAsync(clientCase, courtData, sourceTimeZone, actorName, checkedAt, ct);
+        return await prepared.CompleteAsync();
+    }
+
+    private async Task<CourtSyncPrepared> PrepareSudrfCourtSyncAsync(
         ClientCase clientCase,
         SudrfCourtCaseData courtData,
         TimeZoneInfo? sourceTimeZone,
@@ -9166,6 +9185,7 @@ public partial class CasesV2Controller : ControllerBase
         DateTime checkedAt,
         CancellationToken ct)
     {
+        var notificationsAfterCommit = new List<Func<Task>>();
         var actorUserId = User.GetUserId();
         var previousNextHearingAt = clientCase.NextHearingAt;
         var changedFields = new List<string>();
@@ -9507,8 +9527,8 @@ public partial class CasesV2Controller : ControllerBase
         {
             var isRescheduledHearing = !rescheduleNotificationSent
                 && ReferenceEquals(courtEvent, movedHearingForHistory);
-            await AddCourtEventUserNotificationsAsync(
-                clientCase, courtEvent, isRescheduledHearing ? "rescheduled" : "created", actorUserId, actorName, ct);
+            notificationsAfterCommit.Add(() => AddCourtEventUserNotificationsAsync(
+                clientCase, courtEvent, isRescheduledHearing ? "rescheduled" : "created", actorUserId, actorName, ct));
             rescheduleNotificationSent |= isRescheduledHearing;
         }
 
@@ -9517,8 +9537,8 @@ public partial class CasesV2Controller : ControllerBase
         {
             var isRescheduledHearing = !rescheduleNotificationSent
                 && ReferenceEquals(courtEvent, movedHearingForHistory);
-            await AddCourtEventUserNotificationsAsync(
-                clientCase, courtEvent, isRescheduledHearing ? "rescheduled" : "updated", actorUserId, actorName, ct);
+            notificationsAfterCommit.Add(() => AddCourtEventUserNotificationsAsync(
+                clientCase, courtEvent, isRescheduledHearing ? "rescheduled" : "updated", actorUserId, actorName, ct));
             rescheduleNotificationSent |= isRescheduledHearing;
         }
 
@@ -9686,7 +9706,7 @@ public partial class CasesV2Controller : ControllerBase
                 conflictItems,
                 restoredDeadlineIds,
                 associatedDeadlines,
-                ct);
+                ct, notificationsAfterCommit);
             var legacyDocumentKey = document is not null && document.DocumentKey.Length == 34
                 ? document.DocumentKey : courtActWithKey.LegacyDocumentKey;
             preparedCourtActs.Add((courtAct, documentKey, legacyDocumentKey, courtActWithKey.FileName, document, associatedDeadlines, fileConflict));
@@ -9720,136 +9740,144 @@ public partial class CasesV2Controller : ControllerBase
         // before any summary file can fail or wait for its mandatory copies.
         await _db.SaveChangesAsync(ct);
         var taskJournalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
-        if (taskJournalChanged) await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        return new CourtSyncPrepared(clientCase, CompleteAsync);
 
-        // Keep existing durable attempts behind the copy gate even when routing is disabled.
-        var useCourtSourceRegistry = _managedCaseUploads?.Enabled == true
-            || await _db.CourtDocumentSources.AsNoTracking().AnyAsync(s => s.ClientCaseId == clientCase.Id, ct);
-        CourtDocumentSourceBatchResult? courtSourceBatch = null;
-        if (useCourtSourceRegistry && actorUserId is > 0)
+        async Task<CourtSyncApplyResult> CompleteAsync()
         {
-            courtSourceBatch = await new CourtDocumentSourceRegistry(_db).RecordAcceptedBatchAsync(
-                clientCase.Id, actorUserId.Value, actorName, clientCase.CourtUrl, checkedAt,
-                preparedCourtActs.Where(p => !p.FileConflict).Select(p => new CourtDocumentSourceInput(p.Key, SanitizeCourtSummaryFileName(p.FileName),
-                    p.Act.Title, FirstNonEmpty(p.Act.SourceUrl, courtData.SourceUrl),
-                    BuildSudrfCourtActHtml(clientCase, courtData, p.Act), p.LegacyKey)).ToArray(), ct);
-        }
-        var courtReceipts = courtSourceBatch?.Sources.ToDictionary(r => r.Snapshot.DocumentKey, StringComparer.Ordinal)
-            ?? new Dictionary<string, CourtDocumentSourceReceipt>(StringComparer.Ordinal);
-        var existingCourtDocumentIds = existingCourtActDocuments.Select(d => (long)d.Id).ToArray();
-        var managedCourtDocumentIds = (await _db.StorageProductBindings.AsNoTracking()
-            .Where(b => b.Source == LegacyStorageSources.CaseDocuments
-                && existingCourtDocumentIds.Contains(b.SourceId))
-            .Select(b => b.SourceId).ToListAsync(ct)).ToHashSet();
+            foreach (var notify in notificationsAfterCommit) await notify();
+            if (notificationsAfterCommit.Count > 0) await _db.SaveChangesAsync(ct);
+            if (taskJournalChanged) await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
-        foreach (var prepared in preparedCourtActs)
-        {
-            // Excluded from publication eligibility, not from deadline synchronization.
-            if (prepared.FileConflict) continue;
-            var courtAct = prepared.Act;
-            var documentKey = prepared.Key;
-            // Repeated source rows share the outcome created earlier in this pass.
-            var document = existingCourtActDocumentsByKey.GetValueOrDefault(documentKey) ?? prepared.Document;
-            if (document is null)
+            // Keep existing durable attempts behind the copy gate even when routing is disabled.
+            var useCourtSourceRegistry = _managedCaseUploads?.Enabled == true
+                || await _db.CourtDocumentSources.AsNoTracking().AnyAsync(s => s.ClientCaseId == clientCase.Id, ct);
+            CourtDocumentSourceBatchResult? courtSourceBatch = null;
+            if (useCourtSourceRegistry && actorUserId is > 0)
             {
-                if (useCourtSourceRegistry)
+                courtSourceBatch = await new CourtDocumentSourceRegistry(_db).RecordAcceptedBatchAsync(
+                    clientCase.Id, actorUserId.Value, actorName, clientCase.CourtUrl, checkedAt,
+                    preparedCourtActs.Where(p => !p.FileConflict).Select(p => new CourtDocumentSourceInput(p.Key, SanitizeCourtSummaryFileName(p.FileName),
+                        p.Act.Title, FirstNonEmpty(p.Act.SourceUrl, courtData.SourceUrl),
+                        BuildSudrfCourtActHtml(clientCase, courtData, p.Act), p.LegacyKey)).ToArray(), ct);
+            }
+            var courtReceipts = courtSourceBatch?.Sources.ToDictionary(r => r.Snapshot.DocumentKey, StringComparer.Ordinal)
+                ?? new Dictionary<string, CourtDocumentSourceReceipt>(StringComparer.Ordinal);
+            var existingCourtDocumentIds = existingCourtActDocuments.Select(d => (long)d.Id).ToArray();
+            var managedCourtDocumentIds = (await _db.StorageProductBindings.AsNoTracking()
+                .Where(b => b.Source == LegacyStorageSources.CaseDocuments
+                    && existingCourtDocumentIds.Contains(b.SourceId))
+                .Select(b => b.SourceId).ToListAsync(ct)).ToHashSet();
+
+            foreach (var prepared in preparedCourtActs)
+            {
+                // Excluded from publication eligibility, not from deadline synchronization.
+                if (prepared.FileConflict) continue;
+                var courtAct = prepared.Act;
+                var documentKey = prepared.Key;
+                // Repeated source rows share the outcome created earlier in this pass.
+                var document = existingCourtActDocumentsByKey.GetValueOrDefault(documentKey) ?? prepared.Document;
+                if (document is null)
                 {
-                    if (!courtReceipts.TryGetValue(documentKey, out var receipt))
+                    if (useCourtSourceRegistry)
                     {
-                        conflictItems.Add($"сводка судебного события «{courtAct.Title}» требует проверки источника ({courtSourceBatch?.Status ?? "forbidden"})");
-                        continue;
+                        if (!courtReceipts.TryGetValue(documentKey, out var receipt))
+                        {
+                            conflictItems.Add($"сводка судебного события «{courtAct.Title}» требует проверки источника ({courtSourceBatch?.Status ?? "forbidden"})");
+                            continue;
+                        }
+                        // Earlier legacy metadata/link changes must not enter the writer's transaction.
+                        await _db.SaveChangesAsync(ct);
+                        var outcome = await GenerateManagedCourtDocumentAsync(receipt, ct);
+                        if (outcome.Status != "uploaded" || !outcome.DocumentId.HasValue)
+                        {
+                            if (outcome.Status is "pending" or "disabled" or "unavailable")
+                                pendingCourtActDocumentKeys.Add(documentKey);
+                            else conflictItems.Add($"сводка судебного события «{courtAct.Title}» не добавлена ({outcome.Status})");
+                            continue;
+                        }
+                        document = await _db.ClientCaseDocuments.SingleAsync(d => d.Id == outcome.DocumentId
+                            && d.ClientCaseId == clientCase.Id, ct);
+                        managedCourtDocumentIds.Add(document.Id);
+                        if (!outcome.IsReplay)
+                        {
+                            createdCourtActDocuments++;
+                            _courtSyncMetrics?.RecordDocument(document.SizeBytes);
+                            newItems.Add($"сводка судебного события «{courtAct.Title}»");
+                        }
                     }
-                    // Earlier legacy metadata/link changes must not enter the writer's transaction.
-                    await _db.SaveChangesAsync(ct);
-                    var outcome = await GenerateManagedCourtDocumentAsync(receipt, ct);
-                    if (outcome.Status != "uploaded" || !outcome.DocumentId.HasValue)
+                    else
                     {
-                        if (outcome.Status is "pending" or "disabled" or "unavailable")
-                            pendingCourtActDocumentKeys.Add(documentKey);
-                        else conflictItems.Add($"сводка судебного события «{courtAct.Title}» не добавлена ({outcome.Status})");
-                        continue;
-                    }
-                    document = await _db.ClientCaseDocuments.SingleAsync(d => d.Id == outcome.DocumentId
-                        && d.ClientCaseId == clientCase.Id, ct);
-                    managedCourtDocumentIds.Add(document.Id);
-                    if (!outcome.IsReplay)
-                    {
+                        document = await SaveGeneratedCaseDocumentAsync(clientCase, documentKey,
+                            CourtSyncNormalization.DocumentTypes.CourtEventSummary, "received", prepared.FileName,
+                            BuildSudrfCourtActHtml(clientCase, courtData, courtAct), "Created",
+                            $"Сводка судебного события «{courtAct.Title}» добавлена из ГАС «Правосудие»; текст акта не загружен.",
+                            $"Сводка судебного события «{courtAct.Title}» добавлена из ГАС «Правосудие»; текст акта не загружен.",
+                            ct, publishTaskJournalChanged: false);
                         createdCourtActDocuments++;
                         _courtSyncMetrics?.RecordDocument(document.SizeBytes);
                         newItems.Add($"сводка судебного события «{courtAct.Title}»");
                     }
                 }
-                else
+                else if (!string.Equals(document.DocumentKey, documentKey, StringComparison.Ordinal))
                 {
-                    document = await SaveGeneratedCaseDocumentAsync(clientCase, documentKey,
-                        CourtSyncNormalization.DocumentTypes.CourtEventSummary, "received", prepared.FileName,
-                        BuildSudrfCourtActHtml(clientCase, courtData, courtAct), "Created",
-                        $"Сводка судебного события «{courtAct.Title}» добавлена из ГАС «Правосудие»; текст акта не загружен.",
-                        $"Сводка судебного события «{courtAct.Title}» добавлена из ГАС «Правосудие»; текст акта не загружен.",
-                        ct, publishTaskJournalChanged: false);
-                    createdCourtActDocuments++;
-                    _courtSyncMetrics?.RecordDocument(document.SizeBytes);
-                    newItems.Add($"сводка судебного события «{courtAct.Title}»");
+                    document.DocumentKey = documentKey;
+                    changedItems.Add($"сводка судебного события «{courtAct.Title}»");
                 }
+                if (string.Equals(document.Status, "archived", StringComparison.OrdinalIgnoreCase))
+                {
+                    document.Status = "received";
+                    changedItems.Add($"сводка судебного события «{courtAct.Title}» восстановлена из архива");
+                }
+                if (!managedCourtDocumentIds.Contains(document.Id))
+                {
+                    document.SourceType = "sudrf";
+                    document.DocumentType = CourtSyncNormalization.DocumentTypes.CourtEventSummary;
+                    document.OriginalFileName = prepared.FileName;
+                    document.SourceUrl = Truncate(FirstNonEmpty(courtAct.SourceUrl, courtData.SourceUrl), 1000);
+                    document.SourceCheckedAt = checkedAt;
+                    document.SourceConfidence = "official-source";
+                }
+                existingCourtActDocumentsByKey[documentKey] = document;
+                foreach (var deadline in prepared.Deadlines) deadline.ClientCaseDocumentId = document.Id;
             }
-            else if (!string.Equals(document.DocumentKey, documentKey, StringComparison.Ordinal))
+
+            var removedCourtActDocumentIds = existingCourtActDocuments
+                .Where(item => string.Equals(item.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase)
+                    && IsCurrentCourtSyncSource(item.SourceUrl)
+                    && !string.Equals(item.Status, "archived", StringComparison.OrdinalIgnoreCase)
+                    && !currentCourtActDocumentKeys.Contains(item.DocumentKey))
+                .Select(static item => item.Id).ToHashSet();
+            foreach (var missingDocument in existingCourtActDocuments.Where(item => removedCourtActDocumentIds.Contains(item.Id)))
             {
-                document.DocumentKey = documentKey;
-                changedItems.Add($"сводка судебного события «{courtAct.Title}»");
+                removedItems.Add($"сводка судебного события «{missingDocument.OriginalFileName}»");
+                missingDocument.Status = "archived";
             }
-            if (string.Equals(document.Status, "archived", StringComparison.OrdinalIgnoreCase))
+
+            if (createdCourtActDocuments > 0)
             {
-                document.Status = "received";
-                changedItems.Add($"сводка судебного события «{courtAct.Title}» восстановлена из архива");
+                changedFields.Add("сводки судебных событий");
             }
-            if (!managedCourtDocumentIds.Contains(document.Id))
+
+            if (createdProceduralDeadlines > 0)
             {
-                document.SourceType = "sudrf";
-                document.DocumentType = CourtSyncNormalization.DocumentTypes.CourtEventSummary;
-                document.OriginalFileName = prepared.FileName;
-                document.SourceUrl = Truncate(FirstNonEmpty(courtAct.SourceUrl, courtData.SourceUrl), 1000);
-                document.SourceCheckedAt = checkedAt;
-                document.SourceConfidence = "official-source";
+                changedFields.Add("процессуальные сроки");
             }
-            existingCourtActDocumentsByKey[documentKey] = document;
-            foreach (var deadline in prepared.Deadlines) deadline.ClientCaseDocumentId = document.Id;
-        }
 
-        var removedCourtActDocumentIds = existingCourtActDocuments
-            .Where(item => string.Equals(item.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase)
-                && IsCurrentCourtSyncSource(item.SourceUrl)
-                && !string.Equals(item.Status, "archived", StringComparison.OrdinalIgnoreCase)
-                && !currentCourtActDocumentKeys.Contains(item.DocumentKey))
-            .Select(static item => item.Id).ToHashSet();
-        foreach (var missingDocument in existingCourtActDocuments.Where(item => removedCourtActDocumentIds.Contains(item.Id)))
-        {
-            removedItems.Add($"сводка судебного события «{missingDocument.OriginalFileName}»");
-            missingDocument.Status = "archived";
-        }
+            return new CourtSyncApplyResult(
+                changedFields,
+                createdEvents.Count,
+                updatedCourtEvents,
+                createdCourtParties,
+                createdCourtActDocuments,
+                pendingCourtActDocumentKeys.Count,
+                createdProceduralDeadlines,
+                newItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                changedItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                removedItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                conflictItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                requiresDeadlineTaskSync);
 
-        if (createdCourtActDocuments > 0)
-        {
-            changedFields.Add("сводки судебных событий");
         }
-
-        if (createdProceduralDeadlines > 0)
-        {
-            changedFields.Add("процессуальные сроки");
-        }
-
-        return new CourtSyncApplyResult(
-            changedFields,
-            createdEvents.Count,
-            updatedCourtEvents,
-            createdCourtParties,
-            createdCourtActDocuments,
-            pendingCourtActDocumentKeys.Count,
-            createdProceduralDeadlines,
-            newItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-            changedItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-            removedItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-            conflictItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-            requiresDeadlineTaskSync);
 
         async Task SyncCourtInstanceReferenceAsync(
             string instance, string courtName, string caseNumber, string sourceUrl,
@@ -10128,7 +10156,7 @@ public partial class CasesV2Controller : ControllerBase
         ICollection<string> conflictItems,
         ISet<int> restoredDeadlineIds,
         ICollection<ClientCaseProceduralDeadline> associatedDeadlines,
-        CancellationToken ct)
+        CancellationToken ct, ICollection<Func<Task>> notificationsAfterCommit)
     {
         if (!courtAct.ActDate.HasValue)
         {
@@ -10235,7 +10263,7 @@ public partial class CasesV2Controller : ControllerBase
 
             foreach (var deadline in createdDeadlines)
             {
-                await AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "created", actorUserId, actorName, ct);
+                notificationsAfterCommit.Add(() => AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "created", actorUserId, actorName, ct));
             }
         }
 
