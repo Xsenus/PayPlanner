@@ -1,9 +1,12 @@
+import { documentCopyTestSession } from '../../test/documentCopySession';
+import { onTestFinished } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CaseDocumentUploadStatusPanel } from './CaseDocumentUploadStatusPanel';
 import type { CaseDocumentUploadState } from '../../services/api';
 
 const api = vi.hoisted(() => ({ getCaseDocumentUploadStates: vi.fn(), getPendingCaseDocumentUploads: vi.fn(), retireCaseDocumentUpload: vi.fn() }));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 7, role: { id: 10 } } }) }));
 const dialog = vi.hoisted(() => ({ confirm: vi.fn() }));
 vi.mock('../../hooks/useDialog', () => ({ useDialog: () => dialog }));
 vi.mock('../../services/api', () => ({ apiService: api, getAuthToken: () => 'owned-ui-session' }));
@@ -11,6 +14,65 @@ const waiting: CaseDocumentUploadState = { uploadKey: 'key-1', fileName: 'docume
 const flush = async () => { await act(async () => { await Promise.resolve(); }); };
 
 describe('CaseDocumentUploadStatusPanel', () => {
+  it.each(['login', 'actor', 'logout'] as const)('upload status owner baseline: %s invalidates a pending retirement confirmation', async mode => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    let finish!: (approved: boolean) => void;
+    dialog.confirm.mockReturnValue(new Promise<boolean>(resolve => { finish = resolve; }));
+    api.getPendingCaseDocumentUploads.mockResolvedValue({ items: [waiting], nextCursor: null });
+    render(<CaseDocumentUploadStatusPanel caseId={101} revision={0} onPublished={vi.fn()} />);
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Подготовить новую загрузку' }));
+    session.replace(mode);
+    await act(async () => { finish(true); });
+    expect(api.retireCaseDocumentUpload).not.toHaveBeenCalled();
+  });
+
+  it.each(['login', 'actor', 'logout'] as const)('upload status owner baseline: %s invalidates a pending discovery reply', async mode => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    let finish!: (value: { items: typeof waiting[]; nextCursor: null; localPublicationConfirmed: boolean }) => void;
+    api.getPendingCaseDocumentUploads.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const published = vi.fn();
+    render(<CaseDocumentUploadStatusPanel caseId={101} revision={0} onPublished={published} />);
+    await flush();
+    session.replace(mode);
+    await act(async () => { finish({ items: [waiting], nextCursor: null, localPublicationConfirmed: true }); });
+    expect(published).not.toHaveBeenCalled();
+    expect(screen.queryByText('document.pdf')).toBeNull();
+  });
+
+  it.each(['login', 'actor', 'logout'] as const)('upload status owner polling: %s stops a scheduled batch before render', async mode => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    api.getPendingCaseDocumentUploads.mockResolvedValue({ items: [waiting], nextCursor: null });
+    render(<CaseDocumentUploadStatusPanel caseId={101} revision={0} onPublished={vi.fn()} />);
+    await flush(); session.replace(mode);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(api.getCaseDocumentUploadStates).not.toHaveBeenCalled();
+  });
+
+  it('upload status owner parent: a shared pending mutation blocks a retirement prompt', async () => {
+    const begin = vi.fn(() => null);
+    const parent = { scope: 'busy-parent', busy: true, capture: () => ({ isCurrent: () => true }), begin };
+    api.getPendingCaseDocumentUploads.mockResolvedValue({ items: [waiting], nextCursor: null });
+    render(<CaseDocumentUploadStatusPanel caseId={101} revision={0} actionOwner={parent} onPublished={vi.fn()} />);
+    await flush(); fireEvent.click(screen.getByRole('button', { name: 'Подготовить новую загрузку' }));
+    expect(dialog.confirm).not.toHaveBeenCalled();
+    expect(api.retireCaseDocumentUpload).not.toHaveBeenCalled();
+  });
+
+  it('upload status owner parent: narrowing the parent scope aborts pending discovery', async () => {
+    let finish!: (value: { items: typeof waiting[]; nextCursor: null; localPublicationConfirmed: boolean }) => void;
+    api.getPendingCaseDocumentUploads.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const callback = vi.fn();
+    const parent = { scope: 'before', busy: false, capture: () => ({ isCurrent: () => true }), begin: vi.fn(() => null) };
+    const view = render(<CaseDocumentUploadStatusPanel caseId={101} revision={0} actionOwner={parent} onPublished={callback} />);
+    await flush(); const signal = api.getPendingCaseDocumentUploads.mock.calls[0][2] as AbortSignal;
+    view.rerender(<CaseDocumentUploadStatusPanel caseId={101} revision={0} actionOwner={{ ...parent, scope: 'after' }} onPublished={callback} />);
+    await flush(); expect(signal.aborted).toBe(true);
+    await act(async () => { finish({ items: [waiting], nextCursor: null, localPublicationConfirmed: true }); });
+    expect(callback).not.toHaveBeenCalled();
+    expect(screen.queryByText('document.pdf')).toBeNull();
+  });
+
   it('refreshes documents after local ready proof without adding published history or changing unsaved fields', async () => {
     api.getPendingCaseDocumentUploads.mockResolvedValue({ items: [], nextCursor: null, localPublicationConfirmed: true });
     const onPublished = vi.fn().mockResolvedValue(undefined);
@@ -140,6 +202,7 @@ describe('CaseDocumentUploadStatusPanel', () => {
     expect(onPublished).not.toHaveBeenCalled();
   });
   beforeEach(() => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
     vi.useFakeTimers(); api.getCaseDocumentUploadStates.mockReset(); api.getPendingCaseDocumentUploads.mockReset();
     api.retireCaseDocumentUpload.mockReset(); dialog.confirm.mockReset(); dialog.confirm.mockResolvedValue(false);
     // Existing scenarios supply the same discovery data; polling still uses exact-key states.

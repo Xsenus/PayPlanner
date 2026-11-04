@@ -213,6 +213,29 @@ describe('CaseModal', () => {
     const onSave = vi.fn(); render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={onSave} />); await act(async () => {});
     fireEvent.keyDown(screen.getByRole('button', { name: 'Выбрать: Крайний срок' }), { key: 'Enter', [modifier]: true }); await waitFor(() => expect(onSave).toHaveBeenCalledOnce()); expect(screen.queryByRole('dialog', { name: 'Выбор даты' })).toBeNull();
   });
+  it('upload publication parent: retirement reserves the legacy form until its result is confirmed', async () => {
+    const pending = { uploadKey: '11111111-1111-4111-8111-111111111111', fileName: 'own.pdf', status: 'waiting' as const,
+      documentId: null, version: null, sha256: null, contentType: null, documentKey: null, requestedDocumentKey: null,
+      documentType: null, requestedStatus: null, message: 'Ожидаем копии.' };
+    const terminal = { ...pending, status: 'uploaded' as const, documentId: 601, version: 2 };
+    vi.mocked(apiService.getPendingCaseDocumentUploads).mockResolvedValueOnce({ items: [pending], nextCursor: null }).mockResolvedValue({ items: [terminal], nextCursor: null });
+    let finish!: (value: typeof terminal) => void;
+    vi.mocked(apiService.retireCaseDocumentUpload).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const onSave = vi.fn();
+    render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={onSave} />);
+    const button = await screen.findByRole('button', { name: 'Подготовить новую загрузку' });
+    fireEvent.click(button);
+    await waitFor(() => expect(apiService.retireCaseDocumentUpload).toHaveBeenCalledOnce());
+    expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveProperty('disabled', true);
+    fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true });
+    fireEvent.click(button);
+    expect(apiService.retireCaseDocumentUpload).toHaveBeenCalledOnce();
+    expect(onSave).not.toHaveBeenCalled();
+    await act(async () => { finish(terminal); });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveProperty('disabled', false));
+    expect(apiService.uploadCaseDocument).not.toHaveBeenCalled();
+  });
+
   it.each(['retired', 'uploaded'] as const)('handles explicit %s proof without resetting unsaved position or transmitting a file', async (outcome) => {
     const pending = { uploadKey: '11111111-1111-4111-8111-111111111111', fileName: 'own.pdf', status: 'waiting' as const,
       documentId: null, version: null, sha256: null, contentType: null, requestedDocumentKey: null, documentKey: null,

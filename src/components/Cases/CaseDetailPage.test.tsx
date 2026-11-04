@@ -1,3 +1,4 @@
+import * as uploadStatusPanel from './CaseDocumentUploadStatusPanel';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -291,6 +292,125 @@ describe('CourtSourceProvenance', () => {
 });
 
 describe('CaseDetailPage', () => {
+
+  function publicationWorkOrder(): ClientCaseWorkOrder {
+    return { id: 31, clientCaseId: 15, title: 'Publication order', status: 'approved', statusLabel: 'Согласован', currency: 'RUB', notes: null, totalAmount: 35, items: [] };
+  }
+
+  async function capturePublicationBridge(form: 'edit' | 'documents') {
+    let publish!: (signal: AbortSignal) => Promise<void>;
+    const spy = vi.spyOn(uploadStatusPanel, 'CaseDocumentUploadStatusPanel').mockImplementation(({ onPublished }) => {
+      publish = onPublished;
+      return null;
+    });
+    onTestFinished(() => spy.mockRestore());
+    vi.mocked(apiService.getCaseWorkOrder).mockResolvedValue(publicationWorkOrder());
+    window.sessionStorage.setItem(detailViewStateKey(15), JSON.stringify({ activeTab: 'workOrder' }));
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    await screen.findByRole('button', { name: 'Создать счет' });
+    fireEvent.click(screen.getByRole('button', { name: form === 'edit' ? 'Редактировать дело' : 'Документы' }));
+    await waitFor(() => expect(publish).toBeTypeOf('function'));
+    await act(async () => {});
+    return { publish, view };
+  }
+
+  it.each(['edit', 'documents'] as const)('publication bridge baseline: %s rejects a callback after login replacement before render', async form => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    const { publish } = await capturePublicationBridge(form);
+    const reads = vi.mocked(apiService.getCaseDocuments).mock.calls.length;
+    const orders = vi.mocked(apiService.getCaseWorkOrder).mock.calls.length;
+    session.replace();
+    await act(async () => { await publish(new AbortController().signal).catch(() => {}); });
+    expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(reads);
+    expect(apiService.getCaseWorkOrder).toHaveBeenCalledTimes(orders);
+  });
+
+  it.each(['edit', 'documents'] as const)('publication bridge baseline: %s refuses a foreign document response', async form => {
+    const { publish } = await capturePublicationBridge(form);
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([createCaseDocument({ clientCaseId: 16, originalFileName: 'Foreign private document' })]);
+    let failure: unknown;
+    await act(async () => { try { await publish(new AbortController().signal); } catch (cause) { failure = cause; } });
+    expect(failure).toBeInstanceOf(Error);
+    expect(document.body.textContent).not.toContain('Foreign private document');
+  });
+
+  it('publication bridge baseline: a foreign work order cannot start the next document read', async () => {
+    const { publish } = await capturePublicationBridge('edit');
+    const reads = vi.mocked(apiService.getCaseDocuments).mock.calls.length;
+    vi.mocked(apiService.getCaseWorkOrder).mockResolvedValue({ ...publicationWorkOrder(), clientCaseId: 16, title: 'Foreign work order' });
+    let failure: unknown;
+    await act(async () => { try { await publish(new AbortController().signal); } catch (cause) { failure = cause; } });
+    expect(failure).toBeInstanceOf(Error);
+    expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(reads);
+  });
+
+
+  it.each(['actor', 'logout'] as const)('publication bridge entry: %s stops both document callbacks before render', async mode => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    const { publish } = await capturePublicationBridge('edit');
+    const reads = vi.mocked(apiService.getCaseDocuments).mock.calls.length;
+    const orders = vi.mocked(apiService.getCaseWorkOrder).mock.calls.length;
+    session.replace(mode);
+    await act(async () => { await publish(new AbortController().signal).catch(() => {}); });
+    expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(reads);
+    expect(apiService.getCaseWorkOrder).toHaveBeenCalledTimes(orders);
+  });
+
+  it.each(['case', 'rights', 'role', 'department', 'access-key'] as const)('publication bridge entry: old callbacks cannot dispatch after %s replacement', async boundary => {
+    const { publish, view } = await capturePublicationBridge('documents');
+    if (boundary === 'role') detailAuth.user = { id: 7, role: { id: 20 } };
+    if (boundary === 'department') Object.assign(detailAuth.user, { departmentId: 20 });
+    if (boundary === 'case') vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ id: 16, title: 'Replacement case' }));
+    view.rerender(<CaseDetailPage caseId={boundary === 'case' ? 16 : 15} onBack={vi.fn()} canEdit={boundary !== 'rights'} caseAccessKey={boundary === 'access-key' ? 'changed' : undefined} />);
+    await act(async () => {});
+    const reads = vi.mocked(apiService.getCaseDocuments).mock.calls.length;
+    await act(async () => { await publish(new AbortController().signal).catch(() => {}); });
+    expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(reads);
+  });
+
+  it.each(['login', 'actor', 'logout', 'close edit'] as const)('publication bridge continuation: %s stops the next document read after order refresh', async boundary => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    const { publish } = await capturePublicationBridge('edit');
+    let finish!: (value: ClientCaseWorkOrder) => void;
+    vi.mocked(apiService.getCaseWorkOrder).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const reads = vi.mocked(apiService.getCaseDocuments).mock.calls.length;
+    let done!: Promise<void>;
+    await act(async () => { done = publish(new AbortController().signal).catch(() => {}); });
+    if (boundary === 'close edit') fireEvent.click(screen.getAllByRole('button', { name: 'Отмена' })[0]);
+    else session.replace(boundary);
+    await act(async () => { finish({ ...publicationWorkOrder(), status: 'invoice_created' }); await done; });
+    expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(reads);
+    if (boundary === 'close edit') expect(screen.getByDisplayValue('Publication order')).toBeTruthy();
+  });
+
+  it.each(['documents', 'edit'] as const)('publication bridge current: %s accepts current documents and preserves unsaved fields', async form => {
+    const { publish } = await capturePublicationBridge(form);
+    if (form === 'edit') fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Current unsaved strategy' } });
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([createCaseDocument({ originalFileName: 'Current published.pdf' })]);
+    await act(async () => { await publish(new AbortController().signal); });
+    if (form === 'edit') {
+      expect(screen.getByLabelText('Стратегия и план действий')).toHaveProperty('value', 'Current unsaved strategy');
+      fireEvent.click(screen.getAllByRole('button', { name: 'Отмена' })[0]);
+      fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    }
+    expect(await screen.findByText('Current published.pdf')).toBeTruthy();
+    expect(apiService.updateCaseV2).not.toHaveBeenCalled();
+    expect(apiService.createCaseWorkOrderInvoice).not.toHaveBeenCalled();
+    expect(apiService.uploadCaseDocument).not.toHaveBeenCalled();
+  });
+
+  it('publication bridge current: a missing saved order preserves unsaved order fields', async () => {
+    const { publish } = await capturePublicationBridge('edit');
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Preserved strategy' } });
+    vi.mocked(apiService.getCaseWorkOrder).mockResolvedValue(null as unknown as ClientCaseWorkOrder);
+    let failure: unknown;
+    await act(async () => { try { await publish(new AbortController().signal); } catch (cause) { failure = cause; } });
+    expect(failure).toBeInstanceOf(Error);
+    expect(screen.getByLabelText('Стратегия и план действий')).toHaveProperty('value', 'Preserved strategy');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Отмена' })[0]);
+    expect(screen.getByDisplayValue('Publication order')).toBeTruthy();
+  });
+
   it.each(['documents', 'edit'] as const)('shows the current invoice work order after %s publication proof without another financial action', async (form) => {
     const approved = {
       id: 31, clientCaseId: 15, title: 'Первоначальный наряд', status: 'approved', statusLabel: 'Согласован',
@@ -346,9 +466,10 @@ describe('CaseDetailPage', () => {
       const refresh = new Promise<ClientCaseWorkOrder>((resolve) => { finishRefresh = resolve; });
       const proof = new Promise<Awaited<ReturnType<typeof apiService.getPendingCaseDocumentUploads>>>((resolve) => { finishProof = resolve; });
       let refreshSignal: AbortSignal | undefined;
+      let orderReadCount = 0;
       vi.mocked(apiService.getCaseWorkOrder).mockImplementation(async (caseId, signal) => {
         if (caseId !== 15) return { ...approved, id: 0, clientCaseId: caseId, title: '', items: [] };
-        if (signal) { refreshSignal = signal; return refresh; }
+        if (orderReadCount++ > 0) { refreshSignal = signal; return refresh; }
         return boundary === 'late initial read' ? initial : approved;
       });
       vi.mocked(apiService.getPendingCaseDocumentUploads).mockReturnValue(proof);

@@ -1829,7 +1829,7 @@ export function CaseModal({
           </div>
 
           <div className="md:col-span-2 rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
-            {allowEdit && !readClosed && caseData.id > 0 ? <CaseDocumentUploadStatusPanel key={caseActionOwner.scope} caseId={caseData.id} revision={uploadRevision}
+            {allowEdit && !readClosed && caseData.id > 0 ? <CaseDocumentUploadStatusPanel key={caseActionOwner.scope} caseId={caseData.id} revision={uploadRevision} actionOwner={caseActionOwner}
               onPublished={publishDocumentRead} /> : null}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>

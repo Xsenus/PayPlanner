@@ -62,7 +62,7 @@ import {
 
 import { apiService, type ContactDirectoryItemDto, type LegalEntityDirectoryItem } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
-import { useDocumentDeliveryOwner, type DocumentDeliveryOperation } from '../../hooks/useDocumentDeliveryOwner';
+import { useDocumentDeliveryOwner, type DocumentDeliveryOperation, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
 import { captureAuthSessionIdentity } from '../../services/authService';
 import { useDialog } from '../../hooks/useDialog';
 import { useNestedCaseOperationOwner, type CaseOperationParent } from '../../hooks/useNestedCaseOperationOwner';
@@ -2390,7 +2390,7 @@ function CaseDetailScreen({
 
   useEffect(() => {
     setLastCourtSyncResult(null);
-  }, [caseId]);
+  }, [screenOwner.scope]);
 
   useEffect(() => {
     if (activeTab !== 'court' && activeTab !== 'documents' && activeTab !== 'events') return;
@@ -3767,6 +3767,15 @@ function CaseDetailScreen({
     }
   };
 
+  const refreshPublishedDocuments = async (signal: AbortSignal, owner: DocumentDeliveryRead | null) => {
+    if (!owner) throw new StaleUiOperationError();
+    const current = () => !signal.aborted && owner.isCurrent();
+    const items = await awaitOwnedUiResult(() => apiService.getCaseDocuments(caseId, signal), current);
+    if (!Array.isArray(items) || !items.every(item => item && item.clientCaseId === caseId && Number.isSafeInteger(item.id) && item.id > 0))
+      throw new Error('Не удалось подтвердить документы текущего дела.');
+    setDocuments(items);
+  };
+
   const applyLoadedWorkOrder = (loadedWorkOrder: ClientCaseWorkOrder | null) => {
     setWorkOrder(loadedWorkOrder);
     setWorkOrderDraft(buildWorkOrderHeaderDraft(loadedWorkOrder?.id ? loadedWorkOrder : null));
@@ -4251,32 +4260,34 @@ function CaseDetailScreen({
         uploadRevision={uploadRevision}
         onUploadAttemptSettled={() => { if (childCaseOwner.capture()) setUploadRevision(value => value + 1); }}
         onUploadPublished={async (signal) => {
-          if (signal.aborted) return;
-          // Start the parent-owned order refresh before the edit panel can
-          // cancel its document read. Closing edit must retain publication.
+          const editor = childCaseOwner.capture();
+          const parent = captureScreen();
+          if (signal.aborted || !editor || !parent) throw new StaleUiOperationError();
+          // The order belongs to the page and can finish after closing edit.
           if (activeTab === 'workOrder') {
             const sequence = ++workOrderReadSequence.current;
-          workOrderPublicationRead.current?.abort();
-          const controller = new AbortController();
-          workOrderPublicationRead.current = controller;
-          setWorkOrderLoading(true);
-          try {
-            const updated = await apiService.getCaseWorkOrder(caseItem.id, controller.signal);
-            if (controller.signal.aborted || sequence !== workOrderReadSequence.current) return;
-            if (!workOrder?.id) {
-              applyLoadedWorkOrder(updated);
-            } else {
-              setWorkOrder(updated);
-              setWorkOrderDraft((draft) => draft.status === workOrder.status
-                ? { ...draft, status: updated.status } : draft);
+            workOrderPublicationRead.current?.abort();
+            const controller = new AbortController();
+            workOrderPublicationRead.current = controller;
+            const current = () => !controller.signal.aborted && parent.isCurrent() && sequence === workOrderReadSequence.current;
+            setWorkOrderLoading(true);
+            try {
+              const updated = await awaitOwnedUiResult(() => apiService.getCaseWorkOrder(caseId, controller.signal), current);
+              if ((updated && updated.clientCaseId !== caseId) || (!updated && workOrder?.id))
+                throw new Error('Не удалось подтвердить заказ-наряд текущего дела.');
+              if (!workOrder?.id || !updated) {
+                applyLoadedWorkOrder(updated);
+              } else {
+                setWorkOrder(updated);
+                setWorkOrderDraft((draft) => draft.status === workOrder.status
+                  ? { ...draft, status: updated.status } : draft);
+              }
+            } finally {
+              if (current()) setWorkOrderLoading(false);
+              if (workOrderPublicationRead.current === controller) workOrderPublicationRead.current = null;
             }
-          } finally {
-            if (sequence === workOrderReadSequence.current) setWorkOrderLoading(false);
           }
-          }
-          if (signal.aborted) return;
-          const items = await apiService.getCaseDocuments(caseItem.id, signal);
-          if (!signal.aborted) setDocuments(items);
+          await refreshPublishedDocuments(signal, editor);
         }}
       />
     );
@@ -5124,10 +5135,8 @@ function CaseDetailScreen({
                 </fieldset>
               ) : null}
               {canManageDocuments ? <CaseDocumentUploadStatusPanel key={caseItem.id} caseId={caseItem.id} revision={uploadRevision}
-                onPublished={async (signal) => {
-                  const items = await apiService.getCaseDocuments(caseItem.id, signal);
-                  if (!signal.aborted) setDocuments(items);
-                }} /> : null}
+                actionOwner={childCaseOwner}
+                onPublished={(signal) => refreshPublishedDocuments(signal, captureScreen())} /> : null}
               {documentsLoading ? (
                 <LoadingBlock label="Загрузка документов дела..." />
               ) : documentsLoadError ? (
@@ -5576,7 +5585,7 @@ function CaseEditPage({
             <label className="text-sm font-medium text-slate-700">Решение суда<SystemDateInput type="date" value={draft.courtDecisionAt} onChange={(event) => setField('courtDecisionAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
             <label className="text-sm font-medium text-slate-700">Решение вступило в силу<SystemDateInput aria-label="Дата вступления решения в силу" type="date" value={draft.courtDecisionEffectiveAt} onChange={(event) => setField('courtDecisionEffectiveAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /><span className="mt-1 block text-xs font-normal text-slate-500">Дата указывается вручную; CRM её не рассчитывает.</span></label>
             <div><label className="text-sm font-medium text-slate-700">Исполнительный лист получен<SystemDateInput aria-label="Дата получения исполнительного листа" type="date" value={draft.executiveWritReceivedAt} onChange={(event) => setField('executiveWritReceivedAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label><div className="mt-2"><ExecutiveWritDocumentUpload actionOwner={actionOwner} caseId={caseItem.id} canUpload documents={documents} onUploaded={onWritUploaded} onAttemptSettled={onUploadAttemptSettled} /></div></div>
-            <div className="md:col-span-2"><CaseDocumentUploadStatusPanel key={caseItem.id} caseId={caseItem.id} revision={uploadRevision} onPublished={onUploadPublished} /></div>
+            <div className="md:col-span-2"><CaseDocumentUploadStatusPanel key={caseItem.id} caseId={caseItem.id} revision={uploadRevision} actionOwner={actionOwner} onPublished={onUploadPublished} /></div>
             <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
               <label className="text-sm font-medium text-slate-700">Исполнительный лист подан<SystemDateInput aria-label="Дата подачи исполнительного листа" type="date" value={draft.executiveWritSubmittedAt} onChange={(event) => setField('executiveWritSubmittedAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
               <label className="mt-2 block text-sm font-medium text-slate-700">Куда подан<select aria-label="Куда подан исполнительный лист" value={draft.executiveWritSubmittedTo} onChange={(event) => setField('executiveWritSubmittedTo', event.target.value as 'fssp' | 'bank' | '')} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm"><option value="">Выберите адресата</option><option value="fssp">ФССП</option><option value="bank">Банк</option></select></label>
