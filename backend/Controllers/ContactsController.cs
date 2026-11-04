@@ -59,31 +59,36 @@ public partial class ContactsController : ControllerBase
         [FromQuery] bool includeInactive = false,
         [FromQuery] bool? syncOnly = null,
         [FromQuery] bool includeLinkedProfiles = false,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] int? page = null,
+        [FromQuery] int? pageSize = null)
     {
-        var canViewClients = await _db.HasUserSectionPermissionAsync(
-            User,
-            RolePermissionCatalog.Clients,
-            static permission => permission.CanView,
-            ct);
-        var canViewLegalEntities = await _db.HasUserSectionPermissionAsync(
-            User,
-            RolePermissionCatalog.LegalEntities,
-            static permission => permission.CanView,
-            ct);
+        if (User.Identity?.IsAuthenticated != true || User.GetUserId() is not > 0)
+        {
+            return Unauthorized();
+        }
+        var clientAccess = await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Clients, ct, requireApprovedUser: true);
+        var legalEntityAccess = await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.LegalEntities, ct, requireApprovedUser: true);
+        var canViewClients = clientAccess is not null;
+        var canViewLegalEntities = legalEntityAccess is not null;
         if (!canViewClients && !canViewLegalEntities)
         {
             return Forbid();
         }
 
-        var access = await GetCurrentAccessAsync(ct);
-        var legalAccess = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.LegalEntities, ct);
-        if (access is null && legalAccess is null)
-        {
-            return Unauthorized();
-        }
+        var access = clientAccess?.Visibility;
+        var legalAccess = legalEntityAccess?.Visibility;
 
         var normalizedScope = NormalizeScope(scope);
+        var paged = page.HasValue || pageSize.HasValue;
+        if (paged && normalizedScope != "external")
+        {
+            return BadRequest(new { message = "Постраничный выбор доступен для внешних контактов." });
+        }
+        if (paged && !canViewClients)
+        {
+            return Forbid();
+        }
         var normalizedSearch = string.IsNullOrWhiteSpace(search)
             ? null
             : search.Trim().ToLowerInvariant();
@@ -137,6 +142,20 @@ public partial class ContactsController : ControllerBase
                     || (x.ParentContact != null && x.ParentContact.FullName.ToLower().Contains(normalizedSearch)));
             }
 
+            if (paged)
+            {
+                var size = Math.Clamp(pageSize ?? 50, 1, 200);
+                var offset = (long)(Math.Max(1, page ?? 1) - 1) * size;
+                if (offset > int.MaxValue)
+                {
+                    return BadRequest(new { message = "Номер страницы слишком велик." });
+                }
+                externalQuery = externalQuery.AsNoTracking()
+                    .OrderBy(x => x.FullName)
+                    .ThenBy(x => x.Id)
+                    .Skip((int)offset)
+                    .Take(size);
+            }
             externalContacts = await externalQuery.ToListAsync(ct);
         }
 
