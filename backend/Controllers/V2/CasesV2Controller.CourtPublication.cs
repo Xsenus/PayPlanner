@@ -1,14 +1,70 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.LegalIntegrations;
 using PayPlanner.Api.Services.Storage;
 
 namespace PayPlanner.Api.Controllers.V2;
 
 public partial class CasesV2Controller
 {
+    private async Task<HashSet<int>> FindRecoverableCourtDocumentsAsync(
+        IReadOnlyCollection<ClientCaseDocument> documents, ISet<string> sourceKeys, CancellationToken ct)
+    {
+        // A known key is also accepted by ordinary uploads. Only the server's
+        // committed creation record can recover an unfinished automatic summary.
+        var candidates = documents.Where(document => sourceKeys.Contains(document.DocumentKey)
+                && !string.Equals(document.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase)
+                && document.DocumentType == CourtSyncNormalization.DocumentTypes.CourtEventSummary
+                && document.ContentType.Split(';', 2)[0].Trim().Equals("text/html", StringComparison.OrdinalIgnoreCase)
+                && document.UploadedByUserId is > 0 && document.Version > 0)
+            .ToDictionary(document => document.Id);
+        if (candidates.Count == 0) return [];
+        var ids = candidates.Keys.ToArray();
+        var records = await _db.ObjectAuditEvents.AsNoTracking()
+            .Where(record => record.ObjectType == "client-case-document" && record.Action == "Created" && ids.Contains(record.ObjectId))
+            .Select(record => new { record.ObjectId, record.ActorUserId, record.Description, record.MetadataJson }).ToListAsync(ct);
+        var recovered = new HashSet<int>();
+        foreach (var record in records)
+        {
+            var document = candidates[record.ObjectId];
+            if (record.ActorUserId == document.UploadedByUserId
+                && record.Description?.StartsWith("Сводка судебного события «", StringComparison.Ordinal) == true
+                && record.Description.EndsWith("» добавлена из ГАС «Правосудие»; текст акта не загружен.", StringComparison.Ordinal)
+                && MatchesCourtCreationMetadata(record.MetadataJson, document))
+                recovered.Add(document.Id);
+        }
+        return recovered;
+    }
+
+    private static bool MatchesCourtCreationMetadata(string? json, ClientCaseDocument document)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return false;
+        try
+        {
+            using var metadata = JsonDocument.Parse(json);
+            var fields = metadata.RootElement;
+            if (fields.ValueKind != JsonValueKind.Object) return false;
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in fields.EnumerateObject())
+                if (!names.Add(property.Name)) return false;
+            return fields.TryGetProperty("clientCaseId", out var caseId) && caseId.ValueKind == JsonValueKind.Number
+                && caseId.TryGetInt32(out var parsedCaseId) && parsedCaseId == document.ClientCaseId
+                && fields.TryGetProperty("version", out var version) && version.ValueKind == JsonValueKind.Number
+                && version.TryGetInt32(out var parsedVersion) && parsedVersion == document.Version
+                && fields.TryGetProperty("documentKey", out var key) && key.ValueKind == JsonValueKind.String
+                && key.GetString() == document.DocumentKey
+                && fields.TryGetProperty("documentType", out var type) && type.ValueKind == JsonValueKind.String
+                && type.GetString() == document.DocumentType
+                && fields.TryGetProperty("fileName", out var name) && name.ValueKind == JsonValueKind.String
+                && name.GetString() == document.OriginalFileName;
+        }
+        catch (JsonException) { return false; }
+    }
+
     private sealed class CourtPublicationRejectedException(ActionResult result) : Exception
     {
         public ActionResult Result { get; } = result;

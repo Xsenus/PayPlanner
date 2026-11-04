@@ -9710,6 +9710,7 @@ public partial class CasesV2Controller : ControllerBase
                     || item.DocumentType == CourtSyncNormalization.DocumentTypes.CourtAct))
             .OrderByDescending(item => item.Version)
             .ToListAsync(ct);
+        var recoverableCourtDocumentIds = await FindRecoverableCourtDocumentsAsync(existingCourtActDocuments, currentCourtActDocumentKeys, ct);
         var existingCourtActDocumentsByKey = existingCourtActDocuments
             .GroupBy(static item => item.DocumentKey, StringComparer.Ordinal)
             .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.Ordinal);
@@ -9746,8 +9747,8 @@ public partial class CasesV2Controller : ControllerBase
                 ?? fileNameCandidates.FirstOrDefault(item => !string.Equals(item.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase));
             var document = documentByKnownKey ?? documentByFileName;
             var fileConflict = document is not null
-                && documentByKnownKey is null
-                && !string.Equals(document.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase);
+                && !string.Equals(document.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase)
+                && !recoverableCourtDocumentIds.Contains(document.Id);
             if (fileConflict)
             {
                 conflictItems.Add($"ручной документ «{document!.OriginalFileName}» совпал с судебным актом «{courtAct.Title}»");
