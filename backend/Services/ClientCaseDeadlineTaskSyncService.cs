@@ -72,7 +72,14 @@ public static class ClientCaseDeadlineTaskSyncService
         var assigneeUserId = assignee?.Id ?? actorUserId;
         var assigneeName = assignee is null ? normalizedActorName : DisplayName(assignee);
         var assigneeEmail = assignee?.Email ?? string.Empty;
-        foreach (var deadline in BuildDeadlines(clientCase))
+        HashSet<int> ownComplaintIds = [];
+        if (clientCase.CourtComplaints.Count > 0)
+        {
+            ownComplaintIds = await db.ClientCaseCourtComplaints.AsNoTracking()
+                .Where(complaint => complaint.ClientCaseId == clientCaseId && complaint.CourtInstance.ClientCaseId == clientCaseId)
+                .Select(complaint => complaint.Id).ToHashSetAsync(ct);
+        }
+        foreach (var deadline in BuildDeadlines(clientCase, ownComplaintIds))
         {
             var tag = BuildDeadlineTag(deadline.Key);
             var activeTask = existingTasks
@@ -311,7 +318,7 @@ public static class ClientCaseDeadlineTaskSyncService
         return task;
     }
 
-    private static IReadOnlyList<CaseDeadline> BuildDeadlines(ClientCase clientCase)
+    private static IReadOnlyList<CaseDeadline> BuildDeadlines(ClientCase clientCase, IReadOnlySet<int> ownComplaintIds)
     {
         if (ClientCaseStageClassifier.IsPretrial(clientCase))
         {
@@ -405,7 +412,8 @@ public static class ClientCaseDeadlineTaskSyncService
             .OrderBy(item => item.ScheduledAt)
             .ThenBy(item => item.Id)
             .ToArray();
-        foreach (var complaint in clientCase.CourtComplaints.Where(item => item.ComplaintType == "appealComplaint" && item.TargetInstance == "appeal"))
+        foreach (var complaint in clientCase.CourtComplaints.Where(item => item.ClientCaseId == clientCase.Id
+            && ownComplaintIds.Contains(item.Id) && item.ComplaintType == "appealComplaint" && item.TargetInstance == "appeal"))
         {
             var filed = !complaint.IsArchived
                 && complaint.FiledAt.HasValue
