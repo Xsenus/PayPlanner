@@ -11,7 +11,7 @@ function detailViewStateKey(caseId: number) {
   return `pp.case-detail.${caseId}.view.v2.${encodeURIComponent(captureAuthSessionIdentity().actor!)}`;
 }
 import { apiService, type ContactDirectoryItemDto } from '../../services/api';
-import type { ClientCase, ClientCaseRelatedParty, ClientCaseCourtEvent, ClientCaseDocument, ClientCaseWorkOrder } from '../../types';
+import type { ClientCase, ClientCaseRelatedParty, ClientCaseCourtEvent, ClientCaseDocument, ClientCaseWorkOrder, ClientCaseCourtComplaint } from '../../types';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
 import { CaseDetailPage, CourtSourceProvenance } from './CaseDetailPage';
 const detailAuth = vi.hoisted(() => ({ user: { id: 7, role: { id: 10 } } }));
@@ -292,6 +292,293 @@ describe('CourtSourceProvenance', () => {
 });
 
 describe('CaseDetailPage', () => {
+
+  async function prepareCourtWrite(action: 'instance' | 'complaint' | 'event' | 'party' | 'archive-party' | 'deadline' | 'close-deadline') {
+    await openCourtCommands();
+    const section = (name: string) => within(screen.getByRole('heading', { name }).closest('section')!);
+    if (action === 'instance') return { request: vi.mocked(apiService.updateCaseCourtInstance), button: screen.getByRole('button', { name: 'Сохранить инстанцию' }) };
+    if (action === 'complaint') {
+      fireEvent.change(section('Жалобы и частные жалобы').getByLabelText('Название'), { target: { value: 'Current complaint' } });
+      return { request: vi.mocked(apiService.createCaseCourtComplaint), button: screen.getByRole('button', { name: 'Добавить жалобу' }) };
+    }
+    if (action === 'event') {
+      const date = screen.getByLabelText('Дата и время');
+      fireEvent.change(date, { target: { value: '2026-12-01T10:00' } });
+      return { request: vi.mocked(apiService.createCaseCourtEvent), button: within(date.closest('section')!).getAllByRole('button', { name: 'Добавить' }).at(-1)! };
+    }
+    if (action === 'party') {
+      const parties = section('Стороны процесса');
+      fireEvent.change(parties.getByLabelText('Сторона'), { target: { value: 'Current party' } });
+      return { request: vi.mocked(apiService.createCaseCourtParty), button: within(parties.getByLabelText('Сторона').closest('.grid') as HTMLElement).getByRole('button', { name: 'Добавить' }) };
+    }
+    if (action === 'archive-party') return { request: vi.mocked(apiService.archiveCaseCourtParty), button: section('Стороны процесса').getByRole('button', { name: 'Архив' }) };
+    if (action === 'deadline') {
+      const deadlines = section('Процессуальные сроки 2.0');
+      fireEvent.change(deadlines.getByLabelText('Дата', { exact: true }), { target: { value: '2026-12-10' } });
+      return { request: vi.mocked(apiService.createCaseProceduralDeadline), button: deadlines.getByRole('button', { name: 'Добавить' }) };
+    }
+    dialogMock.prompt.mockResolvedValue('Current closure');
+    return { request: vi.mocked(apiService.closeCaseProceduralDeadline), button: section('Процессуальные сроки 2.0').getAllByRole('button', { name: 'Закрыть' })[0] };
+  }
+
+  const courtWriteCases = ['instance', 'complaint', 'event', 'party', 'archive-party', 'deadline', 'close-deadline'] as const;
+
+  it.each(courtWriteCases)('court write owner: cached %s control cannot write for a replaced login', async action => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    const { request, button } = await prepareCourtWrite(action);
+    session.replace(); fireEvent.click(button);
+    await act(async () => {});
+    expect(request).not.toHaveBeenCalled();
+    expect(dialogMock.prompt).not.toHaveBeenCalled();
+  });
+
+  it.each(courtWriteCases)('court write owner: pending %s excludes a duplicate and header save', async action => {
+    const { request, button } = await prepareCourtWrite(action);
+    request.mockReturnValue(new Promise<never>(() => {}));
+    act(() => { fireEvent.click(button); fireEvent.click(button); });
+    await waitFor(() => expect(request).toHaveBeenCalledOnce());
+    expect(screen.getByRole('button', { name: 'Сохранить' }).matches(':disabled')).toBe(true);
+    expect(apiService.bulkUpdateCases).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Проверить суд по делу' }).matches(':disabled')).toBe(true);
+  });
+
+  it.each(courtWriteCases)('court write owner: late %s failure remains outside a replaced login', async action => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    const { request, button } = await prepareCourtWrite(action);
+    let reject!: (error: Error) => void;
+    request.mockReturnValue(new Promise<never>((_, fail) => { reject = fail; }));
+    fireEvent.click(button);
+    await waitFor(() => expect(request).toHaveBeenCalledOnce());
+    session.replace();
+    await act(async () => { reject(new Error('Private old court write')); });
+    expect(document.body.textContent).not.toContain('Private old court write');
+  });
+
+
+  it.each(['login', 'actor', 'logout'] as const)('court prompt owner: %s cancels manual confirmation before the sync request', async mode => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    await openCourtCommands();
+    let finish!: (value: string | null) => void;
+    dialogMock.prompt.mockReturnValue(new Promise<string | null>(resolve => { finish = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: /Зафиксировать вручную/u }));
+    session.replace(mode);
+    await act(async () => { finish('Old manual comment'); });
+    expect(apiService.runCaseCourtSync).not.toHaveBeenCalled();
+  });
+
+  it.each(['login', 'actor', 'logout'] as const)('court prompt owner: %s cancels a pending deadline closure', async mode => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    const { button } = await prepareCourtWrite('close-deadline');
+    let finish!: (value: string | null) => void;
+    dialogMock.prompt.mockReturnValue(new Promise<string | null>(resolve => { finish = resolve; }));
+    fireEvent.click(button); session.replace(mode);
+    await act(async () => { finish('Old closure'); });
+    expect(apiService.closeCaseProceduralDeadline).not.toHaveBeenCalled();
+  });
+
+  it('court prompt owner: cancellation releases the form for one explicit deadline retry', async () => {
+    const { button } = await prepareCourtWrite('close-deadline');
+    dialogMock.prompt.mockResolvedValueOnce(null).mockResolvedValueOnce(' Current closure ');
+    fireEvent.click(button); await act(async () => {});
+    expect(apiService.closeCaseProceduralDeadline).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Сохранить' }).matches(':disabled')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Закрыть' }));
+    await waitFor(() => expect(apiService.closeCaseProceduralDeadline).toHaveBeenCalledExactlyOnceWith(15, 31, 'Current closure'));
+  });
+
+  it.each(['instance', 'complaint', 'event', 'party', 'deadline'] as const)('court response owner: %s cannot adopt a response belonging to another case', async action => {
+    const { request, button } = await prepareCourtWrite(action);
+    // The foreign owner must be rejected before any remaining response fields are read.
+    request.mockReturnValue(Promise.resolve({ id: 999, clientCaseId: 16 }) as Promise<never>);
+    fireEvent.click(button);
+    await screen.findByText('Не удалось подтвердить данные текущего дела.');
+    expect(screen.queryByText('Сторона процесса добавлена.')).toBeNull();
+    expect(screen.queryByText('Жалоба добавлена.')).toBeNull();
+    expect(screen.queryByText('Судебное событие добавлено.')).toBeNull();
+    expect(screen.queryByText('Процессуальный срок добавлен.')).toBeNull();
+  });
+
+  it.each(['party', 'event', 'deadline', 'complaint'] as const)('court current command: %s sends the existing payload once and reports success', async action => {
+    const { request, button } = await prepareCourtWrite(action);
+    fireEvent.click(button);
+    await waitFor(() => expect(request).toHaveBeenCalledOnce());
+    const success = { party: 'Сторона процесса добавлена.', event: 'Судебное событие добавлено.', deadline: 'Процессуальный срок добавлен.', complaint: 'Жалоба добавлена.' };
+    expect(await screen.findByText(success[action])).toBeTruthy();
+  });
+
+
+
+  it.each([401, 403])('court permission response: HTTP %s closes the unconfirmed case and rejects cached writes', async status => {
+    const { request, button } = await prepareCourtWrite('party');
+    request.mockRejectedValue(new Error(`HTTP ${status} Access denied`));
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.queryByText('ЗЕМЦОВ - банкротство')).toBeNull());
+    fireEvent.click(button);
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  it('court current failure: source failure preserves entered data and allows one explicit retry', async () => {
+    await openCourtCommands();
+    const instanceForm = within(screen.getByRole('heading', { name: 'Инстанции судов' }).closest('section')!);
+    const name = instanceForm.getByLabelText('Суд', { exact: true });
+    fireEvent.change(name, { target: { value: 'Current entered court' } });
+    vi.mocked(apiService.updateCaseCourtInstance).mockRejectedValueOnce(new Error('Temporary current court failure'));
+    const saved = { ...(await apiService.getCaseCourtInstances(15))[0], id: 81, instance: 'first', courtName: 'Current entered court' };
+    vi.mocked(apiService.updateCaseCourtInstance).mockResolvedValueOnce(saved);
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить инстанцию' }));
+    await screen.findByText('Temporary current court failure');
+    expect(instanceForm.getByLabelText('Суд', { exact: true })).toHaveProperty('value', 'Current entered court');
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить инстанцию' }));
+    await waitFor(() => expect(apiService.updateCaseCourtInstance).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('Инстанция «Первая инстанция» сохранена.')).toBeTruthy();
+  });
+
+
+  async function prepareCourtRowWrite(action: 'archive-complaint' | 'edit-complaint' | 'hearing') {
+    if (action === 'hearing') {
+      vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([createJournalEvent({ canRecordHearingOutcome: true })]);
+      await openCourtCommands();
+      fireEvent.click(screen.getByRole('button', { name: 'Зафиксировать результат' }));
+      return { request: vi.mocked(apiService.recordCaseHearingOutcome), button: screen.getByRole('button', { name: 'Сохранить итог' }) };
+    }
+    const rows = await apiService.getCaseCourtInstances(15);
+    const complaint: ClientCaseCourtComplaint = { id: 91, clientCaseId: 15, courtInstanceId: 81, complaintType: 'privateComplaint', complaintTypeLabel: 'Частная жалоба', title: 'Current row complaint', targetInstance: 'appeal', targetInstanceLabel: 'Апелляция', filedBy: 'opponent', status: 'accepted', statusLabel: 'Принята', isArchived: false, createdAt: '2026-05-21T00:00:00Z' };
+    vi.mocked(apiService.getCaseCourtInstances).mockResolvedValue([{ ...rows[0], id: 81, complaints: [complaint] }, ...rows.slice(1)]);
+    await openCourtCommands();
+    const form = within(screen.getByRole('heading', { name: 'Жалобы и частные жалобы' }).closest('section')!);
+    if (action === 'archive-complaint') return { request: vi.mocked(apiService.archiveCaseCourtComplaint), button: form.getByRole('button', { name: 'Архив' }) };
+    fireEvent.click(form.getByRole('button', { name: 'Править' }));
+    return { request: vi.mocked(apiService.updateCaseCourtComplaint), button: form.getByRole('button', { name: 'Сохранить жалобу' }) };
+  }
+
+  it.each(['archive-complaint', 'edit-complaint', 'hearing'] as const)('court row owner: cached %s requires its current login', async action => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    const { request, button } = await prepareCourtRowWrite(action);
+    session.replace(); fireEvent.click(button); await act(async () => {});
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it.each(['archive-complaint', 'edit-complaint', 'hearing'] as const)('court row owner: pending %s excludes a duplicate', async action => {
+    const { request, button } = await prepareCourtRowWrite(action);
+    request.mockReturnValue(new Promise<never>(() => {}));
+    act(() => { fireEvent.click(button); fireEvent.click(button); });
+    await waitFor(() => expect(request).toHaveBeenCalledOnce());
+    expect(screen.getByRole('button', { name: 'Сохранить' }).matches(':disabled')).toBe(true);
+  });
+
+  it.each(['archive-complaint', 'edit-complaint', 'hearing'] as const)('court row owner: current %s reports the confirmed result once', async action => {
+    const { request, button } = await prepareCourtRowWrite(action);
+    if (action === 'hearing') vi.mocked(apiService.recordCaseHearingOutcome).mockResolvedValue(createJournalEvent({ canRecordHearingOutcome: false, hearingOutcome: 'considered' }));
+    fireEvent.click(button); await waitFor(() => expect(request).toHaveBeenCalledOnce());
+    const message = { 'archive-complaint': 'Жалоба архивирована.', 'edit-complaint': 'Жалоба обновлена.', hearing: 'Итог заседания сохранён. Открытая задача подготовки обновлена.' };
+    expect(await screen.findByText(message[action])).toBeTruthy();
+  });
+
+  async function prepareCourtBinding() {
+    vi.mocked(apiService.searchCaseCourtSyncCases).mockResolvedValue([{
+      providerKey: 'sudrf', sourceType: 'sudrf', sourceUrl: 'https://court.example.test/current', courtName: 'Current source court', courtCaseNumber: '2-2026', judicialUid: 'uid-current', instance: 'first', instanceLabel: 'Первая инстанция', title: 'Current source court', summary: 'Current source row', canFetch: true, requiresReview: true,
+      differences: [{ field: 'courtName', label: 'Суд', currentValue: 'Old court', sourceValue: 'Current source court', kind: 'replace' }],
+    }]);
+    await openCourtCommands();
+    fireEvent.change(screen.getByLabelText('Ссылка на источник'), { target: { value: 'https://court.example.test/current' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Найти' }));
+    return screen.findByRole('button', { name: 'Привязать' });
+  }
+
+  it.each(['login', 'actor', 'logout'] as const)('court binding owner: %s invalidates its replacement confirmation', async mode => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    const button = await prepareCourtBinding();
+    let finish!: (value: boolean) => void;
+    dialogMock.confirm.mockReturnValue(new Promise<boolean>(resolve => { finish = resolve; }));
+    fireEvent.click(button); session.replace(mode);
+    await act(async () => { finish(true); });
+    expect(apiService.bindCaseCourtSyncCase).not.toHaveBeenCalled();
+  });
+
+  it('court binding owner: a source edit synchronously invalidates an old candidate', async () => {
+    const button = await prepareCourtBinding();
+    act(() => {
+      fireEvent.change(screen.getByLabelText('Ссылка на источник'), { target: { value: 'https://court.example.test/replacement' } });
+      fireEvent.click(button);
+    });
+    expect(dialogMock.confirm).not.toHaveBeenCalled();
+    expect(apiService.bindCaseCourtSyncCase).not.toHaveBeenCalled();
+  });
+
+
+  it('court read-only details: recorded fields and instance browsing remain available without mutation', async () => {
+    await openCourtCommands(false);
+    const save = screen.getByRole('button', { name: 'Сохранить инстанцию' });
+    expect(save.matches(':disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Проверить суд по делу' }).matches(':disabled')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Вернуться к обзору' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Все судебные данные' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Апелляция/u }));
+    expect(screen.getByRole('button', { name: 'Сохранить инстанцию' }).matches(':disabled')).toBe(true);
+    expect(apiService.updateCaseCourtInstance).not.toHaveBeenCalled();
+    expect(apiService.runCaseCourtSync).not.toHaveBeenCalled();
+  });
+
+  const courtCommandButtons = {
+    sync: /Проверить источник/u,
+    manual: /Зафиксировать вручную/u,
+    instance: /Сохранить инстанцию/u,
+    calculate: /Рассчитать/u,
+  };
+
+  async function openCourtCommands(canEdit = true) {
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    await screen.findByRole('button', { name: /Сохранить инстанцию/u });
+    await act(async () => {});
+    if (!canEdit) {
+      view.rerender(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit={false} />);
+      await screen.findByText('ЗЕМЦОВ - банкротство');
+      await act(async () => {});
+    }
+    return view;
+  }
+
+  it.each(['sync', 'manual', 'instance', 'calculate'] as const)('court command baseline: replaced login rejects cached %s control', async action => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    await openCourtCommands();
+    const button = screen.getByRole('button', { name: courtCommandButtons[action] });
+    session.replace();
+    fireEvent.click(button);
+    expect(apiService.runCaseCourtSync).not.toHaveBeenCalled();
+    expect(apiService.updateCaseCourtInstance).not.toHaveBeenCalled();
+    expect(apiService.calculateCaseProceduralDeadline).not.toHaveBeenCalled();
+    expect(dialogMock.prompt).not.toHaveBeenCalled();
+  });
+
+  it('court command baseline: an unchanged read-only view offers no enabled source mutation', async () => {
+    await openCourtCommands(false);
+    await act(async () => {});
+    const mutations = screen.queryAllByRole('button', { name: /Проверить суд по делу|Проверить источник|Зафиксировать вручную|Сохранить инстанцию|Редактировать данные/u });
+    expect(mutations.every(button => button.matches(':disabled'))).toBe(true);
+  });
+
+  it('court command baseline: source sync reserves the common case mutation', async () => {
+    await openCourtCommands();
+    vi.mocked(apiService.runCaseCourtSync).mockReturnValue(new Promise(() => {}));
+    const sync = screen.getByRole('button', { name: /Проверить источник/u });
+    act(() => { fireEvent.click(sync); fireEvent.click(sync); });
+    expect(apiService.runCaseCourtSync).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: 'Сохранить' }).matches(':disabled')).toBe(true);
+  });
+
+  it('court command baseline: late failure cannot disclose its text after login replacement', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    await openCourtCommands();
+    let reject!: (reason: Error) => void;
+    vi.mocked(apiService.runCaseCourtSync).mockReturnValue(new Promise((_, fail) => { reject = fail; }));
+    fireEvent.click(screen.getByRole('button', { name: /Проверить источник/u }));
+    session.replace();
+    await act(async () => { reject(new Error('Private previous court response')); });
+    expect(document.body.textContent).not.toContain('Private previous court response');
+  });
+
 
   function publicationWorkOrder(): ClientCaseWorkOrder {
     return { id: 31, clientCaseId: 15, title: 'Publication order', status: 'approved', statusLabel: 'Согласован', currency: 'RUB', notes: null, totalAmount: 35, items: [] };
