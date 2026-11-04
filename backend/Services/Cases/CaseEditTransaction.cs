@@ -26,7 +26,9 @@ internal static partial class CaseEditTransaction
         BalanceApplicationLease? lease = null;
         try
         {
-            lease = await BalanceApplicationLease.BeginAsync(db, actorId.Value, ct);
+            lease = deleting
+                ? await BalanceApplicationLease.BeginForCaseDeletionAsync(db, actorId.Value, ct)
+                : await BalanceApplicationLease.BeginAsync(db, actorId.Value, ct);
             if (!await db.Users.AsNoTracking().AnyAsync(user => user.Id == actorId.Value && user.IsActive && user.IsApproved, ct))
                 return new UnauthorizedResult();
             var access = await db.ResolveSectionAccessAsync(actor, RolePermissionCatalog.Cases, ct, requireApprovedUser: true);
@@ -41,6 +43,11 @@ internal static partial class CaseEditTransaction
             }
             if (deleting)
             {
+                if (await HasForeignCourtComplaintsAsync(db, id, ct))
+                    return new ConflictObjectResult(new
+                    {
+                        message = "Удаление дела остановлено из-за несогласованных связей судебных жалоб. Обратитесь к администратору для проверки связей."
+                    });
                 await LockLinkedTasksAsync(db, [id], ct);
                 if (db.Database.IsNpgsql())
                     await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"ClientCaseId\" = {id} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);
@@ -67,6 +74,20 @@ internal static partial class CaseEditTransaction
         {
             if (lease is not null) await lease.DisposeAsync();
         }
+    }
+
+    private static async Task<bool> HasForeignCourtComplaintsAsync(PaymentContext db, int id, CancellationToken ct)
+    {
+        // Pin both parents and existing dependents. An instance lock excludes new
+        // foreign references, while a complaint lock excludes changing its case.
+        if (db.Database.IsNpgsql())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"ClientCaseCourtInstances\" WHERE \"ClientCaseId\" = {id} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"ClientCaseCourtComplaints\" WHERE \"CourtInstanceId\" IN (SELECT \"Id\" FROM \"ClientCaseCourtInstances\" WHERE \"ClientCaseId\" = {id}) ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);
+        }
+        // Archived complaints and hidden historical parents retain their links.
+        return await db.ClientCaseCourtComplaints.IgnoreQueryFilters().AnyAsync(complaint => complaint.ClientCaseId != id
+            && db.ClientCaseCourtInstances.IgnoreQueryFilters().Any(instance => instance.Id == complaint.CourtInstanceId && instance.ClientCaseId == id), ct);
     }
 
     public static async Task LockVisibleOwnersAsync(PaymentContext db, ClientCase clientCase, CancellationToken ct)
