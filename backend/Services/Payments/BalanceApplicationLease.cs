@@ -27,10 +27,10 @@ internal sealed class BalanceApplicationLease : IAsyncDisposable
     public static Task<BalanceApplicationLease> BeginWithSettingsSnapshotAsync(PaymentContext db, int actorId, CancellationToken ct)
         => BeginCoreAsync(db, actorId, ct, pinSettings: true);
 
-    // A row lock taken after the snapshot cannot reveal an earlier concurrent
-    // insertion. Exclude complaint writes before the first case-delete read.
+    // Pin reference tables before the snapshot. Incoming parent reassignments
+    // also need exclusion until the case row can be locked.
     public static Task<BalanceApplicationLease> BeginForCaseDeletionAsync(PaymentContext db, int actorId, CancellationToken ct)
-        => BeginCoreAsync(db, actorId, ct, pinCourtComplaints: true);
+        => BeginCoreAsync(db, actorId, ct, pinCourtDeletionReferences: true);
 
     // A trusted background job has no interactive actor to impersonate. It still
     // owns the same clean transaction and payment locks as interactive writers.
@@ -44,7 +44,7 @@ internal sealed class BalanceApplicationLease : IAsyncDisposable
         => BeginCoreAsync(db, actorId, ct, clearTracker: false);
 
     private static async Task<BalanceApplicationLease> BeginCoreAsync(PaymentContext db, int? actorId, CancellationToken ct, bool clearTracker = true, bool pinSettings = false,
-        bool pinCourtComplaints = false)
+        bool pinCourtDeletionReferences = false)
     {
         if (db.Database.CurrentTransaction is not null || db.ChangeTracker.HasChanges())
             throw new BalanceApplicationConflictException();
@@ -54,8 +54,12 @@ internal sealed class BalanceApplicationLease : IAsyncDisposable
             if (db.Database.IsNpgsql())
             {
                 lease = new(db, await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct));
-                if (pinCourtComplaints)
-                    await db.Database.ExecuteSqlRawAsync("LOCK TABLE \"ClientCaseCourtComplaints\" IN SHARE ROW EXCLUSIVE MODE NOWAIT", ct);
+                if (pinCourtDeletionReferences)
+                {
+                    await db.Database.ExecuteSqlRawAsync("LOCK TABLE \"ClientCaseCourtComplaints\", \"ClientCaseCourtInstances\", \"ClientCaseHearingPreparationDocuments\", \"ClientCaseDocuments\" IN SHARE ROW EXCLUSIVE MODE NOWAIT", ct);
+                    if (!db.UseObjectAuditModel)
+                        await db.Database.ExecuteSqlRawAsync("LOCK TABLE \"ClientCaseCourtEventHistory\", \"ClientCaseCourtEvents\" IN SHARE ROW EXCLUSIVE MODE NOWAIT", ct);
+                }
                 if (pinSettings)
                     await db.Database.ExecuteSqlRawAsync("LOCK TABLE \"SystemSettings\" IN SHARE MODE NOWAIT", ct);
                 if (actorId.HasValue) await PinActorAsync(db, actorId.Value, ct);
