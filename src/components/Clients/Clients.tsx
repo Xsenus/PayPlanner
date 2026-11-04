@@ -1159,7 +1159,11 @@ function ClientsScreen({ context, onOpenContract, onOpenInvoice, onOpenAct, onOp
                 ? {
                     ...client,
                     ...updatedClient,
-                    legalEntity: updatedClient.legalEntity ?? client.legalEntity ?? null,
+                    legalEntity: updatedClient.legalEntity !== undefined
+                      ? updatedClient.legalEntity
+                      : updatedClient.legalEntityId === undefined || updatedClient.legalEntityId === client.legalEntityId
+                        ? client.legalEntity ?? null
+                        : null,
                     clientStatus: updatedClient.clientStatus ?? client.clientStatus ?? null,
                     cases: Array.isArray(updatedClient.cases) ? updatedClient.cases : client.cases,
                     contracts: Array.isArray(updatedClient.contracts) ? updatedClient.contracts : client.contracts,

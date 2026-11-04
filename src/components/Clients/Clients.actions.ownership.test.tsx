@@ -136,6 +136,24 @@ describe('client page action ownership', () => {
     render(<Clients />); await screen.findByText('Клиент 1'); act(() => window.dispatchEvent(new CustomEvent('open-client-detail', { detail: { clientId: 1 } }))); const old = detailProps();
     act(() => window.dispatchEvent(new CustomEvent('open-client-detail', { detail: { clientId: 2 } }))); act(() => old.onClientUpdated?.({ ...row(2), name: 'Чужая карточка' })); act(() => detailProps().onBack()); await screen.findByText('Клиент 2'); expect(screen.queryByText('Чужая карточка')).toBeNull();
   });
+  it.each(['redacted', 'unlinked', 'different-link', 'partial', 'replacement'] as const)(
+    'client linked profile: %s response reconciles the list without restoring old requisites', async kind => {
+      const legal = { id: 21, shortName: 'Прежние реквизиты', createdAt: row().createdAt, clientsCount: 0 };
+      vi.mocked(apiService.getClientsV2).mockResolvedValue({ items: [{ ...row(), legalEntityId: 21, legalEntity: legal }], total: 1, page: 1, pageSize: 25 });
+      render(<Clients />); await screen.findByText('Прежние реквизиты');
+      act(() => window.dispatchEvent(new CustomEvent('open-client-detail', { detail: { clientId: 1 } })));
+      await screen.findByTestId('detail-fixture');
+      const updated: Client = { ...row(), name: 'Клиент после изменения', legalEntityId: kind === 'unlinked' ? null : kind === 'different-link' ? 22 : 21 };
+      if (kind === 'redacted') updated.legalEntity = null;
+      if (kind === 'replacement') updated.legalEntity = { ...legal, shortName: 'Актуальные реквизиты' };
+      act(() => detailProps().onClientUpdated?.(updated));
+      act(() => detailProps().onBack()); await screen.findByText('Клиент после изменения');
+      if (kind === 'partial') expect(screen.getByText('Прежние реквизиты')).toBeTruthy();
+      else expect(screen.queryByText('Прежние реквизиты')).toBeNull();
+      if (kind === 'replacement') expect(screen.getByText('Актуальные реквизиты')).toBeTruthy();
+      expect(apiService.getClientsV2).toHaveBeenCalledOnce();
+    },
+  );
   it('client action regression: a normal bulk delete sends the confirmed ids once and refreshes the current list', async () => {
     localStorage.setItem('pp.clients_view', 'table'); render(<Clients />); await openMenu(); vi.mocked(apiService.getClientsV2).mockResolvedValue({ items: [row(2)], total: 1, page: 1, pageSize: 25 }); act(() => { void menuAction('delete').onSelect(); });
     await waitFor(() => expect(ports.success).toHaveBeenCalledWith('Клиент удален.', 'Удаление выполнено')); expect(apiService.deleteClients).toHaveBeenCalledWith([1]); expect(apiService.deleteClients).toHaveBeenCalledOnce(); await waitFor(() => expect(apiService.getClientsV2).toHaveBeenCalledTimes(2));

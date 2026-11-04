@@ -22,6 +22,7 @@ public class ClientsV2Controller : ControllerBase
         RolePermissionCatalog.Cases,
         RolePermissionCatalog.Contracts,
         RolePermissionCatalog.Payments,
+        RolePermissionCatalog.LegalEntities,
     ];
 
     private readonly PaymentContext _db;
@@ -151,11 +152,19 @@ public class ClientsV2Controller : ControllerBase
             return MissingClientsVisibilityResult();
         }
 
+        var hasLegalFilters = !string.IsNullOrWhiteSpace(legalEntityShortName) || !string.IsNullOrWhiteSpace(legalEntityFullName)
+            || !string.IsNullOrWhiteSpace(legalEntityInn) || !string.IsNullOrWhiteSpace(legalEntityOgrn) || !string.IsNullOrWhiteSpace(legalEntityKpp);
+        ClientLegalReferences? legalReferences = null;
+        if (!string.IsNullOrWhiteSpace(search) || hasLegalFilters)
+            legalReferences = await ClientLegalReferences.ResolveAsync(_db, User, ct, visibilityBySection: visibilityBySection);
+        var searchableLegalIds = legalReferences?.AllowedIds ?? _db.LegalEntities.Where(_ => false).Select(row => row.Id);
+
         var q = BuildVisibleClientsQuery(access)
-            .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
             .Include(c => c.ResponsibleUser)
             .AsQueryable();
+        if (hasLegalFilters)
+            q = q.Where(c => c.LegalEntityId.HasValue && searchableLegalIds.Contains(c.LegalEntityId.Value));
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -166,11 +175,12 @@ public class ClientsV2Controller : ControllerBase
                 (c.Phone != null && c.Phone.ToLower().Contains(search)) ||
                 (c.Company != null && c.Company.ToLower().Contains(search)) ||
                 (c.Address != null && c.Address.ToLower().Contains(search)) ||
-                (c.LegalEntity != null && c.LegalEntity.ShortName.ToLower().Contains(search)) ||
-                (c.LegalEntity != null && c.LegalEntity.FullName != null && c.LegalEntity.FullName.ToLower().Contains(search)) ||
-                (c.LegalEntity != null && c.LegalEntity.Inn != null && c.LegalEntity.Inn.ToLower().Contains(search)) ||
-                (c.LegalEntity != null && c.LegalEntity.Kpp != null && c.LegalEntity.Kpp.ToLower().Contains(search)) ||
-                (c.LegalEntity != null && c.LegalEntity.Ogrn != null && c.LegalEntity.Ogrn.ToLower().Contains(search)));
+                (c.LegalEntityId.HasValue && searchableLegalIds.Contains(c.LegalEntityId.Value) && c.LegalEntity != null &&
+                    (c.LegalEntity.ShortName.ToLower().Contains(search) ||
+                    (c.LegalEntity.FullName != null && c.LegalEntity.FullName.ToLower().Contains(search)) ||
+                    (c.LegalEntity.Inn != null && c.LegalEntity.Inn.ToLower().Contains(search)) ||
+                    (c.LegalEntity.Kpp != null && c.LegalEntity.Kpp.ToLower().Contains(search)) ||
+                    (c.LegalEntity.Ogrn != null && c.LegalEntity.Ogrn.ToLower().Contains(search)))));
         }
 
         if (id.HasValue)
@@ -267,6 +277,7 @@ public class ClientsV2Controller : ControllerBase
         var total = await q.CountAsync(ct);
         var items = await q.AsNoTracking().Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
         PopulateResponsibleUserNames(items);
+        await ClientLegalReferences.PopulateAsync(_db, User, items, ct, legalReferences, visibilityBySection);
 
         var itemIds = items.Select(c => c.Id).ToList();
         if (itemIds.Count > 0)
@@ -568,7 +579,6 @@ public class ClientsV2Controller : ControllerBase
         }
 
         var client = await BuildVisibleClientsQuery(access)
-            .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
             .Include(c => c.ResponsibleUser)
             .AsNoTracking()
@@ -585,6 +595,7 @@ public class ClientsV2Controller : ControllerBase
                 .ThenByDescending(clientCase => clientCase.Id)
                 .ToListAsync(ct);
         }
+        if (client is not null) await ClientLegalReferences.PopulateAsync(_db, User, [client], ct);
         return client is not null ? Ok(client) : NotFound();
     }
 

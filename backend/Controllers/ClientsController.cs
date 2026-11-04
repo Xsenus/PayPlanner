@@ -249,7 +249,6 @@ public class ClientsController : ControllerBase
         }
 
         var clients = await BuildVisibleClientsQuery(access)
-            .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
             .Include(c => c.Addresses)
             .Include(c => c.ResponsibleUser)
@@ -280,6 +279,7 @@ public class ClientsController : ControllerBase
 
         OrderClientAddresses(clients);
         PopulateResponsibleUserNames(clients);
+        await ClientLegalReferences.PopulateAsync(_db, User, clients, ct);
         return Ok(clients);
     }
 
@@ -296,7 +296,6 @@ public class ClientsController : ControllerBase
         }
 
         var client = await BuildVisibleClientsQuery(access)
-            .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
             .Include(c => c.Addresses)
             .Include(c => c.ResponsibleUser)
@@ -318,6 +317,7 @@ public class ClientsController : ControllerBase
                 PopulateAuditMetadata(_db, clientCase);
             }
         }
+        if (client is not null) await ClientLegalReferences.PopulateAsync(_db, User, [client], ct);
         return client is null ? NotFound() : Ok(client);
     }
 
@@ -1069,7 +1069,6 @@ public class ClientsController : ControllerBase
     {
         var client = await _db.Clients
             .AsNoTracking()
-            .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
             .Include(c => c.ResponsibleUser)
             .Include(c => c.Addresses)
@@ -1078,6 +1077,7 @@ public class ClientsController : ControllerBase
 
         OrderClientAddresses(client);
         client.ResponsibleUserName = FormatResponsibleUserName(client.ResponsibleUser);
+        await ClientLegalReferences.PopulateAsync(_db, User, [client], ct);
         return client;
     }
 

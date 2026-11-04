@@ -115,7 +115,6 @@ public class ClientsV1Controller : ControllerBase
         }
 
         var client = await BuildVisibleClientsQuery(access)
-            .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
             .Include(c => c.ResponsibleUser)
             .AsNoTracking()
@@ -132,6 +131,7 @@ public class ClientsV1Controller : ControllerBase
                 .ThenByDescending(clientCase => clientCase.Id)
                 .ToListAsync(ct);
         }
+        if (client is not null) await ClientLegalReferences.PopulateAsync(_db, User, [client], ct);
         return client is not null ? Ok(client) : NotFound();
     }
 
