@@ -8731,66 +8731,59 @@ public partial class CasesV2Controller : ControllerBase
         [FromBody] ClientCaseCourtSyncSearchRequest? request,
         CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
-
-        var clientCase = await _db.ClientCases
-            .AsNoTracking()
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
-
         var normalizedInstance = NormalizeCourtInstance(request?.Instance);
-        var currentCourtInstance = await _db.ClientCaseCourtInstances
-            .AsNoTracking()
-            .FirstOrDefaultAsync(
-                item => item.ClientCaseId == id && item.Instance == normalizedInstance,
-                ct);
-        var sourceUrl = NormalizeOptional(request?.SourceUrl) ?? NormalizeOptional(clientCase.CourtUrl);
-        if (sourceUrl is null)
-        {
+        CourtSyncCaseSearchRequest ResolveSearch(ClientCase clientCase) => new(
+            NormalizeOptional(request?.SourceUrl) ?? NormalizeOptional(clientCase.CourtUrl),
+            NormalizeOptional(request?.CourtCaseNumber) ?? NormalizeOptional(clientCase.CourtCaseNumber),
+            NormalizeOptional(request?.JudicialUid),
+            NormalizeOptional(request?.CourtName) ?? NormalizeOptional(clientCase.CourtName),
+            NormalizeOptional(request?.PartyName),
+            normalizedInstance);
+
+        // Reuse the current-actor and case locks only for the short reads.
+        // The external provider must never run inside a database transaction.
+        Task<IActionResult> ReadCurrentAsync(Func<ClientCase, Task<IActionResult>> read)
+            => CaseEditTransaction.RunAsync(_db, User, id, async (clientCase, _) =>
+            {
+                if (!AuthSessionClaims.TryGetTokenVersion(User, out var tokenVersion)
+                    || !await _db.Users.AsNoTracking().AnyAsync(user => user.Id == User.GetUserId()
+                        && user.AuthTokenVersion == tokenVersion, ct)) return Unauthorized();
+                return await read(clientCase);
+            }, ct);
+
+        var admission = await ReadCurrentAsync(clientCase => Task.FromResult<IActionResult>(Ok(ResolveSearch(clientCase))));
+        if (admission is not OkObjectResult { Value: CourtSyncCaseSearchRequest search }) return (ActionResult)admission;
+        if (search.SourceUrl is null)
             return BadRequest(new { message = "Укажите ссылку на судебную карточку или страницу поиска суда." });
-        }
 
-        var provider = ResolveCourtSyncProvider(sourceUrl);
+        var provider = ResolveCourtSyncProvider(search.SourceUrl);
         if (provider is null)
-        {
             return BadRequest(new { message = "Для указанного источника пока нет активного провайдера судебной синхронизации." });
-        }
         if (provider is not ICourtSyncCaseSearchProvider searchProvider)
-        {
             return BadRequest(new { message = "Выбранный судебный источник не поддерживает поиск карточек." });
-        }
 
+        IReadOnlyList<CourtSyncCaseSearchResult>? results = null;
+        string? sourceError = null;
         try
         {
-            var results = await searchProvider.SearchCasesAsync(
-                new CourtSyncCaseSearchRequest(
-                    sourceUrl,
-                    NormalizeOptional(request?.CourtCaseNumber) ?? NormalizeOptional(clientCase.CourtCaseNumber),
-                    NormalizeOptional(request?.JudicialUid),
-                    NormalizeOptional(request?.CourtName) ?? NormalizeOptional(clientCase.CourtName),
-                    NormalizeOptional(request?.PartyName),
-                    normalizedInstance),
-                ct);
-
-            return Ok(results.Select(item => MapCourtSyncSearchResult(clientCase, currentCourtInstance, item)).ToList());
+            results = await searchProvider.SearchCasesAsync(search, ct);
         }
         catch (SudrfCourtSyncException ex)
         {
-            return BadRequest(new { message = ex.Message });
+            sourceError = ex.Message;
         }
+        ct.ThrowIfCancellationRequested();
+
+        var response = await ReadCurrentAsync(async clientCase =>
+        {
+            if (ResolveSearch(clientCase) != search)
+                return Conflict(new { message = "Судебные данные дела изменились во время поиска. Повторите поиск с актуальными данными." });
+            if (sourceError is not null) return BadRequest(new { message = sourceError });
+            var currentCourtInstance = await _db.ClientCaseCourtInstances.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.ClientCaseId == id && item.Instance == normalizedInstance, ct);
+            return Ok(results!.Select(item => MapCourtSyncSearchResult(clientCase, currentCourtInstance, item)).ToList());
+        });
+        return (ActionResult)response;
     }
 
     [HttpPost("{id:int}/court-sync/bind")]
