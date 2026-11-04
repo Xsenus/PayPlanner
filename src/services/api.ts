@@ -4431,6 +4431,8 @@ export class ApiService {
     params?: {
       scope?: ContactScope;
       search?: string;
+      page?: number;
+      pageSize?: number;
       legalEntityId?: number;
       includeInactive?: boolean;
       syncOnly?: boolean;
@@ -4441,6 +4443,7 @@ export class ApiService {
     const q = buildQuery(params ?? {});
     return this.request<ContactDirectoryItemDto[]>(`/contacts${q}`, {
       signal: options?.signal,
+      cache: 'no-store',
     });
   }
 

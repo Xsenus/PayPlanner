@@ -17,4 +17,21 @@ describe('client company lookup read contract', () => {
     expect(String(fetch.mock.calls[0][0])).toMatch(/\/legal-entities\/21$/); expect(fetch.mock.calls[0][1]).toMatchObject({ signal: controller.signal, cache: 'no-store' });
     await apiService.getLegalEntity(21); expect(fetch.mock.calls[1][1].signal).toBeUndefined();
   });
+
+  it('participant directory transport: contacts preserve paging search cancellation and uncached reads', async () => {
+    const fetch = vi.fn().mockImplementation(async () => Response.json([])); vi.stubGlobal('fetch', fetch);
+    const controller = new AbortController();
+    await apiService.getContacts({ scope: 'external', search: 'Имя & телефон', page: 2, pageSize: 50 }, { signal: controller.signal });
+    const url = new URL(String(fetch.mock.calls[0][0]), 'http://fixture.local');
+    expect(url.pathname).toMatch(/\/contacts$/);
+    expect(url.searchParams.get('scope')).toBe('external');
+    expect(url.searchParams.get('search')).toBe('Имя & телефон');
+    expect(url.searchParams.get('page')).toBe('2');
+    expect(url.searchParams.get('pageSize')).toBe('50');
+    expect(fetch.mock.calls[0][1]).toMatchObject({ signal: controller.signal, cache: 'no-store' });
+    await apiService.getContacts();
+    expect(fetch.mock.calls[1][1].signal).toBeUndefined();
+    expect(fetch.mock.calls[1][1].cache).toBe('no-store');
+  });
+
 });

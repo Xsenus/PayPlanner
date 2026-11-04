@@ -4,6 +4,7 @@ import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { TablePagination } from '../ui/TablePagination';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useCaseTaskPage, CASE_TASK_PAGE_SIZES, type CaseTaskFilter } from '../../hooks/useCaseTaskPage';
 import { CaseTaskActions } from './CaseTaskActions';
 import { CaseTaskRowMenu } from './CaseTaskRowMenu';
@@ -267,6 +268,17 @@ interface ParticipantDirectoryOption {
   label: string;
   description?: string;
 }
+
+const PARTICIPANT_DIRECTORY_PAGE_SIZE = 50;
+
+type ParticipantDirectoryView = {
+  scope: string;
+  page: number;
+  options: ParticipantDirectoryOption[];
+  loading: boolean;
+  error: string | null;
+  hasMore: boolean;
+};
 
 const STATUS_LABELS: Record<string, string> = {
   Open: 'В работе',
@@ -1599,9 +1611,7 @@ function CaseDetailScreen({
   const [workOrder, setWorkOrder] = useState<ClientCaseWorkOrder | null>(null);
   const workOrderReadSequence = useRef(0);
   const workOrderPublicationRead = useRef<AbortController | null>(null);
-  const [participantClients, setParticipantClients] = useState<Client[]>([]);
-  const [participantLegalEntities, setParticipantLegalEntities] = useState<LegalEntitySummary[]>([]);
-  const [participantContacts, setParticipantContacts] = useState<ContactDirectoryItemDto[]>([]);
+  const [participantDirectory, setParticipantDirectory] = useState<ParticipantDirectoryView>({ scope: '', page: 0, options: [], loading: false, error: null, hasMore: false });
   const [activeTab, setActiveTab] = useState<CaseDetailTab>(
     (canViewFinance || initialViewState.activeTab !== 'finance')
       && (canViewTasks || initialViewState.activeTab !== 'tasks')
@@ -1629,8 +1639,6 @@ function CaseDetailScreen({
   const [conversationLoading, setConversationLoading] = useState(false);
   const [financeLoading, setFinanceLoading] = useState(false);
   const [workOrderLoading, setWorkOrderLoading] = useState(false);
-  const [participantDirectoryLoading, setParticipantDirectoryLoading] = useState(false);
-  const [participantDirectoryError, setParticipantDirectoryError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
@@ -1731,6 +1739,21 @@ function CaseDetailScreen({
   const [participantSearch, setParticipantSearch] = useState('');
   const [participantRole, setParticipantRole] = useState(initialViewState.participantRole ?? '');
   const [participantNotes, setParticipantNotes] = useState('');
+
+  const [participantDirectoryPage, setParticipantDirectoryPage] = useState(1);
+  const [participantDirectoryAttempt, setParticipantDirectoryAttempt] = useState(0);
+  const debouncedParticipantSearch = useDebouncedValue(participantSearch, 300);
+  const participantDirectoryEnabled = activeTab === 'participants' && canEdit && !editPageOpen;
+  const participantDirectoryScope = JSON.stringify([screenOwner.scope, participantSourceType, participantSearch]);
+  const participantDirectoryOwner = useDocumentDeliveryOwner(JSON.stringify([
+    participantDirectoryScope, debouncedParticipantSearch, participantDirectoryPage, participantDirectoryAttempt, participantDirectoryEnabled,
+  ]));
+  const { capture: captureParticipantDirectory } = participantDirectoryOwner;
+  const participantDirectoryCurrent = participantDirectory.scope === participantDirectoryScope;
+  const participantDirectoryLoading = !participantDirectoryCurrent || participantDirectory.page !== participantDirectoryPage
+    || participantDirectory.loading || participantSearch !== debouncedParticipantSearch;
+  const participantDirectoryError = participantDirectoryCurrent ? participantDirectory.error : null;
+
   const [documentTypeDraft, setDocumentTypeDraft] = useState(initialViewState.documentTypeDraft ?? '');
   const [documentStatusDraft, setDocumentStatusDraft] = useState(initialViewState.documentStatusDraft ?? '');
   const [documentFile, setDocumentFile] = useState<File | null>(null);
@@ -2174,54 +2197,66 @@ function CaseDetailScreen({
   }, [captureScreen, activeTab, caseId, reloadToken, headerReloadToken, showArchivedParties, participantReadAttempt]);
 
   useEffect(() => {
-    if (activeTab !== 'participants' || !canEdit) return;
-
-    const owner = captureScreen();
+    if (!participantDirectoryEnabled || participantSearch !== debouncedParticipantSearch) return;
+    const owner = captureParticipantDirectory();
     if (!owner) return;
-    const readController = new AbortController();
-    const isReadCurrent = () => !readController.signal.aborted && owner.isCurrent();
-    setParticipantDirectoryLoading(true);
-    setParticipantDirectoryError(null);
-
-    const loadDirectory = async () => {
-      const [clientsResult, legalEntitiesResult, contactsResult] = await Promise.allSettled([
-        apiService.getClients({ signal: readController.signal }),
-        apiService.getLegalEntitiesPaged({ page: 1, pageSize: 200 }, { signal: readController.signal }),
-        apiService.getContacts({ scope: 'all' }, { signal: readController.signal }),
-      ]);
-
-      if (!isReadCurrent()) return;
-
-      const loadedClients = clientsResult.status === 'fulfilled' ? clientsResult.value : [];
-      const loadedLegalEntities = legalEntitiesResult.status === 'fulfilled' ? legalEntitiesResult.value.items ?? [] : [];
-      const loadedContacts = contactsResult.status === 'fulfilled' ? contactsResult.value : [];
-
-      setParticipantClients(loadedClients);
-      setParticipantLegalEntities(loadedLegalEntities);
-      setParticipantContacts(loadedContacts);
-
-      if (clientsResult.status === 'rejected' && legalEntitiesResult.status === 'rejected' && contactsResult.status === 'rejected') {
-        setParticipantDirectoryError('Не удалось загрузить справочники участников дела.');
+    const controller = new AbortController();
+    const current = () => !controller.signal.aborted && owner.isCurrent();
+    const scope = participantDirectoryScope;
+    const page = participantDirectoryPage;
+    const search = debouncedParticipantSearch.trim() || undefined;
+    setParticipantDirectory(previous => ({
+      scope, page, options: page > 1 && previous.scope === scope ? previous.options : [],
+      loading: true, error: null, hasMore: page > 1 && previous.scope === scope && previous.hasMore,
+    }));
+    const load = async () => {
+      let options: ParticipantDirectoryOption[];
+      let receivedCount: number;
+      let pagination: { total: number; page: number; pageSize: number } | null = null;
+      if (participantSourceType === 'client') {
+        const result = await apiService.getClientsV2({ search, isActive: true, page, pageSize: PARTICIPANT_DIRECTORY_PAGE_SIZE }, { signal: controller.signal });
+        if (!current()) return;
+        if (!Array.isArray(result?.items) || result.items.length > PARTICIPANT_DIRECTORY_PAGE_SIZE) throw new Error('Invalid participant directory');
+        pagination = result;
+        receivedCount = result.items.length;
+        options = buildParticipantDirectoryOptions({ sourceType: participantSourceType, clients: result.items, legalEntities: [], contacts: [] });
+      } else if (participantSourceType === 'legalEntity') {
+        const result = await apiService.getLegalEntitiesPaged({ search, page, pageSize: PARTICIPANT_DIRECTORY_PAGE_SIZE }, { signal: controller.signal });
+        if (!current()) return;
+        if (!Array.isArray(result?.items) || result.items.length > PARTICIPANT_DIRECTORY_PAGE_SIZE) throw new Error('Invalid participant directory');
+        pagination = result;
+        receivedCount = result.items.length;
+        options = buildParticipantDirectoryOptions({ sourceType: participantSourceType, clients: [], legalEntities: result.items, contacts: [] });
+      } else {
+        const result = await apiService.getContacts({ scope: 'external', search, page, pageSize: PARTICIPANT_DIRECTORY_PAGE_SIZE }, { signal: controller.signal });
+        if (!current()) return;
+        if (!Array.isArray(result) || result.length > PARTICIPANT_DIRECTORY_PAGE_SIZE || result.some(contact => !contact || contact.sourceType !== 'external')) throw new Error('Invalid participant directory');
+        receivedCount = result.length;
+        options = buildParticipantDirectoryOptions({ sourceType: participantSourceType, clients: [], legalEntities: [], contacts: result });
       }
+      if (receivedCount > PARTICIPANT_DIRECTORY_PAGE_SIZE
+        || options.some(option => !Number.isSafeInteger(option.sourceId) || option.sourceId <= 0 || typeof option.label !== 'string')
+        || new Set(options.map(option => option.key)).size !== options.length
+        || (pagination && (!Number.isSafeInteger(pagination.total) || pagination.total < receivedCount
+          || pagination.page !== page || pagination.pageSize !== PARTICIPANT_DIRECTORY_PAGE_SIZE))) throw new Error('Invalid participant directory');
+      const hasMore = pagination ? page * PARTICIPANT_DIRECTORY_PAGE_SIZE < pagination.total : receivedCount === PARTICIPANT_DIRECTORY_PAGE_SIZE;
+      setParticipantDirectory(previous => ({
+        scope, page, options: Array.from(new Map([
+          ...(page > 1 && previous.scope === scope ? previous.options : []), ...options,
+        ].map(option => [option.key, option])).values()), loading: false, error: null, hasMore,
+      }));
     };
-
-    void loadDirectory()
-      .catch(() => {
-        if (isReadCurrent()) {
-          setParticipantDirectoryError('Не удалось загрузить справочники участников дела.');
-          setParticipantClients([]);
-          setParticipantLegalEntities([]);
-          setParticipantContacts([]);
-        }
-      })
-      .finally(() => {
-        if (isReadCurrent()) setParticipantDirectoryLoading(false);
-      });
-
-    return () => {
-      readController.abort();
-    };
-  }, [captureScreen, activeTab, canEdit]);
+    void load().catch(error => {
+      if (!current()) return;
+      const denied = isHttpErrorStatus(error, 401) || isHttpErrorStatus(error, 403);
+      if (denied) setParticipantSourceId('');
+      setParticipantDirectory(previous => ({
+        scope, page, options: !denied && page > 1 && previous.scope === scope ? previous.options : [],
+        loading: false, error: 'Не удалось загрузить выбранный справочник участников.', hasMore: false,
+      }));
+    });
+    return () => controller.abort();
+  }, [captureParticipantDirectory, participantDirectoryEnabled, participantDirectoryScope, participantDirectoryPage, participantSourceType, participantSearch, debouncedParticipantSearch]);
 
   useEffect(() => {
     if (activeTab !== 'documents'
@@ -2627,15 +2662,8 @@ function CaseDetailScreen({
   );
 
   const participantOptions = useMemo(
-    () => buildParticipantDirectoryOptions({
-      sourceType: participantSourceType,
-      clients: participantClients,
-      legalEntities: participantLegalEntities,
-      contacts: participantContacts,
-      relatedParties,
-      search: participantSearch,
-    }),
-    [participantClients, participantContacts, participantLegalEntities, participantSearch, participantSourceType, relatedParties],
+    () => filterParticipantDirectoryOptions(participantDirectoryCurrent ? participantDirectory.options : [], relatedParties),
+    [participantDirectoryCurrent, participantDirectory.options, relatedParties],
   );
 
   const rememberStageTransition = (previousStage: string | null | undefined, nextCase: ClientCase) => {
@@ -3646,7 +3674,7 @@ function CaseDetailScreen({
   };
 
   const addParticipant = async () => {
-    if (!caseItem || !canEdit || !captureScreen() || participantsLoading || participantsLoadError || participantDirectoryLoading) return;
+    if (!caseItem || !canEdit || !captureScreen() || participantsLoading || participantsLoadError || participantDirectoryLoading || participantDirectoryError || !captureParticipantDirectory()) return;
     const sourceId = Number(participantSourceId);
     if (!Number.isSafeInteger(sourceId) || sourceId <= 0
       || !participantOptions.some(option => option.sourceId === sourceId && option.sourceType === participantSourceType)) {
@@ -4541,7 +4569,14 @@ function CaseDetailScreen({
                     <SystemSelect
                       aria-label="Тип участника"
                       value={participantSourceType}
-                      onChange={(event) => setParticipantSourceType(event.target.value as ParticipantSourceType)}
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        if (!isParticipantSourceType(next) || next === participantSourceType || pageBusy || !childCaseOwner.capture()) return;
+                        participantDirectoryOwner.invalidate();
+                        setParticipantSourceType(next);
+                        setParticipantSourceId('');
+                        setParticipantDirectoryPage(1);
+                      }}
                       className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
                       <option value="client">Клиент</option>
                       <option value="legalEntity">Юрлицо</option>
@@ -4554,7 +4589,13 @@ function CaseDetailScreen({
                       <input
                         aria-label="Поиск участника дела"
                         value={participantSearch}
-                        onChange={(event) => setParticipantSearch(event.target.value)}
+                        onChange={(event) => {
+                          if (event.target.value === participantSearch || pageBusy || !childCaseOwner.capture()) return;
+                          participantDirectoryOwner.invalidate();
+                          setParticipantSearch(event.target.value);
+                          setParticipantSourceId('');
+                          setParticipantDirectoryPage(1);
+                        }}
                         className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                         placeholder="ФИО, название, телефон или email"
                       />
@@ -4564,14 +4605,15 @@ function CaseDetailScreen({
                       <SystemSelect
                         aria-label="Участник дела"
                         value={participantSourceId}
-                        onChange={(event) => setParticipantSourceId(event.target.value)}
-                        disabled={participantDirectoryLoading || participantOptions.length === 0}
+                        onChange={(event) => { if (captureParticipantDirectory() && !participantDirectoryLoading && !pageBusy) setParticipantSourceId(event.target.value); }}
+                        disabled={participantDirectoryLoading || !!participantDirectoryError || participantOptions.length === 0}
                         className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400">
                         <option value="">
                           {participantDirectoryLoading
                             ? 'Загрузка справочника...'
+                            : participantDirectoryError ? 'Справочник недоступен'
                             : participantOptions.length === 0
-                              ? 'Нет доступных записей'
+                              ? participantDirectoryCurrent && participantDirectory.hasMore ? 'В этой порции нет доступных записей' : 'Нет доступных записей'
                               : 'Выберите из справочника'}
                         </option>
                         {participantOptions.map((option) => (
@@ -4581,6 +4623,13 @@ function CaseDetailScreen({
                         ))}
                       </SystemSelect>
                     </label>
+                    {participantDirectoryCurrent && participantDirectory.hasMore && !participantDirectoryError ? (
+                      <button type="button" aria-label="Ещё записи справочника участников" disabled={participantDirectoryLoading || pageBusy} onClick={() => {
+                        if (!captureParticipantDirectory() || participantDirectoryLoading || pageBusy) return;
+                        participantDirectoryOwner.invalidate();
+                        setParticipantDirectoryPage(participantDirectoryPage + 1);
+                      }} className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 disabled:opacity-50">Ещё записи</button>
+                    ) : null}
                   </div>
                   <label className="text-sm font-medium text-slate-700">
                     <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Роль</span>
@@ -4595,7 +4644,7 @@ function CaseDetailScreen({
                   <button
                     type="button"
                     onClick={() => void addParticipant()}
-                    disabled={addingParticipant || pageBusy || participantsLoading || participantsLoadError || participantDirectoryLoading}
+                    disabled={addingParticipant || pageBusy || participantsLoading || participantsLoadError || participantDirectoryLoading || !!participantDirectoryError}
                     className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 md:self-end">
                     {addingParticipant ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserRound className="h-4 w-4" />} Добавить
                   </button>
@@ -4611,8 +4660,14 @@ function CaseDetailScreen({
                   </label>
                 </div>
                 {participantDirectoryError ? (
-                  <div className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  <div role="alert" className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-rose-100 bg-rose-50 p-3 text-sm text-rose-700">
                     {participantDirectoryError}
+                    <button type="button" aria-label="Повторить загрузку справочника участников" disabled={participantDirectoryLoading || pageBusy} onClick={() => {
+                      if (!captureParticipantDirectory() || participantDirectoryLoading || pageBusy) return;
+                      participantDirectoryOwner.invalidate();
+                      setParticipantDirectoryPage(participantDirectory.options.length ? participantDirectoryPage : 1);
+                      setParticipantDirectoryAttempt(participantDirectoryAttempt + 1);
+                    }} className="font-semibold underline">Повторить загрузку</button>
                   </div>
                 ) : null}
               </fieldset>
@@ -6844,31 +6899,13 @@ function TextBlock({ title, value }: { title: string; value: string }) {
   );
 }
 
-function buildParticipantDirectoryOptions({
-  sourceType,
-  clients,
-  legalEntities,
-  contacts,
-  relatedParties,
-  search,
-}: {
+function buildParticipantDirectoryOptions({ sourceType, clients, legalEntities, contacts }: {
   sourceType: ParticipantSourceType;
   clients: Client[];
   legalEntities: LegalEntitySummary[];
   contacts: ContactDirectoryItemDto[];
-  relatedParties: ClientCaseRelatedParty[];
-  search: string;
 }): ParticipantDirectoryOption[] {
-  const linkedKeys = new Set(
-    relatedParties
-      .map((party) => {
-        const sourceId = getRelatedPartySourceId(party);
-        return sourceId ? `${party.sourceType}:${sourceId}` : null;
-      })
-      .filter((value): value is string => Boolean(value)),
-  );
-
-  const options = sourceType === 'client'
+  return sourceType === 'client'
     ? clients
       .filter((client) => client.isActive !== false)
       .map((client) => ({
@@ -6895,16 +6932,14 @@ function buildParticipantDirectoryOptions({
           label: contact.fullName || `Контакт #${contact.sourceId}`,
           description: [contact.organizationName, contact.phone, contact.email].filter(Boolean).join(' · '),
         }));
+}
 
-  const query = normalizeParticipantSearch(search);
-
-  return options
-    .filter((option) => !linkedKeys.has(option.key))
-    .filter((option) => {
-      if (!query) return true;
-      return normalizeParticipantSearch(`${option.label} ${option.description ?? ''}`).includes(query);
-    })
-    .sort((a, b) => a.label.localeCompare(b.label, 'ru'));
+function filterParticipantDirectoryOptions(options: ParticipantDirectoryOption[], relatedParties: ClientCaseRelatedParty[]) {
+  const linkedKeys = new Set(relatedParties.map(party => {
+    const sourceId = getRelatedPartySourceId(party);
+    return sourceId ? `${party.sourceType}:${sourceId}` : null;
+  }));
+  return options.filter(option => !linkedKeys.has(option.key)).sort((a, b) => a.label.localeCompare(b.label, 'ru'));
 }
 
 function getRelatedPartySourceId(party: ClientCaseRelatedParty) {
@@ -6913,10 +6948,6 @@ function getRelatedPartySourceId(party: ClientCaseRelatedParty) {
   if (party.sourceType === 'legalEntity') return party.legalEntityId ?? null;
   if (party.sourceType === 'externalContact') return party.externalContactId ?? null;
   return null;
-}
-
-function normalizeParticipantSearch(value: string) {
-  return value.trim().toLocaleLowerCase('ru-RU');
 }
 
 function getRelatedPartySourceLabel(party: ClientCaseRelatedParty) {

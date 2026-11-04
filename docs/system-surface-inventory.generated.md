@@ -8,7 +8,7 @@
 - Разделов frontend: 55.
 - Backend-контроллеров: 103.
 - HTTP endpoints: 969; с прямой тестовой связью: 684.
-- HTTP endpoints с точной ссылкой из документации: 278; критичных без такой ссылки: 526.
+- HTTP endpoints с точной ссылкой из документации: 279; критичных без такой ссылки: 526.
 - Критичных endpoints без прямой тестовой связи: 238.
 - Реальных HTML-форм: 21; с найденной тестовой связью: 19.
 - Фоновых сервисов: 35; с найденной тестовой связью: 28.
@@ -939,7 +939,7 @@
 | PUT | api/legal-entities/company-profile/main/{id:int} | LegalEntitiesController | SetCompanyProfileMain | backend/Controllers/LegalEntitiesController.cs:1534 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
 | POST | api/legal-entities/find-by-id | LegalEntitiesController | FindById | backend/Controllers/LegalEntitiesController.cs:1563 | [Authorize] | да | нет |
 | GET | api/legal-entities | LegalEntitiesController | GetAll | backend/Controllers/LegalEntitiesController.cs:1620 | [Authorize] | да | docs/balance-application-cancel-fence-checkpoint-2026-10-31.md, docs/balance-application-managed-route-checkpoint-2026-10-31.md, docs/development-company-profile-permissions-2026-10-23.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md |
-| GET | api/legal-entities/paged | LegalEntitiesController | GetPaged | backend/Controllers/LegalEntitiesController.cs:1654 | [Authorize] | да | нет |
+| GET | api/legal-entities/paged | LegalEntitiesController | GetPaged | backend/Controllers/LegalEntitiesController.cs:1654 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
 | GET | api/legal-entities/{id:int} | LegalEntitiesController | GetById | backend/Controllers/LegalEntitiesController.cs:2027 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
 | GET | api/legal-entities/{id:int}/requisites-check | LegalEntitiesController | CheckRequisites | backend/Controllers/LegalEntitiesController.cs:2060 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
 | GET | api/legal-entities/{id:int}/case-finance-summaries | LegalEntitiesController | GetCaseFinanceSummaries | backend/Controllers/LegalEntitiesController.cs:2108 | [Authorize] | да | нет |

@@ -9,7 +9,7 @@ import { StrictMode } from 'react';
 function detailViewStateKey(caseId: number) {
   return `pp.case-detail.${caseId}.view.v2.${encodeURIComponent(captureAuthSessionIdentity().actor!)}`;
 }
-import { apiService } from '../../services/api';
+import { apiService, type ContactDirectoryItemDto } from '../../services/api';
 import type { ClientCase, ClientCaseRelatedParty, ClientCaseCourtEvent, ClientCaseDocument, ClientCaseWorkOrder } from '../../types';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
 import { CaseDetailPage, CourtSourceProvenance } from './CaseDetailPage';
@@ -89,6 +89,7 @@ vi.mock('../../services/api', () => ({
     getTaskJournalAssignees: vi.fn(),
     getCaseRelatedParties: vi.fn(),
     getClients: vi.fn(),
+    getClientsV2: vi.fn(),
     getLegalEntitiesPaged: vi.fn(),
     getContacts: vi.fn(),
     getCaseDocuments: vi.fn(),
@@ -541,7 +542,7 @@ describe('CaseDetailPage', () => {
       },
     ]);
     vi.mocked(apiService.getClients).mockReset();
-    vi.mocked(apiService.getClients).mockResolvedValue([
+    const directoryClients = [
       createCase().client!,
       {
         id: 30,
@@ -554,7 +555,10 @@ describe('CaseDetailPage', () => {
         createdAt: '2026-05-01T00:00:00Z',
         isActive: true,
       },
-    ]);
+    ];
+    vi.mocked(apiService.getClients).mockResolvedValue(directoryClients);
+    vi.mocked(apiService.getClientsV2).mockReset();
+    vi.mocked(apiService.getClientsV2).mockResolvedValue({ items: directoryClients, total: directoryClients.length, page: 1, pageSize: 50 });
     vi.mocked(apiService.getLegalEntitiesPaged).mockReset();
     vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({
       items: [
@@ -572,7 +576,7 @@ describe('CaseDetailPage', () => {
       ],
       total: 1,
       page: 1,
-      pageSize: 200,
+      pageSize: 50,
     });
     vi.mocked(apiService.getContacts).mockReset();
     vi.mocked(apiService.getContacts).mockResolvedValue([
@@ -6180,6 +6184,7 @@ describe('CaseDetailPage', () => {
     expect(screen.queryByRole('button', { name: /^Добавить$/u })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Удалить связь с участником Земцов Виктор Александрович' })).toBeNull();
     expect(apiService.getClients).not.toHaveBeenCalled();
+    expect(apiService.getClientsV2).not.toHaveBeenCalled();
     expect(apiService.getLegalEntitiesPaged).not.toHaveBeenCalled();
     expect(apiService.getContacts).not.toHaveBeenCalled();
   });
@@ -6212,6 +6217,7 @@ describe('CaseDetailPage', () => {
 
   it('page participant owner baseline: source changes clear an equal ID from another directory', async () => {
     vi.mocked(apiService.getClients).mockResolvedValue([{ id: 25, name: 'Клиент 25', phone: '', email: '', company: '', address: '', notes: '', isActive: true, createdAt: '2026-05-01T00:00:00Z' }]);
+    vi.mocked(apiService.getClientsV2).mockResolvedValue({ items: [{ ...createCase().client!, id: 25, name: 'Клиент 25' }], total: 1, page: 1, pageSize: 50 });
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
     await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '25')).toBe(true));
@@ -6378,13 +6384,13 @@ describe('CaseDetailPage', () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
     const retry = await screen.findByRole('button', { name: 'Повторить загрузку участников' });
-    const directoryReads = vi.mocked(apiService.getClients).mock.calls.length;
+    const directoryReads = vi.mocked(apiService.getClientsV2).mock.calls.length;
     const caseReads = vi.mocked(apiService.getCaseV2).mock.calls.length;
     fireEvent.click(retry);
     await screen.findByRole('heading', { name: 'Связанные лица' });
     expect(apiService.getCaseRelatedParties).toHaveBeenCalledTimes(2);
     expect(apiService.getCaseRelatedParties).toHaveBeenLastCalledWith(15, false, { signal: expect.any(AbortSignal) });
-    expect(apiService.getClients).toHaveBeenCalledTimes(directoryReads);
+    expect(apiService.getClientsV2).toHaveBeenCalledTimes(directoryReads);
     expect(apiService.getCaseV2).toHaveBeenCalledTimes(caseReads);
     expect(screen.queryByText('Private diagnostics')).toBeNull();
   });
@@ -6659,6 +6665,285 @@ describe('CaseDetailPage', () => {
     const signal = vi.mocked(apiService.downloadCaseDocument).mock.calls[0][2]?.signal;
     fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
     expect(signal?.aborted).toBe(true);
+  });
+
+
+  it('participant directory baseline: loads only the selected bounded client source', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    await waitFor(() => expect(apiService.getClientsV2).toHaveBeenCalledWith({ search: undefined, isActive: true, page: 1, pageSize: 50 }, { signal: expect.any(AbortSignal) }));
+    expect(apiService.getClients).not.toHaveBeenCalled();
+    expect(apiService.getLegalEntitiesPaged).not.toHaveBeenCalled();
+    expect(apiService.getContacts).not.toHaveBeenCalled();
+  });
+
+  it('participant directory baseline: server search reaches an organization outside the first 200 rows', async () => {
+    vi.mocked(apiService.getLegalEntitiesPaged).mockImplementation(async query => ({ items: query?.search === 'Организация 250' ? [{ id: 250, shortName: 'Организация 250', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }] : [], total: query?.search ? 1 : 250, page: query?.page ?? 1, pageSize: query?.pageSize ?? 50 }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
+    fireEvent.change(screen.getByLabelText('Поиск участника дела'), { target: { value: 'Организация 250' } });
+    await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '250')).toBe(true));
+    expect(apiService.getLegalEntitiesPaged).toHaveBeenLastCalledWith({ search: 'Организация 250', page: 1, pageSize: 50 }, { signal: expect.any(AbortSignal) });
+  });
+
+  it('participant directory baseline: next page keeps earlier organizations available', async () => {
+    vi.mocked(apiService.getLegalEntitiesPaged).mockImplementation(async query => ({ items: [{ id: query?.page === 2 ? 251 : 25, shortName: query?.page === 2 ? 'Следующая организация' : 'Первая организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 51, page: query?.page ?? 1, pageSize: 50 }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Ещё записи справочника участников' }));
+    await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).map(option => option.value)).toEqual(expect.arrayContaining(['25', '251'])));
+  });
+
+  it('participant directory baseline: a failed selected source offers an explicit retry and preserves role', async () => {
+    vi.mocked(apiService.getLegalEntitiesPaged).mockRejectedValueOnce(new Error('Скрытая диагностика справочника'));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
+    fireEvent.change(screen.getByLabelText('Роль участника'), { target: { value: 'Представитель' } });
+    const retry = await screen.findByRole('button', { name: 'Повторить загрузку справочника участников' });
+    expect(screen.queryByText('Скрытая диагностика справочника')).toBeNull();
+    fireEvent.click(retry);
+    await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '25')).toBe(true));
+    expect(screen.getByLabelText('Роль участника')).toHaveProperty('value', 'Представитель');
+  });
+
+
+  function directoryContact(id: number): ContactDirectoryItemDto {
+    return { sourceType: 'external', category: 'external', sourceId: id, contactType: 'Person', roles: ['Contact'],
+      fullName: `Контакт ${id}`, hasFullProfile: false, phones: [], emails: [], isActive: true, syncToPhonebook: false };
+  }
+
+  it('participant directory: external contacts use bounded external scope and an explicit final page', async () => {
+    vi.mocked(apiService.getContacts).mockImplementation(async query => query?.page === 2 ? [directoryContact(1050)] : Array.from({ length: 50 }, (_, index) => directoryContact(1000 + index)));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'externalContact' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Ещё записи справочника участников' }));
+    await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options)).toHaveLength(52));
+    expect(apiService.getContacts).toHaveBeenLastCalledWith({ scope: 'external', search: undefined, page: 2, pageSize: 50 }, { signal: expect.any(AbortSignal) });
+    expect(screen.queryByRole('button', { name: 'Ещё записи справочника участников' })).toBeNull();
+  });
+
+  it('participant directory: a pending unrelated source cannot hold the selected client directory', async () => {
+    vi.mocked(apiService.getContacts).mockReturnValue(new Promise(() => {}));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '30')).toBe(true));
+    expect(apiService.getContacts).not.toHaveBeenCalled();
+  });
+
+  it('participant directory: changing source aborts and rejects the prior directory response', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof apiService.getLegalEntitiesPaged>>) => void;
+    vi.mocked(apiService.getLegalEntitiesPaged).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
+    await waitFor(() => expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledOnce());
+    const signal = vi.mocked(apiService.getLegalEntitiesPaged).mock.calls[0][1]?.signal;
+    fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'client' } });
+    await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '30')).toBe(true));
+    await act(async () => finish({ items: [{ id: 888, shortName: 'Прежняя организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 1, page: 1, pageSize: 50 }));
+    expect(signal?.aborted).toBe(true);
+    expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '888')).toBe(false);
+    expect(screen.getByLabelText('Тип участника')).toHaveProperty('value', 'client');
+    expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '30')).toBe(true);
+  });
+
+  it('participant directory: an old search response cannot replace a newer query', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof apiService.getLegalEntitiesPaged>>) => void;
+    vi.mocked(apiService.getLegalEntitiesPaged).mockImplementation(async query => query?.search === 'прежний' ? new Promise(resolve => { finish = resolve; }) : ({ items: [{ id: 250, shortName: 'Новая организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 1, page: query?.page ?? 1, pageSize: 50 }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
+    fireEvent.change(screen.getByLabelText('Поиск участника дела'), { target: { value: 'прежний' } });
+    await waitFor(() => expect(finish).toBeTypeOf('function'));
+    const signal = vi.mocked(apiService.getLegalEntitiesPaged).mock.calls.at(-1)?.[1]?.signal;
+    fireEvent.change(screen.getByLabelText('Поиск участника дела'), { target: { value: 'новый' } });
+    await waitFor(() => expect(apiService.getLegalEntitiesPaged).toHaveBeenLastCalledWith({ search: 'новый', page: 1, pageSize: 50 }, { signal: expect.any(AbortSignal) }));
+    await act(async () => finish({ items: [{ id: 888, shortName: 'Прежняя организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 1, page: 1, pageSize: 50 }));
+    expect(signal?.aborted).toBe(true);
+    expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '888')).toBe(false);
+    await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '250')).toBe(true));
+  });
+
+  it('participant directory: current server matches are retained for fields absent from the option label', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    await choosePageParticipantSource();
+    fireEvent.change(screen.getByLabelText('Поиск участника дела'), { target: { value: 'адрес из серверного поиска' } });
+    await waitFor(() => expect(apiService.getLegalEntitiesPaged).toHaveBeenLastCalledWith({ search: 'адрес из серверного поиска', page: 1, pageSize: 50 }, { signal: expect.any(AbortSignal) }));
+    await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '25')).toBe(true));
+    expect(screen.getByLabelText('Участник дела')).toHaveProperty('value', '');
+  });
+
+  it('participant directory: a source failure does not prevent switching to another permitted source', async () => {
+    vi.mocked(apiService.getLegalEntitiesPaged).mockRejectedValue(new Error('Hidden source failure'));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
+    await screen.findByRole('button', { name: 'Повторить загрузку справочника участников' });
+    fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'client' } });
+    await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '30')).toBe(true));
+    expect(screen.queryByRole('button', { name: 'Повторить загрузку справочника участников' })).toBeNull();
+  });
+
+  it('participant directory: failed next-page retry preserves the previous selection and draft', async () => {
+    let failed = false;
+    vi.mocked(apiService.getLegalEntitiesPaged).mockImplementation(async query => {
+      if (query?.page === 2 && !failed) { failed = true; throw new Error('Hidden page failure'); }
+      return { items: [{ id: query?.page === 2 ? 251 : 25, shortName: 'Организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 51, page: query?.page ?? 1, pageSize: 50 };
+    });
+    vi.mocked(apiService.addCaseRelatedParty).mockReturnValue(new Promise(() => {}));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    await choosePageParticipantSource();
+    fireEvent.change(screen.getByLabelText('Роль участника'), { target: { value: 'Ответчик' } });
+    fireEvent.change(screen.getByLabelText('Основание связи участника'), { target: { value: 'Сохранённое основание' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ещё записи справочника участников' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Повторить загрузку справочника участников' }));
+    await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '251')).toBe(true));
+    expect(screen.getByLabelText('Участник дела')).toHaveProperty('value', '25');
+    expect(screen.getByLabelText('Роль участника')).toHaveProperty('value', 'Ответчик');
+    expect(screen.getByLabelText('Основание связи участника')).toHaveProperty('value', 'Сохранённое основание');
+    fireEvent.click(screen.getByRole('button', { name: /^Добавить$/u }));
+    expect(apiService.addCaseRelatedParty).toHaveBeenCalledWith(15, { sourceType: 'legalEntity', sourceId: 25, role: 'Ответчик', notes: 'Сохранённое основание' });
+  });
+
+  it('participant directory: duplicate next-page records are merged without dropping new choices', async () => {
+    vi.mocked(apiService.getLegalEntitiesPaged).mockImplementation(async query => ({ items: (query?.page === 2 ? [25, 251] : [25]).map(id => ({ id, shortName: `Организация ${id}`, clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' })), total: 51, page: query?.page ?? 1, pageSize: 50 }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    await choosePageParticipantSource();
+    fireEvent.click(screen.getByRole('button', { name: 'Ещё записи справочника участников' }));
+    await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).map(option => option.value)).toEqual(['', '25', '251']));
+  });
+
+  it.each(['total', 'page', 'size', 'id', 'duplicate'] as const)('participant directory: invalid %s result is an explicit refusal', async kind => {
+    const item = { ...createCase().client!, id: kind === 'id' ? 0 : 31 };
+    vi.mocked(apiService.getClientsV2).mockResolvedValue({ items: kind === 'duplicate' ? [item, item] : [item], total: kind === 'total' ? -1 : 2, page: kind === 'page' ? 2 : 1, pageSize: kind === 'size' ? 200 : 50 });
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    await screen.findByRole('button', { name: 'Повторить загрузку справочника участников' });
+    expect(screen.getByRole('button', { name: /^Добавить$/u })).toHaveProperty('disabled', true);
+    expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).map(option => option.value)).toEqual(['']);
+  });
+
+  it.each(['foreign', 'oversized'] as const)('participant directory: invalid external %s payload cannot provide a selection', async kind => {
+    vi.mocked(apiService.getContacts).mockResolvedValue(kind === 'foreign' ? [{ ...directoryContact(44), sourceType: 'client' }] : Array.from({ length: 51 }, (_, index) => directoryContact(index + 1000)));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'externalContact' } });
+    await screen.findByRole('button', { name: 'Повторить загрузку справочника участников' });
+    expect(screen.getByRole('button', { name: /^Добавить$/u })).toHaveProperty('disabled', true);
+  });
+
+  it('participant directory: double next-page click reserves only one page and excludes a cached add', async () => {
+    vi.mocked(apiService.getLegalEntitiesPaged).mockImplementation(async query => query?.page === 2 ? new Promise(() => {}) : ({ items: [{ id: 25, shortName: 'Организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 101, page: 1, pageSize: 50 }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    const add = await choosePageParticipantSource();
+    const more = screen.getByRole('button', { name: 'Ещё записи справочника участников' });
+    act(() => { fireEvent.click(more); fireEvent.click(more); fireEvent.click(add); });
+    await waitFor(() => expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(apiService.getLegalEntitiesPaged).mock.calls.map(([query]) => query?.page)).toEqual([1, 2]);
+    expect(apiService.addCaseRelatedParty).not.toHaveBeenCalled();
+  });
+
+  it('participant directory: an immediate query change rejects the cached add and clears selection', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    const add = await choosePageParticipantSource();
+    act(() => { fireEvent.change(screen.getByLabelText('Поиск участника дела'), { target: { value: 'новый поиск' } }); fireEvent.click(add); });
+    expect(apiService.addCaseRelatedParty).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Участник дела')).toHaveProperty('value', '');
+  });
+
+  it.each(['retry', 'more'] as const)('participant directory: replaced login rejects old %s control before rerender', async control => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    if (control === 'retry') vi.mocked(apiService.getLegalEntitiesPaged).mockRejectedValue(new Error('Unavailable'));
+    else vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [{ id: 25, shortName: 'Организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 51, page: 1, pageSize: 50 });
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
+    const button = await screen.findByRole('button', { name: control === 'retry' ? 'Повторить загрузку справочника участников' : 'Ещё записи справочника участников' });
+    const reads = vi.mocked(apiService.getLegalEntitiesPaged).mock.calls.length;
+    session.replace('actor');
+    fireEvent.click(button);
+    expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledTimes(reads);
+  });
+
+
+  it('participant directory lifetime: revoking edit aborts a pending read and hides its late source', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof apiService.getClientsV2>>) => void;
+    vi.mocked(apiService.getClientsV2).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const props = { caseId: 15, onBack: vi.fn(), canEdit: true };
+    const view = render(<CaseDetailPage {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    await waitFor(() => expect(apiService.getClientsV2).toHaveBeenCalledOnce());
+    const signal = vi.mocked(apiService.getClientsV2).mock.calls[0][1]?.signal;
+    view.rerender(<CaseDetailPage {...props} canEdit={false} />);
+    await act(async () => finish({ items: [{ ...createCase().client!, id: 31, name: 'Поздний источник' }], total: 1, page: 1, pageSize: 50 }));
+    expect(signal?.aborted).toBe(true);
+    expect(screen.queryByLabelText('Участник дела')).toBeNull();
+    expect(screen.queryByText('Поздний источник')).toBeNull();
+    expect(apiService.getClientsV2).toHaveBeenCalledOnce();
+  });
+
+  it('participant directory lifetime: token refresh retains the current query and avoids a duplicate read', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    vi.mocked(apiService.getClientsV2).mockReturnValue(new Promise(() => {}));
+    const props = { caseId: 15, onBack: vi.fn(), canEdit: true };
+    const view = render(<CaseDetailPage {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    await waitFor(() => expect(apiService.getClientsV2).toHaveBeenCalledOnce());
+    const signal = vi.mocked(apiService.getClientsV2).mock.calls[0][1]?.signal;
+    session.refresh();
+    view.rerender(<CaseDetailPage {...props} />);
+    expect(signal?.aborted).toBe(false);
+    expect(apiService.getClientsV2).toHaveBeenCalledOnce();
+  });
+
+  it('participant directory lifetime: rapid input sends only the final debounced search', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    await waitFor(() => expect(apiService.getClientsV2).toHaveBeenCalledOnce());
+    const search = screen.getByLabelText('Поиск участника дела');
+    act(() => {
+      fireEvent.change(search, { target: { value: 'a' } });
+      fireEvent.change(search, { target: { value: 'ab' } });
+      fireEvent.change(search, { target: { value: ' abc ' } });
+    });
+    await waitFor(() => expect(apiService.getClientsV2).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(apiService.getClientsV2).mock.calls.map(([query]) => query?.search)).toEqual([undefined, 'abc']);
+  });
+
+
+  it.each([401, 403])('participant directory denial baseline: HTTP %s on the next page clears private choices', async status => {
+    let allowed = true;
+    vi.mocked(apiService.getLegalEntitiesPaged).mockImplementation(async query => {
+      if (query?.page === 2 && allowed) { allowed = false; throw new Error(`HTTP ${status} Private directory denial`); }
+      return { items: [{ id: 25, shortName: 'Закрытая организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 51, page: query?.page ?? 1, pageSize: 50 };
+    });
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    await choosePageParticipantSource();
+    fireEvent.change(screen.getByLabelText('Роль участника'), { target: { value: 'Представитель' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ещё записи справочника участников' }));
+    const retry = await screen.findByRole('button', { name: 'Повторить загрузку справочника участников' });
+    expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).map(option => option.value)).toEqual(['']);
+    expect(screen.getByLabelText('Участник дела')).toHaveProperty('value', '');
+    expect(screen.getByLabelText('Роль участника')).toHaveProperty('value', 'Представитель');
+    fireEvent.click(retry);
+    await waitFor(() => expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(apiService.getLegalEntitiesPaged).mock.calls.map(([query]) => query?.page)).toEqual([1, 2, 1]);
+  });
+
+  it('participant directory linked page: an excluded first portion still exposes the next available choices', async () => {
+    vi.mocked(apiService.getCaseRelatedParties).mockResolvedValue([{ id: 61, clientCaseId: 15, sourceType: 'legalEntity', sourceId: 25, legalEntityId: 25, displayName: 'Связанная организация', role: 'Ответчик', createdAt: '2026-11-04T00:00:00Z' }]);
+    vi.mocked(apiService.getLegalEntitiesPaged).mockImplementation(async query => ({ items: [{ id: query?.page === 2 ? 251 : 25, shortName: 'Организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 51, page: query?.page ?? 1, pageSize: 50 }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
+    fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
+    const more = await screen.findByRole('button', { name: 'Ещё записи справочника участников' });
+    expect((screen.getByLabelText('Участник дела') as HTMLSelectElement).options[0].textContent).toBe('В этой порции нет доступных записей');
+    fireEvent.click(more);
+    await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '251')).toBe(true));
   });
 
 });
