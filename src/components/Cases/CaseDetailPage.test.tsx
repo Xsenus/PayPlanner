@@ -6447,4 +6447,218 @@ describe('CaseDetailPage', () => {
     expect(apiService.getCaseRelatedParties).toHaveBeenCalledTimes(reads);
   });
 
+  it.each(['add', 'restore', 'generate', 'disk', 'delete'] as const)('page editor composition baseline: pending %s reserves the editor transition before React renders', async kind => {
+    vi.mocked(apiService.addCaseRelatedParty).mockReturnValue(new Promise(() => {}));
+    vi.mocked(apiService.generateCaseDocumentTemplate).mockReturnValue(new Promise(() => {}));
+    vi.mocked(apiService.uploadCaseDocumentToYandexDisk).mockReturnValue(new Promise(() => {}));
+    dialogMock.confirm.mockReturnValue(new Promise(() => {}));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit canSendToYandexDisk />);
+    let start: HTMLElement;
+    if (kind === 'add') start = await choosePageParticipantSource();
+    else if (kind === 'restore') start = await showPageArchivedParticipant();
+    else {
+      fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+      await openDocumentDetails();
+      const names = {
+        generate: 'Сформировать',
+        disk: 'Отправить документ Заявление.docx на Яндекс.Диск',
+        delete: 'Удалить документ Заявление.docx',
+      };
+      start = screen.getByRole('button', { name: names[kind] });
+    }
+    const edit = screen.getByRole('button', { name: 'Редактировать дело' });
+    act(() => { fireEvent.click(start); fireEvent.click(edit); });
+    expect(screen.queryByRole('heading', { name: 'Редактирование дела' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Редактировать дело' })).toHaveProperty('disabled', true);
+  });
+
+  it.each(['add', 'generate'] as const)('page editor composition baseline: opening the editor rejects a cached %s callback in the same turn', async kind => {
+    vi.mocked(apiService.addCaseRelatedParty).mockReturnValue(new Promise(() => {}));
+    vi.mocked(apiService.generateCaseDocumentTemplate).mockReturnValue(new Promise(() => {}));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    let start: HTMLElement;
+    if (kind === 'add') start = await choosePageParticipantSource();
+    else {
+      fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+      await openDocumentDetails();
+      start = screen.getByRole('button', { name: /^Сформировать$/u });
+    }
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' })); fireEvent.click(start); });
+    expect(screen.getByRole('heading', { name: 'Редактирование дела' })).toBeTruthy();
+    expect(apiService.addCaseRelatedParty).not.toHaveBeenCalled();
+    expect(apiService.generateCaseDocumentTemplate).not.toHaveBeenCalled();
+  });
+
+  it.each(['download', 'preview'] as const)('page editor composition baseline: opening the editor cancels a pending %s and rejects its eventual file', async kind => {
+    let finish!: (result: { blob: Blob; fileName: string }) => void;
+    vi.mocked(apiService.downloadCaseDocument).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const old = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+    const createUrl = vi.fn(() => 'blob:old-editor-file');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createUrl });
+    onTestFinished(() => { if (old) Object.defineProperty(URL, 'createObjectURL', old); else Reflect.deleteProperty(URL, 'createObjectURL'); });
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    onTestFinished(() => anchorClick.mockRestore());
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    fireEvent.click(screen.getByRole('button', { name: kind === 'download' ? 'Скачать документ Заявление.docx' : 'Предпросмотр документа Заявление.docx' }));
+    const signal = vi.mocked(apiService.downloadCaseDocument).mock.calls[0][2]?.signal;
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    const abortedOnOpen = signal?.aborted;
+    await act(async () => finish({ blob: new Blob(['old editor response'], { type: 'application/pdf' }), fileName: 'old-editor.pdf' }));
+    expect(abortedOnOpen).toBe(true);
+    expect(createUrl).not.toHaveBeenCalled();
+    expect(anchorClick).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Карточка дела' }));
+    await openDocumentDetails();
+    expect(screen.getByRole('button', { name: 'Предпросмотр документа Заявление.docx' })).toHaveProperty('disabled', false);
+    expect(screen.getByRole('button', { name: 'Скачать документ Заявление.docx' })).toHaveProperty('disabled', false);
+  });
+
+  it('page editor composition baseline: pending text cannot allocate a preview after the editor opens', async () => {
+    let finishText!: (value: string) => void;
+    const text = vi.fn(() => new Promise<string>(resolve => { finishText = resolve; }));
+    vi.mocked(apiService.downloadCaseDocument).mockResolvedValue({ blob: { type: 'text/plain', size: 8, text } as unknown as Blob, fileName: 'old-editor.txt' });
+    const old = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+    const createUrl = vi.fn(() => 'blob:old-editor-text');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createUrl });
+    onTestFinished(() => { if (old) Object.defineProperty(URL, 'createObjectURL', old); else Reflect.deleteProperty(URL, 'createObjectURL'); });
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    fireEvent.click(screen.getByRole('button', { name: 'Предпросмотр документа Заявление.docx' }));
+    await waitFor(() => expect(text).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    await act(async () => finishText('old editor private text'));
+    expect(createUrl).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Карточка дела' }));
+    expect(screen.queryByText('old editor private text')).toBeNull();
+  });
+
+  it('page editor composition baseline: an open preview is released and cannot reappear after returning from the editor', async () => {
+    const oldCreate = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+    const oldRevoke = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
+    const createUrl = vi.fn(() => 'blob:preview-before-editor');
+    const revokeUrl = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeUrl });
+    onTestFinished(() => {
+      if (oldCreate) Object.defineProperty(URL, 'createObjectURL', oldCreate); else Reflect.deleteProperty(URL, 'createObjectURL');
+      if (oldRevoke) Object.defineProperty(URL, 'revokeObjectURL', oldRevoke); else Reflect.deleteProperty(URL, 'revokeObjectURL');
+    });
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    fireEvent.click(screen.getByRole('button', { name: 'Предпросмотр документа Заявление.docx' }));
+    await waitFor(() => expect(createUrl).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    expect(revokeUrl).toHaveBeenCalledWith('blob:preview-before-editor');
+    fireEvent.click(screen.getByRole('button', { name: 'Карточка дела' }));
+    expect(screen.queryByTitle('Предпросмотр Исковое заявление.pdf')).toBeNull();
+  });
+
+
+  it('page editor composition: a completed participant write releases the editor transition', async () => {
+    let finish!: (party: ClientCaseRelatedParty) => void;
+    vi.mocked(apiService.addCaseRelatedParty).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    const add = await choosePageParticipantSource();
+    fireEvent.click(add);
+    expect(screen.getByRole('button', { name: 'Редактировать дело' })).toHaveProperty('disabled', true);
+    await act(async () => finish({ id: 72, clientCaseId: 15, sourceType: 'legalEntity', sourceId: 25, legalEntityId: 25, displayName: 'Организация', role: 'Участник', createdAt: '2026-11-04T00:00:00Z' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Редактировать дело' })).toHaveProperty('disabled', false));
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    expect(screen.getByRole('heading', { name: 'Редактирование дела' })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /Сохранить дело/u })[0]).toHaveProperty('disabled', false);
+  });
+
+  it('page editor composition: cancelling a pending deletion leaves the editor available', async () => {
+    dialogMock.confirm.mockResolvedValue(false);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    fireEvent.click(screen.getByRole('button', { name: 'Удалить документ Заявление.docx' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Редактировать дело' })).toHaveProperty('disabled', false));
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    expect(screen.getByRole('heading', { name: 'Редактирование дела' })).toBeTruthy();
+    expect(apiService.deleteCaseDocument).not.toHaveBeenCalled();
+  });
+
+  it.each(['download', 'preview'] as const)('page editor composition: a cached %s cannot start after the editor opens in the same turn', async kind => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    const start = screen.getByRole('button', { name: kind === 'download' ? 'Скачать документ Заявление.docx' : 'Предпросмотр документа Заявление.docx' });
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' })); fireEvent.click(start); });
+    expect(apiService.downloadCaseDocument).not.toHaveBeenCalled();
+  });
+
+  it('page editor composition: a cancelled read failure cannot replace the editor or appear on return', async () => {
+    let fail!: (reason: Error) => void;
+    vi.mocked(apiService.downloadCaseDocument).mockReturnValue(new Promise((_resolve, reject) => { fail = reject; }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    fireEvent.click(screen.getByRole('button', { name: 'Предпросмотр документа Заявление.docx' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.change(screen.getByLabelText('Название дела'), { target: { value: 'Текущий черновик редактора' } });
+    await act(async () => fail(new Error('Ошибка прежнего чтения')));
+    expect(screen.getByLabelText('Название дела')).toHaveProperty('value', 'Текущий черновик редактора');
+    expect(screen.queryByText('Ошибка прежнего чтения')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Карточка дела' }));
+    expect(screen.queryByText('Ошибка прежнего чтения')).toBeNull();
+  });
+
+  it('page editor composition: returning from the editor admits a new current file read', async () => {
+    let finish!: (result: { blob: Blob; fileName: string }) => void;
+    vi.mocked(apiService.downloadCaseDocument).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const old = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+    const createUrl = vi.fn(() => 'blob:current-after-editor');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createUrl });
+    onTestFinished(() => { if (old) Object.defineProperty(URL, 'createObjectURL', old); else Reflect.deleteProperty(URL, 'createObjectURL'); });
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    fireEvent.click(screen.getByRole('button', { name: 'Предпросмотр документа Заявление.docx' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Карточка дела' }));
+    await openDocumentDetails();
+    fireEvent.click(screen.getByRole('button', { name: 'Предпросмотр документа Заявление.docx' }));
+    await screen.findByTitle('Предпросмотр Исковое заявление.pdf');
+    expect(apiService.downloadCaseDocument).toHaveBeenCalledTimes(2);
+    expect(createUrl).toHaveBeenCalledOnce();
+    await act(async () => finish({ blob: new Blob(['obsolete'], { type: 'application/pdf' }), fileName: 'obsolete.pdf' }));
+    expect(createUrl).toHaveBeenCalledOnce();
+    expect(screen.getByTitle('Предпросмотр Исковое заявление.pdf')).toBeTruthy();
+  });
+
+  it('page editor composition: a token refresh and harmless render retain a current file read', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    vi.mocked(apiService.downloadCaseDocument).mockReturnValue(new Promise(() => {}));
+    const props = { caseId: 15, onBack: vi.fn(), canEdit: true };
+    const view = render(<CaseDetailPage {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    fireEvent.click(screen.getByRole('button', { name: 'Предпросмотр документа Заявление.docx' }));
+    const signal = vi.mocked(apiService.downloadCaseDocument).mock.calls[0][2]?.signal;
+    session.refresh();
+    view.rerender(<CaseDetailPage {...props} />);
+    expect(signal?.aborted).toBe(false);
+    expect(apiService.downloadCaseDocument).toHaveBeenCalledOnce();
+  });
+
+  it('page editor composition: an attachment read is cancelled when entering the editor', async () => {
+    vi.mocked(apiService.getCaseConversation).mockResolvedValue([{
+      id: 71, clientCaseId: 15, kind: 'message', text: 'Сообщение с вложением', occurredAt: '2026-11-04T00:00:00Z',
+      attachments: [{ documentId: 7, fileName: 'scan.pdf', contentType: 'application/pdf', sizeBytes: 12 }],
+    }]);
+    vi.mocked(apiService.downloadCaseDocument).mockReturnValue(new Promise(() => {}));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Переписка' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Скачать вложение scan.pdf' }));
+    const signal = vi.mocked(apiService.downloadCaseDocument).mock.calls[0][2]?.signal;
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    expect(signal?.aborted).toBe(true);
+  });
+
 });

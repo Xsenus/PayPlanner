@@ -1700,7 +1700,7 @@ function CaseDetailScreen({
   const savingCaseEdit = childCaseOwner.kind === 'case-edit:save';
   const participantDeletePrompt = useRef<AbortController | null>(null);
   useEffect(() => () => participantDeletePrompt.current?.abort(), [childCaseOwner.scope]);
-  const documentReadOwner = useDocumentDeliveryOwner(JSON.stringify(['case-document-content', screenOwner.scope]));
+  const documentReadOwner = useDocumentDeliveryOwner(JSON.stringify(['case-document-content', screenOwner.scope, editPageOpen]));
   const documentContentRead = useRef<AbortController | null>(null);
   const documentDeletePrompt = useRef<AbortController | null>(null);
   useEffect(() => () => {
@@ -2740,10 +2740,19 @@ function CaseDetailScreen({
 
   const openCaseEditPage = () => {
     if (!caseItem || !canEdit || caseTaskBulkBusy || childCaseOwner.busy || !captureScreen() || !caseReadConfirmed.current) return;
+    const operation = childCaseOwner.begin('case-edit:open');
+    if (!operation) return;
+    documentReadOwner.invalidate();
+    documentContentRead.current?.abort();
+    setDownloadingDocumentId(null);
+    setPreviewingDocumentId(null);
+    setDocumentPreview(null);
     setCaseEditDraft(buildCaseEditDraft(caseItem));
     setEditPageOpen(true);
     setError(null);
     setNotice(null);
+    operation.finish();
+    childCaseOwner.invalidate();
   };
 
   const closeCaseEditPage = () => {
