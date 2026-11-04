@@ -18,8 +18,13 @@ internal static partial class CaseEditTransaction
         Func<ClientCase, SectionAccessContext, Task<IActionResult>> write, CancellationToken ct)
         => RunSingleAsync(db, actor, id, write, ct, deleting: true);
 
+    public static Task<IActionResult> RunRelatedAsync(PaymentContext db, ClaimsPrincipal actor, int id,
+        Func<ClientCase, SectionAccessContext, Task<IActionResult>> write, CancellationToken ct)
+        => RunSingleAsync(db, actor, id, write, ct, deleting: false, related: true);
+
     private static async Task<IActionResult> RunSingleAsync(PaymentContext db, ClaimsPrincipal actor, int id,
-        Func<ClientCase, SectionAccessContext, Task<IActionResult>> write, CancellationToken ct, bool deleting, Action? beforeCommit = null)
+        Func<ClientCase, SectionAccessContext, Task<IActionResult>> write, CancellationToken ct, bool deleting,
+        Action? beforeCommit = null, bool related = false)
     {
         var actorId = actor.GetUserId();
         if (actor.Identity?.IsAuthenticated != true || actorId is not > 0) return new UnauthorizedResult();
@@ -53,7 +58,14 @@ internal static partial class CaseEditTransaction
                     await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"ClientCaseId\" = {id} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);
             }
             var result = await write(clientCase, access);
-            if (deleting ? result is NoContentResult : result is OkObjectResult)
+            var succeeded = result switch
+            {
+                NoContentResult => deleting || related,
+                CreatedResult => related,
+                OkObjectResult => !deleting,
+                _ => false
+            };
+            if (succeeded)
             {
                 beforeCommit?.Invoke();
                 await lease.CommitAsync(ct);

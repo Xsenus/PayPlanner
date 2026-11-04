@@ -3615,87 +3615,72 @@ public partial class CasesV2Controller : ControllerBase
         [FromBody] UpsertClientCaseCourtInstanceRequest? request,
         CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
-            return forbidden;
-        }
-
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
-
-        var clientCase = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
-
-        var normalizedInstance = NormalizeCourtInstance(instance);
-        var court = await ResolveCourtDirectoryItemForRequestAsync(request?.CourtId, ct);
-        if (request?.CourtId is not null && court is null)
-        {
-            return BadRequest(new { message = "Судебная инстанция не найдена в справочнике." });
-        }
-
-        var courtInstance = await _db.ClientCaseCourtInstances
-            .Include(item => item.Complaints.Where(complaint => complaint.ClientCaseId == id && !complaint.IsArchived))
-            .FirstOrDefaultAsync(item => item.ClientCaseId == id && item.Instance == normalizedInstance, ct);
-        var inheritCaseFields = normalizedInstance != "first" || courtInstance is null
-            && !await _db.ClientCaseCourtInstances.AsNoTracking()
-                .AnyAsync(item => item.ClientCaseId == id && item.Instance != "first", ct);
-        var validation = ValidateCourtInstanceRequest(
-            request, clientCase, normalizedInstance, court, courtInstance, inheritCaseFields);
-        if (validation.Error is not null)
-        {
-            return BadRequest(new { message = validation.Error });
-        }
-
-        var actorUserId = User.GetUserId();
-        var actorName = User.GetDisplayName();
-        var now = DateTime.UtcNow;
-        if (courtInstance is null)
-        {
-            courtInstance = new ClientCaseCourtInstance
+            var normalizedInstance = NormalizeCourtInstance(instance);
+            await PinCourtDirectoryItemAsync(request?.CourtId, ct);
+            var court = await ResolveCourtDirectoryItemForRequestAsync(request?.CourtId, ct);
+            if (request?.CourtId is not null && court is null)
             {
-                ClientCaseId = id,
-                Instance = normalizedInstance,
-                CreatedAt = now,
-                CreatedByUserId = actorUserId,
-                CreatedByUserName = Truncate(actorName, 256),
-            };
-            _db.ClientCaseCourtInstances.Add(courtInstance);
-        }
+                return BadRequest(new { message = "Судебная инстанция не найдена в справочнике." });
+            }
 
-        courtInstance.CourtId = court?.Id;
-        courtInstance.CourtName = validation.CourtName;
-        courtInstance.CourtCaseNumber = validation.CourtCaseNumber;
-        courtInstance.JudicialUid = validation.JudicialUid;
-        courtInstance.CourtUrl = validation.CourtUrl;
-        courtInstance.JudgeName = validation.JudgeName;
-        courtInstance.Courtroom = validation.Courtroom;
-        courtInstance.SecretaryName = validation.SecretaryName;
-        courtInstance.Notes = validation.Notes;
-        courtInstance.UpdatedAt = now;
-        courtInstance.UpdatedByUserId = actorUserId;
-        courtInstance.UpdatedByUserName = Truncate(actorName, 256);
-        // The case-level UID identifies the currently bound source. Another
-        // instance may have its own judicial card and must keep its own UID.
-        if (!string.IsNullOrWhiteSpace(validation.JudicialUid)
-            && !string.IsNullOrWhiteSpace(courtInstance.CourtUrl)
-            && string.Equals(courtInstance.CourtUrl, clientCase.CourtUrl, StringComparison.OrdinalIgnoreCase))
-        {
-            clientCase.JudicialUid = validation.JudicialUid;
-        }
+            var courtInstance = await LoadCourtBindingInstanceAsync(id, normalizedInstance, ct);
+            if (courtInstance is not null) await LoadCourtBindingComplaintsAsync(courtInstance, ct);
+            var inheritCaseFields = normalizedInstance != "first" || courtInstance is null
+                && !await _db.ClientCaseCourtInstances.AsNoTracking()
+                    .AnyAsync(item => item.ClientCaseId == id && item.Instance != "first", ct);
+            var validation = ValidateCourtInstanceRequest(
+                request, clientCase, normalizedInstance, court, courtInstance, inheritCaseFields);
+            if (validation.Error is not null)
+            {
+                return BadRequest(new { message = validation.Error });
+            }
 
-        AppendCaseEvent(clientCase, $"Обновлена судебная инстанция «{ResolveCourtInstanceLabel(normalizedInstance)}». Автор: {actorName}.");
-        _db.SetAuditReason($"Обновлена судебная инстанция дела: {ResolveCourtInstanceLabel(normalizedInstance)}");
-        await _db.SaveChangesAsync(ct);
+            var actorUserId = User.GetUserId();
+            var actorName = User.GetDisplayName();
+            var now = DateTime.UtcNow;
+            if (courtInstance is null)
+            {
+                courtInstance = new ClientCaseCourtInstance
+                {
+                    ClientCaseId = id,
+                    Instance = normalizedInstance,
+                    CreatedAt = now,
+                    CreatedByUserId = actorUserId,
+                    CreatedByUserName = Truncate(actorName, 256),
+                };
+                _db.ClientCaseCourtInstances.Add(courtInstance);
+            }
 
-        return Ok(MapCourtInstance(courtInstance));
+            courtInstance.CourtId = court?.Id;
+            courtInstance.CourtName = validation.CourtName;
+            courtInstance.CourtCaseNumber = validation.CourtCaseNumber;
+            courtInstance.JudicialUid = validation.JudicialUid;
+            courtInstance.CourtUrl = validation.CourtUrl;
+            courtInstance.JudgeName = validation.JudgeName;
+            courtInstance.Courtroom = validation.Courtroom;
+            courtInstance.SecretaryName = validation.SecretaryName;
+            courtInstance.Notes = validation.Notes;
+            courtInstance.UpdatedAt = now;
+            courtInstance.UpdatedByUserId = actorUserId;
+            courtInstance.UpdatedByUserName = Truncate(actorName, 256);
+            // The case-level UID identifies the currently bound source. Another
+            // instance may have its own judicial card and must keep its own UID.
+            if (!string.IsNullOrWhiteSpace(validation.JudicialUid)
+                && !string.IsNullOrWhiteSpace(courtInstance.CourtUrl)
+                && string.Equals(courtInstance.CourtUrl, clientCase.CourtUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                clientCase.JudicialUid = validation.JudicialUid;
+            }
+
+            AppendCaseEvent(clientCase, $"Обновлена судебная инстанция «{ResolveCourtInstanceLabel(normalizedInstance)}». Автор: {actorName}.");
+            _db.SetAuditReason($"Обновлена судебная инстанция дела: {ResolveCourtInstanceLabel(normalizedInstance)}");
+            await _db.SaveChangesAsync(ct);
+
+            return Ok(MapCourtInstance(courtInstance));
+        }, ct);
+        return (ActionResult)result;
     }
 
     [HttpPost("{id:int}/court-instances/{instance}/complaints")]
@@ -3705,66 +3690,53 @@ public partial class CasesV2Controller : ControllerBase
         [FromBody] UpsertClientCaseCourtComplaintRequest? request,
         CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        var journalChanged = false;
+        var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
-            return forbidden;
-        }
+            var normalizedInstance = NormalizeCourtInstance(instance);
+            await PinCourtComplaintDocumentAsync(id, request?.ClientCaseDocumentId, ct);
+            var validation = await ValidateCourtComplaintRequestAsync(id, normalizedInstance, request, ct);
+            if (validation.Error is not null)
+            {
+                return BadRequest(new { message = validation.Error });
+            }
 
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
+            await CaseEditTransaction.LockLinkedTasksAsync(_db, [id], ct);
+            var actorUserId = User.GetUserId();
+            var actorName = User.GetDisplayName();
+            var now = DateTime.UtcNow;
+            var courtInstance = await EnsureCourtInstanceAsync(clientCase, normalizedInstance, actorUserId, actorName, ct);
+            var complaint = new ClientCaseCourtComplaint
+            {
+                ClientCaseId = id,
+                CourtInstanceId = courtInstance.Id,
+                ComplaintType = validation.ComplaintType,
+                Title = validation.Title,
+                TargetInstance = validation.TargetInstance,
+                FiledAt = validation.FiledAt,
+                FiledBy = validation.FiledBy,
+                Status = validation.Status,
+                ClientCaseDocumentId = validation.ClientCaseDocumentId,
+                Notes = validation.Notes,
+                CreatedAt = now,
+                CreatedByUserId = actorUserId,
+                CreatedByUserName = Truncate(actorName, 256),
+                UpdatedAt = now,
+                UpdatedByUserId = actorUserId,
+                UpdatedByUserName = Truncate(actorName, 256),
+            };
 
-        var clientCase = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
+            _db.ClientCaseCourtComplaints.Add(complaint);
+            AppendCaseEvent(clientCase, $"Добавлена жалоба «{complaint.Title}» в блок {ResolveCourtInstanceLabel(normalizedInstance)}. Автор: {actorName}.");
+            _db.SetAuditReason($"Добавлена жалоба по судебной инстанции: {complaint.Title}");
+            await _db.SaveChangesAsync(ct);
+            journalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
 
-        var normalizedInstance = NormalizeCourtInstance(instance);
-        var validation = await ValidateCourtComplaintRequestAsync(id, normalizedInstance, request, ct);
-        if (validation.Error is not null)
-        {
-            return BadRequest(new { message = validation.Error });
-        }
-
-        var actorUserId = User.GetUserId();
-        var actorName = User.GetDisplayName();
-        var now = DateTime.UtcNow;
-        var courtInstance = await EnsureCourtInstanceAsync(clientCase, normalizedInstance, actorUserId, actorName, ct);
-        var complaint = new ClientCaseCourtComplaint
-        {
-            ClientCaseId = id,
-            CourtInstanceId = courtInstance.Id,
-            ComplaintType = validation.ComplaintType,
-            Title = validation.Title,
-            TargetInstance = validation.TargetInstance,
-            FiledAt = validation.FiledAt,
-            FiledBy = validation.FiledBy,
-            Status = validation.Status,
-            ClientCaseDocumentId = validation.ClientCaseDocumentId,
-            Notes = validation.Notes,
-            CreatedAt = now,
-            CreatedByUserId = actorUserId,
-            CreatedByUserName = Truncate(actorName, 256),
-            UpdatedAt = now,
-            UpdatedByUserId = actorUserId,
-            UpdatedByUserName = Truncate(actorName, 256),
-        };
-
-        _db.ClientCaseCourtComplaints.Add(complaint);
-        AppendCaseEvent(clientCase, $"Добавлена жалоба «{complaint.Title}» в блок {ResolveCourtInstanceLabel(normalizedInstance)}. Автор: {actorName}.");
-        _db.SetAuditReason($"Добавлена жалоба по судебной инстанции: {complaint.Title}");
-        await _db.SaveChangesAsync(ct);
-        if (await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct))
-        {
+            return Created($"/api/v2/cases/{id}/court-instances/{normalizedInstance}/complaints/{complaint.Id}", MapCourtComplaint(complaint));
+        }, ct);
+        if (journalChanged && result is CreatedResult or OkObjectResult or NoContentResult)
             await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        }
-
-        return Created($"/api/v2/cases/{id}/court-instances/{normalizedInstance}/complaints/{complaint.Id}", MapCourtComplaint(complaint));
+        return (ActionResult)result;
     }
 
     [HttpPut("{id:int}/court-instances/{instance}/complaints/{complaintId:int}")]
@@ -3775,69 +3747,48 @@ public partial class CasesV2Controller : ControllerBase
         [FromBody] UpsertClientCaseCourtComplaintRequest? request,
         CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        var journalChanged = false;
+        var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
-            return forbidden;
-        }
+            var normalizedInstance = NormalizeCourtInstance(instance);
+            var complaint = await LoadCourtComplaintForWriteAsync(id, normalizedInstance, complaintId, ct);
+            if (complaint is null)
+            {
+                return NotFound();
+            }
 
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
+            await PinCourtComplaintDocumentAsync(id, request?.ClientCaseDocumentId, ct);
+            var validation = await ValidateCourtComplaintRequestAsync(id, normalizedInstance, request, ct, complaint.FiledBy);
+            if (validation.Error is not null)
+            {
+                return BadRequest(new { message = validation.Error });
+            }
 
-        var clientCase = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
+            await CaseEditTransaction.LockLinkedTasksAsync(_db, [id], ct);
+            var actorUserId = User.GetUserId();
+            var actorName = User.GetDisplayName();
+            complaint.ComplaintType = validation.ComplaintType;
+            complaint.Title = validation.Title;
+            complaint.TargetInstance = validation.TargetInstance;
+            complaint.FiledAt = validation.FiledAt;
+            complaint.FiledBy = validation.FiledBy;
+            complaint.Status = validation.Status;
+            complaint.ClientCaseDocumentId = validation.ClientCaseDocumentId;
+            complaint.Notes = validation.Notes;
+            complaint.UpdatedAt = DateTime.UtcNow;
+            complaint.UpdatedByUserId = actorUserId;
+            complaint.UpdatedByUserName = Truncate(actorName, 256);
 
-        var normalizedInstance = NormalizeCourtInstance(instance);
-        var complaint = await _db.ClientCaseCourtComplaints
-            .Include(item => item.CourtInstance)
-            .FirstOrDefaultAsync(item =>
-                item.Id == complaintId &&
-                item.ClientCaseId == id &&
-                item.CourtInstance.ClientCaseId == id &&
-                item.CourtInstance.Instance == normalizedInstance &&
-                !item.IsArchived,
-                ct);
-        if (complaint is null)
-        {
-            return NotFound();
-        }
+            AppendCaseEvent(clientCase, $"Обновлена жалоба «{complaint.Title}». Автор: {actorName}.");
+            _db.SetAuditReason($"Обновлена жалоба по судебной инстанции: {complaint.Title}");
+            await _db.SaveChangesAsync(ct);
+            journalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
 
-        var validation = await ValidateCourtComplaintRequestAsync(id, normalizedInstance, request, ct, complaint.FiledBy);
-        if (validation.Error is not null)
-        {
-            return BadRequest(new { message = validation.Error });
-        }
-
-        var actorUserId = User.GetUserId();
-        var actorName = User.GetDisplayName();
-        complaint.ComplaintType = validation.ComplaintType;
-        complaint.Title = validation.Title;
-        complaint.TargetInstance = validation.TargetInstance;
-        complaint.FiledAt = validation.FiledAt;
-        complaint.FiledBy = validation.FiledBy;
-        complaint.Status = validation.Status;
-        complaint.ClientCaseDocumentId = validation.ClientCaseDocumentId;
-        complaint.Notes = validation.Notes;
-        complaint.UpdatedAt = DateTime.UtcNow;
-        complaint.UpdatedByUserId = actorUserId;
-        complaint.UpdatedByUserName = Truncate(actorName, 256);
-
-        AppendCaseEvent(clientCase, $"Обновлена жалоба «{complaint.Title}». Автор: {actorName}.");
-        _db.SetAuditReason($"Обновлена жалоба по судебной инстанции: {complaint.Title}");
-        await _db.SaveChangesAsync(ct);
-        if (await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct))
-        {
+            return Ok(MapCourtComplaint(complaint));
+        }, ct);
+        if (journalChanged && result is CreatedResult or OkObjectResult or NoContentResult)
             await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        }
-
-        return Ok(MapCourtComplaint(complaint));
+        return (ActionResult)result;
     }
 
     [HttpDelete("{id:int}/court-instances/{instance}/complaints/{complaintId:int}")]
@@ -3847,55 +3798,33 @@ public partial class CasesV2Controller : ControllerBase
         int complaintId,
         CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        var journalChanged = false;
+        var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
-            return forbidden;
-        }
+            var normalizedInstance = NormalizeCourtInstance(instance);
+            var complaint = await LoadCourtComplaintForWriteAsync(id, normalizedInstance, complaintId, ct);
+            if (complaint is null)
+            {
+                return NotFound();
+            }
 
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
+            await CaseEditTransaction.LockLinkedTasksAsync(_db, [id], ct);
+            var actorUserId = User.GetUserId();
+            var actorName = User.GetDisplayName();
+            complaint.IsArchived = true;
+            complaint.UpdatedAt = DateTime.UtcNow;
+            complaint.UpdatedByUserId = actorUserId;
+            complaint.UpdatedByUserName = Truncate(actorName, 256);
+            AppendCaseEvent(clientCase, $"Жалоба «{complaint.Title}» перенесена в архив. Автор: {actorName}.");
+            _db.SetAuditReason($"Жалоба по судебной инстанции перенесена в архив: {complaint.Title}");
+            await _db.SaveChangesAsync(ct);
+            journalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
 
-        var clientCase = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
-
-        var normalizedInstance = NormalizeCourtInstance(instance);
-        var complaint = await _db.ClientCaseCourtComplaints
-            .Include(item => item.CourtInstance)
-            .FirstOrDefaultAsync(item =>
-                item.Id == complaintId &&
-                item.ClientCaseId == id &&
-                item.CourtInstance.ClientCaseId == id &&
-                item.CourtInstance.Instance == normalizedInstance &&
-                !item.IsArchived,
-                ct);
-        if (complaint is null)
-        {
-            return NotFound();
-        }
-
-        var actorUserId = User.GetUserId();
-        var actorName = User.GetDisplayName();
-        complaint.IsArchived = true;
-        complaint.UpdatedAt = DateTime.UtcNow;
-        complaint.UpdatedByUserId = actorUserId;
-        complaint.UpdatedByUserName = Truncate(actorName, 256);
-        AppendCaseEvent(clientCase, $"Жалоба «{complaint.Title}» перенесена в архив. Автор: {actorName}.");
-        _db.SetAuditReason($"Жалоба по судебной инстанции перенесена в архив: {complaint.Title}");
-        await _db.SaveChangesAsync(ct);
-        if (await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct))
-        {
+            return NoContent();
+        }, ct);
+        if (journalChanged && result is CreatedResult or OkObjectResult or NoContentResult)
             await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        }
-
-        return NoContent();
+        return result;
     }
 
     [HttpGet("{id:int}/court-events")]
@@ -13836,8 +13765,7 @@ public partial class CasesV2Controller : ControllerBase
         CancellationToken ct)
     {
         var normalizedInstance = NormalizeCourtInstance(instance);
-        var courtInstance = await _db.ClientCaseCourtInstances
-            .FirstOrDefaultAsync(item => item.ClientCaseId == clientCase.Id && item.Instance == normalizedInstance, ct);
+        var courtInstance = await LoadCourtBindingInstanceAsync(clientCase.Id, normalizedInstance, ct);
         if (courtInstance is not null)
         {
             return courtInstance;

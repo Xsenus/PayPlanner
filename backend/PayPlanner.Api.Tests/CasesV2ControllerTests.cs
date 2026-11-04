@@ -10479,7 +10479,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             }, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(result.Result);
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.AsNoTracking().SingleAsync(item => item.Id == clientCase.Id);
         Assert.Equal("first-uid-17", clientCase.JudicialUid);
         var instances = await db.ClientCaseCourtInstances.Where(item => item.ClientCaseId == clientCase.Id).ToListAsync();
         Assert.Equal("first-uid-17", Assert.Single(instances, item => item.Instance == "first").JudicialUid);
@@ -10711,6 +10711,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             Status = "accepted",
         }, CancellationToken.None);
         var opponentComplaint = Assert.IsType<CasesV2Controller.ClientCaseCourtComplaintDto>(Assert.IsType<CreatedResult>(opponentResult.Result).Value);
+        followup = await db.TaskJournalItems.SingleAsync(item => item.Id == followup.Id);
         Assert.DoesNotContain(await db.TaskJournalItems.Where(item => item.ClientCaseId == clientCase.Id).ToListAsync(),
             item => item.Title == "Подготовить возражения на апелляцию");
 
@@ -10766,6 +10767,8 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Equal(2, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id && item.Title == "Отслеживать назначение заседания"));
 
         await controller.ArchiveCourtComplaint(clientCase.Id, "first", opponentComplaint.Id, CancellationToken.None);
+        objections = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == objections.Id);
+        resumedFollowup = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == resumedFollowup.Id);
         Assert.Equal("cancelled", objections.Status);
         Assert.Equal("done", resumedFollowup.Status);
     }
