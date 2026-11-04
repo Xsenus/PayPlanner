@@ -41,7 +41,7 @@ public partial class CasesV2Controller
             clientCase.NextHearingConfirmedByName);
     }
 
-    private sealed record CourtSyncPrepared(ClientCase Case, Func<Task<CourtSyncApplyResult>> CompleteAsync);
+    private sealed record CourtSyncPrepared(ClientCase Case, Func<Task<CourtSyncApplyResult>> CompleteAsync, CourtPublicationPlan? Changes);
 
     private async Task<ActionResult<ClientCaseCourtSyncRunDto>> RecordCourtCheckAsync(
         int id, CourtCheckSource expectedSource, DateTime checkedAt, string actorName,

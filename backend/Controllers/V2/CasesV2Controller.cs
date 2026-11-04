@@ -9047,51 +9047,57 @@ public partial class CasesV2Controller : ControllerBase
                     return Conflict(new { message = "Судебные сведения дела изменились во время ожидания. Обновите дело перед повторной проверкой." });
                 var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(currentCase, ct);
                 _db.SetAuditReason($"Обновление дела #{currentCase.Id} из судебного источника {courtSyncProvider.Label}.");
-                return Ok(await PrepareSudrfCourtSyncAsync(currentCase, courtData, sourceTimeZone, actorName, checkedAt, ct));
+                return Ok(await PrepareSudrfCourtSyncAsync(currentCase, courtData, sourceTimeZone, actorName, checkedAt, ct, queuePublicationChanges: true));
             }, ct);
             if (acceptance is not OkObjectResult { Value: CourtSyncPrepared prepared }) return (ActionResult)acceptance;
             clientCase = prepared.Case;
             var syncResult = await prepared.CompleteAsync();
-            MarkCourtSyncSuccess(clientCase, checkedAt);
-            var syncMessage = !syncResult.HasChanges
-                ? $"Судебный источник проверен: новых изменений не найдено. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}."
-                : $"Судебный источник обновлен: {FormatCourtSyncResult(syncResult)}";
-
-            AppendCaseEvent(clientCase, $"{syncMessage} Инициатор: {actorName}.");
-            _db.SetAuditReason($"Обновление дела #{clientCase.Id} из судебного источника {courtSyncProvider.Label}.");
-            await _db.SaveChangesAsync(ct);
-            if (syncResult.HasChanges)
+            var completion = await WithCurrentCourtCheckAsync(id, prepared.Changes!.Source, async currentCase =>
             {
+                if (CourtSyncCaseState.Capture(currentCase) != prepared.Changes.Fields)
+                    return Conflict(new { message = "Судебные сведения изменились во время публикации. Обновите дело перед повторной проверкой." });
+                var invalid = await ApplyCourtPublicationChangesAsync(id, prepared.Changes, ct);
+                if (invalid is not null) return invalid;
+                clientCase = currentCase;
+                MarkCourtSyncSuccess(clientCase, checkedAt);
+                var syncMessage = !syncResult.HasChanges
+                    ? $"Судебный источник проверен: новых изменений не найдено. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}."
+                    : $"Судебный источник обновлен: {FormatCourtSyncResult(syncResult)}";
+
+                AppendCaseEvent(clientCase, $"{syncMessage} Инициатор: {actorName}.");
+                _db.SetAuditReason($"Обновление дела #{clientCase.Id} из судебного источника {courtSyncProvider.Label}.");
+                await _db.SaveChangesAsync(ct);
+                return Ok(new ClientCaseCourtSyncRunDto
+                {
+                    ClientCaseId = clientCase.Id,
+                    Status = "external-sync-completed",
+                    HasCourtBinding = true,
+                    Message = syncMessage,
+                    CheckedAt = checkedAt,
+                    CheckedByUserId = User.GetUserId(),
+                    CheckedByUserName = actorName,
+                    CourtName = clientCase.CourtName,
+                    CourtCaseNumber = clientCase.CourtCaseNumber,
+                    JudicialUid = clientCase.JudicialUid,
+                    CourtUrl = clientCase.CourtUrl,
+                    SyncedFromExternalSource = true,
+                    UpdatedFields = syncResult.ChangedFields,
+                    CreatedCourtEvents = syncResult.CreatedCourtEvents,
+                    UpdatedCourtEvents = syncResult.UpdatedCourtEvents,
+                    CreatedCourtParties = syncResult.CreatedCourtParties,
+                    CreatedCourtActDocuments = syncResult.CreatedCourtActDocuments,
+                    PendingCourtActDocuments = syncResult.PendingCourtActDocuments,
+                    CreatedProceduralDeadlines = syncResult.CreatedProceduralDeadlines,
+                    NewItems = syncResult.NewItems,
+                    ChangedItems = syncResult.ChangedItems,
+                    RemovedItems = syncResult.RemovedItems,
+                    ConflictItems = syncResult.ConflictItems,
+                    NextHearingAt = clientCase.NextHearingAt,
+                });
+            }, ct);
+            if (completion is OkObjectResult && syncResult.HasChanges)
                 await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-            }
-
-            return Ok(new ClientCaseCourtSyncRunDto
-            {
-                ClientCaseId = clientCase.Id,
-                Status = "external-sync-completed",
-                HasCourtBinding = true,
-                Message = syncMessage,
-                CheckedAt = checkedAt,
-                CheckedByUserId = User.GetUserId(),
-                CheckedByUserName = actorName,
-                CourtName = clientCase.CourtName,
-                CourtCaseNumber = clientCase.CourtCaseNumber,
-                JudicialUid = clientCase.JudicialUid,
-                CourtUrl = clientCase.CourtUrl,
-                SyncedFromExternalSource = true,
-                UpdatedFields = syncResult.ChangedFields,
-                CreatedCourtEvents = syncResult.CreatedCourtEvents,
-                UpdatedCourtEvents = syncResult.UpdatedCourtEvents,
-                CreatedCourtParties = syncResult.CreatedCourtParties,
-                CreatedCourtActDocuments = syncResult.CreatedCourtActDocuments,
-                PendingCourtActDocuments = syncResult.PendingCourtActDocuments,
-                CreatedProceduralDeadlines = syncResult.CreatedProceduralDeadlines,
-                NewItems = syncResult.NewItems,
-                ChangedItems = syncResult.ChangedItems,
-                RemovedItems = syncResult.RemovedItems,
-                ConflictItems = syncResult.ConflictItems,
-                NextHearingAt = clientCase.NextHearingAt,
-            });
+            return (ActionResult)completion;
         }
 
         return await RecordCourtCheckAsync(id, expectedSource, checkedAt, actorName, manualOnly, manualCommentSuffix, ct);
@@ -9183,7 +9189,7 @@ public partial class CasesV2Controller : ControllerBase
         TimeZoneInfo? sourceTimeZone,
         string actorName,
         DateTime checkedAt,
-        CancellationToken ct)
+        CancellationToken ct, bool queuePublicationChanges = false)
     {
         var notificationsAfterCommit = new List<Func<Task>>();
         var actorUserId = User.GetUserId();
@@ -9740,7 +9746,13 @@ public partial class CasesV2Controller : ControllerBase
         // before any summary file can fail or wait for its mandatory copies.
         await _db.SaveChangesAsync(ct);
         var taskJournalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
-        return new CourtSyncPrepared(clientCase, CompleteAsync);
+        CourtPublicationPlan? publicationChanges = null;
+        if (queuePublicationChanges)
+        {
+            await _db.Entry(clientCase).ReloadAsync(ct);
+            publicationChanges = new CourtPublicationPlan(clientCase);
+        }
+        return new CourtSyncPrepared(clientCase, CompleteAsync, publicationChanges);
 
         async Task<CourtSyncApplyResult> CompleteAsync()
         {
@@ -9818,27 +9830,37 @@ public partial class CasesV2Controller : ControllerBase
                         newItems.Add($"сводка судебного события «{courtAct.Title}»");
                     }
                 }
-                else if (!string.Equals(document.DocumentKey, documentKey, StringComparison.Ordinal))
+                var metadata = CurrentCourtDocumentMetadata(publicationChanges, document);
+                if (!string.Equals(metadata.DocumentKey, documentKey, StringComparison.Ordinal))
                 {
-                    document.DocumentKey = documentKey;
+                    metadata = metadata with { DocumentKey = documentKey };
                     changedItems.Add($"сводка судебного события «{courtAct.Title}»");
                 }
-                if (string.Equals(document.Status, "archived", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(metadata.Status, "archived", StringComparison.OrdinalIgnoreCase))
                 {
-                    document.Status = "received";
+                    metadata = metadata with { Status = "received" };
                     changedItems.Add($"сводка судебного события «{courtAct.Title}» восстановлена из архива");
                 }
                 if (!managedCourtDocumentIds.Contains(document.Id))
                 {
-                    document.SourceType = "sudrf";
-                    document.DocumentType = CourtSyncNormalization.DocumentTypes.CourtEventSummary;
-                    document.OriginalFileName = prepared.FileName;
-                    document.SourceUrl = Truncate(FirstNonEmpty(courtAct.SourceUrl, courtData.SourceUrl), 1000);
-                    document.SourceCheckedAt = checkedAt;
-                    document.SourceConfidence = "official-source";
+                    metadata = metadata with
+                    {
+                        SourceType = "sudrf",
+                        DocumentType = CourtSyncNormalization.DocumentTypes.CourtEventSummary,
+                        OriginalFileName = prepared.FileName,
+                        SourceUrl = Truncate(FirstNonEmpty(courtAct.SourceUrl, courtData.SourceUrl), 1000),
+                        SourceCheckedAt = checkedAt,
+                        SourceConfidence = "official-source",
+                    };
                 }
+                StageCourtDocumentMetadata(publicationChanges, document, metadata);
                 existingCourtActDocumentsByKey[documentKey] = document;
-                foreach (var deadline in prepared.Deadlines) deadline.ClientCaseDocumentId = document.Id;
+                foreach (var deadline in prepared.Deadlines)
+                {
+                    if (publicationChanges is null) deadline.ClientCaseDocumentId = document.Id;
+                    else publicationChanges.Deadlines[deadline.Id] = new CourtDeadlineLink(
+                        deadline.ClientCaseDocumentId, deadline.SourceDocumentKey, deadline.SourceType, deadline.SourceUrl, document.Id);
+                }
             }
 
             var removedCourtActDocumentIds = existingCourtActDocuments
@@ -9850,7 +9872,8 @@ public partial class CasesV2Controller : ControllerBase
             foreach (var missingDocument in existingCourtActDocuments.Where(item => removedCourtActDocumentIds.Contains(item.Id)))
             {
                 removedItems.Add($"сводка судебного события «{missingDocument.OriginalFileName}»");
-                missingDocument.Status = "archived";
+                StageCourtDocumentMetadata(publicationChanges, missingDocument,
+                    CurrentCourtDocumentMetadata(publicationChanges, missingDocument) with { Status = "archived" });
             }
 
             if (createdCourtActDocuments > 0)
