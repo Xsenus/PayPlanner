@@ -1545,6 +1545,7 @@ function AppContent() {
             canEditTaskBilling={isAdminRole || permissions.tasks.canEdit || permissions.tasks.canEditOthers}
             canExportTasks={permissions.tasks.canExport}
             canSendMessenger={isAdminRole}
+            canSendToYandexDisk={permissions.cases.canExport && permissions.yandexDisk.canCreate}
             onBack={() => {
               setSelectedCaseId(null);
               setActiveTab(caseReturnTab === 'caseDetail' ? 'cases' : caseReturnTab);

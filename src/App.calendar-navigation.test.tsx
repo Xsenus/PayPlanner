@@ -10,6 +10,8 @@ import { apiService } from './services/api';
 const permissionsState = vi.hoisted(() => ({
   paymentsCanView: true,
   casesCanView: true,
+  casesCanExport: true,
+  yandexCanCreate: true,
   tasksCanView: true,
   accountsCanCreate: true,
   accountsCanView: true,
@@ -74,7 +76,7 @@ vi.mock('./hooks/useRolePermissions', () => {
         calculator: currentSection,
         legalEntities: { ...currentSection, canView: permissionsState.loaded && permissionsState.legalEntitiesCanView },
         clients: currentSection,
-        cases: { ...currentSection, canView: permissionsState.loaded && permissionsState.casesCanView },
+        cases: { ...currentSection, canView: permissionsState.loaded && permissionsState.casesCanView, canExport: permissionsState.loaded && permissionsState.casesCanExport },
         requests: currentSection,
         accounts: { ...currentSection, canView: permissionsState.loaded && permissionsState.accountsCanView, canCreate: permissionsState.loaded && permissionsState.accountsCanCreate },
         acts: currentSection,
@@ -84,7 +86,7 @@ vi.mock('./hooks/useRolePermissions', () => {
         roles: currentSection,
         audit: currentSection,
         integrations: currentSection,
-        yandexDisk: currentSection,
+        yandexDisk: { ...currentSection, canCreate: permissionsState.loaded && permissionsState.yandexCanCreate },
         s3Storage: currentSection,
       };
     },
@@ -181,17 +183,20 @@ vi.mock('./components/Tasks/TaskJournal', () => ({
 vi.mock('./components/Cases/CaseDetailPage', () => ({
   CaseDetailPage: ({
     caseId,
+    canSendToYandexDisk,
     onOpenFinance,
     onBack,
     backLabel,
   }: {
     caseId: number;
+    canSendToYandexDisk?: boolean;
     onOpenFinance?: (caseItem: { id: number; clientId: number | null; legalEntityId: number | null }) => void;
     onBack?: () => void;
     backLabel?: string;
   }) => (
     <section data-testid="case-detail">
       <span>case {caseId}</span>
+      <span data-testid="case-disk-admission">{canSendToYandexDisk ? 'allowed' : 'denied'}</span>
       <span>{window.sessionStorage.getItem(`pp.case-detail.${caseId}.view.v1`)}</span>
       <button type="button" onClick={onBack}>{backLabel ?? 'back from case'}</button>
       <button type="button" onClick={() => onOpenFinance?.({ id: caseId, clientId: null, legalEntityId: 37 })}>
@@ -295,6 +300,8 @@ describe('App calendar client navigation', () => {
     window.sessionStorage.clear();
     permissionsState.paymentsCanView = true;
     permissionsState.casesCanView = true;
+    permissionsState.casesCanExport = true;
+    permissionsState.yandexCanCreate = true;
     permissionsState.tasksCanView = true;
     permissionsState.accountsCanCreate = true;
     permissionsState.accountsCanView = true;
@@ -785,4 +792,13 @@ describe('App calendar client navigation', () => {
 
     expect(window.localStorage.getItem(userLastTabKey)).toBeNull();
   });
+
+  it.each([[false, false], [false, true], [true, false], [true, true]])('case disk admission: case export=%s and disk create=%s reach the normal case entry', async (canExport, canCreate) => {
+    permissionsState.casesCanExport = canExport;
+    permissionsState.yandexCanCreate = canCreate;
+    window.history.replaceState({}, '', '/cases/164');
+    render(<App />);
+    expect((await screen.findByTestId('case-disk-admission')).textContent).toBe(canExport && canCreate ? 'allowed' : 'denied');
+  });
+
 });

@@ -593,6 +593,8 @@ describe('CaseDetailPage', () => {
         syncToPhonebook: false,
       },
     ]);
+    vi.mocked(apiService.uploadCaseDocumentToYandexDisk).mockReset();
+    vi.mocked(apiService.uploadCaseDocumentToYandexDisk).mockResolvedValue({ success: true, path: '/synthetic/document.pdf' });
     vi.mocked(apiService.getCaseDocuments).mockReset();
     vi.mocked(apiService.getCaseDocuments).mockResolvedValue([
       {
@@ -1986,7 +1988,7 @@ describe('CaseDetailPage', () => {
       const details = screen.getByRole('region', { name: 'Сведения и действия документа Одинаковое.pdf' });
       expect(within(details).getByText('Версия 4')).toBeTruthy();
       fireEvent.click(within(details).getByRole('button', { name: 'Скачать документ Одинаковое.pdf' }));
-      await waitFor(() => expect(apiService.downloadCaseDocument).toHaveBeenCalledExactlyOnceWith(15, 72));
+      await waitFor(() => expect(apiService.downloadCaseDocument).toHaveBeenCalledExactlyOnceWith(15, 72, { signal: expect.any(AbortSignal) }));
       await waitFor(() => expect(revokeUrl).toHaveBeenCalledWith('blob:selected-document'), { timeout: 2000 });
       const file = new File(['synthetic replacement'], 'replacement.pdf', { type: 'application/pdf' });
       fireEvent.change(within(details).getByLabelText('Загрузить новую версию документа Одинаковое.pdf'), { target: { files: [file] } });
@@ -2004,7 +2006,7 @@ describe('CaseDetailPage', () => {
     ]);
     let rejectDelete!: (reason: Error) => void;
     vi.mocked(apiService.deleteCaseDocument).mockReturnValueOnce(new Promise((_resolve, reject) => { rejectDelete = reject; }));
-    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canSendMessenger />);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canSendMessenger canSendToYandexDisk />);
     fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
     const details = await openDocumentDetails();
     fireEvent.change(within(details).getByLabelText('Тип документа Заявление.docx'), { target: { value: 'Черновик до удаления' } });
@@ -4044,7 +4046,7 @@ describe('CaseDetailPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Скачать документ Заявление.docx' }));
 
     await waitFor(() => {
-      expect(apiService.downloadCaseDocument).toHaveBeenCalledWith(15, 7);
+      expect(apiService.downloadCaseDocument).toHaveBeenCalledWith(15, 7, { signal: expect.any(AbortSignal) });
       expect(createObjectUrl).toHaveBeenCalledTimes(1);
       expect(clickSpy).toHaveBeenCalledTimes(1);
       expect(screen.getByText('Документ «Заявление.docx» подготовлен к скачиванию.')).toBeTruthy();
@@ -4069,7 +4071,7 @@ describe('CaseDetailPage', () => {
 
     expect(await screen.findByText('Предпросмотр документа')).toBeTruthy();
     expect(screen.getByTitle('Предпросмотр Исковое заявление.pdf')).toBeTruthy();
-    expect(apiService.downloadCaseDocument).toHaveBeenCalledWith(15, 7);
+    expect(apiService.downloadCaseDocument).toHaveBeenCalledWith(15, 7, { signal: expect.any(AbortSignal) });
     expect(createObjectUrl).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'Закрыть предпросмотр' }));
@@ -4140,7 +4142,7 @@ describe('CaseDetailPage', () => {
       new Error('HTTP 400 Bad Request at http://localhost:5080/api/yandex-disk/upload - Включите правила синхронизации CRM в разделе Я.Диск.'),
     );
 
-    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canSendToYandexDisk />);
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
@@ -5918,6 +5920,237 @@ describe('CaseDetailPage', () => {
     }
     fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/ })[0]); await waitFor(() => expect(apiService.updateCaseV2).toHaveBeenCalledOnce()); const body = vi.mocked(apiService.updateCaseV2).mock.calls[0][1];
     expect(body.strategy).toBe(source.strategy); expect(body.eventHistory).toBe(source.eventHistory);
+  });
+
+
+  it('page document owner baseline: an old delete confirmation cannot dispatch for another page', async () => {
+    let approve!: (value: boolean) => void;
+    dialogMock.confirm.mockReturnValue(new Promise(resolve => { approve = resolve; }));
+    const props = { caseId: 15, onBack: vi.fn() };
+    const view = render(<CaseDetailPage {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    fireEvent.click(screen.getByRole('button', { name: 'Удалить документ Заявление.docx' }));
+    await waitFor(() => expect(dialogMock.confirm).toHaveBeenCalledOnce());
+    view.rerender(<CaseDetailPage {...props} caseId={16} />);
+    await act(async () => approve(true));
+    expect(apiService.deleteCaseDocument).not.toHaveBeenCalled();
+  });
+
+  it('page document owner baseline: a replaced login prevents a confirmed deletion before context rerenders', async () => {
+    const session = documentCopyTestSession();
+    onTestFinished(() => session.restore());
+    let approve!: (value: boolean) => void;
+    dialogMock.confirm.mockReturnValue(new Promise(resolve => { approve = resolve; }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    fireEvent.click(screen.getByRole('button', { name: 'Удалить документ Заявление.docx' }));
+    session.replace('actor');
+    await act(async () => approve(true));
+    expect(apiService.deleteCaseDocument).not.toHaveBeenCalled();
+  });
+
+  it('page document owner baseline: one pending deletion prompt excludes another prompt and header save', async () => {
+    dialogMock.confirm.mockReturnValue(new Promise(() => {}));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    const remove = screen.getByRole('button', { name: 'Удалить документ Заявление.docx' });
+    act(() => { fireEvent.click(remove); fireEvent.click(remove); });
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/u }));
+    expect(dialogMock.confirm).toHaveBeenCalledOnce();
+    expect(apiService.bulkUpdateCases).not.toHaveBeenCalled();
+  });
+
+  it('page document owner baseline: a late download cannot allocate a URL after leaving the case', async () => {
+    let answer!: (value: { blob: Blob; fileName: string }) => void;
+    vi.mocked(apiService.downloadCaseDocument).mockReturnValue(new Promise(resolve => { answer = resolve; }));
+    const old = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+    const createUrl = vi.fn(() => 'blob:stale-document');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createUrl });
+    onTestFinished(() => { if (old) Object.defineProperty(URL, 'createObjectURL', old); else Reflect.deleteProperty(URL, 'createObjectURL'); });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    onTestFinished(() => click.mockRestore());
+    const props = { caseId: 15, onBack: vi.fn() };
+    const view = render(<CaseDetailPage {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    fireEvent.click(screen.getByRole('button', { name: 'Скачать документ Заявление.docx' }));
+    view.rerender(<CaseDetailPage {...props} caseId={16} />);
+    await act(async () => answer({ blob: new Blob(['private']), fileName: 'private.pdf' }));
+    expect(createUrl).not.toHaveBeenCalled();
+    expect(click).not.toHaveBeenCalled();
+  });
+
+  it('page document owner baseline: download cancellation uses the existing API signal', async () => {
+    vi.mocked(apiService.downloadCaseDocument).mockReturnValue(new Promise(() => {}));
+    const props = { caseId: 15, onBack: vi.fn() };
+    const view = render(<CaseDetailPage {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    fireEvent.click(screen.getByRole('button', { name: 'Скачать документ Заявление.docx' }));
+    const signal = vi.mocked(apiService.downloadCaseDocument).mock.calls[0][2]?.signal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    view.rerender(<CaseDetailPage {...props} canEdit={false} />);
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it('page document owner baseline: text preview allocates its URL only after the current content settles', async () => {
+    let finishText!: (value: string) => void;
+    const text = vi.fn(() => new Promise<string>(resolve => { finishText = resolve; }));
+    vi.mocked(apiService.downloadCaseDocument).mockResolvedValue({ blob: { type: 'text/plain', size: 12, text } as unknown as Blob, fileName: 'private.txt' });
+    const old = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+    const createUrl = vi.fn(() => 'blob:stale-preview');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createUrl });
+    onTestFinished(() => { if (old) Object.defineProperty(URL, 'createObjectURL', old); else Reflect.deleteProperty(URL, 'createObjectURL'); });
+    const props = { caseId: 15, onBack: vi.fn() };
+    const view = render(<CaseDetailPage {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    fireEvent.click(screen.getByRole('button', { name: 'Предпросмотр документа Заявление.docx' }));
+    await waitFor(() => expect(text).toHaveBeenCalledOnce());
+    expect(createUrl).not.toHaveBeenCalled();
+    view.rerender(<CaseDetailPage {...props} caseId={16} />);
+    await act(async () => finishText('private text'));
+    expect(createUrl).not.toHaveBeenCalled();
+    expect(screen.queryByTitle('Предпросмотр private.txt')).toBeNull();
+  });
+
+  it('page document owner baseline: disk delivery needs its own explicit admission', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    expect(screen.queryByRole('button', { name: 'Отправить документ Заявление.docx на Яндекс.Диск' })).toBeNull();
+    expect(apiService.uploadCaseDocumentToYandexDisk).not.toHaveBeenCalled();
+  });
+
+  it('page document owner baseline: old disk click cannot dispatch after login replacement', async () => {
+    const session = documentCopyTestSession();
+    onTestFinished(() => session.restore());
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canSendToYandexDisk />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    const send = screen.getByRole('button', { name: 'Отправить документ Заявление.docx на Яндекс.Диск' });
+    session.replace('actor');
+    fireEvent.click(send);
+    expect(apiService.uploadCaseDocumentToYandexDisk).not.toHaveBeenCalled();
+  });
+
+  it('page document owner baseline: double generation reserves one operation synchronously', async () => {
+    vi.mocked(apiService.generateCaseDocumentTemplate).mockReturnValue(new Promise(() => {}));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    const generate = await screen.findByRole('button', { name: /^Сформировать$/u });
+    await waitFor(() => expect(generate).toHaveProperty('disabled', false));
+    act(() => { fireEvent.click(generate); fireEvent.click(generate); });
+    expect(apiService.generateCaseDocumentTemplate).toHaveBeenCalledOnce();
+  });
+
+  it('page document owner baseline: pending header mutation prevents a document upload', async () => {
+    vi.mocked(apiService.bulkUpdateCases).mockReturnValue(new Promise(() => {}));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    fireEvent.change(screen.getByLabelText('Файл документа'), { target: { files: [new File(['body'], 'new.pdf')] } });
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/u }));
+    fireEvent.click(screen.getByRole('button', { name: /^Загрузить$/u }));
+    expect(apiService.uploadCaseDocument).not.toHaveBeenCalled();
+  });
+
+  it('page document owner baseline: a cached version input cannot send for a replaced login', async () => {
+    const session = documentCopyTestSession();
+    onTestFinished(() => session.restore());
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    const input = screen.getByLabelText('Загрузить новую версию документа Заявление.docx');
+    session.replace('actor');
+    fireEvent.change(input, { target: { files: [new File(['body'], 'new-version.pdf')] } });
+    expect(apiService.uploadCaseDocumentVersion).not.toHaveBeenCalled();
+  });
+
+
+  it('page document owner: an allowed readonly user can send to disk independently of edit access', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit={false} canSendToYandexDisk />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить документ Заявление.docx на Яндекс.Диск' }));
+    await waitFor(() => expect(apiService.uploadCaseDocumentToYandexDisk).toHaveBeenCalledExactlyOnceWith(7));
+  });
+
+  it('page document owner: revoking disk admission cancels its pending UI adoption', async () => {
+    let finish!: (value: { success: boolean; path: string }) => void;
+    vi.mocked(apiService.uploadCaseDocumentToYandexDisk).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const props = { caseId: 15, onBack: vi.fn(), canSendToYandexDisk: true };
+    const view = render(<CaseDetailPage {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить документ Заявление.docx на Яндекс.Диск' }));
+    view.rerender(<CaseDetailPage {...props} canSendToYandexDisk={false} />);
+    await act(async () => finish({ success: true, path: '/old-owner/secret' }));
+    expect(screen.queryByText(/old-owner\/secret/u)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Отправить документ Заявление.docx на Яндекс.Диск' })).toBeNull();
+  });
+
+  it('page document owner: cancelled deletion releases the reservation and permission replacement aborts the next prompt', async () => {
+    dialogMock.confirm.mockResolvedValueOnce(false).mockReturnValueOnce(new Promise(() => {}));
+    const props = { caseId: 15, onBack: vi.fn() };
+    const view = render(<CaseDetailPage {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    const remove = screen.getByRole('button', { name: 'Удалить документ Заявление.docx' });
+    fireEvent.click(remove);
+    await waitFor(() => expect(remove).toHaveProperty('disabled', false));
+    fireEvent.click(remove);
+    await waitFor(() => expect(dialogMock.confirm).toHaveBeenCalledTimes(2));
+    const signal = dialogMock.confirm.mock.calls[1][0].signal as AbortSignal;
+    expect(signal.aborted).toBe(false);
+    view.rerender(<CaseDetailPage {...props} canDelete={false} />);
+    expect(signal.aborted).toBe(true);
+    expect(apiService.deleteCaseDocument).not.toHaveBeenCalled();
+  });
+
+  it('page document owner: failed upload retains the selected file and an explicit retry clears it only after success', async () => {
+    let fail!: (error: Error) => void;
+    vi.mocked(apiService.uploadCaseDocument).mockReturnValueOnce(new Promise((_, reject) => { fail = reject; }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    const input = screen.getByLabelText('Файл документа');
+    const file = new File(['private body'], 'my-document.pdf');
+    fireEvent.change(input, { target: { files: [file] } });
+    const submit = screen.getByRole('button', { name: /^Загрузить$/u });
+    fireEvent.click(submit);
+    expect(input.matches(':disabled')).toBe(true);
+    await act(async () => fail(new Error('Ошибка загрузки')));
+    expect(await screen.findByText('Ошибка загрузки')).toBeTruthy();
+    expect(input.matches(':disabled')).toBe(false);
+    fireEvent.click(submit);
+    await waitFor(() => expect(apiService.uploadCaseDocument).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(apiService.uploadCaseDocument).mock.calls[0]).toEqual(vi.mocked(apiService.uploadCaseDocument).mock.calls[1]);
+    await screen.findByText('Документ «my-document.pdf» загружен.');
+  });
+
+  it.each(['download', 'preview', 'update', 'delete', 'generate', 'upload'] as const)('page document owner: stale %s control cannot dispatch after a replaced login', async action => {
+    const session = documentCopyTestSession();
+    onTestFinished(() => session.restore());
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
+    if (action === 'upload') fireEvent.change(screen.getByLabelText('Файл документа'), { target: { files: [new File(['body'], 'private.pdf')] } });
+    const labels = {
+      download: 'Скачать документ Заявление.docx', preview: 'Предпросмотр документа Заявление.docx',
+      update: 'Сохранить документ Заявление.docx', delete: 'Удалить документ Заявление.docx',
+      generate: 'Сформировать', upload: 'Загрузить',
+    };
+    const button = screen.getByRole('button', { name: labels[action] });
+    session.replace('actor');
+    fireEvent.click(button);
+    expect(apiService.downloadCaseDocument).not.toHaveBeenCalled();
+    expect(apiService.updateCaseDocument).not.toHaveBeenCalled();
+    expect(apiService.deleteCaseDocument).not.toHaveBeenCalled();
+    expect(apiService.generateCaseDocumentTemplate).not.toHaveBeenCalled();
+    expect(apiService.uploadCaseDocument).not.toHaveBeenCalled();
+    expect(dialogMock.confirm).not.toHaveBeenCalled();
   });
 
 });

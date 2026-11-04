@@ -127,6 +127,7 @@ interface CaseDetailPageProps {
   canEditTaskBilling?: boolean;
   canExportTasks?: boolean;
   canSendMessenger?: boolean;
+  canSendToYandexDisk?: boolean;
 }
 
 type CaseDetailTab = 'overview' | 'participants' | 'tasks' | 'court' | 'events' | 'finance' | 'workOrder' | 'documents' | 'conversation' | 'history';
@@ -1488,7 +1489,7 @@ export function CaseDetailPage(props: CaseDetailPageProps) {
     user?.id, user?.role?.id, user?.departmentId, user?.department,
     props.canEdit ?? true, props.canDelete ?? true, props.canViewFinance ?? true, props.canViewTasks ?? true,
     props.canCreateTasks ?? true, props.canEditTasks ?? false, props.canEditTaskBilling ?? props.canEditTasks ?? false,
-    props.canExportTasks ?? false, props.canSendMessenger ?? false]));
+    props.canExportTasks ?? false, props.canSendMessenger ?? false, props.canSendToYandexDisk ?? false]));
   const guard = <Args extends unknown[],>(callback: ((...args: Args) => void) | undefined) => callback
     ? (...args: Args) => { if (owner.capture()) callback(...args); } : undefined;
   if (!captureAuthSessionIdentity().authenticated) return <p className="p-3 text-sm text-slate-600">Войдите в систему, чтобы открыть дело.</p>;
@@ -1521,6 +1522,7 @@ function CaseDetailScreen({
   canEditTaskBilling = canEditTasks,
   canExportTasks = false,
   canSendMessenger = false,
+  canSendToYandexDisk = false,
 }: CaseDetailPageProps & { screenOwner: CaseOperationParent; markedViewedCaseIdRef: { current: number | null } }) {
   const { confirm, prompt } = useDialog();
   const { capture: captureScreen, begin: beginScreenOperation, busy: pageBusy } = screenOwner;
@@ -1694,6 +1696,13 @@ function CaseDetailScreen({
   const childCaseOwner = useNestedCaseOperationOwner(JSON.stringify(['case-detail-children', caseId, taskAccessKey, canEdit, canDelete, canViewFinance, canViewTasks, editPageOpen]),
     { ...screenOwner, begin: beginCaseOperation }, caseItem?.id === caseId);
   const savingCaseEdit = childCaseOwner.kind === 'case-edit:save';
+  const documentReadOwner = useDocumentDeliveryOwner(JSON.stringify(['case-document-content', screenOwner.scope]));
+  const documentContentRead = useRef<AbortController | null>(null);
+  const documentDeletePrompt = useRef<AbortController | null>(null);
+  useEffect(() => () => {
+    documentContentRead.current?.abort();
+    documentDeletePrompt.current?.abort();
+  }, [documentReadOwner.scope]);
   const childDocumentRead = useRef<AbortController | null>(null);
   useEffect(() => () => childDocumentRead.current?.abort(), [childCaseOwner.scope]);
   const [stageTransitionPrompt, setStageTransitionPrompt] = useState<StageTransitionPromptState | null>(null);
@@ -2841,8 +2850,11 @@ function CaseDetailScreen({
   };
 
   const generateDocument = async () => {
-    if (!caseItem) return;
+    if (!caseItem || !captureScreen()) return;
     if (!canManageDocuments) return;
+
+    const operation = childCaseOwner.begin('document:generateDocument');
+    if (!operation) return;
 
     setGeneratingDocument(true);
     setError(null);
@@ -2853,29 +2865,35 @@ function CaseDetailScreen({
         throw new Error('Нет доступных шаблонов документов для типа этого дела.');
       }
 
-      await apiService.generateCaseDocumentTemplate(caseItem.id, {
+      await awaitOwnedUiResult(() => apiService.generateCaseDocumentTemplate(caseItem.id, {
         templateKey: selectedTemplate.key,
         documentType: selectedTemplate.documentType,
         status: 'Подготовлен',
-      });
+      }), operation.isCurrent);
       setNotice(`Документ по шаблону «${selectedTemplate.label}» сформирован.`);
       setActiveTab('documents');
       setReloadToken((value) => value + 1);
     } catch (err) {
-      setError(extractDisplayErrorMessage(err, 'Не удалось сформировать документ по делу.'));
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(extractDisplayErrorMessage(err, 'Не удалось сформировать документ по делу.'));
     } finally {
-      setGeneratingDocument(false);
-      setUploadRevision((value) => value + 1);
+      if (operation.isCurrent()) {
+        setGeneratingDocument(false);
+        setUploadRevision((value) => value + 1);
+      }
+      operation.finish();
     }
   };
 
   const uploadDocument = async () => {
-    if (!caseItem) return;
+    if (!caseItem || !captureScreen()) return;
     if (!canManageDocuments) return;
     if (!documentFile) {
       setError('Выберите файл документа для загрузки.');
       return;
     }
+
+    const operation = childCaseOwner.begin('document:uploadDocument');
+    if (!operation) return;
 
     setUploadingDocument(true);
     setError(null);
@@ -2894,7 +2912,7 @@ function CaseDetailScreen({
       if (documentKey) {
         payload.documentKey = documentKey;
       }
-      await apiService.uploadCaseDocument(caseItem.id, documentFile, payload);
+      await awaitOwnedUiResult(() => apiService.uploadCaseDocument(caseItem.id, documentFile, payload), operation.isCurrent);
       setNotice(`Документ «${documentFile.name}» загружен.`);
       setDocumentTypeDraft('');
       setDocumentStatusDraft('');
@@ -2905,46 +2923,64 @@ function CaseDetailScreen({
       setActiveTab('documents');
       setDocumentReloadToken((value) => value + 1);
     } catch (err) {
-      setError(extractDisplayErrorMessage(err, 'Не удалось загрузить документ по делу.'));
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(extractDisplayErrorMessage(err, 'Не удалось загрузить документ по делу.'));
     } finally {
-      setUploadingDocument(false);
-      setUploadRevision((value) => value + 1);
+      if (operation.isCurrent()) {
+        setUploadingDocument(false);
+        setUploadRevision((value) => value + 1);
+      }
+      operation.finish();
     }
   };
 
   const downloadDocument = async (caseDocument: ClientCaseDocument) => {
-    if (!caseItem) return;
+    if (!caseItem || !captureScreen() || !caseReadConfirmed.current) return;
+
+    const operation = documentReadOwner.begin('document:downloadDocument');
+    if (!operation) return;
+    const controller = new AbortController();
+    documentContentRead.current = controller;
 
     setDownloadingDocumentId(caseDocument.id);
     setError(null);
     setNotice(null);
     try {
-      const result = await apiService.downloadCaseDocument(caseItem.id, caseDocument.id);
+      const result = await awaitOwnedUiResult(() => apiService.downloadCaseDocument(caseItem.id, caseDocument.id, { signal: controller.signal }), operation.isCurrent);
       downloadBlob(result.blob, result.fileName || caseDocument.originalFileName || `case-document-${caseDocument.id}`);
       setNotice(`Документ «${caseDocument.originalFileName}» подготовлен к скачиванию.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось скачать документ по делу.');
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(err instanceof Error ? err.message : 'Не удалось скачать документ по делу.');
     } finally {
-      setDownloadingDocumentId(null);
+      if (operation.isCurrent()) {
+        setDownloadingDocumentId(null);
+      }
+      if (documentContentRead.current === controller) documentContentRead.current = null;
+      controller.abort();
+      operation.finish();
     }
   };
 
   const previewDocument = async (caseDocument: ClientCaseDocument) => {
-    if (!caseItem) return;
+    if (!caseItem || !captureScreen() || !caseReadConfirmed.current) return;
+
+    const operation = documentReadOwner.begin('document:previewDocument');
+    if (!operation) return;
+    const controller = new AbortController();
+    documentContentRead.current = controller;
 
     setPreviewingDocumentId(caseDocument.id);
     setError(null);
     setNotice(null);
     try {
-      const result = await apiService.downloadCaseDocument(caseItem.id, caseDocument.id);
-      const url = URL.createObjectURL(result.blob);
+      const result = await awaitOwnedUiResult(() => apiService.downloadCaseDocument(caseItem.id, caseDocument.id, { signal: controller.signal }), operation.isCurrent);
       const contentType = result.blob.type || caseDocument.contentType || '';
       const normalizedContentType = contentType.toLowerCase();
       const isHtml = normalizedContentType.includes('html');
       const isText = normalizedContentType.startsWith('text/') && !isHtml;
       const readableContent = (isHtml || (isText && result.blob.size <= MAX_INLINE_TEXT_PREVIEW_BYTES))
-        ? await result.blob.text()
+        ? await awaitOwnedUiResult(() => result.blob.text(), operation.isCurrent)
         : undefined;
+      const url = URL.createObjectURL(result.blob);
       setDocumentPreview({
         document: caseDocument,
         url,
@@ -2954,96 +2990,125 @@ function CaseDetailScreen({
         textContent: isText ? readableContent : undefined,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось открыть предпросмотр документа по делу.');
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(err instanceof Error ? err.message : 'Не удалось открыть предпросмотр документа по делу.');
     } finally {
-      setPreviewingDocumentId(null);
+      if (operation.isCurrent()) {
+        setPreviewingDocumentId(null);
+      }
+      if (documentContentRead.current === controller) documentContentRead.current = null;
+      controller.abort();
+      operation.finish();
     }
   };
 
   const sendDocumentToYandexDisk = async (caseDocument: ClientCaseDocument) => {
-    if (!caseItem) return;
+    if (!caseItem || !canSendToYandexDisk) return;
+
+    const operation = childCaseOwner.begin('document:sendDocumentToYandexDisk');
+    if (!operation) return;
 
     setSendingYandexDocumentId(caseDocument.id);
     setError(null);
     setNotice(null);
     try {
-      const result = await apiService.uploadCaseDocumentToYandexDisk(caseDocument.id);
+      const result = await awaitOwnedUiResult(() => apiService.uploadCaseDocumentToYandexDisk(caseDocument.id), operation.isCurrent);
       setNotice(`Документ «${caseDocument.originalFileName}» отправлен на Яндекс.Диск: ${result.path}.`);
     } catch (err) {
-      setError(extractDisplayErrorMessage(err, 'Не удалось отправить документ на Яндекс.Диск.'));
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(extractDisplayErrorMessage(err, 'Не удалось отправить документ на Яндекс.Диск.'));
     } finally {
-      setSendingYandexDocumentId(null);
+      if (operation.isCurrent()) {
+        setSendingYandexDocumentId(null);
+      }
+      operation.finish();
     }
   };
 
   const updateDocument = async (caseDocument: ClientCaseDocument, payload: { documentType: string; status: string }) => {
-    if (!caseItem) return;
+    if (!caseItem || !captureScreen()) return;
     if (!canManageDocuments) return;
+
+    const operation = childCaseOwner.begin('document:updateDocument');
+    if (!operation) return;
 
     setUpdatingDocumentId(caseDocument.id);
     setError(null);
     setNotice(null);
     try {
-      await apiService.updateCaseDocument(caseItem.id, caseDocument.id, {
+      await awaitOwnedUiResult(() => apiService.updateCaseDocument(caseItem.id, caseDocument.id, {
         documentType: payload.documentType.trim() || undefined,
         status: payload.status.trim() || undefined,
-      });
+      }), operation.isCurrent);
       setNotice(`Документ «${caseDocument.originalFileName}» обновлен.`);
       setReloadToken((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось обновить документ по делу.');
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(err instanceof Error ? err.message : 'Не удалось обновить документ по делу.');
     } finally {
-      setUpdatingDocumentId(null);
+      if (operation.isCurrent()) {
+        setUpdatingDocumentId(null);
+      }
+      operation.finish();
     }
   };
 
   const uploadDocumentVersion = async (caseDocument: ClientCaseDocument, file: File | null | undefined) => {
-    if (!caseItem || !file) return;
+    if (!caseItem || !file || !captureScreen()) return;
     if (!canManageDocuments) return;
+
+    const operation = childCaseOwner.begin('document:uploadDocumentVersion');
+    if (!operation) return;
 
     setUploadingDocumentVersionId(caseDocument.id);
     setError(null);
     setNotice(null);
     try {
-      await apiService.uploadCaseDocumentVersion(caseDocument.id, file, {
+      await awaitOwnedUiResult(() => apiService.uploadCaseDocumentVersion(caseDocument.id, file, {
         clientCaseId: caseDocument.clientCaseId,
         documentKey: caseDocument.documentKey,
         documentType: caseDocument.documentType,
         status: caseDocument.status,
-      });
+      }), operation.isCurrent);
       setNotice(`Новая версия документа «${caseDocument.originalFileName}» загружена.`);
       setDocumentReloadToken((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось загрузить новую версию документа по делу.');
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(err instanceof Error ? err.message : 'Не удалось загрузить новую версию документа по делу.');
     } finally {
-      setUploadingDocumentVersionId(null);
-      setUploadRevision((value) => value + 1);
+      if (operation.isCurrent()) {
+        setUploadingDocumentVersionId(null);
+        setUploadRevision((value) => value + 1);
+      }
+      operation.finish();
     }
   };
 
   const deleteDocument = async (caseDocument: ClientCaseDocument) => {
-    if (!caseItem) return;
-    if (!canDeleteDocuments) return;
-    const approved = await confirm({
-      title: 'Удалить документ?',
-      description: `Документ «${caseDocument.originalFileName}» будет удален из дела.`,
-      confirmLabel: 'Удалить',
-      cancelLabel: 'Отмена',
-      variant: 'danger',
-    });
-    if (!approved) return;
-
+    if (!caseItem || !canDeleteDocuments) return;
+    const operation = childCaseOwner.begin('document:delete');
+    if (!operation) return;
+    const controller = new AbortController();
+    documentDeletePrompt.current = controller;
     setDeletingDocumentId(caseDocument.id);
     setError(null);
     setNotice(null);
     try {
-      await apiService.deleteCaseDocument(caseItem.id, caseDocument.id);
+      const approved = await awaitOwnedUiResult(() => confirm({
+        title: 'Удалить документ?',
+        description: `Документ «${caseDocument.originalFileName}» будет удален из дела.`,
+        confirmLabel: 'Удалить',
+        cancelLabel: 'Отмена',
+        variant: 'danger',
+        signal: controller.signal,
+      }), operation.isCurrent);
+      if (!approved) return;
+      await awaitOwnedUiResult(() => apiService.deleteCaseDocument(caseItem.id, caseDocument.id), operation.isCurrent);
       setNotice(`Документ «${caseDocument.originalFileName}» удален.`);
       setReloadToken((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось удалить документ по делу.');
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(err instanceof Error ? err.message : 'Не удалось удалить документ по делу.');
     } finally {
-      setDeletingDocumentId(null);
+      if (documentDeletePrompt.current === controller) documentDeletePrompt.current = null;
+      controller.abort();
+      if (operation.isCurrent()) setDeletingDocumentId(null);
+      operation.finish();
     }
   };
 
@@ -3095,19 +3160,26 @@ function CaseDetailScreen({
   };
 
   const downloadConversationAttachment = async (attachment: ClientCaseConversationAttachment) => {
-    if (!caseItem) return;
+    if (!caseItem || !captureScreen() || !caseReadConfirmed.current) return;
+    const operation = documentReadOwner.begin('document:conversation-download');
+    if (!operation) return;
+    const controller = new AbortController();
+    documentContentRead.current = controller;
 
     setDownloadingDocumentId(attachment.documentId);
     setError(null);
     setNotice(null);
     try {
-      const result = await apiService.downloadCaseDocument(caseItem.id, attachment.documentId);
+      const result = await awaitOwnedUiResult(() => apiService.downloadCaseDocument(caseItem.id, attachment.documentId, { signal: controller.signal }), operation.isCurrent);
       downloadBlob(result.blob, result.fileName || attachment.fileName || `case-conversation-attachment-${attachment.documentId}`);
       setNotice(`Файл «${attachment.fileName || result.fileName}» подготовлен к скачиванию.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось скачать вложение переписки.');
+      if (operation.isCurrent() && !(err instanceof StaleUiOperationError)) setError(err instanceof Error ? err.message : 'Не удалось скачать вложение переписки.');
     } finally {
-      setDownloadingDocumentId(null);
+      if (documentContentRead.current === controller) documentContentRead.current = null;
+      controller.abort();
+      if (operation.isCurrent()) setDownloadingDocumentId(null);
+      operation.finish();
     }
   };
 
@@ -4843,7 +4915,7 @@ function CaseDetailScreen({
                         ))}
                       </SystemSelect>
                     </label>
-                    <button type="button" onClick={() => void generateDocument()} disabled={generatingDocument || availableDocumentTemplates.length === 0} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+                    <button type="button" onClick={() => void generateDocument()} disabled={pageBusy || generatingDocument || availableDocumentTemplates.length === 0} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
                       {generatingDocument ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus2 className="h-4 w-4" />} Сформировать
                     </button>
                   </div>
@@ -4854,7 +4926,7 @@ function CaseDetailScreen({
                 )}
               </div>
               {canManageDocuments ? (
-                <section className="rounded-xl border border-slate-200 p-4">
+                <fieldset disabled={pageBusy} className="rounded-xl border border-slate-200 p-4">
                   <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Загрузить файл</h2>
                   <datalist id={documentTypeListId}>
                     {documentTypeOptions.map((type) => (
@@ -4951,7 +5023,7 @@ function CaseDetailScreen({
                       {uploadingDocument ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus2 className="h-4 w-4" />} Загрузить
                     </button>
                   </div>
-                </section>
+                </fieldset>
               ) : null}
               {canManageDocuments ? <CaseDocumentUploadStatusPanel key={caseItem.id} caseId={caseItem.id} revision={uploadRevision}
                 onPublished={async (signal) => {
@@ -4983,6 +5055,10 @@ function CaseDetailScreen({
                   canEdit={canManageDocuments}
                   canDelete={canDeleteDocuments}
                   canSendMessenger={canSendMessenger}
+                  canSendToYandexDisk={canSendToYandexDisk}
+                  actionOwner={childCaseOwner}
+                  reading={documentReadOwner.busy}
+                  mutating={pageBusy}
                   onPreview={(caseDocument) => void previewDocument(caseDocument)}
                   onDownload={(caseDocument) => void downloadDocument(caseDocument)}
                   onSendToYandexDisk={(caseDocument) => void sendDocumentToYandexDisk(caseDocument)}
@@ -8731,6 +8807,10 @@ function DocumentList({
   canEdit,
   canDelete,
   canSendMessenger,
+  canSendToYandexDisk,
+  actionOwner,
+  reading,
+  mutating,
   onPreview,
   onDownload,
   onSendToYandexDisk,
@@ -8751,6 +8831,10 @@ function DocumentList({
   canEdit: boolean;
   canDelete: boolean;
   canSendMessenger: boolean;
+  canSendToYandexDisk: boolean;
+  actionOwner: CaseOperationParent;
+  reading: boolean;
+  mutating: boolean;
   onPreview: (caseDocument: ClientCaseDocument) => void;
   onDownload: (caseDocument: ClientCaseDocument) => void;
   onSendToYandexDisk: (caseDocument: ClientCaseDocument) => void;
@@ -8764,6 +8848,12 @@ function DocumentList({
   const [latestOnly, setLatestOnly] = useState(false);
   const [dateSortDirection, setDateSortDirection] = useState<'asc' | 'desc'>('desc');
   const [deliveryDocument, setDeliveryDocument] = useState<ClientCaseDocument | null>(null);
+  const openMessengerDelivery = (document: ClientCaseDocument) => {
+    const operation = canSendMessenger ? actionOwner.begin('document:messenger') : null;
+    if (!operation) return;
+    setDeliveryDocument(document);
+    operation.finish();
+  };
   const versionSummaries = useMemo(() => buildDocumentVersionSummaries(documents), [documents]);
 
   const documentTypes = useMemo(
@@ -8910,8 +9000,10 @@ function DocumentList({
                   canDelete={canDelete}
                   onPreview={onPreview}
                   onDownload={onDownload}
-                  onSendToYandexDisk={onSendToYandexDisk}
-                  onSendMessenger={clientId && canSendMessenger ? setDeliveryDocument : undefined}
+                  onSendToYandexDisk={canSendToYandexDisk ? onSendToYandexDisk : undefined}
+                  reading={reading}
+                  mutating={mutating}
+                  onSendMessenger={clientId && canSendMessenger ? openMessengerDelivery : undefined}
                   onUploadVersion={onUploadVersion}
                   onUpdate={onUpdate}
                   onDelete={onDelete}
@@ -8921,7 +9013,7 @@ function DocumentList({
           </table>
         </div>
       )}
-      {deliveryDocument && clientId ? (
+      {deliveryDocument && clientId && actionOwner.capture() ? (
         <MessengerDocumentDeliveryModal
           document={deliveryDocument}
           clientId={clientId}
@@ -9121,6 +9213,8 @@ function DocumentCard({
   documentStatusOptions,
   canEdit,
   canDelete,
+  reading,
+  mutating,
   onPreview,
   onDownload,
   onSendToYandexDisk,
@@ -9141,9 +9235,11 @@ function DocumentCard({
   documentStatusOptions: string[];
   canEdit: boolean;
   canDelete: boolean;
+  reading: boolean;
+  mutating: boolean;
   onPreview: (caseDocument: ClientCaseDocument) => void;
   onDownload: (caseDocument: ClientCaseDocument) => void;
-  onSendToYandexDisk: (caseDocument: ClientCaseDocument) => void;
+  onSendToYandexDisk?: (caseDocument: ClientCaseDocument) => void;
   onSendMessenger?: (caseDocument: ClientCaseDocument) => void;
   onUploadVersion: (caseDocument: ClientCaseDocument, file: File | null | undefined) => void;
   onUpdate: (caseDocument: ClientCaseDocument, payload: { documentType: string; status: string }) => void;
@@ -9231,7 +9327,7 @@ function DocumentCard({
           <button
             type="button"
             onClick={() => onUpdate(document, { documentType, status })}
-            disabled={updating || deleting}
+            disabled={mutating || updating || deleting}
             aria-label={`Сохранить документ ${document.originalFileName}`}
             className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
             {updating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Сохранить
@@ -9240,7 +9336,7 @@ function DocumentCard({
         <button
           type="button"
           onClick={() => onPreview(document)}
-          disabled={previewing || deleting}
+          disabled={reading || previewing || deleting}
           aria-label={`Предпросмотр документа ${document.originalFileName}`}
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-200 px-3 py-2 text-sm font-medium text-cyan-700 hover:bg-cyan-50 disabled:opacity-50">
           {previewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />} Просмотр
@@ -9248,24 +9344,26 @@ function DocumentCard({
         <button
           type="button"
           onClick={() => onDownload(document)}
-          disabled={downloading || deleting}
+          disabled={reading || downloading || deleting}
           aria-label={`Скачать документ ${document.originalFileName}`}
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
           {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Скачать
         </button>
+        {onSendToYandexDisk ? (
         <button
           type="button"
           onClick={() => onSendToYandexDisk(document)}
-          disabled={sendingToYandex || deleting}
+          disabled={mutating || sendingToYandex || deleting}
           aria-label={`Отправить документ ${document.originalFileName} на Яндекс.Диск`}
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-sky-200 px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50">
           {sendingToYandex ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />} Я.Диск
         </button>
+        ) : null}
         {onSendMessenger ? (
           <button
             type="button"
             onClick={() => onSendMessenger(document)}
-            disabled={deleting}
+            disabled={mutating || deleting}
             aria-label={`Отправить документ ${document.originalFileName} в мессенджер`}
             className="inline-flex items-center justify-center gap-2 rounded-lg border border-violet-200 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50">
             <Send className="h-4 w-4" /> Мессенджер
@@ -9292,7 +9390,7 @@ function DocumentCard({
           <button
             type="button"
             onClick={() => onDelete(document)}
-            disabled={updating || deleting}
+            disabled={mutating || updating || deleting}
             aria-label={`Удалить документ ${document.originalFileName}`}
             className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">
             {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Удалить
