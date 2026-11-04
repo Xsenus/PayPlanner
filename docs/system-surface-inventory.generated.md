@@ -7,8 +7,8 @@
 
 - Разделов frontend: 55.
 - Backend-контроллеров: 103.
-- HTTP endpoints: 969; с прямой тестовой связью: 684.
-- HTTP endpoints с точной ссылкой из документации: 279; критичных без такой ссылки: 526.
+- HTTP endpoints: 970; с прямой тестовой связью: 685.
+- HTTP endpoints с точной ссылкой из документации: 280; критичных без такой ссылки: 526.
 - Критичных endpoints без прямой тестовой связи: 238.
 - Реальных HTML-форм: 21; с найденной тестовой связью: 19.
 - Фоновых сервисов: 35; с найденной тестовой связью: 28.
@@ -207,7 +207,7 @@
 | InternalChatController | backend/Controllers/InternalChatSendController.cs | 3 | не задано | да |
 | InvoicesController | backend/Controllers/InvoicesController.cs | 38 | [Authorize] | да |
 | LegacyStorageMigrationController | backend/Controllers/LegacyStorageMigrationController.cs | 1 | [Authorize(Policy = "Admin")] | нет |
-| LegalEntitiesController | backend/Controllers/LegalEntitiesController.cs | 18 | [Authorize] | да |
+| LegalEntitiesController | backend/Controllers/LegalEntitiesController.cs | 19 | [Authorize] | да |
 | LegalEntityBalancesController | backend/Controllers/LegalEntityBalancesController.cs | 6 | не задано | да |
 | MaxMessengerController | backend/Controllers/MaxMessengerController.cs | 8 | [Authorize] | да |
 | MaxWebhookController | backend/Controllers/MaxMessengerController.cs | 1 | публичный ([AllowAnonymous]) | да |
@@ -931,21 +931,22 @@
 | POST | api/legal-entities/clean/address | LegalEntitiesController | CleanAddress | backend/Controllers/LegalEntitiesController.cs:908 | [Authorize] | да | нет |
 | POST | api/legal-entities/clean/email | LegalEntitiesController | CleanEmail | backend/Controllers/LegalEntitiesController.cs:942 | [Authorize] | да | нет |
 | POST | api/legal-entities/clean/phone | LegalEntitiesController | CleanPhone | backend/Controllers/LegalEntitiesController.cs:965 | [Authorize] | да | нет |
-| POST | api/legal-entities | LegalEntitiesController | Create | backend/Controllers/LegalEntitiesController.cs:1089 | [Authorize] | да | docs/balance-application-cancel-fence-checkpoint-2026-10-31.md, docs/balance-application-managed-route-checkpoint-2026-10-31.md, docs/development-company-profile-permissions-2026-10-23.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md |
+| POST | api/legal-entities | LegalEntitiesController | Create | backend/Controllers/LegalEntitiesController.cs:1089 | [Authorize] | да | docs/balance-application-cancel-fence-checkpoint-2026-10-31.md, docs/balance-application-managed-route-checkpoint-2026-10-31.md, docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/development-company-profile-permissions-2026-10-23.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md |
 | DELETE | api/legal-entities/{id:int} | LegalEntitiesController | Delete | backend/Controllers/LegalEntitiesController.cs:1293 | [Authorize] | да | docs/development-bank-import-verification-2026-10-16.md, docs/pay-33-36-implementation-log-2026-10-09.md |
 | GET | api/legal-entities/main-companies/settings | LegalEntitiesController | GetMainCompanySettings | backend/Controllers/LegalEntitiesController.cs:1393 | [Authorize] | да | нет |
 | PUT | api/legal-entities/main-companies/settings | LegalEntitiesController | UpdateMainCompanySettings | backend/Controllers/LegalEntitiesController.cs:1428 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
 | GET | api/legal-entities/company-profile | LegalEntitiesController | GetCompanyProfile | backend/Controllers/LegalEntitiesController.cs:1506 | [Authorize] | да | docs/development-company-profile-permissions-2026-10-23.md |
 | PUT | api/legal-entities/company-profile/main/{id:int} | LegalEntitiesController | SetCompanyProfileMain | backend/Controllers/LegalEntitiesController.cs:1534 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
 | POST | api/legal-entities/find-by-id | LegalEntitiesController | FindById | backend/Controllers/LegalEntitiesController.cs:1563 | [Authorize] | да | нет |
-| GET | api/legal-entities | LegalEntitiesController | GetAll | backend/Controllers/LegalEntitiesController.cs:1620 | [Authorize] | да | docs/balance-application-cancel-fence-checkpoint-2026-10-31.md, docs/balance-application-managed-route-checkpoint-2026-10-31.md, docs/development-company-profile-permissions-2026-10-23.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md |
-| GET | api/legal-entities/paged | LegalEntitiesController | GetPaged | backend/Controllers/LegalEntitiesController.cs:1654 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
-| GET | api/legal-entities/{id:int} | LegalEntitiesController | GetById | backend/Controllers/LegalEntitiesController.cs:2027 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
-| GET | api/legal-entities/{id:int}/requisites-check | LegalEntitiesController | CheckRequisites | backend/Controllers/LegalEntitiesController.cs:2060 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
-| GET | api/legal-entities/{id:int}/case-finance-summaries | LegalEntitiesController | GetCaseFinanceSummaries | backend/Controllers/LegalEntitiesController.cs:2108 | [Authorize] | да | нет |
-| POST | api/legal-entities/suggest | LegalEntitiesController | Suggest | backend/Controllers/LegalEntitiesController.cs:2213 | [Authorize] | да | нет |
-| PUT | api/legal-entities/{id:int} | LegalEntitiesController | Update | backend/Controllers/LegalEntitiesController.cs:2241 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
-| POST | api/legal-entities/migrate-legacy-addresses | LegalEntitiesController | MigrateLegacyAddresses | backend/Controllers/LegalEntitiesController.cs:2481 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
+| GET | api/legal-entities | LegalEntitiesController | GetAll | backend/Controllers/LegalEntitiesController.cs:1620 | [Authorize] | да | docs/balance-application-cancel-fence-checkpoint-2026-10-31.md, docs/balance-application-managed-route-checkpoint-2026-10-31.md, docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/development-company-profile-permissions-2026-10-23.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md |
+| GET | api/legal-entities/directory | LegalEntitiesController | GetDirectory | backend/Controllers/LegalEntitiesController.cs:1673 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
+| GET | api/legal-entities/paged | LegalEntitiesController | GetPaged | backend/Controllers/LegalEntitiesController.cs:1700 | [Authorize] | да | docs/company-reference-ownership-checkpoint-2026-11-01.md |
+| GET | api/legal-entities/{id:int} | LegalEntitiesController | GetById | backend/Controllers/LegalEntitiesController.cs:2069 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
+| GET | api/legal-entities/{id:int}/requisites-check | LegalEntitiesController | CheckRequisites | backend/Controllers/LegalEntitiesController.cs:2102 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
+| GET | api/legal-entities/{id:int}/case-finance-summaries | LegalEntitiesController | GetCaseFinanceSummaries | backend/Controllers/LegalEntitiesController.cs:2150 | [Authorize] | да | нет |
+| POST | api/legal-entities/suggest | LegalEntitiesController | Suggest | backend/Controllers/LegalEntitiesController.cs:2255 | [Authorize] | да | нет |
+| PUT | api/legal-entities/{id:int} | LegalEntitiesController | Update | backend/Controllers/LegalEntitiesController.cs:2283 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
+| POST | api/legal-entities/migrate-legacy-addresses | LegalEntitiesController | MigrateLegacyAddresses | backend/Controllers/LegalEntitiesController.cs:2523 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
 | GET |  | LegalEntityBalancesController | GetSummary | backend/Controllers/LegalEntityBalancesController.cs:56 | не задано | да | нет |
 | GET | transactions | LegalEntityBalancesController | GetTransactions | backend/Controllers/LegalEntityBalancesController.cs:77 | не задано | да | docs/bank-integrations-api-verification-2026-10-09.md, docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/delete-behavior-contract-2026-06-10.md |
 | GET | applications/{requestId:guid} | LegalEntityBalancesController | GetApplication | backend/Controllers/LegalEntityBalancesController.cs:115 | не задано | да | docs/balance-application-cancel-fence-checkpoint-2026-10-31.md, docs/balance-application-managed-route-checkpoint-2026-10-31.md, docs/balance-application-recovery-checkpoint-2026-10-31.md |

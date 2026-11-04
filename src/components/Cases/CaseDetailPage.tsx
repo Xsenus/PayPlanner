@@ -60,7 +60,7 @@ import {
   X,
 } from 'lucide-react';
 
-import { apiService, type ContactDirectoryItemDto } from '../../services/api';
+import { apiService, type ContactDirectoryItemDto, type LegalEntityDirectoryItem } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentDeliveryOwner, type DocumentDeliveryOperation } from '../../hooks/useDocumentDeliveryOwner';
 import { captureAuthSessionIdentity } from '../../services/authService';
@@ -93,7 +93,6 @@ import type {
   ClientCaseWorkOrderItem,
   ExternalWorkOrderApprovalStatus,
   DocumentStatusEntity,
-  LegalEntitySummary,
   ProceduralDeadlineCalculationResult,
 } from '../../types';
 import { toRuDate } from '../../utils/dateUtils';
@@ -2221,7 +2220,7 @@ function CaseDetailScreen({
         receivedCount = result.items.length;
         options = buildParticipantDirectoryOptions({ sourceType: participantSourceType, clients: result.items, legalEntities: [], contacts: [] });
       } else if (participantSourceType === 'legalEntity') {
-        const result = await apiService.getLegalEntitiesPaged({ search, page, pageSize: PARTICIPANT_DIRECTORY_PAGE_SIZE }, { signal: controller.signal });
+        const result = await apiService.getLegalEntityDirectoryPage({ search, page, pageSize: PARTICIPANT_DIRECTORY_PAGE_SIZE }, { signal: controller.signal });
         if (!current()) return;
         if (!Array.isArray(result?.items) || result.items.length > PARTICIPANT_DIRECTORY_PAGE_SIZE) throw new Error('Invalid participant directory');
         pagination = result;
@@ -6902,7 +6901,7 @@ function TextBlock({ title, value }: { title: string; value: string }) {
 function buildParticipantDirectoryOptions({ sourceType, clients, legalEntities, contacts }: {
   sourceType: ParticipantSourceType;
   clients: Client[];
-  legalEntities: LegalEntitySummary[];
+  legalEntities: LegalEntityDirectoryItem[];
   contacts: ContactDirectoryItemDto[];
 }): ParticipantDirectoryOption[] {
   return sourceType === 'client'

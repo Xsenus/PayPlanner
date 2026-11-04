@@ -1651,6 +1651,52 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         return Ok(items.Select(item => MapDetail(item, visibleClientIds: visibleClientIds)));
     }
 
+    public sealed record DirectoryItem(int Id, string ShortName, string? FullName, string? Inn, string? Phone, string? Email);
+
+    private static IQueryable<LegalEntity> ApplyDirectorySearch(IQueryable<LegalEntity> query, string? search)
+    {
+        if (string.IsNullOrWhiteSpace(search)) return query;
+
+        var term = search.Trim().ToLower();
+        return query.Where(le =>
+            le.ShortName.ToLower().Contains(term) ||
+            (le.FullName ?? string.Empty).ToLower().Contains(term) ||
+            (le.Inn ?? string.Empty).ToLower().Contains(term) ||
+            (le.Kpp ?? string.Empty).ToLower().Contains(term) ||
+            (le.Ogrn ?? string.Empty).ToLower().Contains(term) ||
+            (le.Director ?? string.Empty).ToLower().Contains(term) ||
+            (le.Address ?? string.Empty).ToLower().Contains(term) ||
+            (le.Phone ?? string.Empty).ToLower().Contains(term) ||
+            (le.Email ?? string.Empty).ToLower().Contains(term));
+    }
+
+    [HttpGet("directory")]
+    public async Task<ActionResult<PagedResponse<DirectoryItem>>> GetDirectory(
+        [FromQuery] string? search,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken ct = default,
+        [FromQuery] string? counterpartyRole = null)
+    {
+        if (User.Identity?.IsAuthenticated != true || User.GetUserId() is not > 0) return Unauthorized();
+        var access = await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.LegalEntities, ct, requireApprovedUser: true);
+        if (access is null) return Forbid();
+
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+        var offset = (long)(page - 1) * pageSize;
+        if (offset > int.MaxValue) return BadRequest(new { message = "Слишком большой номер страницы." });
+
+        var query = await ApplyCompanyVisibilityAsync(_db.LegalEntities.AsNoTracking(), access.Visibility, ct);
+        query = ApplyDirectorySearch(query, search).ApplyCounterpartyRoleFilter(counterpartyRole);
+        var total = await query.CountAsync(ct);
+        var items = await query.OrderBy(le => le.ShortName).ThenBy(le => le.Id)
+            .Skip((int)offset).Take(pageSize)
+            .Select(le => new DirectoryItem(le.Id, le.ShortName, le.FullName, le.Inn, le.Phone, le.Email))
+            .ToListAsync(ct);
+        return Ok(new PagedResponse<DirectoryItem> { Items = items, Total = total, Page = page, PageSize = pageSize });
+    }
+
     [HttpGet("paged")]
     public async Task<ActionResult<PagedResponse<LegalEntityListItemDto>>> GetPaged(
         [FromQuery] string? search,
@@ -1659,30 +1705,25 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         CancellationToken ct = default,
         [FromQuery] string? counterpartyRole = null)
     {
+        if (User.Identity?.IsAuthenticated != true || User.GetUserId() is not > 0) return Unauthorized();
+        var userId = User.GetUserId();
+        if (!await _db.Users.AsNoTracking().AnyAsync(user => user.Id == userId && user.IsActive && user.IsApproved, ct)) return Forbid();
+
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
+        var offset = (long)(page - 1) * pageSize;
+        if (offset > int.MaxValue) return BadRequest(new { message = "Слишком большой номер страницы." });
 
         var visibilityBySection = await _db.ResolveDataVisibilitiesAsync(User, PagedVisibilitySections, ct);
+        var access = visibilityBySection[RolePermissionCatalog.LegalEntities];
+        if (access is null) return Forbid();
 
         var baseQuery = await ApplyCompanyVisibilityAsync(
             _db.LegalEntities.AsQueryable(),
-            visibilityBySection[RolePermissionCatalog.LegalEntities],
+            access,
             ct);
 
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            var term = search.Trim().ToLower();
-            baseQuery = baseQuery.Where(le =>
-                le.ShortName.ToLower().Contains(term) ||
-                (le.FullName ?? string.Empty).ToLower().Contains(term) ||
-                (le.Inn ?? string.Empty).ToLower().Contains(term) ||
-                (le.Kpp ?? string.Empty).ToLower().Contains(term) ||
-                (le.Ogrn ?? string.Empty).ToLower().Contains(term) ||
-                (le.Director ?? string.Empty).ToLower().Contains(term) ||
-                (le.Address ?? string.Empty).ToLower().Contains(term));
-        }
-
-        baseQuery = baseQuery.ApplyCounterpartyRoleFilter(counterpartyRole);
+        baseQuery = ApplyDirectorySearch(baseQuery, search).ApplyCounterpartyRoleFilter(counterpartyRole);
 
         var total = await baseQuery.CountAsync(ct);
 
@@ -1692,7 +1733,8 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             .Include(le => le.ResponsibleUser)
             .Include(le => le.ClientStatus)
             .OrderBy(le => le.ShortName)
-            .Skip((page - 1) * pageSize)
+            .ThenBy(le => le.Id)
+            .Skip((int)offset)
             .Take(pageSize)
             .ToListAsync(ct);
 

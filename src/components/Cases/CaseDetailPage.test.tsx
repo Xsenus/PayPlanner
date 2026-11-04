@@ -91,6 +91,7 @@ vi.mock('../../services/api', () => ({
     getClients: vi.fn(),
     getClientsV2: vi.fn(),
     getLegalEntitiesPaged: vi.fn(),
+    getLegalEntityDirectoryPage: vi.fn(),
     getContacts: vi.fn(),
     getCaseDocuments: vi.fn(),
     getPendingCaseDocumentUploads: vi.fn(),
@@ -572,6 +573,22 @@ describe('CaseDetailPage', () => {
           clientsCount: 0,
           createdAt: '2026-05-01T00:00:00Z',
           clients: [],
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 50,
+    });
+    vi.mocked(apiService.getLegalEntityDirectoryPage).mockReset();
+    vi.mocked(apiService.getLegalEntityDirectoryPage).mockResolvedValue({
+      items: [
+        {
+          id: 25,
+          shortName: 'ООО "Процесс"',
+          fullName: 'Общество с ограниченной ответственностью "Процесс"',
+          inn: '6310000000',
+          phone: '+79991112233',
+          email: 'office@example.test',
         },
       ],
       total: 1,
@@ -6186,6 +6203,7 @@ describe('CaseDetailPage', () => {
     expect(apiService.getClients).not.toHaveBeenCalled();
     expect(apiService.getClientsV2).not.toHaveBeenCalled();
     expect(apiService.getLegalEntitiesPaged).not.toHaveBeenCalled();
+    expect(apiService.getLegalEntityDirectoryPage).not.toHaveBeenCalled();
     expect(apiService.getContacts).not.toHaveBeenCalled();
   });
 
@@ -6673,22 +6691,23 @@ describe('CaseDetailPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
     await waitFor(() => expect(apiService.getClientsV2).toHaveBeenCalledWith({ search: undefined, isActive: true, page: 1, pageSize: 50 }, { signal: expect.any(AbortSignal) }));
     expect(apiService.getClients).not.toHaveBeenCalled();
-    expect(apiService.getLegalEntitiesPaged).not.toHaveBeenCalled();
+    expect(apiService.getLegalEntityDirectoryPage).not.toHaveBeenCalled();
     expect(apiService.getContacts).not.toHaveBeenCalled();
   });
 
   it('participant directory baseline: server search reaches an organization outside the first 200 rows', async () => {
-    vi.mocked(apiService.getLegalEntitiesPaged).mockImplementation(async query => ({ items: query?.search === 'Организация 250' ? [{ id: 250, shortName: 'Организация 250', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }] : [], total: query?.search ? 1 : 250, page: query?.page ?? 1, pageSize: query?.pageSize ?? 50 }));
+    vi.mocked(apiService.getLegalEntityDirectoryPage).mockImplementation(async query => ({ items: query?.search === 'Организация 250' ? [{ id: 250, shortName: 'Организация 250' }] : [], total: query?.search ? 1 : 250, page: query?.page ?? 1, pageSize: query?.pageSize ?? 50 }));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
     fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
     fireEvent.change(screen.getByLabelText('Поиск участника дела'), { target: { value: 'Организация 250' } });
     await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '250')).toBe(true));
-    expect(apiService.getLegalEntitiesPaged).toHaveBeenLastCalledWith({ search: 'Организация 250', page: 1, pageSize: 50 }, { signal: expect.any(AbortSignal) });
+    expect(apiService.getLegalEntitiesPaged).not.toHaveBeenCalled();
+    expect(apiService.getLegalEntityDirectoryPage).toHaveBeenLastCalledWith({ search: 'Организация 250', page: 1, pageSize: 50 }, { signal: expect.any(AbortSignal) });
   });
 
   it('participant directory baseline: next page keeps earlier organizations available', async () => {
-    vi.mocked(apiService.getLegalEntitiesPaged).mockImplementation(async query => ({ items: [{ id: query?.page === 2 ? 251 : 25, shortName: query?.page === 2 ? 'Следующая организация' : 'Первая организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 51, page: query?.page ?? 1, pageSize: 50 }));
+    vi.mocked(apiService.getLegalEntityDirectoryPage).mockImplementation(async query => ({ items: [{ id: query?.page === 2 ? 251 : 25, shortName: query?.page === 2 ? 'Следующая организация' : 'Первая организация' }], total: 51, page: query?.page ?? 1, pageSize: 50 }));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
     fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
@@ -6697,7 +6716,7 @@ describe('CaseDetailPage', () => {
   });
 
   it('participant directory baseline: a failed selected source offers an explicit retry and preserves role', async () => {
-    vi.mocked(apiService.getLegalEntitiesPaged).mockRejectedValueOnce(new Error('Скрытая диагностика справочника'));
+    vi.mocked(apiService.getLegalEntityDirectoryPage).mockRejectedValueOnce(new Error('Скрытая диагностика справочника'));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
     fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
@@ -6735,16 +6754,16 @@ describe('CaseDetailPage', () => {
   });
 
   it('participant directory: changing source aborts and rejects the prior directory response', async () => {
-    let finish!: (value: Awaited<ReturnType<typeof apiService.getLegalEntitiesPaged>>) => void;
-    vi.mocked(apiService.getLegalEntitiesPaged).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    let finish!: (value: Awaited<ReturnType<typeof apiService.getLegalEntityDirectoryPage>>) => void;
+    vi.mocked(apiService.getLegalEntityDirectoryPage).mockReturnValue(new Promise(resolve => { finish = resolve; }));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
     fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
-    await waitFor(() => expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledOnce());
-    const signal = vi.mocked(apiService.getLegalEntitiesPaged).mock.calls[0][1]?.signal;
+    await waitFor(() => expect(apiService.getLegalEntityDirectoryPage).toHaveBeenCalledOnce());
+    const signal = vi.mocked(apiService.getLegalEntityDirectoryPage).mock.calls[0][1]?.signal;
     fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'client' } });
     await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '30')).toBe(true));
-    await act(async () => finish({ items: [{ id: 888, shortName: 'Прежняя организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 1, page: 1, pageSize: 50 }));
+    await act(async () => finish({ items: [{ id: 888, shortName: 'Прежняя организация' }], total: 1, page: 1, pageSize: 50 }));
     expect(signal?.aborted).toBe(true);
     expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '888')).toBe(false);
     expect(screen.getByLabelText('Тип участника')).toHaveProperty('value', 'client');
@@ -6752,17 +6771,17 @@ describe('CaseDetailPage', () => {
   });
 
   it('participant directory: an old search response cannot replace a newer query', async () => {
-    let finish!: (value: Awaited<ReturnType<typeof apiService.getLegalEntitiesPaged>>) => void;
-    vi.mocked(apiService.getLegalEntitiesPaged).mockImplementation(async query => query?.search === 'прежний' ? new Promise(resolve => { finish = resolve; }) : ({ items: [{ id: 250, shortName: 'Новая организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 1, page: query?.page ?? 1, pageSize: 50 }));
+    let finish!: (value: Awaited<ReturnType<typeof apiService.getLegalEntityDirectoryPage>>) => void;
+    vi.mocked(apiService.getLegalEntityDirectoryPage).mockImplementation(async query => query?.search === 'прежний' ? new Promise(resolve => { finish = resolve; }) : ({ items: [{ id: 250, shortName: 'Новая организация' }], total: 1, page: query?.page ?? 1, pageSize: 50 }));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
     fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
     fireEvent.change(screen.getByLabelText('Поиск участника дела'), { target: { value: 'прежний' } });
     await waitFor(() => expect(finish).toBeTypeOf('function'));
-    const signal = vi.mocked(apiService.getLegalEntitiesPaged).mock.calls.at(-1)?.[1]?.signal;
+    const signal = vi.mocked(apiService.getLegalEntityDirectoryPage).mock.calls.at(-1)?.[1]?.signal;
     fireEvent.change(screen.getByLabelText('Поиск участника дела'), { target: { value: 'новый' } });
-    await waitFor(() => expect(apiService.getLegalEntitiesPaged).toHaveBeenLastCalledWith({ search: 'новый', page: 1, pageSize: 50 }, { signal: expect.any(AbortSignal) }));
-    await act(async () => finish({ items: [{ id: 888, shortName: 'Прежняя организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 1, page: 1, pageSize: 50 }));
+    await waitFor(() => expect(apiService.getLegalEntityDirectoryPage).toHaveBeenLastCalledWith({ search: 'новый', page: 1, pageSize: 50 }, { signal: expect.any(AbortSignal) }));
+    await act(async () => finish({ items: [{ id: 888, shortName: 'Прежняя организация' }], total: 1, page: 1, pageSize: 50 }));
     expect(signal?.aborted).toBe(true);
     expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '888')).toBe(false);
     await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '250')).toBe(true));
@@ -6772,13 +6791,13 @@ describe('CaseDetailPage', () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
     await choosePageParticipantSource();
     fireEvent.change(screen.getByLabelText('Поиск участника дела'), { target: { value: 'адрес из серверного поиска' } });
-    await waitFor(() => expect(apiService.getLegalEntitiesPaged).toHaveBeenLastCalledWith({ search: 'адрес из серверного поиска', page: 1, pageSize: 50 }, { signal: expect.any(AbortSignal) }));
+    await waitFor(() => expect(apiService.getLegalEntityDirectoryPage).toHaveBeenLastCalledWith({ search: 'адрес из серверного поиска', page: 1, pageSize: 50 }, { signal: expect.any(AbortSignal) }));
     await waitFor(() => expect(Array.from((screen.getByLabelText('Участник дела') as HTMLSelectElement).options).some(option => option.value === '25')).toBe(true));
     expect(screen.getByLabelText('Участник дела')).toHaveProperty('value', '');
   });
 
   it('participant directory: a source failure does not prevent switching to another permitted source', async () => {
-    vi.mocked(apiService.getLegalEntitiesPaged).mockRejectedValue(new Error('Hidden source failure'));
+    vi.mocked(apiService.getLegalEntityDirectoryPage).mockRejectedValue(new Error('Hidden source failure'));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
     fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
@@ -6790,9 +6809,9 @@ describe('CaseDetailPage', () => {
 
   it('participant directory: failed next-page retry preserves the previous selection and draft', async () => {
     let failed = false;
-    vi.mocked(apiService.getLegalEntitiesPaged).mockImplementation(async query => {
+    vi.mocked(apiService.getLegalEntityDirectoryPage).mockImplementation(async query => {
       if (query?.page === 2 && !failed) { failed = true; throw new Error('Hidden page failure'); }
-      return { items: [{ id: query?.page === 2 ? 251 : 25, shortName: 'Организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 51, page: query?.page ?? 1, pageSize: 50 };
+      return { items: [{ id: query?.page === 2 ? 251 : 25, shortName: 'Организация' }], total: 51, page: query?.page ?? 1, pageSize: 50 };
     });
     vi.mocked(apiService.addCaseRelatedParty).mockReturnValue(new Promise(() => {}));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
@@ -6810,7 +6829,7 @@ describe('CaseDetailPage', () => {
   });
 
   it('participant directory: duplicate next-page records are merged without dropping new choices', async () => {
-    vi.mocked(apiService.getLegalEntitiesPaged).mockImplementation(async query => ({ items: (query?.page === 2 ? [25, 251] : [25]).map(id => ({ id, shortName: `Организация ${id}`, clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' })), total: 51, page: query?.page ?? 1, pageSize: 50 }));
+    vi.mocked(apiService.getLegalEntityDirectoryPage).mockImplementation(async query => ({ items: (query?.page === 2 ? [25, 251] : [25]).map(id => ({ id, shortName: `Организация ${id}` })), total: 51, page: query?.page ?? 1, pageSize: 50 }));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
     await choosePageParticipantSource();
     fireEvent.click(screen.getByRole('button', { name: 'Ещё записи справочника участников' }));
@@ -6837,13 +6856,13 @@ describe('CaseDetailPage', () => {
   });
 
   it('participant directory: double next-page click reserves only one page and excludes a cached add', async () => {
-    vi.mocked(apiService.getLegalEntitiesPaged).mockImplementation(async query => query?.page === 2 ? new Promise(() => {}) : ({ items: [{ id: 25, shortName: 'Организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 101, page: 1, pageSize: 50 }));
+    vi.mocked(apiService.getLegalEntityDirectoryPage).mockImplementation(async query => query?.page === 2 ? new Promise(() => {}) : ({ items: [{ id: 25, shortName: 'Организация' }], total: 101, page: 1, pageSize: 50 }));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
     const add = await choosePageParticipantSource();
     const more = screen.getByRole('button', { name: 'Ещё записи справочника участников' });
     act(() => { fireEvent.click(more); fireEvent.click(more); fireEvent.click(add); });
-    await waitFor(() => expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledTimes(2));
-    expect(vi.mocked(apiService.getLegalEntitiesPaged).mock.calls.map(([query]) => query?.page)).toEqual([1, 2]);
+    await waitFor(() => expect(apiService.getLegalEntityDirectoryPage).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(apiService.getLegalEntityDirectoryPage).mock.calls.map(([query]) => query?.page)).toEqual([1, 2]);
     expect(apiService.addCaseRelatedParty).not.toHaveBeenCalled();
   });
 
@@ -6857,16 +6876,16 @@ describe('CaseDetailPage', () => {
 
   it.each(['retry', 'more'] as const)('participant directory: replaced login rejects old %s control before rerender', async control => {
     const session = documentCopyTestSession(); onTestFinished(() => session.restore());
-    if (control === 'retry') vi.mocked(apiService.getLegalEntitiesPaged).mockRejectedValue(new Error('Unavailable'));
-    else vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [{ id: 25, shortName: 'Организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 51, page: 1, pageSize: 50 });
+    if (control === 'retry') vi.mocked(apiService.getLegalEntityDirectoryPage).mockRejectedValue(new Error('Unavailable'));
+    else vi.mocked(apiService.getLegalEntityDirectoryPage).mockResolvedValue({ items: [{ id: 25, shortName: 'Организация' }], total: 51, page: 1, pageSize: 50 });
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
     fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
     const button = await screen.findByRole('button', { name: control === 'retry' ? 'Повторить загрузку справочника участников' : 'Ещё записи справочника участников' });
-    const reads = vi.mocked(apiService.getLegalEntitiesPaged).mock.calls.length;
+    const reads = vi.mocked(apiService.getLegalEntityDirectoryPage).mock.calls.length;
     session.replace('actor');
     fireEvent.click(button);
-    expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledTimes(reads);
+    expect(apiService.getLegalEntityDirectoryPage).toHaveBeenCalledTimes(reads);
   });
 
 
@@ -6917,9 +6936,9 @@ describe('CaseDetailPage', () => {
 
   it.each([401, 403])('participant directory denial baseline: HTTP %s on the next page clears private choices', async status => {
     let allowed = true;
-    vi.mocked(apiService.getLegalEntitiesPaged).mockImplementation(async query => {
+    vi.mocked(apiService.getLegalEntityDirectoryPage).mockImplementation(async query => {
       if (query?.page === 2 && allowed) { allowed = false; throw new Error(`HTTP ${status} Private directory denial`); }
-      return { items: [{ id: 25, shortName: 'Закрытая организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 51, page: query?.page ?? 1, pageSize: 50 };
+      return { items: [{ id: 25, shortName: 'Закрытая организация' }], total: 51, page: query?.page ?? 1, pageSize: 50 };
     });
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
     await choosePageParticipantSource();
@@ -6930,13 +6949,13 @@ describe('CaseDetailPage', () => {
     expect(screen.getByLabelText('Участник дела')).toHaveProperty('value', '');
     expect(screen.getByLabelText('Роль участника')).toHaveProperty('value', 'Представитель');
     fireEvent.click(retry);
-    await waitFor(() => expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledTimes(3));
-    expect(vi.mocked(apiService.getLegalEntitiesPaged).mock.calls.map(([query]) => query?.page)).toEqual([1, 2, 1]);
+    await waitFor(() => expect(apiService.getLegalEntityDirectoryPage).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(apiService.getLegalEntityDirectoryPage).mock.calls.map(([query]) => query?.page)).toEqual([1, 2, 1]);
   });
 
   it('participant directory linked page: an excluded first portion still exposes the next available choices', async () => {
     vi.mocked(apiService.getCaseRelatedParties).mockResolvedValue([{ id: 61, clientCaseId: 15, sourceType: 'legalEntity', sourceId: 25, legalEntityId: 25, displayName: 'Связанная организация', role: 'Ответчик', createdAt: '2026-11-04T00:00:00Z' }]);
-    vi.mocked(apiService.getLegalEntitiesPaged).mockImplementation(async query => ({ items: [{ id: query?.page === 2 ? 251 : 25, shortName: 'Организация', clientsCount: 0, createdAt: '2026-11-04T00:00:00Z' }], total: 51, page: query?.page ?? 1, pageSize: 50 }));
+    vi.mocked(apiService.getLegalEntityDirectoryPage).mockImplementation(async query => ({ items: [{ id: query?.page === 2 ? 251 : 25, shortName: 'Организация' }], total: 51, page: query?.page ?? 1, pageSize: 50 }));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Участники' }));
     fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });

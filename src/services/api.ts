@@ -17,6 +17,8 @@ import { beginCaseDocumentUpload, beginCaseDocumentGeneration, confirmCaseDocume
 import type { TaskStickerStyles } from '../utils/taskStickerStyles';
 
 export const AUTH_SESSION_EXPIRED_EVENT = 'payplanner:auth-session-expired';
+export type LegalEntityDirectoryItem = Pick<LegalEntitySummary, 'id' | 'shortName' | 'fullName' | 'inn' | 'phone' | 'email'>;
+
 export interface SalesRequestInvoiceCandidate {
   invoiceId: number;
   number: string;
@@ -6349,6 +6351,22 @@ export class ApiService {
       counterpartyRole: params?.counterpartyRole,
     });
     return this.request<LegalEntitySummary[]>(`/legal-entities${q}`, { signal: options?.signal, cache: 'no-store' });
+  }
+
+  async getLegalEntityDirectoryPage(
+    params?: { search?: string; page?: number; pageSize?: number; counterpartyRole?: 'client' | 'supplier' },
+    options?: { signal?: AbortSignal },
+  ) {
+    const q = buildQuery({
+      search: params?.search,
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 50,
+      counterpartyRole: params?.counterpartyRole,
+    });
+    return this.request<PagedResult<LegalEntityDirectoryItem>>(`/legal-entities/directory${q}`, {
+      signal: options?.signal,
+      cache: 'no-store',
+    });
   }
 
   async getLegalEntitiesPaged(

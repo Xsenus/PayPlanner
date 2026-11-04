@@ -426,7 +426,8 @@ public class LegalEntitiesControllerCoverageTests
             });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: 1);
+        var actor = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: actor.Id);
         interceptor.Commands.Clear();
 
         var action = await controller.GetPaged(search: "alpha", page: 1, pageSize: 1, ct: CancellationToken.None);
@@ -705,7 +706,8 @@ public class LegalEntitiesControllerCoverageTests
             });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: 1);
+        var actor = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: actor.Id);
 
         var action = await controller.GetPaged(search: "Zemtsov", page: 1, pageSize: 25, ct: CancellationToken.None);
 
