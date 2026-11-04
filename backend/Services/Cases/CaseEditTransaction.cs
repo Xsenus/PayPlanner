@@ -91,6 +91,7 @@ internal static partial class CaseEditTransaction
             {
                 await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"ClientCaseCourtEvents\" WHERE \"ClientCaseId\" = {id} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);
                 await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"ClientCaseCourtEventHistory\" WHERE \"ClientCaseCourtEventId\" IN (SELECT \"Id\" FROM \"ClientCaseCourtEvents\" WHERE \"ClientCaseId\" = {id}) ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);
+                await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"ClientCaseProceduralDeadlines\" WHERE \"ClientCaseId\" = {id} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);
             }
         }
         // Archived complaints and hidden historical parents retain their links.
@@ -98,6 +99,17 @@ internal static partial class CaseEditTransaction
             && db.ClientCaseCourtInstances.IgnoreQueryFilters().Any(instance => instance.Id == complaint.CourtInstanceId && instance.ClientCaseId == id), ct)) return true;
         if (!db.UseObjectAuditModel && await db.ClientCaseCourtEventHistory.IgnoreQueryFilters().AnyAsync(history => history.ClientCaseId != id
             && db.ClientCaseCourtEvents.IgnoreQueryFilters().Any(courtEvent => courtEvent.Id == history.ClientCaseCourtEventId && courtEvent.ClientCaseId == id), ct)) return true;
+        if (!db.UseObjectAuditModel)
+        {
+            if (await db.ClientCaseCourtComplaints.IgnoreQueryFilters().AnyAsync(complaint => complaint.ClientCaseId != id
+                && db.ClientCaseDocuments.IgnoreQueryFilters().Any(document => document.Id == complaint.ClientCaseDocumentId && document.ClientCaseId == id), ct)) return true;
+            if (await db.ClientCaseCourtEvents.IgnoreQueryFilters().AnyAsync(courtEvent => courtEvent.ClientCaseId != id
+                && db.ClientCaseDocuments.IgnoreQueryFilters().Any(document => document.Id == courtEvent.ClientCaseDocumentId && document.ClientCaseId == id), ct)) return true;
+            if (await db.ClientCaseProceduralDeadlines.IgnoreQueryFilters().AnyAsync(deadline => deadline.ClientCaseId != id
+                && db.ClientCaseDocuments.IgnoreQueryFilters().Any(document => document.Id == deadline.ClientCaseDocumentId && document.ClientCaseId == id), ct)) return true;
+            if (await db.ClientCaseCourtEvents.IgnoreQueryFilters().AnyAsync(courtEvent => courtEvent.ClientCaseId != id
+                && db.ClientCaseProceduralDeadlines.IgnoreQueryFilters().Any(deadline => deadline.Id == courtEvent.ProceduralDeadlineId && deadline.ClientCaseId == id), ct)) return true;
+        }
         return await db.ClientCaseHearingPreparationDocuments.IgnoreQueryFilters().AnyAsync(link =>
             db.ClientCaseDocuments.IgnoreQueryFilters().Any(document => document.Id == link.ClientCaseDocumentId && document.ClientCaseId == id)
             && db.ClientCaseHearingPreparations.IgnoreQueryFilters().Any(preparation => preparation.Id == link.ClientCaseHearingPreparationId && preparation.ClientCaseId != id), ct);
