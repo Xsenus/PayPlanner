@@ -8852,145 +8852,137 @@ public partial class CasesV2Controller : ControllerBase
         [FromBody] ClientCaseCourtSyncBindRequest? request,
         CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        if (!await HasCurrentCourtCheckActorAsync(ct)) return Unauthorized();
+        var normalizedInstance = NormalizeCourtInstance(request?.Instance);
+        var admission = await CaseEditTransaction.RunAsync(_db, User, id, async (currentCase, _) =>
         {
-            return forbidden;
-        }
-
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
-
-        var clientCase = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
-
+            if (!await HasCurrentCourtCheckActorAsync(ct)) return Unauthorized();
+            var currentInstance = await LoadCourtBindingInstanceAsync(id, normalizedInstance, ct);
+            return Ok(new CourtBindingPlan(currentCase, currentInstance));
+        }, ct);
+        if (admission is not OkObjectResult { Value: CourtBindingPlan expected }) return (ActionResult)admission;
+        var clientCase = expected.Case;
+        var courtInstance = expected.Instance;
         var sourceUrl = NormalizeOptional(request?.SourceUrl);
         if (sourceUrl is null)
-        {
             return BadRequest(new { message = "Выберите судебную карточку или укажите ссылку на источник." });
-        }
-
         var provider = ResolveCourtSyncProvider(sourceUrl);
         if (provider is null)
-        {
             return BadRequest(new { message = "Для указанного источника пока нет активного провайдера судебной синхронизации." });
-        }
-
-        var normalizedInstance = NormalizeCourtInstance(request?.Instance);
-        var courtInstance = await _db.ClientCaseCourtInstances
-            .Include(item => item.Complaints.Where(complaint => !complaint.IsArchived))
-            .FirstOrDefaultAsync(item => item.ClientCaseId == id && item.Instance == normalizedInstance, ct);
-        var previewDifferences = BuildCourtSyncPreviewDifferences(
-            clientCase,
-            courtInstance,
-            request?.CourtName,
-            NormalizeOptional(request?.CourtCaseNumber) ?? NormalizeOptional(request?.JudicialUid),
-            request?.JudgeName,
-            sourceUrl);
+        if (provider is not ICourtSyncCaseReader caseReader)
+            return BadRequest(new { message = "Выбранный судебный источник не поддерживает чтение карточки дела." });
+        var previewDifferences = BuildCourtSyncPreviewDifferences(clientCase, courtInstance, request?.CourtName,
+            NormalizeOptional(request?.CourtCaseNumber) ?? NormalizeOptional(request?.JudicialUid), request?.JudgeName, sourceUrl);
         if (previewDifferences.Any(static item => item.Kind == "replace") && request?.ConfirmDifferences != true)
-        {
             return Conflict(new
             {
                 message = "Найденная судебная карточка отличается от уже заполненных данных дела. Проверьте изменения и подтвердите замену.",
                 requiresConfirmation = true,
                 differences = previewDifferences,
             });
-        }
 
         var actorUserId = User.GetUserId();
         var actorName = User.GetDisplayName();
         var now = DateTime.UtcNow;
         var courtName = Truncate(NormalizeOptional(request?.CourtName) ?? NormalizeOptional(clientCase.CourtName) ?? string.Empty, 200);
-        var courtCaseNumber = Truncate(
-            NormalizeOptional(request?.CourtCaseNumber)
-                ?? NormalizeOptional(request?.JudicialUid)
-                ?? NormalizeOptional(clientCase.CourtCaseNumber)
-                ?? string.Empty,
-            100);
+        var courtCaseNumber = Truncate(NormalizeOptional(request?.CourtCaseNumber) ?? NormalizeOptional(request?.JudicialUid)
+            ?? NormalizeOptional(clientCase.CourtCaseNumber) ?? string.Empty, 100);
         var judicialUid = NormalizeOptional(request?.JudicialUid);
-
-        clientCase.CourtName = courtName;
-        clientCase.CourtCaseNumber = courtCaseNumber;
-        if (judicialUid is not null) clientCase.JudicialUid = Truncate(judicialUid, 120);
-        clientCase.CourtUrl = Truncate(sourceUrl, 1000);
-
-        if (courtInstance is null)
-        {
-            courtInstance = new ClientCaseCourtInstance
-            {
-                ClientCaseId = id,
-                Instance = normalizedInstance,
-                CreatedAt = now,
-                CreatedByUserId = actorUserId,
-                CreatedByUserName = Truncate(actorName, 256),
-            };
-            _db.ClientCaseCourtInstances.Add(courtInstance);
-        }
-
-        courtInstance.CourtName = courtName;
-        courtInstance.CourtCaseNumber = courtCaseNumber;
-        if (judicialUid is not null) courtInstance.JudicialUid = Truncate(judicialUid, 120);
-        courtInstance.CourtUrl = clientCase.CourtUrl;
-        courtInstance.UpdatedAt = now;
-        courtInstance.UpdatedByUserId = actorUserId;
-        courtInstance.UpdatedByUserName = Truncate(actorName, 256);
-
-        CourtSyncApplyResult? syncResult = null;
+        SudrfCourtCaseData? courtData = null;
         string? syncError = null;
         try
         {
-            if (provider is not ICourtSyncCaseReader caseReader)
+            // The proposed binding stays outside EF while the external reader waits.
+            courtData = await caseReader.ReadCaseAsync(new CourtSyncCaseBinding(Truncate(sourceUrl, 1000), courtCaseNumber, judicialUid, normalizedInstance), ct);
+        }
+        catch (SudrfCourtSyncException ex) { syncError = ex.Message; }
+        ct.ThrowIfCancellationRequested();
+        var externalIdSuffix = judicialUid is null ? string.Empty : $" Внешний идентификатор: {Truncate(judicialUid, 120)}.";
+        var bindingMessage = $"Привязана судебная карточка «{ResolveCourtInstanceLabel(normalizedInstance)}» через {provider.Label}. Суд: {FormatCaseTextValue(courtName)}; № в суде: {FormatCaseTextValue(courtCaseNumber)}.{externalIdSuffix}";
+        var accepted = await WithCurrentCourtCheckAsync(id, expected.Source, async currentCase =>
+        {
+            if (courtData is not null && CourtSyncCaseState.Capture(currentCase) != expected.Fields)
+                return Conflict(new { message = "Судебные сведения дела изменились во время ожидания. Обновите дело перед повторной привязкой." });
+            var currentInstance = await LoadCourtBindingInstanceAsync(id, normalizedInstance, ct);
+            if (CourtBindingInstanceState.Capture(currentInstance) != expected.InstanceState)
+                return Conflict(new { message = "Сведения судебной инстанции изменились. Обновите дело и подтвердите актуальную привязку." });
+            currentCase.CourtName = courtName;
+            currentCase.CourtCaseNumber = courtCaseNumber;
+            if (judicialUid is not null) currentCase.JudicialUid = Truncate(judicialUid, 120);
+            currentCase.CourtUrl = Truncate(sourceUrl, 1000);
+            if (currentInstance is null)
             {
-                return BadRequest(new { message = "Выбранный судебный источник не поддерживает чтение карточки дела." });
+                currentInstance = new ClientCaseCourtInstance
+                {
+                    ClientCaseId = id,
+                    Instance = normalizedInstance,
+                    CreatedAt = now,
+                    CreatedByUserId = actorUserId,
+                    CreatedByUserName = Truncate(actorName, 256),
+                };
+                _db.ClientCaseCourtInstances.Add(currentInstance);
             }
-
-            var courtData = await caseReader.ReadCaseAsync(
-                new CourtSyncCaseBinding(clientCase.CourtUrl, courtCaseNumber, judicialUid, normalizedInstance),
-                ct);
-            var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(clientCase, ct);
-            syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, sourceTimeZone, actorName, now, ct);
-            MarkCourtSyncSuccess(clientCase, now);
-        }
-        catch (SudrfCourtSyncException ex)
+            currentInstance.CourtName = courtName;
+            currentInstance.CourtCaseNumber = courtCaseNumber;
+            if (judicialUid is not null) currentInstance.JudicialUid = Truncate(judicialUid, 120);
+            currentInstance.CourtUrl = currentCase.CourtUrl;
+            currentInstance.UpdatedAt = now;
+            currentInstance.UpdatedByUserId = actorUserId;
+            currentInstance.UpdatedByUserName = Truncate(actorName, 256);
+            _db.SetAuditReason($"Привязана судебная карточка дела через {provider.Label}.");
+            CourtSyncPrepared? prepared = null;
+            if (courtData is not null)
+            {
+                AppendCaseEvent(currentCase, $"{bindingMessage} Автор: {actorName}.");
+                var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(currentCase, ct);
+                prepared = await PrepareSudrfCourtSyncAsync(currentCase, courtData, sourceTimeZone, actorName, now, ct, queuePublicationChanges: true);
+                prepared.Changes!.BindingInstance = CourtBindingInstanceState.Capture(currentInstance);
+            }
+            else
+            {
+                MarkCourtSyncFailure(currentCase, now, syncError!);
+                AppendCaseEvent(currentCase, $"{bindingMessage} Автоматическая синхронизация после привязки не выполнена: {syncError} Автор: {actorName}.");
+                await _db.SaveChangesAsync(ct);
+                await LoadCourtBindingComplaintsAsync(currentInstance, ct);
+            }
+            return Ok(new CourtBindingAccepted(new CourtBindingPlan(currentCase, currentInstance), prepared));
+        }, ct);
+        if (accepted is not OkObjectResult { Value: CourtBindingAccepted acceptedBinding }) return (ActionResult)accepted;
+        clientCase = acceptedBinding.Binding.Case;
+        courtInstance = acceptedBinding.Binding.Instance!;
+        CourtSyncApplyResult? syncResult = null;
+        string syncMessage;
+        if (acceptedBinding.Sync is { } acceptedSync)
         {
-            syncError = ex.Message;
-            MarkCourtSyncFailure(clientCase, now, ex.Message);
-            await NotifyCourtSyncFailedForCaseAsync(
-                clientCase,
-                provider.Label,
-                $"Автоматическая синхронизация после привязки не выполнена: {ex.Message}",
-                actorUserId,
-                actorName,
-                ct);
+            try { syncResult = await acceptedSync.CompleteAsync(); }
+            catch (CourtPublicationRejectedException denied) { return denied.Result; }
+            syncMessage = !syncResult.Value.HasChanges ? "Судебный источник проверен: новых изменений не найдено."
+                : $"Судебный источник обновлен: {FormatCourtSyncResult(syncResult.Value)}";
+            var completed = await WithCurrentCourtPublicationAsync(id, acceptedSync.Changes!, async currentCase =>
+            {
+                var invalid = await ApplyCourtPublicationChangesAsync(id, acceptedSync.Changes!, ct);
+                if (invalid is not null) return invalid;
+                clientCase = currentCase;
+                courtInstance = (await LoadCourtBindingInstanceAsync(id, normalizedInstance, ct))!;
+                await LoadCourtBindingComplaintsAsync(courtInstance, ct);
+                MarkCourtSyncSuccess(currentCase, now);
+                AppendCaseEvent(currentCase, $"{syncMessage} Инициатор: {actorName}.");
+                _db.SetAuditReason($"Привязана судебная карточка дела через {provider.Label}.");
+                await _db.SaveChangesAsync(ct);
+                return Ok(BuildResponse());
+            }, ct);
+            if (completed is OkObjectResult && syncResult.Value.HasChanges)
+                await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+            return (ActionResult)completed;
         }
+        syncMessage = $"Автоматическая синхронизация после привязки не выполнена: {syncError}";
+        await NotifyCourtSyncFailedForCaseAsync(clientCase, provider.Label, syncMessage, actorUserId, actorName, ct);
+        return Ok(BuildResponse());
 
-        var externalIdSuffix = judicialUid is null
-            ? string.Empty
-            : $" Внешний идентификатор: {Truncate(judicialUid, 120)}.";
-        var syncMessage = syncResult.HasValue
-            ? !syncResult.Value.HasChanges
-                ? "Судебный источник проверен: новых изменений не найдено."
-                : $"Судебный источник обновлен: {FormatCourtSyncResult(syncResult.Value)}"
-            : $"Автоматическая синхронизация после привязки не выполнена: {syncError}";
-        AppendCaseEvent(clientCase, $"Привязана судебная карточка «{ResolveCourtInstanceLabel(normalizedInstance)}» через {provider.Label}. Суд: {FormatCaseTextValue(courtName)}; № в суде: {FormatCaseTextValue(courtCaseNumber)}.{externalIdSuffix} {syncMessage} Автор: {actorName}.");
-        _db.SetAuditReason($"Привязана судебная карточка дела через {provider.Label}.");
-        await _db.SaveChangesAsync(ct);
-        if (syncResult is { HasChanges: true })
-        {
-            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        }
-
-        return Ok(new ClientCaseCourtSyncBindingDto
+        ClientCaseCourtSyncBindingDto BuildResponse() => new()
         {
             ClientCaseId = clientCase.Id,
-            Instance = courtInstance.Instance,
+            Instance = courtInstance!.Instance,
             ProviderKey = provider.Key,
             SourceType = provider.SourceType,
             CourtName = clientCase.CourtName,
@@ -9013,8 +9005,8 @@ public partial class CasesV2Controller : ControllerBase
             RemovedItems = syncResult?.RemovedItems ?? [],
             ConflictItems = syncResult?.ConflictItems ?? [],
             SyncError = syncError ?? string.Empty,
-            CourtInstance = MapCourtInstance(courtInstance),
-        });
+            CourtInstance = MapCourtInstance(courtInstance!),
+        };
     }
 
     [HttpPut("court-sync/settings")]
@@ -9233,14 +9225,6 @@ public partial class CasesV2Controller : ControllerBase
             DateTimeKind.Local => value.ToUniversalTime(),
             _ => CalendarTimeZoneHelper.FromUserLocalToUtc(value, sourceTimeZone),
         };
-    }
-
-    private async Task<CourtSyncApplyResult> ApplySudrfCourtSyncAsync(
-        ClientCase clientCase, SudrfCourtCaseData courtData, TimeZoneInfo? sourceTimeZone,
-        string actorName, DateTime checkedAt, CancellationToken ct)
-    {
-        var prepared = await PrepareSudrfCourtSyncAsync(clientCase, courtData, sourceTimeZone, actorName, checkedAt, ct);
-        return await prepared.CompleteAsync();
     }
 
     private async Task<CourtSyncPrepared> PrepareSudrfCourtSyncAsync(

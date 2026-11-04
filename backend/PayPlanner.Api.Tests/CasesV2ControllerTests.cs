@@ -12279,7 +12279,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         var conflict = Assert.IsType<ConflictObjectResult>(result.Result);
         Assert.NotNull(conflict.Value);
 
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.AsNoTracking().SingleAsync(item => item.Id == clientCase.Id);
         Assert.Equal("Старый суд", clientCase.CourtName);
         Assert.Equal("СТАРЫЙ-1", clientCase.CourtCaseNumber);
         Assert.Equal("https://example.sudrf.ru/old-card", clientCase.CourtUrl);
@@ -12367,7 +12367,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Equal(1, dto.CreatedCourtEvents);
         Assert.Contains("Судебный источник обновлен", dto.Message);
 
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.AsNoTracking().SingleAsync(item => item.Id == clientCase.Id);
         Assert.Equal("Хабаровский краевой суд", clientCase.CourtName);
         Assert.Equal("33а-3390/2026", clientCase.CourtCaseNumber);
         Assert.NotNull(clientCase.CourtSyncLastAttemptAt);
@@ -12449,7 +12449,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Equal("Судебный источник не ответил", dto.SyncError);
         Assert.Contains("синхронизация не выполнена", dto.Message, StringComparison.Ordinal);
 
-        await db.Entry(clientCase).ReloadAsync();
+        clientCase = await db.ClientCases.AsNoTracking().SingleAsync(item => item.Id == clientCase.Id);
         Assert.Equal("Хабаровский краевой суд", clientCase.CourtName);
         Assert.Equal("33а-3390/2026", clientCase.CourtCaseNumber);
         Assert.NotNull(clientCase.CourtSyncFailureStartedAt);

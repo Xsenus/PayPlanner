@@ -72,11 +72,13 @@ public partial class CasesV2Controller
 
     private Task<IActionResult> WithCurrentCourtPublicationAsync(int id, CourtPublicationPlan plan,
         Func<ClientCase, Task<IActionResult>> write, CancellationToken ct, Action? beforeCommit = null)
-        => WithCurrentCourtCheckAsync(id, plan.Source, currentCase =>
+        => WithCurrentCourtCheckAsync(id, plan.Source, async currentCase =>
         {
             if (CourtSyncCaseState.Capture(currentCase) != plan.Fields)
-                return Task.FromResult<IActionResult>(Conflict(new { message = "Судебные сведения изменились во время публикации. Обновите дело перед повторной проверкой." }));
-            return write(currentCase);
+                return Conflict(new { message = "Судебные сведения изменились во время публикации. Обновите дело перед повторной проверкой." });
+            if (plan.BindingInstance is { } binding && !await HasCurrentCourtBindingInstanceAsync(binding, pin: true, ct))
+                return Conflict(new { message = "Судебная инстанция изменилась во время публикации. Обновите дело перед повторной привязкой." });
+            return await write(currentCase);
         }, ct, beforeCommit);
 
     private async Task<ClientCase> RequireCourtPublicationAsync(int id, CourtPublicationPlan plan, CancellationToken ct)
@@ -90,6 +92,7 @@ public partial class CasesV2Controller
     {
         public CourtCheckSource Source { get; } = CourtCheckSource.Capture(clientCase);
         public CourtSyncCaseState Fields { get; } = CourtSyncCaseState.Capture(clientCase);
+        public CourtBindingInstanceState? BindingInstance { get; set; }
         public Dictionary<int, CourtDocumentChange> Documents { get; } = [];
         public Dictionary<int, CourtDeadlineLink> Deadlines { get; } = [];
         public Dictionary<int, CourtControlState> Controls { get; } = [];
@@ -108,7 +111,8 @@ public partial class CasesV2Controller
         var access = await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Cases, ct, requireApprovedUser: true);
         if (access?.Permission is not { CanView: true, CanEdit: true }) return false;
         var current = await _db.ClientCases.AsNoTracking().ApplyClientCaseVisibility(access.Visibility).SingleOrDefaultAsync(row => row.Id == id, ct);
-        return current is not null && CourtCheckSource.Capture(current) == plan.Source && CourtSyncCaseState.Capture(current) == plan.Fields;
+        return current is not null && CourtCheckSource.Capture(current) == plan.Source && CourtSyncCaseState.Capture(current) == plan.Fields
+            && (plan.BindingInstance is null || await HasCurrentCourtBindingInstanceAsync(plan.BindingInstance, pin: false, ct));
     }
 
     private async Task<CourtDocumentSourceBatchResult> CaptureCourtSourceBatchAsync(int id, int actorId, string actorName,
