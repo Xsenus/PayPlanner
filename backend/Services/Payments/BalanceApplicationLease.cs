@@ -50,13 +50,7 @@ internal sealed class BalanceApplicationLease : IAsyncDisposable
                 lease = new(db, await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct));
                 if (pinSettings)
                     await db.Database.ExecuteSqlRawAsync("LOCK TABLE \"SystemSettings\" IN SHARE MODE NOWAIT", ct);
-                if (actorId.HasValue)
-                {
-                    await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = {actorId.Value} FOR SHARE NOWAIT", ct);
-                    await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Roles\" WHERE \"Id\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId.Value}) FOR SHARE NOWAIT", ct);
-                    await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId.Value}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
-                    await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"UserId\" FROM \"UserCompanyAccesses\" WHERE \"UserId\" = {actorId.Value} ORDER BY \"LegalEntityId\" FOR SHARE NOWAIT", ct);
-                }
+                if (actorId.HasValue) await PinActorAsync(db, actorId.Value, ct);
             }
             else if (db.Database.IsSqlite())
             {
@@ -92,6 +86,16 @@ internal sealed class BalanceApplicationLease : IAsyncDisposable
             if (lease is not null) await lease.DisposeAsync();
             throw;
         }
+    }
+
+    internal static async Task PinActorAsync(PaymentContext db, int actorId, CancellationToken ct)
+    {
+        if (db.Database.CurrentTransaction is null) throw new InvalidOperationException("Actor locks require their publication transaction.");
+        if (!db.Database.IsNpgsql()) return;
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = {actorId} FOR SHARE NOWAIT", ct);
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Roles\" WHERE \"Id\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId}) FOR SHARE NOWAIT", ct);
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"UserId\" FROM \"UserCompanyAccesses\" WHERE \"UserId\" = {actorId} ORDER BY \"LegalEntityId\" FOR SHARE NOWAIT", ct);
     }
 
     public async Task LockOwnedPaymentAsync(int id, int? clientId, int? legalEntityId, CancellationToken ct)

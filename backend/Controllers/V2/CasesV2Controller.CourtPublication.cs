@@ -1,6 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Storage;
 
 namespace PayPlanner.Api.Controllers.V2;
 
@@ -33,6 +36,66 @@ public partial class CasesV2Controller
         public CourtSyncCaseState Fields { get; } = CourtSyncCaseState.Capture(clientCase);
         public Dictionary<int, CourtDocumentChange> Documents { get; } = [];
         public Dictionary<int, CourtDeadlineLink> Deadlines { get; } = [];
+        public Dictionary<int, CourtControlState> Controls { get; } = [];
+    }
+
+    private sealed record CourtControlState(int Id, int CaseId, string? SourceKey, string SourceType,
+        string SourceUrl, string Status, int? DocumentId)
+    {
+        public static CourtControlState Capture(ClientCaseProceduralDeadline deadline) => new(deadline.Id, deadline.ClientCaseId,
+            deadline.SourceDocumentKey, deadline.SourceType, deadline.SourceUrl, deadline.Status, deadline.ClientCaseDocumentId);
+    }
+
+    private async Task<bool> CanContinueCourtPublicationAsync(int id, CourtPublicationPlan plan, CancellationToken ct)
+    {
+        if (!await HasCurrentCourtCheckActorAsync(ct)) return false;
+        var access = await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Cases, ct, requireApprovedUser: true);
+        if (access?.Permission is not { CanView: true, CanEdit: true }) return false;
+        var current = await _db.ClientCases.AsNoTracking().ApplyClientCaseVisibility(access.Visibility).SingleOrDefaultAsync(row => row.Id == id, ct);
+        return current is not null && CourtCheckSource.Capture(current) == plan.Source && CourtSyncCaseState.Capture(current) == plan.Fields;
+    }
+
+    private async Task<CourtDocumentSourceBatchResult> CaptureCourtSourceBatchAsync(int id, int actorId, string actorName,
+        string bindingUrl, DateTime checkedAt, IReadOnlyCollection<CourtDocumentSourceInput> inputs, CourtPublicationPlan? plan, CancellationToken ct)
+    {
+        if (plan is null)
+            return await new CourtDocumentSourceRegistry(_db).RecordAcceptedBatchAsync(id, actorId, actorName, bindingUrl, checkedAt, inputs, ct);
+        var result = await WithCurrentCourtPublicationAsync(id, plan, async _ =>
+        {
+            var captured = await new CourtDocumentSourceRegistry(_db).RecordAcceptedBatchInTransactionAsync(id, actorId, actorName,
+                bindingUrl, checkedAt, inputs, ct);
+            return captured.Status == "recorded" ? Ok(captured)
+                : Conflict(new { message = "Судебный источник изменился или недоступен для добавления сводок. Обновите дело перед повторной проверкой." });
+        }, ct);
+        return result is OkObjectResult { Value: CourtDocumentSourceBatchResult batch } ? batch
+            : throw new CourtPublicationRejectedException((ActionResult)result);
+    }
+
+    private async Task<(ActionResult? Failure, Dictionary<int, int?> Links)> ReadCourtPublicationControlsAsync(
+        int caseId, IReadOnlyCollection<CourtControlState> controls, CancellationToken ct)
+    {
+        if (controls.Count == 0) return (null, []);
+        var ids = controls.Select(row => row.Id).ToArray();
+        if (_db.Database.IsNpgsql())
+            await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"ClientCaseProceduralDeadlines\" WHERE \"ClientCaseId\" = {caseId} AND \"Id\" = ANY ({ids}) ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);
+        var rows = await _db.ClientCaseProceduralDeadlines.AsNoTracking().Where(row => row.ClientCaseId == caseId && ids.Contains(row.Id))
+            .ToDictionaryAsync(row => row.Id, ct);
+        foreach (var expected in controls)
+            if (!rows.TryGetValue(expected.Id, out var row) || (CourtControlState.Capture(row) with { DocumentId = expected.DocumentId }) != expected)
+                return (Conflict(new { message = "Процессуальный срок изменился во время подготовки сводки. Обновите дело перед повторной проверкой." }), []);
+        return (null, rows.ToDictionary(pair => pair.Key, pair => pair.Value.ClientCaseDocumentId));
+    }
+
+    private async Task AdoptCourtReplayLinksAsync(int caseId, int documentId, CourtPublicationPlan plan,
+        IReadOnlyCollection<CourtControlState> controls, CancellationToken ct)
+    {
+        if (controls.Count == 0) return;
+        var ids = controls.Select(row => row.Id).ToArray();
+        var rows = await _db.ClientCaseProceduralDeadlines.AsNoTracking().Where(row => row.ClientCaseId == caseId && ids.Contains(row.Id)).ToDictionaryAsync(row => row.Id, ct);
+        foreach (var expected in controls)
+            if (rows.TryGetValue(expected.Id, out var row) && row.ClientCaseDocumentId == documentId
+                && (CourtControlState.Capture(row) with { DocumentId = expected.DocumentId }) == expected)
+                plan.Controls[expected.Id] = expected with { DocumentId = documentId };
     }
 
     private sealed record CourtDocumentMetadata(
@@ -113,7 +176,8 @@ public partial class CasesV2Controller
         {
             var deadline = deadlines[id];
             if (deadline.ClientCaseDocumentId != link.BeforeDocumentId || deadline.SourceDocumentKey != link.SourceKey
-                || deadline.SourceType != link.SourceType || deadline.SourceUrl != link.SourceUrl)
+                || deadline.SourceType != link.SourceType || deadline.SourceUrl != link.SourceUrl
+                || plan.Controls.TryGetValue(id, out var control) && deadline.Status != control.Status)
                 return Conflict(new { message = "Связь процессуального срока изменена. Обновите дело перед повторной проверкой." });
         }
         foreach (var (id, change) in plan.Documents)

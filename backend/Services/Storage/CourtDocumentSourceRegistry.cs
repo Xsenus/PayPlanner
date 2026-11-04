@@ -1,9 +1,11 @@
+using System.Data;
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.LegalIntegrations;
@@ -25,11 +27,25 @@ public sealed class CourtDocumentSourceRegistry(PaymentContext db)
     internal const string GenerationKind = "court";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public async Task<CourtDocumentSourceBatchResult> RecordAcceptedBatchAsync(int caseId, int actorId, string actorName,
+    private IDbContextTransaction? pinnedTransaction;
+    private readonly HashSet<(int ActorId, int CaseId)> pinnedActors = [];
+
+    public Task<CourtDocumentSourceBatchResult> RecordAcceptedBatchAsync(int caseId, int actorId, string actorName,
         string bindingUrl, DateTime checkedAt, IReadOnlyCollection<CourtDocumentSourceInput> inputs, CancellationToken ct)
+        => RecordAcceptedBatchCoreAsync(caseId, actorId, actorName, bindingUrl, checkedAt, inputs, ct, ownsTransaction: true);
+
+    internal Task<CourtDocumentSourceBatchResult> RecordAcceptedBatchInTransactionAsync(int caseId, int actorId, string actorName,
+        string bindingUrl, DateTime checkedAt, IReadOnlyCollection<CourtDocumentSourceInput> inputs, CancellationToken ct)
+        => RecordAcceptedBatchCoreAsync(caseId, actorId, actorName, bindingUrl, checkedAt, inputs, ct, ownsTransaction: false);
+
+    private async Task<CourtDocumentSourceBatchResult> RecordAcceptedBatchCoreAsync(int caseId, int actorId, string actorName,
+        string bindingUrl, DateTime checkedAt, IReadOnlyCollection<CourtDocumentSourceInput> inputs, CancellationToken ct, bool ownsTransaction)
     {
-        if (db.Database.CurrentTransaction is not null || db.ChangeTracker.HasChanges())
+        if ((ownsTransaction ? db.Database.CurrentTransaction is not null : db.Database.CurrentTransaction is null)
+            || db.ChangeTracker.HasChanges())
             throw new InvalidOperationException("Court source capture requires a clean, independent unit of work.");
+        if (!ownsTransaction && db.Database.CurrentTransaction!.GetDbTransaction().IsolationLevel != IsolationLevel.Serializable)
+            throw new InvalidOperationException("Accepted court source requires its serializable case owner.");
         if (caseId <= 0 || actorId <= 0 || string.IsNullOrWhiteSpace(actorName) || actorName.Length > 256
             || !ValidUrl(bindingUrl) || checkedAt.Kind != DateTimeKind.Utc || checkedAt < DateTime.UnixEpoch
             || inputs.Count > 500 || inputs.Any(i => !ValidInput(i))) return Result("invalid");
@@ -40,16 +56,16 @@ public sealed class CourtDocumentSourceRegistry(PaymentContext db)
         var bindingSha = Hash(bindingUrl);
         // Both providers preserve the same UTC wall clock, including PostgreSQL microseconds.
         checkedAt = new DateTime(checkedAt.Ticks - checkedAt.Ticks % 10, DateTimeKind.Utc);
-        if (!await CaseDocumentUploadAuthorization.CanPublishAsync(db, actorId, caseId, ct)) return Result("forbidden");
+        if (!await CanPublishCourtActorAsync(actorId, caseId, ct)) return Result("forbidden");
         var before = db.ChangeTracker.Entries().Select(e => (e.Entity, Current: e.CurrentValues.Clone(), Original: e.OriginalValues.Clone())).ToArray();
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var transaction = ownsTransaction ? await db.Database.BeginTransactionAsync(ct) : null;
         var commitStarted = false;
         try
         {
             if (await db.ClientCases.Where(c => c.Id == caseId)
                 .ExecuteUpdateAsync(s => s.SetProperty(c => c.Title, c => c.Title), ct) != 1) return Result("notFound");
             var currentBinding = await db.ClientCases.AsNoTracking().Where(c => c.Id == caseId).Select(c => c.CourtUrl).SingleAsync(ct);
-            if (currentBinding != bindingUrl || !await CaseDocumentUploadAuthorization.CanPublishAsync(db, actorId, caseId, ct))
+            if (currentBinding != bindingUrl || !await CanPublishCourtActorAsync(actorId, caseId, ct))
                 return Result("forbidden");
             var scope = await db.CourtDocumentSourceScopes.AsNoTracking().SingleOrDefaultAsync(s => s.ClientCaseId == caseId && s.BindingSha256 == bindingSha, ct);
             if (scope is not null)
@@ -160,12 +176,15 @@ public sealed class CourtDocumentSourceRegistry(PaymentContext db)
             var recoveredActors = await RecoverReturningPublicationsAsync(
                 result.Where(r => returningKeys.Contains(r.Snapshot.DocumentKey)).ToArray(), ct);
             foreach (var originalActor in recoveredActors)
-                if (!await CaseDocumentUploadAuthorization.CanPublishAsync(db, originalActor, caseId, ct))
+                if (!await CanPublishCourtActorAsync(originalActor, caseId, ct))
                     throw new InvalidOperationException("Court queue recovery lost its original author's authority.");
-            if (!await CaseDocumentUploadAuthorization.CanPublishAsync(db, actorId, caseId, ct))
+            if (!await CanPublishCourtActorAsync(actorId, caseId, ct))
                 throw new InvalidOperationException("Court source capture lost its authority.");
-            commitStarted = true;
-            await transaction.CommitAsync(ct);
+            if (transaction is not null)
+            {
+                commitStarted = true;
+                await transaction.CommitAsync(ct);
+            }
             return new("recorded", result);
 
             async Task FlushContentsAsync()
@@ -178,6 +197,7 @@ public sealed class CourtDocumentSourceRegistry(PaymentContext db)
         }
         catch (Exception original)
         {
+            if (transaction is null) throw;
             var rolledBack = false;
             try
             {
@@ -203,6 +223,21 @@ public sealed class CourtDocumentSourceRegistry(PaymentContext db)
         }
     }
 
+    private async Task<bool> CanPublishCourtActorAsync(int actorId, int caseId, CancellationToken ct)
+    {
+        var transaction = db.Database.CurrentTransaction;
+        if (!ReferenceEquals(transaction, pinnedTransaction))
+        {
+            pinnedTransaction = transaction;
+            pinnedActors.Clear();
+        }
+        var pin = transaction is not null && !pinnedActors.Contains((actorId, caseId));
+        var allowed = await CaseDocumentUploadAuthorization.CanPublishAsync(db, actorId, caseId, ct,
+            pinForPublication: pin);
+        if (pin && allowed) pinnedActors.Add((actorId, caseId));
+        return allowed;
+    }
+
     public async Task<bool> CanPublishAsync(ManagedCaseDocumentGenerationSource source, CancellationToken ct)
     {
         var snapshot = ReadSnapshot(source.Generation);
@@ -211,7 +246,7 @@ public sealed class CourtDocumentSourceRegistry(PaymentContext db)
             || source.RequestedDocumentKey != source.DocumentKey || source.FileName != snapshot.FileName
             || source.DocumentType != CourtSyncNormalization.DocumentTypes.CourtEventSummary || source.Status != "received"
             || source.ContentType != "text/html; charset=utf-8"
-            || !await CaseDocumentUploadAuthorization.CanPublishAsync(db, source.ActorId, source.CaseId, ct)) return false;
+            || !await CanPublishCourtActorAsync(source.ActorId, source.CaseId, ct)) return false;
         var attempt = await db.CourtDocumentSourceAttempts.AsNoTracking().Include(a => a.Source).ThenInclude(s => s.Scope)
             .SingleOrDefaultAsync(a => a.Id == snapshot.AttemptId && a.SourceId == snapshot.SourceId
                 && a.Source.ClientCaseId == source.CaseId && a.ActorId == source.ActorId
@@ -397,7 +432,7 @@ public sealed class CourtDocumentSourceRegistry(PaymentContext db)
                 || content.BindingUrl != snapshot.BindingUrl || content.RequestSha256 != receipt.Generation.RequestSha256
                 || content.FrozenSnapshotSha256 != Hash(receipt.Generation.FrozenDomainJson)) continue;
             if (!authority.TryGetValue(snapshot.ActorId, out var allowed))
-                authority[snapshot.ActorId] = allowed = await CaseDocumentUploadAuthorization.CanPublishAsync(db, snapshot.ActorId, caseId, ct);
+                authority[snapshot.ActorId] = allowed = await CanPublishCourtActorAsync(snapshot.ActorId, caseId, ct);
             if (allowed) eligible.Add(candidate.Operation.Id);
         }
         if (eligible.Count == 0) return [];

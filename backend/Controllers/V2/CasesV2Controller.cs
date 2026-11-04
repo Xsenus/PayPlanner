@@ -5987,7 +5987,7 @@ public partial class CasesV2Controller : ControllerBase
     }
 
     private async Task<ManagedCaseDocumentUploadResult> GenerateManagedCourtDocumentAsync(
-        CourtDocumentSourceReceipt receipt, CancellationToken ct)
+        CourtDocumentSourceReceipt receipt, CourtPublicationPlan? plan, IReadOnlyCollection<CourtControlState> controls, CancellationToken ct)
     {
         if (_managedCaseUploads is null) return new("disabled");
         var registry = new CourtDocumentSourceRegistry(_db);
@@ -5995,11 +5995,42 @@ public partial class CasesV2Controller : ControllerBase
         var publication = new GeneratedCourtDocumentPublication(_db,
             new CaseDocumentPublicationRecords(_db, notifications), registry);
         var snapshot = receipt.Snapshot;
+        if (plan is not null) await RequireCourtPublicationAsync(snapshot.CaseId, plan, ct);
+        var ownerUsed = false;
+        CaseDocumentAtomicPersistence<ManagedCaseDocumentUploadResult>? persistence = null;
+        if (plan is not null)
+        {
+            persistence = async (publish, commitStarting, token) =>
+            {
+                ownerUsed = true;
+                var owned = await WithCurrentCourtPublicationAsync(snapshot.CaseId, plan, async _ =>
+                {
+                    var before = await ReadCourtPublicationControlsAsync(snapshot.CaseId, controls, token);
+                    if (before.Failure is not null) return before.Failure;
+                    var published = await publish();
+                    if (published.Status != "uploaded" || !published.DocumentId.HasValue)
+                        return Conflict(new { message = "Публикация сводки изменилась. Обновите дело перед повторной проверкой." });
+                    foreach (var control in controls)
+                    {
+                        var currentLink = before.Links[control.Id];
+                        if (currentLink != control.DocumentId && currentLink != published.DocumentId)
+                            return Conflict(new { message = "Связь процессуального срока изменена другим сотрудником. Обновите дело перед повторной проверкой." });
+                        if (control.Status != "archived") plan.Controls[control.Id] = control with { DocumentId = published.DocumentId };
+                    }
+                    return Ok(published);
+                }, token, commitStarting);
+                return owned is OkObjectResult { Value: ManagedCaseDocumentUploadResult committed } ? committed
+                    : throw new CourtPublicationRejectedException((ActionResult)owned);
+            };
+        }
+        async Task<bool> AuthorizeRequestAsync(int actorId, int caseId, CancellationToken token)
+            => actorId == snapshot.ActorId && caseId == snapshot.CaseId
+                && (plan is null || await CanContinueCourtPublicationAsync(caseId, plan, token));
         ManagedCaseDocumentPublication atomic = (path, publish, token) => SaveCaseDocumentAtomicallyAsync(path,
-            () => Task.CompletedTask, publish, token, preserveFileOnFailure: true);
+            () => Task.CompletedTask, publish, token, preserveFileOnFailure: true, persistence: persistence);
         var result = await _managedCaseUploads.TryResumeGeneratedAsync(snapshot.CaseId, snapshot.ActorId,
             snapshot.AttemptId, receipt.Generation.Kind, receipt.Generation.RequestSha256,
-            (_, _, _) => Task.FromResult(true), publication.PersistAsync, atomic, ct, publication.CanPublishAsync);
+            AuthorizeRequestAsync, publication.PersistAsync, atomic, ct, publication.CanPublishAsync);
         if (result is null)
         {
             var source = GeneratedCourtDocumentPublication.GenerationSource(receipt.Generation);
@@ -6011,10 +6042,15 @@ public partial class CasesV2Controller : ControllerBase
             { Headers = new HeaderDictionary(), ContentType = source.ContentType };
             result = await _managedCaseUploads.GenerateAsync(new(source.CaseId, source.ActorId, snapshot.ActorName,
                 source.UploadKey, file, source.FileName, source.DocumentType, source.Status, source.DocumentKey),
-                receipt.Generation, (_, _, _) => Task.FromResult(true), publication.PersistAsync, atomic, ct,
+                receipt.Generation, AuthorizeRequestAsync, publication.PersistAsync, atomic, ct,
                 publication.CanPublishAsync);
         }
-        if (result.Status == "uploaded") await notifications.FlushCommittedAsync(ct);
+        if (result.Status == "uploaded")
+        {
+            if (plan is not null && !ownerUsed && result.DocumentId.HasValue)
+                await AdoptCourtReplayLinksAsync(snapshot.CaseId, result.DocumentId.Value, plan, controls, ct);
+            await notifications.FlushCommittedAsync(ct);
+        }
         return result;
     }
 
@@ -9775,6 +9811,8 @@ public partial class CasesV2Controller : ControllerBase
         {
             await _db.Entry(clientCase).ReloadAsync(ct);
             publicationChanges = new CourtPublicationPlan(clientCase);
+            foreach (var control in preparedCourtActs.SelectMany(act => act.Deadlines).DistinctBy(deadline => deadline.Id))
+                publicationChanges.Controls.Add(control.Id, CourtControlState.Capture(control));
         }
         return new CourtSyncPrepared(clientCase, CompleteAsync, publicationChanges);
 
@@ -9790,11 +9828,11 @@ public partial class CasesV2Controller : ControllerBase
             CourtDocumentSourceBatchResult? courtSourceBatch = null;
             if (useCourtSourceRegistry && actorUserId is > 0)
             {
-                courtSourceBatch = await new CourtDocumentSourceRegistry(_db).RecordAcceptedBatchAsync(
+                courtSourceBatch = await CaptureCourtSourceBatchAsync(
                     clientCase.Id, actorUserId.Value, actorName, clientCase.CourtUrl, checkedAt,
                     preparedCourtActs.Where(p => !p.FileConflict).Select(p => new CourtDocumentSourceInput(p.Key, SanitizeCourtSummaryFileName(p.FileName),
                         p.Act.Title, FirstNonEmpty(p.Act.SourceUrl, courtData.SourceUrl),
-                        BuildSudrfCourtActHtml(clientCase, courtData, p.Act), p.LegacyKey)).ToArray(), ct);
+                        BuildSudrfCourtActHtml(clientCase, courtData, p.Act), p.LegacyKey)).ToArray(), publicationChanges, ct);
             }
             var courtReceipts = courtSourceBatch?.Sources.ToDictionary(r => r.Snapshot.DocumentKey, StringComparer.Ordinal)
                 ?? new Dictionary<string, CourtDocumentSourceReceipt>(StringComparer.Ordinal);
@@ -9823,7 +9861,9 @@ public partial class CasesV2Controller : ControllerBase
                         }
                         // Earlier legacy metadata/link changes must not enter the writer's transaction.
                         await _db.SaveChangesAsync(ct);
-                        var outcome = await GenerateManagedCourtDocumentAsync(receipt, ct);
+                        var controls = publicationChanges is null ? Array.Empty<CourtControlState>()
+                            : prepared.Deadlines.Select(deadline => publicationChanges.Controls[deadline.Id]).ToArray();
+                        var outcome = await GenerateManagedCourtDocumentAsync(receipt, publicationChanges, controls, ct);
                         if (outcome.Status != "uploaded" || !outcome.DocumentId.HasValue)
                         {
                             if (outcome.Status is "pending" or "disabled" or "unavailable")
@@ -9883,7 +9923,7 @@ public partial class CasesV2Controller : ControllerBase
                 {
                     if (publicationChanges is null) deadline.ClientCaseDocumentId = document.Id;
                     else publicationChanges.Deadlines[deadline.Id] = new CourtDeadlineLink(
-                        deadline.ClientCaseDocumentId, deadline.SourceDocumentKey, deadline.SourceType, deadline.SourceUrl, document.Id);
+                        publicationChanges.Controls[deadline.Id].DocumentId, deadline.SourceDocumentKey, deadline.SourceType, deadline.SourceUrl, document.Id);
                 }
             }
 
