@@ -701,6 +701,12 @@ export interface LegalEntityInput {
   clientIds: number[];
 }
 
+/** Вложенные реквизиты в ответе клиента не содержат счётчик связанных клиентов.
+ * Полный список/карточка организаций по-прежнему возвращают LegalEntitySummary. */
+export type ClientLegalEntityReference = Omit<LegalEntitySummary, 'clientsCount'> & {
+  clientsCount?: number;
+};
+
 export interface Client {
   id: number;
   name: string;
@@ -721,7 +727,7 @@ export interface Client {
   auditDeletedByUserName?: string | null;
   isActive: boolean;
   legalEntityId?: number | null;
-  legalEntity?: LegalEntitySummary | null;
+  legalEntity?: ClientLegalEntityReference | null;
   responsibleUserId?: number | null;
   responsibleUserName?: string | null;
   clientStatusId?: number | null;

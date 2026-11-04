@@ -2388,6 +2388,22 @@ describe('ClientDetail integration', () => {
     expect(apiService.getLegalEntitiesPaged).not.toHaveBeenCalled();
     expect(document.querySelector<HTMLSelectElement>('select[name="legalEntityId"]')?.value).toBe('21');
   });
+  it('company inline contract: saves the authorized inline profile without a fabricated client count', async () => {
+    const inline = { id: 21, shortName: 'Доступная организация', fullName: 'Доступная организация полностью', inn: '7701000000', createdAt: '2026-11-01T00:00:00Z' } satisfies NonNullable<Client['legalEntity']>;
+    const client: Client = { ...linkedLookupClient(), legalEntity: inline };
+    vi.mocked(apiService.getClient).mockResolvedValue(client);
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+    vi.mocked(apiService.updateClient).mockResolvedValue(client);
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    await waitFor(() => expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledOnce());
+    await waitFor(() => expect(document.querySelector<HTMLSelectElement>('select[name="legalEntityId"]')?.selectedOptions[0]?.textContent).toContain('Доступная организация'));
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(apiService.updateClient).toHaveBeenCalledOnce());
+    expect(vi.mocked(apiService.updateClient).mock.calls[0][1]).toMatchObject({ legalEntityId: 21, name: 'Доступная организация', company: 'Доступная организация' });
+    expect(apiService.getLegalEntity).not.toHaveBeenCalled(); expect(inline).not.toHaveProperty('clientsCount');
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith('Изменения карточки клиента сохранены.', 'Клиент обновлен'));
+  });
   async function editHiddenLinkedClient(access: 'no-view' | 'denied-page', originalId: number | null = 21) {
     permissionsResult.legalEntities.canView = access === 'denied-page';
     permissionsResult.companyProfile.canView = false;

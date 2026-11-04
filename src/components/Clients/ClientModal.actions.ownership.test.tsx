@@ -25,6 +25,27 @@ describe('quick client action ownership', () => {
   beforeEach(() => { vi.resetAllMocks(); session = documentCopyTestSession(); ports.confirm.mockResolvedValue(true); vi.mocked(apiService.createLegalEntity).mockResolvedValue(company); vi.mocked(apiService.findLegalEntityById).mockResolvedValue(details); });
   afterEach(() => session.restore());
 
+  it.each(['hidden', 'inline'] as const)('quick client linked contract: %s existing organization needs no new creation or invented count', async visibility => {
+    const inline = { id: 31, shortName: 'Сохранённая организация', inn: '7701000000', createdAt: '2026-11-01T00:00:00Z' } satisfies NonNullable<Client['legalEntity']>;
+    const stored: Client = { ...client(), name: 'Сохранённая организация', company: 'Сохранённая организация', legalEntityId: 31, legalEntity: visibility === 'inline' ? inline : null };
+    const props = { isOpen: true, client: stored, ownerScope: 'all', onClose: vi.fn(), onSubmit: vi.fn().mockResolvedValue(undefined) };
+    render(<ClientModal {...props} />); submit();
+    await waitFor(() => expect(props.onSubmit).toHaveBeenCalledOnce());
+    expect(props.onSubmit.mock.calls[0][0]).toMatchObject({ legalEntityId: 31, name: stored.name, company: stored.company });
+    expect(apiService.createLegalEntity).not.toHaveBeenCalled(); expect(apiService.findLegalEntityById).not.toHaveBeenCalled();
+    await waitFor(() => expect(props.onClose).toHaveBeenCalledOnce()); expect(inline).not.toHaveProperty('clientsCount');
+  });
+  it('quick client linked contract: a server refusal retains the original link and edited comment for retry', async () => {
+    const stored: Client = { ...client(), name: 'Сохранённая организация', company: 'Сохранённая организация', legalEntityId: 31, legalEntity: null };
+    const props = { isOpen: true, client: stored, ownerScope: 'all', onClose: vi.fn(), onSubmit: vi.fn().mockRejectedValueOnce(new Error('Доступ изменился')).mockResolvedValue(undefined) };
+    render(<ClientModal {...props} />); fireEvent.change(document.querySelector('textarea[name="comment"]')!, { target: { value: 'Мой новый комментарий' } }); submit();
+    await screen.findByText('Доступ изменился'); expect(props.onClose).not.toHaveBeenCalled();
+    expect(document.querySelector<HTMLTextAreaElement>('textarea[name="comment"]')?.value).toBe('Мой новый комментарий');
+    submit(); await waitFor(() => expect(props.onSubmit).toHaveBeenCalledTimes(2));
+    expect(props.onSubmit.mock.calls[1][0]).toEqual(props.onSubmit.mock.calls[0][0]);
+    expect(props.onSubmit.mock.calls[1][0]).toMatchObject({ legalEntityId: 31, name: stored.name, company: stored.company, notes: expect.stringContaining('Мой новый комментарий') });
+    expect(apiService.createLegalEntity).not.toHaveBeenCalled(); await waitFor(() => expect(props.onClose).toHaveBeenCalledOnce());
+  });
   it('quick client baseline: closing during company creation prevents the next client write', async () => {
     const pending = deferred<LegalEntityDetail>(); vi.mocked(apiService.createLegalEntity).mockReturnValue(pending.promise); const view = setup(); legal(); submit(); await waitFor(() => expect(apiService.createLegalEntity).toHaveBeenCalledOnce());
     fireEvent.click(screen.getAllByRole('button', { name: 'cancel' }).at(-1)!); await act(async () => pending.resolve(company)); expect(view.props.onSubmit).not.toHaveBeenCalled(); expect(view.props.onClose).toHaveBeenCalledOnce();

@@ -89,7 +89,7 @@ import type {
   InvoiceWorkflowStatus,
   LegalEntityDetail,
   LegalEntityInput,
-  LegalEntitySummary,
+  ClientLegalEntityReference,
   Payment,
   PaymentPayload,
   PaymentStatus,
@@ -1669,7 +1669,7 @@ function ClientDetailScreen({
     isClientAndSupplier: false,
   }));
   const clientFormBaselineRef = useRef<typeof clientFormState | null>(null);
-  const [rememberedLegalEntity, setRememberedLegalEntity] = useState<{ entity: LegalEntitySummary; page: typeof EMPTY_LEGAL_LOOKUP } | null>(null);
+  const [rememberedLegalEntity, setRememberedLegalEntity] = useState<{ entity: ClientLegalEntityReference; page: typeof EMPTY_LEGAL_LOOKUP } | null>(null);
   const persistedLegalChange = useRef(false);
   const [legalEntityLookupSearch, setLegalEntityLookupSearch] = useState("");
   const debouncedLegalEntityLookupSearch = useDebouncedValue(
@@ -1759,7 +1759,7 @@ function ClientDetailScreen({
   const legalReadAttempt = useRef<{ controller: AbortController; isCurrent: () => boolean } | null>(null);
   const legalWriteAttempt = useRef<DocumentDeliveryRead | null>(null);
   const canCreateLegal = userIsAdmin || legalEntityPermissions.canCreate;
-  const canReadLegal = (entity: (LegalEntitySummary & { isOwnCompany?: boolean | null }) | null) => userIsAdmin || (entity?.isOwnCompany === true
+  const canReadLegal = (entity: (ClientLegalEntityReference & { isOwnCompany?: boolean | null }) | null) => userIsAdmin || (entity?.isOwnCompany === true
     ? permissions.companyProfile?.canView : entity?.isOwnCompany === false
       ? legalEntityPermissions.canView : legalEntityPermissions.canView || permissions.companyProfile?.canView);
   const canWriteLegal = (entity: LegalEntityDetail | null) => userIsAdmin || (entity
@@ -1860,7 +1860,7 @@ function ClientDetailScreen({
     setLegalEntityDraft({ shortName: "", inn: "" });
   };
 
-  const rememberLegalEntity = useCallback((entity: LegalEntitySummary) => {
+  const rememberLegalEntity = useCallback((entity: ClientLegalEntityReference) => {
     setRememberedLegalEntity({ entity, page: legalLookupRef.current.value });
   }, []);
 
@@ -4786,7 +4786,7 @@ function ClientDetailScreen({
       ?? (clientData?.legalEntity?.id === id ? clientData.legalEntity : null);
   }, [clientFormState.legalEntityId, legalLookup.value, legalLookupDenied, rememberedLegalEntity, clientData?.legalEntity]);
   const sortedLegalEntities = useMemo(() => {
-    const rows = new Map(legalLookup.value.items.map(entity => [entity.id, entity]));
+    const rows = new Map<number, ClientLegalEntityReference>(legalLookup.value.items.map(entity => [entity.id, entity]));
     if (selectedLegalEntity) rows.set(selectedLegalEntity.id, selectedLegalEntity);
     return [...rows.values()].sort((a, b) => a.shortName.localeCompare(b.shortName, undefined, { sensitivity: 'base' }));
   }, [legalLookup.value.items, selectedLegalEntity]);
