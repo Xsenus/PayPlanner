@@ -4,6 +4,9 @@ using PayPlanner.Api.Data;
 
 namespace PayPlanner.Api.Services;
 
+// The persistence owner signals before attempting COMMIT, including a lost acknowledgement.
+public delegate Task<T> CaseDocumentAtomicPersistence<T>(Func<Task<T>> saveRecords, Action commitStarting, CancellationToken ct);
+
 /// <summary>
 /// Saves a case document graph and restores only this operation's tracking after a confirmed rollback.
 /// Shared by HTTP writers and durable publication consumers.
@@ -12,7 +15,8 @@ public static class CaseDocumentAtomicSave
 {
     public static async Task<T> SaveAsync<T>(
         PaymentContext db, ICaseDocumentStorage storage, string relativePath, Func<Task> saveFile,
-        Func<Task<T>> saveRecords, CancellationToken ct, bool preserveFileOnFailure = false)
+        Func<Task<T>> saveRecords, CancellationToken ct, bool preserveFileOnFailure = false,
+        CaseDocumentAtomicPersistence<T>? persistence = null)
     {
         db.ChangeTracker.DetectChanges();
         var trackedBefore = db.ChangeTracker.Entries().Select(entry => new CaseDocumentTrackingSnapshot(
@@ -26,6 +30,8 @@ public static class CaseDocumentAtomicSave
         {
             await saveFile();
             fileSaved = true;
+            if (persistence is not null)
+                return await persistence(saveRecords, () => commitStarted = true, ct);
             transaction = await db.Database.BeginTransactionAsync(ct);
             var result = await saveRecords();
             commitStarted = true;
@@ -36,7 +42,7 @@ public static class CaseDocumentAtomicSave
         {
             // Never remove bytes after commit was attempted: a lost acknowledgement can
             // leave a committed reference. Retaining an orphan is safer than losing a document.
-            var rollbackConfirmed = transaction is null;
+            var rollbackConfirmed = transaction is null && !commitStarted;
             if (transaction is not null)
             {
                 try

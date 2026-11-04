@@ -5746,9 +5746,10 @@ public partial class CasesV2Controller : ControllerBase
     }
 
     private async Task<T> SaveCaseDocumentAtomicallyAsync<T>(
-        string relativePath, Func<Task> saveFile, Func<Task<T>> saveRecords, CancellationToken ct, bool preserveFileOnFailure = false)
+        string relativePath, Func<Task> saveFile, Func<Task<T>> saveRecords, CancellationToken ct, bool preserveFileOnFailure = false,
+        CaseDocumentAtomicPersistence<T>? persistence = null)
     {
-        var result = await CaseDocumentAtomicSave.SaveAsync(_db, _caseDocumentStorage, relativePath, saveFile, saveRecords, ct, preserveFileOnFailure);
+        var result = await CaseDocumentAtomicSave.SaveAsync(_db, _caseDocumentStorage, relativePath, saveFile, saveRecords, ct, preserveFileOnFailure, persistence);
         await CreateCaseDocumentNotifications().FlushCommittedAsync(ct);
         return result;
     }
@@ -5908,16 +5909,39 @@ public partial class CasesV2Controller : ControllerBase
         string auditDescription,
         string caseEventText,
         CancellationToken ct,
-        bool publishTaskJournalChanged = true, Guid? legacyUploadKey = null)
+        bool publishTaskJournalChanged = true, Guid? legacyUploadKey = null, CourtPublicationPlan? courtPublication = null)
     {
+        if (courtPublication is not null)
+            clientCase = await RequireCourtPublicationAsync(clientCase.Id, courtPublication, ct);
         var latestVersion = await _db.ClientCaseDocuments
             .Where(item => item.ClientCaseId == clientCase.Id && item.DocumentKey == documentKey)
             .MaxAsync(item => (int?)item.Version, ct) ?? 0;
+        if (courtPublication is not null && latestVersion != 0)
+            throw new CourtPublicationRejectedException(Conflict(new { message = "Сводка уже добавлена или получила новую версию. Обновите дело перед повторной проверкой." }));
         var version = latestVersion + 1;
         var safeFileName = SanitizeFileName(fileName);
         var storedFileName = BuildStoredFileName(documentKey, version, safeFileName);
         var relativePath = _caseDocumentStorage.BuildRelativePath(clientCase.Id, storedFileName);
         var content = Encoding.UTF8.GetBytes(html);
+
+        CaseDocumentAtomicPersistence<ClientCaseDocument>? persistence = null;
+        if (courtPublication is not null)
+        {
+            persistence = async (saveRecords, commitStarting, token) =>
+            {
+                var result = await WithCurrentCourtPublicationAsync(clientCase.Id, courtPublication, async currentCase =>
+                {
+                    clientCase = currentCase;
+                    var currentVersion = await _db.ClientCaseDocuments.Where(item => item.ClientCaseId == clientCase.Id && item.DocumentKey == documentKey)
+                        .MaxAsync(item => (int?)item.Version, token) ?? 0;
+                    if (currentVersion != latestVersion)
+                        return Conflict(new { message = "Сводка уже добавлена или получила новую версию. Обновите дело перед повторной проверкой." });
+                    return Ok(await saveRecords());
+                }, token, commitStarting);
+                return result is OkObjectResult { Value: ClientCaseDocument document } ? document
+                    : throw new CourtPublicationRejectedException((ActionResult)result);
+            };
+        }
 
         var savedDocument = await SaveCaseDocumentAtomicallyAsync(relativePath,
             () => _caseDocumentStorage.SaveAsync(relativePath, content, ct), async () =>
@@ -5954,7 +5978,7 @@ public partial class CasesV2Controller : ControllerBase
                 ct);
             await _db.SaveChangesAsync(ct);
             return document;
-        }, ct);
+        }, ct, persistence: persistence);
         if (publishTaskJournalChanged)
         {
             await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
@@ -9051,12 +9075,12 @@ public partial class CasesV2Controller : ControllerBase
             }, ct);
             if (acceptance is not OkObjectResult { Value: CourtSyncPrepared prepared }) return (ActionResult)acceptance;
             clientCase = prepared.Case;
-            var syncResult = await prepared.CompleteAsync();
-            var completion = await WithCurrentCourtCheckAsync(id, prepared.Changes!.Source, async currentCase =>
+            CourtSyncApplyResult syncResult;
+            try { syncResult = await prepared.CompleteAsync(); }
+            catch (CourtPublicationRejectedException denied) { return denied.Result; }
+            var completion = await WithCurrentCourtPublicationAsync(id, prepared.Changes!, async currentCase =>
             {
-                if (CourtSyncCaseState.Capture(currentCase) != prepared.Changes.Fields)
-                    return Conflict(new { message = "Судебные сведения изменились во время публикации. Обновите дело перед повторной проверкой." });
-                var invalid = await ApplyCourtPublicationChangesAsync(id, prepared.Changes, ct);
+                var invalid = await ApplyCourtPublicationChangesAsync(id, prepared.Changes!, ct);
                 if (invalid is not null) return invalid;
                 clientCase = currentCase;
                 MarkCourtSyncSuccess(clientCase, checkedAt);
@@ -9824,7 +9848,7 @@ public partial class CasesV2Controller : ControllerBase
                             BuildSudrfCourtActHtml(clientCase, courtData, courtAct), "Created",
                             $"Сводка судебного события «{courtAct.Title}» добавлена из ГАС «Правосудие»; текст акта не загружен.",
                             $"Сводка судебного события «{courtAct.Title}» добавлена из ГАС «Правосудие»; текст акта не загружен.",
-                            ct, publishTaskJournalChanged: false);
+                            ct, publishTaskJournalChanged: false, courtPublication: publicationChanges);
                         createdCourtActDocuments++;
                         _courtSyncMetrics?.RecordDocument(document.SizeBytes);
                         newItems.Add($"сводка судебного события «{courtAct.Title}»");

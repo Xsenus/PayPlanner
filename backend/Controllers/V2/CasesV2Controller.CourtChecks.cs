@@ -19,14 +19,14 @@ public partial class CasesV2Controller
     }
 
     private Task<IActionResult> WithCurrentCourtCheckAsync(int id, CourtCheckSource expectedSource,
-        Func<ClientCase, Task<IActionResult>> write, CancellationToken ct)
+        Func<ClientCase, Task<IActionResult>> write, CancellationToken ct, Action? beforeCommit = null)
         => CaseEditTransaction.RunAsync(_db, User, id, async (clientCase, _) =>
         {
             if (!await HasCurrentCourtCheckActorAsync(ct)) return Unauthorized();
             if (CourtCheckSource.Capture(clientCase) != expectedSource)
                 return Conflict(new { message = "Судебная привязка или результат проверки изменились. Обновите дело перед повторной проверкой." });
             return await write(clientCase);
-        }, ct);
+        }, ct, beforeCommit);
 
     private sealed record CourtSyncCaseState(
         string JudgeName, string Courtroom, string Claimant, string Defendant, string ThirdParties, string Representatives,

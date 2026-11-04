@@ -11,15 +11,15 @@ namespace PayPlanner.Api.Services.Cases;
 internal static partial class CaseEditTransaction
 {
     public static Task<IActionResult> RunAsync(PaymentContext db, ClaimsPrincipal actor, int id,
-        Func<ClientCase, SectionAccessContext, Task<IActionResult>> write, CancellationToken ct)
-        => RunSingleAsync(db, actor, id, write, ct, deleting: false);
+        Func<ClientCase, SectionAccessContext, Task<IActionResult>> write, CancellationToken ct, Action? beforeCommit = null)
+        => RunSingleAsync(db, actor, id, write, ct, deleting: false, beforeCommit);
 
     public static Task<IActionResult> RunDeleteAsync(PaymentContext db, ClaimsPrincipal actor, int id,
         Func<ClientCase, SectionAccessContext, Task<IActionResult>> write, CancellationToken ct)
         => RunSingleAsync(db, actor, id, write, ct, deleting: true);
 
     private static async Task<IActionResult> RunSingleAsync(PaymentContext db, ClaimsPrincipal actor, int id,
-        Func<ClientCase, SectionAccessContext, Task<IActionResult>> write, CancellationToken ct, bool deleting)
+        Func<ClientCase, SectionAccessContext, Task<IActionResult>> write, CancellationToken ct, bool deleting, Action? beforeCommit = null)
     {
         var actorId = actor.GetUserId();
         if (actor.Identity?.IsAuthenticated != true || actorId is not > 0) return new UnauthorizedResult();
@@ -46,7 +46,11 @@ internal static partial class CaseEditTransaction
                     await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"ClientCaseId\" = {id} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);
             }
             var result = await write(clientCase, access);
-            if (deleting ? result is NoContentResult : result is OkObjectResult) await lease.CommitAsync(ct);
+            if (deleting ? result is NoContentResult : result is OkObjectResult)
+            {
+                beforeCommit?.Invoke();
+                await lease.CommitAsync(ct);
+            }
             return result;
         }
         catch (Exception error) when (!ct.IsCancellationRequested && BalanceApplicationLease.IsConflict(error)

@@ -6,6 +6,27 @@ namespace PayPlanner.Api.Controllers.V2;
 
 public partial class CasesV2Controller
 {
+    private sealed class CourtPublicationRejectedException(ActionResult result) : Exception
+    {
+        public ActionResult Result { get; } = result;
+    }
+
+    private Task<IActionResult> WithCurrentCourtPublicationAsync(int id, CourtPublicationPlan plan,
+        Func<ClientCase, Task<IActionResult>> write, CancellationToken ct, Action? beforeCommit = null)
+        => WithCurrentCourtCheckAsync(id, plan.Source, currentCase =>
+        {
+            if (CourtSyncCaseState.Capture(currentCase) != plan.Fields)
+                return Task.FromResult<IActionResult>(Conflict(new { message = "Судебные сведения изменились во время публикации. Обновите дело перед повторной проверкой." }));
+            return write(currentCase);
+        }, ct, beforeCommit);
+
+    private async Task<ClientCase> RequireCourtPublicationAsync(int id, CourtPublicationPlan plan, CancellationToken ct)
+    {
+        var result = await WithCurrentCourtPublicationAsync(id, plan, currentCase => Task.FromResult<IActionResult>(Ok(currentCase)), ct);
+        return result is OkObjectResult { Value: ClientCase currentCase } ? currentCase
+            : throw new CourtPublicationRejectedException((ActionResult)result);
+    }
+
     private sealed class CourtPublicationPlan(ClientCase clientCase)
     {
         public CourtCheckSource Source { get; } = CourtCheckSource.Capture(clientCase);
