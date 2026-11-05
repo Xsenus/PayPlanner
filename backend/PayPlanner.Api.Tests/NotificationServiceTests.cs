@@ -5252,6 +5252,22 @@ public partial class NotificationServiceTests
     {
         await using var db = await CreateContextAsync();
         var recipient = await CreateUserAsync(db, "deadline-max-recipient@example.com");
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = recipient.RoleId,
+            Section = RolePermissionCatalog.Cases,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own
+        });
+        db.MaxRecipientLinks.Add(new MaxRecipientLink
+        {
+            UserId = recipient.Id,
+            MaxUserId = 79001,
+            Status = MaxRecipientLinkStatuses.Verified,
+            LinkTokenHash = Guid.NewGuid().ToString("N"),
+            VerifiedAt = DateTime.UtcNow.AddDays(-1)
+        });
+        await db.SaveChangesAsync();
         var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = recipient.Id };
         db.Clients.Add(client);
         await db.SaveChangesAsync();
@@ -5277,8 +5293,9 @@ public partial class NotificationServiceTests
         db.ClientCaseProceduralDeadlines.Add(deadline);
         await db.SaveChangesAsync();
         var max = new RecordingMaxOutboxService();
+        var realtime = new RecordingRealtimeNotificationPublisher();
         var service = CreateService(
-            db, new RecordingEmailService(), new RecordingTelegramService(),
+            db, new RecordingEmailService(), new RecordingTelegramService(), realtime,
             maxService: new ReadyMaxNotificationService(), maxOutboxService: max,
             configurationValues: new Dictionary<string, string?> { ["App:FrontendUrl"] = "https://crm.example.test/" });
 
@@ -5286,6 +5303,8 @@ public partial class NotificationServiceTests
             [new CaseProceduralDeadlineReminderBatchItem(clientCase, deadline, [recipient.Id])]));
         Assert.Equal(0, await service.NotifyCaseProceduralDeadlineRemindersAsync(
             [new CaseProceduralDeadlineReminderBatchItem(clientCase, deadline, [recipient.Id])]));
+        Assert.Empty(max.Requests);
+        Assert.Equal(1, await new CaseCourtNotificationDispatchProcessor(db, service, realtime).ProcessBatchAsync(default));
         var request = Assert.Single(max.Requests);
         Assert.Equal(UserNotificationTypes.CaseProceduralDeadline, request.NotificationType);
         Assert.Equal(recipient.Id, request.RecipientUserId);

@@ -323,8 +323,15 @@ public sealed partial class MaxOutboxServiceTests
         for (var batch = 0; batch < (types.Length + 19) / 20; batch++)
             await fixture.Processor(api).ProcessBatchAsync(CancellationToken.None);
 
-        Assert.Equal(types.Length, await fixture.Db.MaxOutboxMessages.CountAsync(item => item.Status == MaxOutboxStatuses.Sent));
-        Assert.Equal(expectedTexts.OrderBy(text => text, StringComparer.Ordinal), api.Messages.Select(message => message.Text).OrderBy(text => text, StringComparer.Ordinal));
+        var guardedTypes = new[] { UserNotificationTypes.CaseCourtEvent, UserNotificationTypes.CourtHearing, UserNotificationTypes.CourtStatusChanged,
+            UserNotificationTypes.CourtDecisionRecorded, UserNotificationTypes.CourtDecisionPublished, UserNotificationTypes.CaseProceduralDeadline };
+        var guardedCount = types.Count(type => guardedTypes.Contains(type.Key));
+        Assert.Equal(types.Length, await fixture.Db.MaxOutboxMessages.CountAsync(item => item.Status == MaxOutboxStatuses.Sent
+            || item.Status == MaxOutboxStatuses.Cancelled && item.LastErrorCode == "court-source-unresolved"));
+        Assert.Equal(guardedCount, await fixture.Db.MaxOutboxMessages.CountAsync(item => item.Status == MaxOutboxStatuses.Cancelled));
+        Assert.Equal(types.Length - guardedCount, await fixture.Db.MaxOutboxMessages.CountAsync(item => item.Status == MaxOutboxStatuses.Sent));
+        Assert.Equal(types.Where(type => !guardedTypes.Contains(type.Key)).Select(type => MaxMessageTemplateCatalog.RenderNotification(type.Key))
+            .OrderBy(text => text, StringComparer.Ordinal), api.Messages.Select(message => message.Text).OrderBy(text => text, StringComparer.Ordinal));
         Assert.Equal(0, await fixture.Processor(api).ProcessBatchAsync(CancellationToken.None));
     }
 

@@ -218,7 +218,7 @@ public class WebPushNotificationService : IWebPushNotificationService
         }
 
         // Managed court retries are dispatched by NotificationService through the original durable claim.
-        if (CaseCourtNotificationDeliveryGuard.IsManaged(original.EventKey)) return null;
+        if (CaseCourtNotificationDeliveryGuard.IsManaged(original.EventKey) || CaseCourtLegacyKey.IsCandidate(original.EventKey)) return null;
 
         var baseEventKey = ResolveBaseEventKey(original.EventKey);
         var notification = await _context.UserNotifications

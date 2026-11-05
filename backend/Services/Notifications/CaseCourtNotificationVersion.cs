@@ -24,8 +24,10 @@ internal static class CaseCourtNotificationVersion
 
     public static string Capture(string kind, CaseCourtNotificationPayload payload) => kind switch
     {
+        "current-state" => CaseCourtCurrentStateRecovery.Fingerprint(payload),
         "event" => Capture(payload.CourtEvent!),
         "deadline" => Capture(payload.Deadline!),
+        "reminder" => Hash(new { Deadline = Capture(payload.Deadline!), payload.CaseTitle, payload.CaseNumber }),
         "hearing-date" or "decision-date" => Capture(kind, payload.DateChange!),
         _ => throw new InvalidOperationException("Unsupported court notification source.")
     };
@@ -90,9 +92,26 @@ internal static class CaseCourtNotificationVersion
     public static async Task<bool> IsCurrentAsync(PaymentContext db, long outboxId, int caseId, string kind, int sourceId,
         string fingerprint, CancellationToken ct)
     {
+        if (kind == "current-state")
+        {
+            var accepted = await db.CaseCourtNotificationOutboxes.AsNoTracking().SingleOrDefaultAsync(row => row.Id == outboxId
+                && row.ClientCaseId == caseId && row.Kind == kind && row.SourceId == sourceId, ct);
+            return accepted is not null && CaseCourtNotificationDispatchProcessor.TryReadPayload(accepted, out var payload)
+                && Capture(kind, payload) == fingerprint
+                && await CaseCourtCurrentStateRecovery.IsCurrentAsync(db, caseId, sourceId, payload, ct);
+        }
         var markerKind = CaseDateMarkerKind(kind);
+        var versionKind = kind == "reminder" ? "deadline" : kind;
         if (await db.CaseCourtNotificationOutboxes.AsNoTracking().AnyAsync(row => row.ClientCaseId == caseId
-            && (row.Kind == kind || (markerKind != null && row.Kind == markerKind)) && row.SourceId == sourceId && row.Id > outboxId, ct)) return false;
+            && (row.Kind == versionKind || (markerKind != null && row.Kind == markerKind)) && row.SourceId == sourceId && row.Id > outboxId, ct)) return false;
+        if (kind == "reminder")
+        {
+            var source = await db.ClientCaseProceduralDeadlines.AsNoTracking()
+                .Where(row => row.Id == sourceId && row.ClientCaseId == caseId)
+                .Select(row => new { Deadline = row, row.ClientCase.Title, row.ClientCase.CaseNumber }).SingleOrDefaultAsync(ct);
+            return source is not null && source.Deadline.Status == "active"
+                && Hash(new { Deadline = Capture(source.Deadline), CaseTitle = source.Title, source.CaseNumber }) == fingerprint;
+        }
         if (IsCaseDateKind(kind))
         {
             if (sourceId != caseId) return false;

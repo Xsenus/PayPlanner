@@ -489,7 +489,8 @@ public sealed record NotificationEventEnvelope(
 public sealed record CaseProceduralDeadlineReminderBatchItem(
     ClientCase ClientCase,
     ClientCaseProceduralDeadline Deadline,
-    IReadOnlyCollection<int> RecipientUserIds);
+    IReadOnlyCollection<int> RecipientUserIds,
+    bool ResolveCurrentRecipients = false);
 
 public static class UserNotificationAntiSpamPolicy
 {

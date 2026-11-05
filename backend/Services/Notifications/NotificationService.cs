@@ -2664,7 +2664,9 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         int actorUserId,
         IReadOnlyCollection<int> recipientUserIds,
         CancellationToken cancellationToken = default)
-        => NotifyCaseProceduralDeadlineCoreAsync(clientCase, deadline, action, actorName, actorUserId, recipientUserIds, cancellationToken, null);
+        => NormalizeCaseProceduralDeadlineAction(action) == "reminder"
+            ? PersistCourtRemindersAsync([new(clientCase, deadline, recipientUserIds)], cancellationToken)
+            : NotifyCaseProceduralDeadlineCoreAsync(clientCase, deadline, action, actorName, actorUserId, recipientUserIds, cancellationToken, null);
 
     private async Task<IReadOnlyList<NotificationDelivery>> NotifyCaseProceduralDeadlineCoreAsync(
         ClientCase clientCase, ClientCaseProceduralDeadline deadline, string action, string actorName, int actorUserId,
@@ -2769,152 +2771,10 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
     /// каналов, шаблон и существующие ключи читаются пакетно, а новые записи сохраняются
     /// одной операцией независимо от количества дел и получателей.
     /// </summary>
-    public async Task<int> NotifyCaseProceduralDeadlineRemindersAsync(
+    public Task<int> NotifyCaseProceduralDeadlineRemindersAsync(
         IReadOnlyCollection<CaseProceduralDeadlineReminderBatchItem> reminders,
         CancellationToken cancellationToken = default)
-    {
-        var createdAt = DateTime.UtcNow;
-        var recipientCandidates = reminders
-            .Where(item => item.ClientCase.Id > 0 && item.Deadline.Id > 0)
-            .SelectMany(item => item.RecipientUserIds
-                .Where(userId => userId > 0)
-                .Distinct()
-                .Select(userId => new
-                {
-                    Item = item,
-                    RecipientUserId = userId,
-                }))
-            .ToArray();
-        if (recipientCandidates.Length == 0)
-        {
-            return 0;
-        }
-
-        var recipientIds = recipientCandidates
-            .Select(item => item.RecipientUserId)
-            .Distinct()
-            .ToArray();
-        var timeZonesByUserId = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
-            _context, recipientIds, cancellationToken);
-        var candidates = recipientCandidates
-            .Select(item => new
-            {
-                item.Item,
-                item.RecipientUserId,
-                EventKey = BuildCaseProceduralDeadlineReminderEventKey(
-                    item.Item.ClientCase.Id,
-                    item.Item.Deadline.Id,
-                    item.RecipientUserId,
-                    CaseDeadlineReminderCalendar.LocalDay(
-                        createdAt, timeZonesByUserId[item.RecipientUserId])
-                        .ToString("yyyyMMdd", CultureInfo.InvariantCulture)),
-            })
-            .GroupBy(item => item.EventKey, StringComparer.Ordinal)
-            .Select(group => group.First())
-            .ToArray();
-        var channelsByUser = await ResolveUserNotificationChannelsAsync(
-            recipientIds,
-            UserNotificationTypes.CaseProceduralDeadline,
-            [NotificationChannels.InApp, NotificationChannels.Toast, NotificationChannels.WebPush],
-            cancellationToken);
-        var candidateEventKeys = candidates.Select(candidate => candidate.EventKey).ToArray();
-        var existingEventKeys = await _context.UserNotifications
-            .AsNoTracking()
-            .Where(item => candidateEventKeys.Contains(item.EventKey))
-            .Select(item => item.EventKey)
-            .ToHashSetAsync(cancellationToken);
-        var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.CaseProceduralDeadline);
-        var templateStorage = templateDefinition is null
-            ? new NotificationTemplateStorage()
-            : await LoadTemplateStorageAsync(cancellationToken);
-        var messagesByDeadlineAndTimeZone = new Dictionary<(int DeadlineId, string TimeZoneId), NotificationMessage>();
-        var notifications = new List<UserNotification>(candidates.Length);
-        var deliveryChannels = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
-
-        foreach (var candidate in candidates)
-        {
-            var channels = channelsByUser[candidate.RecipientUserId];
-            if (!channels.Contains(NotificationChannels.InApp)
-                || existingEventKeys.Contains(candidate.EventKey))
-            {
-                continue;
-            }
-
-            var deadline = candidate.Item.Deadline;
-            var clientCase = candidate.Item.ClientCase;
-            var recipientTimeZone = timeZonesByUserId[candidate.RecipientUserId];
-            var messageKey = (deadline.Id, recipientTimeZone.Id);
-            if (!messagesByDeadlineAndTimeZone.TryGetValue(messageKey, out var message))
-            {
-                message = RenderTemplate(
-                    templateDefinition,
-                    templateStorage,
-                    BuildCaseProceduralDeadlineSubject(clientCase, deadline, "reminder"),
-                    BuildCaseProceduralDeadlineBody(clientCase, deadline, "reminder", "CRM", recipientTimeZone),
-                    BuildCaseProceduralDeadlineTemplateValues(clientCase, deadline, "reminder", "CRM", recipientTimeZone),
-                    isSensitive: false,
-                    purpose: NotificationPurposes.TaskReminder);
-                messagesByDeadlineAndTimeZone[messageKey] = message;
-            }
-
-            var notification = new UserNotification
-            {
-                RecipientUserId = candidate.RecipientUserId,
-                Type = UserNotificationTypes.CaseProceduralDeadline,
-                EventKey = candidate.EventKey,
-                Title = Truncate(message.Subject.Trim(), 300),
-                BodyPreview = Truncate(message.Body.Trim(), 1000),
-                Tone = ResolveCaseProceduralDeadlineTone("reminder", deadline),
-                ObjectType = "case",
-                ObjectId = clientCase.Id,
-                MetadataJson = JsonSerializer.Serialize(new
-                {
-                    clientCaseId = clientCase.Id,
-                    proceduralDeadlineId = deadline.Id,
-                    action = "reminder",
-                    actionText = ResolveCaseProceduralDeadlineActionText("reminder"),
-                    actorUserId = 0,
-                    actorName = "CRM",
-                    deadlineType = deadline.DeadlineType,
-                    dueAt = deadline.DueAt,
-                    allDay = deadline.AllDay,
-                    status = deadline.Status,
-                    warningDaysBefore = deadline.WarningDaysBefore,
-                    taskJournalItemId = deadline.TaskJournalItemId,
-                    clientCaseDocumentId = deadline.ClientCaseDocumentId,
-                    sourceType = deadline.SourceType,
-                    sourceId = deadline.SourceId,
-                }, JsonOptions),
-                CreatedAt = createdAt,
-            };
-            notifications.Add(notification);
-            deliveryChannels[candidate.EventKey] = channels;
-        }
-
-        if (notifications.Count == 0)
-        {
-            return 0;
-        }
-
-        _context.UserNotifications.AddRange(notifications);
-        await _context.SaveChangesAsync(cancellationToken);
-        foreach (var notification in notifications)
-        {
-            await QueueMaxNotificationIfAvailableAsync(notification, cancellationToken);
-            var channels = deliveryChannels[notification.EventKey];
-            await _realtimePublisher.PublishUserNotificationAsync(
-                notification,
-                channels.Contains(NotificationChannels.Toast),
-                cancellationToken);
-            if (_webPushNotificationService is not null
-                && channels.Contains(NotificationChannels.WebPush))
-            {
-                await _webPushNotificationService.SendUserNotificationAsync(notification, cancellationToken);
-            }
-        }
-
-        return notifications.Count;
-    }
+        => PersistCourtRemindersAsync(reminders, cancellationToken);
 
     private static string BuildCaseProceduralDeadlineReminderEventKey(
         int clientCaseId,
@@ -4577,6 +4437,10 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         {
             throw new InvalidOperationException("NotificationDeliveryPending");
         }
+
+        if (CaseCourtLegacyKey.IsCandidate(original.EventKey)
+            && !await _context.CaseCourtNotificationOutboxes.AsNoTracking().AnyAsync(row => row.EventKey == CaseCourtNotificationDeliveryGuard.RootKey(original.EventKey), cancellationToken))
+            return await RetryLegacyCourtDeliveryAsync(original, cancellationToken);
 
         if (CaseCourtNotificationDeliveryGuard.IsManaged(original.EventKey))
             return await RetryCourtDeliveryAsync(original, cancellationToken);

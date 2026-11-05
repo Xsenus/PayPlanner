@@ -103,6 +103,12 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
             }
 
             var candidates = await LoadRetryCandidatesAsync(settings, cancellationToken);
+            using (var legacyScope = _scopeFactory.CreateScope())
+            {
+                var legacy = await CaseCourtLegacyRecoveryScanner.ReadAsync(legacyScope.ServiceProvider.GetRequiredService<PaymentContext>(),
+                    DateTime.UtcNow.AddMinutes(-settings.DelayMinutes), settings.BatchSize, settings.MaxAttempts, cancellationToken);
+                candidates = legacy.Concat(candidates).ToArray();
+            }
             var retried = 0;
             var skipped = 0;
             string? lastError = null;
@@ -117,7 +123,8 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
                 try
                 {
                     var wasRetried = false;
-                    if (string.Equals(delivery.Channel, NotificationChannels.WebPush, StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(delivery.Channel, NotificationChannels.WebPush, StringComparison.OrdinalIgnoreCase)
+                        && !CaseCourtLegacyKey.IsCandidate(delivery.EventKey))
                     {
                         if (webPushNotificationService is null)
                         {
@@ -188,12 +195,13 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
             NormalizeDelay(delayMinutes),
             200,
             NormalizeMaxAttempts(maxAttempts));
-        return (await LoadRetryCandidatesAsync(settings, cancellationToken)).Count;
+        return (await LoadRetryCandidatesAsync(settings, cancellationToken, includeLegacy: true)).Count;
     }
 
     private async Task<IReadOnlyList<NotificationDelivery>> LoadRetryCandidatesAsync(
         NotificationRetrySettings settings,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool includeLegacy = false)
     {
         var cutoff = DateTime.UtcNow.AddMinutes(-settings.DelayMinutes);
         using var scope = _scopeFactory.CreateScope();
@@ -206,6 +214,10 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
                 // Court retries belong to their durable worker. Stable keys must not
                 // occupy this scheduler's bounded candidate window forever.
                 !item.EventKey.ToLower().StartsWith("case-court:") &&
+                (includeLegacy || !(item.EventKey.ToLower().StartsWith("case:") && (item.EventKey.ToLower().Contains(":procedural-deadline:")
+                    || item.EventKey.ToLower().Contains(":court-event:") || item.EventKey.ToLower().Contains(":hearing-date-changed:")
+                    || item.EventKey.ToLower().Contains(":decision-date-changed:")))) &&
+                (!includeLegacy || !context.CaseCourtNotificationOutboxes.Any(job => job.EventKey == item.EventKey)) &&
                 (item.Channel == NotificationChannels.Email
                     || item.Channel == NotificationChannels.Telegram
                     || item.Channel == NotificationChannels.WebPush))

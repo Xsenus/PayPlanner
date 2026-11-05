@@ -58,8 +58,8 @@ public sealed partial class NotificationService : IDurableCourtNotificationServi
 
     private static async Task RequireCourtDeliveryClaimAsync(CaseCourtDeliveryClaim claim, CancellationToken ct)
     {
-        if (claim.OutboxId <= 0 || claim.CaseId <= 0 || claim.SourceId <= 0 || claim.Kind is not ("event" or "deadline" or "hearing-date" or "decision-date")
-            || !CaseCourtNotificationVersion.IsValidEventKey(claim.EventKey) || claim.SourceFingerprint.Length != 64 || !await claim.OwnsLease(ct))
+        if (claim.OutboxId <= 0 || claim.CaseId <= 0 || claim.SourceId <= 0 || claim.Kind is not ("event" or "deadline" or "reminder" or "hearing-date" or "decision-date" or "current-state")
+            || !(claim.Kind == "reminder" ? CaseCourtReminderKeys.TryParse(claim.EventKey, out _) : CaseCourtNotificationVersion.IsValidEventKey(claim.EventKey)) || claim.SourceFingerprint.Length != 64 || !await claim.OwnsLease(ct))
             throw new InvalidOperationException("Court notification delivery claim is no longer current.");
     }
 
@@ -76,7 +76,7 @@ public sealed partial class NotificationService : IDurableCourtNotificationServi
             await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"ClientCases\" WHERE \"Id\" = {claim.CaseId} FOR SHARE NOWAIT", ct);
             if (claim.Kind == "event")
                 await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"ClientCaseCourtEvents\" WHERE \"Id\" = {claim.SourceId} AND \"ClientCaseId\" = {claim.CaseId} FOR SHARE NOWAIT", ct);
-            else if (claim.Kind == "deadline")
+            else if (claim.Kind is "deadline" or "reminder")
                 await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"ClientCaseProceduralDeadlines\" WHERE \"Id\" = {claim.SourceId} AND \"ClientCaseId\" = {claim.CaseId} FOR SHARE NOWAIT", ct);
         }
         await RequireCourtDeliveryClaimAsync(claim, ct);
@@ -88,6 +88,8 @@ public sealed partial class NotificationService : IDurableCourtNotificationServi
         if (!await _context.Users.AsNoTracking().AnyAsync(user => user.Id == userId && user.IsActive && user.IsApproved, ct)) return false;
         if (!await CaseCourtNotificationVersion.IsCurrentAsync(_context, claim.OutboxId, claim.CaseId, claim.Kind,
             claim.SourceId, claim.SourceFingerprint, ct)) return false;
+        if (claim.Kind == "reminder" && !await CaseCourtReminderKeys.IsCurrentWindowAsync(_context, claim.EventKey, userId, claim.ReminderTimeZoneId,
+            _timeProvider.GetUtcNow().UtcDateTime, ct)) return false;
         var envelope = new NotificationEventEnvelope(userId, type, claim.EventKey, "", "", "case", claim.CaseId, null);
         return await CanRecipientSeeNotificationObjectAsync(envelope, type, ct)
             && await IsUserNotificationChannelEnabledAsync(userId, type, channel, ct);

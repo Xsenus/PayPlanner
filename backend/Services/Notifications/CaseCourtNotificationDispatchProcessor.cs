@@ -105,12 +105,13 @@ public sealed class CaseCourtNotificationDispatchProcessor(PaymentContext db, ID
                             var clientCase = new ClientCase { Id = item.ClientCaseId, Title = payload!.CaseTitle, CaseNumber = payload.CaseNumber };
                             var claim = new CaseCourtDeliveryClaim(item.Id, item.EventKey, item.ClientCaseId, item.Kind, item.SourceId,
                                 async tokenCt => await Owned(item, token).AnyAsync(tokenCt),
-                                CaseCourtNotificationVersion.Capture(item.Kind, payload));
+                                CaseCourtNotificationVersion.Capture(item.Kind, payload), payload.ReminderTimeZoneId);
                             deliveries = item.Kind switch
                             {
+                                "current-state" => await notifications.NotifyCurrentCourtStateAsync(clientCase, payload, item.CreatedAt, claim, timeout.Token),
                                 "event" => await notifications.NotifyCourtEventForEventAsync(clientCase, payload.CourtEvent!, payload.Action, payload.ActorName,
                                     payload.ActorUserId, payload.RecipientUserIds, claim, timeout.Token),
-                                "deadline" => await notifications.NotifyProceduralDeadlineForEventAsync(clientCase, payload.Deadline!, payload.Action, payload.ActorName,
+                                "deadline" or "reminder" => await notifications.NotifyProceduralDeadlineForEventAsync(clientCase, payload.Deadline!, payload.Action, payload.ActorName,
                                     payload.ActorUserId, payload.RecipientUserIds, claim, timeout.Token),
                                 _ => await notifications.NotifyCaseDateForEventAsync(clientCase, payload.DateChange!, payload.ActorName, payload.ActorUserId,
                                     payload.RecipientUserIds, item.CreatedAt, claim, timeout.Token)
@@ -176,15 +177,23 @@ public sealed class CaseCourtNotificationDispatchProcessor(PaymentContext db, ID
         if (payload is not { Version: 1, CaseTitle: not null, CaseNumber: not null, ActorName: not null, RecipientUserIds: not null }
             || payload.ActorUserId < 0 || payload.RecipientUserIds.Any(id => id <= 0)
             || payload.RecipientUserIds.Distinct().Count() != payload.RecipientUserIds.Length
-            || !CaseCourtNotificationVersion.IsValidEventKey(item.EventKey)) return false;
-        if (payload.DateChange is not null && !CaseCourtNotificationVersion.IsCaseDateKind(item.Kind)
+            || !(item.Kind == "reminder" ? CaseCourtReminderKeys.TryParse(item.EventKey, out _) : CaseCourtNotificationVersion.IsValidEventKey(item.EventKey))) return false;
+        if (payload.ReminderTimeZoneId is not null && item.Kind != "reminder") return false;
+        if (payload.CurrentState is not null && item.Kind != "current-state") return false;
+        if (payload.DateChange is not null && item.Kind != "current-state" && !CaseCourtNotificationVersion.IsCaseDateKind(item.Kind)
             && !CaseCourtNotificationVersion.IsCaseDateMarker(item.Kind)) return false;
         return item.Kind switch
         {
+            "current-state" => CaseCourtCurrentStateRecovery.IsValid(item, payload),
             "event" => payload.CourtEvent is not null && payload.Deadline is null && payload.CourtEvent.Id == item.SourceId
                 && payload.CourtEvent.ClientCaseId == item.ClientCaseId && payload.Action is "created" or "updated" or "rescheduled",
             "deadline" => payload.Deadline is not null && payload.CourtEvent is null && payload.Deadline.Id == item.SourceId
                 && payload.Deadline.ClientCaseId == item.ClientCaseId && payload.Action is "created" or "updated" or "closed",
+            "reminder" => payload.Deadline is not null && payload.CourtEvent is null && payload.Deadline.Id == item.SourceId
+                && payload.Deadline.ClientCaseId == item.ClientCaseId && payload.Action == "reminder" && !string.IsNullOrWhiteSpace(payload.ReminderTimeZoneId) && payload.ReminderTimeZoneId.Length <= 128
+                && payload.ActorUserId == 0 && payload.ActorName == "CRM" && !item.JournalChanged
+                && payload.RecipientUserIds.Length == 1 && CaseCourtReminderKeys.TryParse(item.EventKey, out var reminder)
+                && reminder.CaseId == item.ClientCaseId && reminder.DeadlineId == item.SourceId && reminder.UserId == payload.RecipientUserIds[0],
             "journal" => item.SourceId == 0 && payload.CourtEvent is null && payload.Deadline is null,
             "hearing-date" or "decision-date" => item.SourceId == item.ClientCaseId && payload.CourtEvent is null && payload.Deadline is null
                 && payload.DateChange is not null && payload.Action == "updated",

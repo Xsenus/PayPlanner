@@ -4,6 +4,10 @@ namespace PayPlanner.Api.Services.Notifications;
 
 public interface IDurableCourtNotificationService
 {
+    Task<IReadOnlyList<NotificationDelivery>> NotifyCurrentCourtStateAsync(ClientCase clientCase, CaseCourtNotificationPayload payload,
+        DateTime acceptedAt, CaseCourtDeliveryClaim claim, CancellationToken ct)
+        => throw new InvalidOperationException("Current court state recovery is not supported by this notification service.");
+
     Task<IReadOnlyList<NotificationDelivery>> NotifyCourtEventForEventAsync(ClientCase clientCase, ClientCaseCourtEvent courtEvent,
         string action, string actorName, int actorUserId, IReadOnlyCollection<int> recipients, CaseCourtDeliveryClaim claim, CancellationToken ct);
 
@@ -15,4 +19,4 @@ public interface IDurableCourtNotificationService
 }
 
 public sealed record CaseCourtDeliveryClaim(long OutboxId, string EventKey, int CaseId, string Kind, int SourceId,
-    Func<CancellationToken, Task<bool>> OwnsLease, string SourceFingerprint);
+    Func<CancellationToken, Task<bool>> OwnsLease, string SourceFingerprint, string? ReminderTimeZoneId = null);

@@ -9,10 +9,17 @@ namespace PayPlanner.Api.Services.Notifications;
 
 internal static class CaseCourtNotificationDeliveryGuard
 {
-    internal static bool IsManaged(string? eventKey) => eventKey?.StartsWith("case-court:", StringComparison.OrdinalIgnoreCase) == true;
+    internal static bool IsManaged(string? eventKey) => eventKey?.StartsWith("case-court:", StringComparison.OrdinalIgnoreCase) == true
+        || CaseCourtReminderKeys.IsManaged(eventKey);
 
     internal static string? RootKey(string? eventKey)
     {
+        if (CaseCourtReminderKeys.IsManaged(eventKey))
+        {
+            var suffix = eventKey!.IndexOf(":retry:", StringComparison.Ordinal);
+            var key = suffix < 0 ? eventKey : eventKey[..suffix];
+            return CaseCourtReminderKeys.TryParse(key, out _) ? key : null;
+        }
         if (eventKey is null || eventKey.Length < 43) return null;
         var root = eventKey[..43];
         return CaseCourtNotificationVersion.IsValidEventKey(root)
@@ -25,12 +32,15 @@ internal static class CaseCourtNotificationDeliveryGuard
         var root = RootKey(eventKey);
         if (root is null || userId is not > 0) return false;
         var intent = await db.CaseCourtNotificationOutboxes.AsNoTracking().SingleOrDefaultAsync(row => row.EventKey == root, ct);
-        if (intent is null || intent.PayloadJson.Length > 65536 || intent.Kind is not ("event" or "deadline" or "hearing-date" or "decision-date")
+        if (intent is null || intent.PayloadJson.Length > 65536 || intent.Kind is not ("event" or "deadline" or "reminder" or "hearing-date" or "decision-date" or "current-state")
             || !CaseCourtNotificationDispatchProcessor.TryReadPayload(intent, out var payload)) return false;
         if (payload.DateChange?.SuppressDelivery == true) return false;
+        if (payload.CurrentState is not null && payload.CurrentState.RecipientUserId != userId.Value) return false;
         var fingerprint = CaseCourtNotificationVersion.Capture(intent.Kind, payload);
         if (!await CaseCourtNotificationVersion.IsCurrentAsync(db, intent.Id, intent.ClientCaseId, intent.Kind, intent.SourceId, fingerprint, ct)) return false;
-        var type = intent.Kind == "deadline" ? UserNotificationTypes.CaseProceduralDeadline
+        if (intent.Kind == "reminder" && !await CaseCourtReminderKeys.IsCurrentWindowAsync(db, root, userId.Value, payload.ReminderTimeZoneId, DateTime.UtcNow, ct)) return false;
+        var type = intent.Kind == "current-state" ? CaseCourtCurrentStateRecovery.Type(payload)
+            : intent.Kind is "deadline" or "reminder" ? UserNotificationTypes.CaseProceduralDeadline
             : intent.Kind == "hearing-date" ? UserNotificationTypes.CourtHearing
             : intent.Kind == "decision-date" ? UserNotificationTypes.CourtDecisionRecorded
             : payload.Action == "rescheduled" ? UserNotificationTypes.CourtHearing

@@ -8,7 +8,8 @@ namespace PayPlanner.Api.Services.Notifications;
 
 public sealed record CaseCourtNotificationPayload(int Version, string CaseTitle, string CaseNumber,
     string Action, int ActorUserId, string ActorName, int[] RecipientUserIds,
-    ClientCaseCourtEvent? CourtEvent, ClientCaseProceduralDeadline? Deadline, CaseCourtDateChange? DateChange = null);
+    ClientCaseCourtEvent? CourtEvent, ClientCaseProceduralDeadline? Deadline, CaseCourtDateChange? DateChange = null, string? ReminderTimeZoneId = null,
+    CaseCourtCurrentState? CurrentState = null);
 
 public sealed record CaseCourtDateChange(DateTime? PreviousAt, DateTime? CurrentAt, bool SuppressDelivery = false);
 

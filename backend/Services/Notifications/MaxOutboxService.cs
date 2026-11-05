@@ -35,7 +35,21 @@ public static class MaxMessageTemplateCatalog
         .GroupBy(definition => RenderNotification(definition.Key), StringComparer.Ordinal)
         .ToDictionary(group => group.Key, group => group.Select(definition => definition.Key).ToArray(), StringComparer.Ordinal);
 
-    internal static string CreateNotificationPayload(string notificationType) => PayloadPrefix + notificationType;
+    internal static string CreateNotificationPayload(string notificationType, string? sourceKey = null)
+        => PayloadPrefix + notificationType + (sourceKey is { Length: > 64 }
+            && (CaseCourtNotificationDeliveryGuard.IsManaged(sourceKey) || CaseCourtLegacyKey.IsCandidate(sourceKey)) ? "\n" + sourceKey : "");
+
+    internal static bool RequiresCourtSource(string type) => type is UserNotificationTypes.CaseCourtEvent or UserNotificationTypes.CourtHearing
+        or UserNotificationTypes.CourtStatusChanged or UserNotificationTypes.CourtDecisionRecorded
+        or UserNotificationTypes.CourtDecisionPublished or UserNotificationTypes.CaseProceduralDeadline;
+
+    internal static string? SourceKey(string payload, string storedKey)
+    {
+        var separator = payload.IndexOf('\n');
+        if (separator < 0) return storedKey.StartsWith("sha256:", StringComparison.Ordinal) ? null : storedKey;
+        var key = payload[(separator + 1)..];
+        return key.Length > 0 && key.Length <= 512 && !key.Contains('\n') && MaxOutboxService.NormalizeEventKey(key) == storedKey ? key : null;
+    }
 
     internal static string? ResolveNotificationType(string payload, string? sourceType)
     {
@@ -47,7 +61,8 @@ public static class MaxMessageTemplateCatalog
         if (payload.StartsWith("pp-max-notification:", StringComparison.Ordinal))
         {
             if (!payload.StartsWith(PayloadPrefix, StringComparison.Ordinal)) return null;
-            definition = UserNotificationTypes.Find(payload[PayloadPrefix.Length..]);
+            var separator = payload.IndexOf('\n');
+            definition = UserNotificationTypes.Find(separator < 0 ? payload[PayloadPrefix.Length..] : payload[PayloadPrefix.Length..separator]);
         }
         else
         {
@@ -210,7 +225,7 @@ public sealed class MaxOutboxService(
             RecipientUserId = request.RecipientUserId,
             ProtectedText = _protector.Protect(notificationType is null
                 ? text
-                : MaxMessageTemplateCatalog.CreateNotificationPayload(notificationType)),
+                : MaxMessageTemplateCatalog.CreateNotificationPayload(notificationType, request.EventKey)),
             ProtectedActionUrl = actionUri is null ? null : _protector.Protect(actionUri.AbsoluteUri),
             ActionText = string.IsNullOrWhiteSpace(request.ActionText) ? null : request.ActionText.Trim()[..Math.Min(request.ActionText.Trim().Length, 128)],
             IdempotencyKey = idempotencyKey,
@@ -280,7 +295,7 @@ public sealed class MaxOutboxService(
         _ => false
     };
 
-    private static string NormalizeEventKey(string? value)
+    internal static string NormalizeEventKey(string? value)
     {
         var normalized = value?.Trim() ?? string.Empty;
         if (normalized.Length == 0) throw new InvalidOperationException("Event key MAX обязателен.");
@@ -360,7 +375,7 @@ public sealed class MaxOutboxProcessor(
             : now;
         List<MaxOutboxMessage> messages;
         var lastSendByRecipient = new Dictionary<long, DateTime>();
-        var processableMessages = new List<(MaxOutboxMessage Message, long RecipientId, string? NotificationType)>();
+        var processableMessages = new List<(MaxOutboxMessage Message, long RecipientId, string? NotificationType, string SourceKey)>();
         try
         {
             await using var leaseTransaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
@@ -434,6 +449,7 @@ public sealed class MaxOutboxProcessor(
                 }
 
                 string? resolvedNotificationType = null;
+                var sourceEventKey = message.EventKey;
                 if (message.Scenario == MaxMessengerScenarios.Notifications)
                 {
                     if (message.RecipientUserId is not int userId
@@ -459,7 +475,23 @@ public sealed class MaxOutboxProcessor(
                             continue;
                         }
                         resolvedNotificationType = notificationType;
-                        var typedPayload = MaxMessageTemplateCatalog.CreateNotificationPayload(notificationType);
+                        var originalSourceKey = MaxMessageTemplateCatalog.SourceKey(payload, message.EventKey);
+                        if (originalSourceKey is null && MaxMessageTemplateCatalog.RequiresCourtSource(notificationType))
+                        {
+                            message.Status = MaxOutboxStatuses.Cancelled;
+                            message.LastErrorCode = "court-source-unresolved";
+                            message.UpdatedAt = now;
+                            continue;
+                        }
+                        sourceEventKey = originalSourceKey ?? message.EventKey;
+                        if (CaseCourtLegacyKey.IsCandidate(sourceEventKey) && (message.Status == MaxOutboxStatuses.Processing
+                            || message.LastErrorCode is UnknownDeliveryError or "provider-timeout"))
+                        {
+                            MarkFailed(message, UnknownDeliveryError, false, now);
+                            message.UpdatedAt = now;
+                            continue;
+                        }
+                        var typedPayload = MaxMessageTemplateCatalog.CreateNotificationPayload(notificationType, sourceEventKey);
                         if (payload != typedPayload)
                             message.ProtectedText = _protector.Protect(typedPayload);
                     }
@@ -500,7 +532,7 @@ public sealed class MaxOutboxProcessor(
                 message.Status = MaxOutboxStatuses.Processing;
                 message.AttemptCount++;
                 message.UpdatedAt = now;
-                processableMessages.Add((message, recipientId, resolvedNotificationType));
+                processableMessages.Add((message, recipientId, resolvedNotificationType, sourceEventKey));
             }
 
             if (messages.Count > 0)
@@ -517,7 +549,7 @@ public sealed class MaxOutboxProcessor(
             return 0;
         }
 
-        foreach (var (message, recipientId, notificationType) in processableMessages)
+        foreach (var (message, recipientId, notificationType, sourceEventKey) in processableMessages)
         {
             try
             {
@@ -581,7 +613,15 @@ public sealed class MaxOutboxProcessor(
                         }
                     }
                 }
-                if (!await CaseCourtNotificationDeliveryGuard.CanSendAsync(db, message.EventKey, message.RecipientUserId,
+                if (CaseCourtLegacyKey.IsCandidate(sourceEventKey)
+                    && !await db.CaseCourtNotificationOutboxes.AsNoTracking().AnyAsync(row => row.EventKey == sourceEventKey, ct))
+                {
+                    var currentId = await CaseCourtCurrentStateRecovery.AdoptAsync(db, sourceEventKey, message.RecipientUserId ?? 0,
+                        "max:" + message.PublicId.ToString("N"), timeProvider.GetUtcNow().UtcDateTime, ct, message.Id);
+                    await CancelAsync(message, currentId.HasValue ? "court-replaced-with-current-state" : "court-current-state-not-permitted", ct);
+                    continue;
+                }
+                if (!await CaseCourtNotificationDeliveryGuard.CanSendAsync(db, sourceEventKey, message.RecipientUserId,
                     NotificationChannels.Max, ct))
                 {
                     await CancelAsync(message, "court-event-no-longer-deliverable", ct);

@@ -97,17 +97,23 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
                 : candidates;
             var page = await pageQuery.Take(pageSize).ToListAsync(cancellationToken);
             var eligible = page.Where(deadline => !ClientCaseStageClassifier.IsPretrial(deadline.ClientCase)).ToArray();
-            var recipientsByCaseId = await ResolveCaseNotificationRecipientIdsAsync(
+            var durable = notificationService is IDurableCourtNotificationService;
+            var recipientsByCaseId = durable ? new Dictionary<int, IReadOnlyCollection<int>>() : await ResolveCaseNotificationRecipientIdsAsync(
                 db,
                 eligible.Select(deadline => deadline.ClientCaseId).Distinct().ToArray(),
                 cancellationToken);
-            var timeZonesByUserId = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            var timeZonesByUserId = durable ? new Dictionary<int, TimeZoneInfo>() : await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
                 db,
                 recipientsByCaseId.Values.SelectMany(userIds => userIds),
                 cancellationToken);
             var pageReminders = new List<CaseProceduralDeadlineReminderBatchItem>(eligible.Length);
             foreach (var deadline in eligible)
             {
+                if (durable)
+                {
+                    pageReminders.Add(new(deadline.ClientCase, deadline, [], ResolveCurrentRecipients: true));
+                    continue;
+                }
                 if (!recipientsByCaseId.TryGetValue(deadline.ClientCaseId, out var recipients)
                     || recipients.Count == 0) continue;
                 var dueRecipients = recipients.Where(userId => timeZonesByUserId.TryGetValue(userId, out var timeZone)
