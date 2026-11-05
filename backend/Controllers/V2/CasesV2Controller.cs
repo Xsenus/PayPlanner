@@ -3406,7 +3406,7 @@ public partial class CasesV2Controller : ControllerBase
             }
 
             await PinCourtComplaintDocumentAsync(id, request?.ClientCaseDocumentId, ct);
-            var linkError = await ValidateProceduralDeadlineLinksAsync(id, request, ct);
+            var linkError = await ValidateProceduralDeadlineLinksAsync(id, request, ct, deadlineId);
             if (linkError is not null)
             {
                 return BadRequest(new { message = linkError });
@@ -3934,7 +3934,7 @@ public partial class CasesV2Controller : ControllerBase
             }
 
             await PinCourtComplaintDocumentAsync(id, request?.ClientCaseDocumentId, ct);
-            var linkError = await ValidateCourtEventLinksAsync(id, request, ct);
+            var linkError = await ValidateCourtEventLinksAsync(id, request, ct, courtEventId);
             if (linkError is not null)
             {
                 return BadRequest(new { message = linkError });
@@ -14022,7 +14022,8 @@ public partial class CasesV2Controller : ControllerBase
     private static string ResolveCourtMovementStatusLabel(string value)
         => CourtSyncNormalization.GetMovementStatusLabel(value);
 
-    private async Task<string?> ValidateCourtEventLinksAsync(int clientCaseId, UpsertClientCaseCourtEventRequest? request, CancellationToken ct)
+    private async Task<string?> ValidateCourtEventLinksAsync(int clientCaseId, UpsertClientCaseCourtEventRequest? request, CancellationToken ct,
+        int? courtEventId = null)
     {
         if (request?.ClientCaseDocumentId is { } documentId)
         {
@@ -14037,19 +14038,28 @@ public partial class CasesV2Controller : ControllerBase
 
         if (request?.ProceduralDeadlineId is { } deadlineId)
         {
-            var deadlineExists = await _db.ClientCaseProceduralDeadlines
+            var deadline = await _db.ClientCaseProceduralDeadlines
                 .AsNoTracking()
-                .AnyAsync(item => item.Id == deadlineId && item.ClientCaseId == clientCaseId, ct);
-            if (!deadlineExists)
+                .Where(item => item.Id == deadlineId && item.ClientCaseId == clientCaseId)
+                .Select(item => new { item.SourceType, item.SourceId })
+                .SingleOrDefaultAsync(ct);
+            if (deadline is null)
             {
                 return "Процессуальный срок судебного события не найден в этом деле.";
+            }
+            if (IsCourtEventSourceType(deadline.SourceType) && deadline.SourceId.HasValue && deadline.SourceId != courtEventId
+                || await _db.ClientCaseCourtEvents.AsNoTracking().AnyAsync(item => item.ClientCaseId == clientCaseId
+                    && item.ProceduralDeadlineId == deadlineId && item.Id != (courtEventId ?? 0), ct))
+            {
+                return "Процессуальный срок уже связан с другим судебным событием. Сначала снимите прежнюю связь.";
             }
         }
 
         return null;
     }
 
-    private async Task<string?> ValidateProceduralDeadlineLinksAsync(int clientCaseId, UpsertClientCaseProceduralDeadlineRequest? request, CancellationToken ct)
+    private async Task<string?> ValidateProceduralDeadlineLinksAsync(int clientCaseId, UpsertClientCaseProceduralDeadlineRequest? request, CancellationToken ct,
+        int? deadlineId = null)
     {
         if (request?.TaskJournalItemId is { } taskId)
         {
@@ -14075,13 +14085,25 @@ public partial class CasesV2Controller : ControllerBase
 
         if (IsCourtEventSourceType(request?.SourceType) && request?.SourceId is { } courtEventId)
         {
-            var courtEventExists = await _db.ClientCaseCourtEvents
+            var courtEvent = await _db.ClientCaseCourtEvents
                 .AsNoTracking()
-                .AnyAsync(item => item.Id == courtEventId && item.ClientCaseId == clientCaseId, ct);
-            if (!courtEventExists)
+                .Where(item => item.Id == courtEventId && item.ClientCaseId == clientCaseId)
+                .Select(item => new { item.ProceduralDeadlineId })
+                .SingleOrDefaultAsync(ct);
+            if (courtEvent is null)
             {
                 return "Судебное событие процессуального срока не найдено в этом деле.";
             }
+            const string occupiedMessage = "Судебное событие уже связано с другим процессуальным сроком. Сначала снимите прежнюю связь.";
+            if (courtEvent.ProceduralDeadlineId.HasValue && courtEvent.ProceduralDeadlineId != deadlineId)
+            {
+                return occupiedMessage;
+            }
+            var sourceTypes = _db.ClientCaseProceduralDeadlines.AsNoTracking()
+                .Where(item => item.ClientCaseId == clientCaseId && item.SourceId == courtEventId && item.Id != (deadlineId ?? 0))
+                .Select(item => item.SourceType);
+            await foreach (var sourceType in sourceTypes.AsAsyncEnumerable().WithCancellation(ct))
+                if (IsCourtEventSourceType(sourceType)) return occupiedMessage;
         }
 
         return null;
@@ -14144,7 +14166,8 @@ public partial class CasesV2Controller : ControllerBase
         string actorName,
         CancellationToken ct)
     {
-        if (IsCourtEventSourceType(previousSourceType) && previousSourceId.HasValue && previousSourceId != deadline.SourceId)
+        if (IsCourtEventSourceType(previousSourceType) && previousSourceId.HasValue
+            && (!IsCourtEventSourceType(deadline.SourceType) || previousSourceId != deadline.SourceId))
         {
             var previousCourtEvent = await _db.ClientCaseCourtEvents
                 .FirstOrDefaultAsync(item => item.Id == previousSourceId && item.ClientCaseId == deadline.ClientCaseId && item.ProceduralDeadlineId == deadline.Id, ct);
