@@ -3940,6 +3940,21 @@ public class PaymentContext : DbContext
             entity.HasIndex(item => new { item.CompletedAt, item.LeaseUntil, item.LastAttemptAt, item.Id }).HasDatabaseName("IX_PaymentOverdueOutbox_Due");
         });
 
+        modelBuilder.Entity<CaseCourtNotificationOutbox>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Kind).HasMaxLength(16).IsRequired();
+            entity.Property(item => item.EventKey).HasMaxLength(160).IsRequired();
+            entity.Property(item => item.PayloadJson).HasColumnType("text").IsRequired();
+            entity.Property(item => item.LeaseToken).HasMaxLength(64);
+            entity.Property(item => item.LastError).HasMaxLength(500);
+            entity.HasOne<ClientCase>().WithMany().HasForeignKey(item => item.ClientCaseId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(item => item.EventKey).IsUnique();
+            entity.HasIndex(item => new { item.CompletedAt, item.BlockedAt, item.NextAttemptAt, item.LeaseUntil, item.Id })
+                .HasDatabaseName("IX_CaseCourtNotifications_Due");
+            entity.HasIndex(item => new { item.ClientCaseId, item.Kind, item.SourceId, item.Id }).HasDatabaseName("IX_CaseCourtNotifications_Source");
+        });
+
         modelBuilder.Entity<TaskStatusNotificationOutbox>(entity =>
         {
             entity.HasKey(item => item.Id);
@@ -5520,6 +5535,7 @@ public class PaymentContext : DbContext
     public DbSet<MaxOutboxMessage> MaxOutboxMessages { get; set; }
     public DbSet<TaskJournalDeadlineChangeRequest> TaskJournalDeadlineChangeRequests { get; set; }
     public DbSet<TaskStatusNotificationOutbox> TaskStatusNotificationOutboxes { get; set; }
+    public DbSet<CaseCourtNotificationOutbox> CaseCourtNotificationOutboxes { get; set; }
     public DbSet<PaymentOverdueNotificationOutbox> PaymentOverdueNotificationOutboxes { get; set; }
     public DbSet<TaskJournalFile> TaskJournalFiles { get; set; }
     public DbSet<TaskJournalTemplate> TaskJournalTemplates { get; set; }

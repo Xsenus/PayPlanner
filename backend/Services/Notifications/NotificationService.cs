@@ -2359,7 +2359,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         }
     }
 
-    public async Task NotifyCaseCourtEventAsync(
+    public Task NotifyCaseCourtEventAsync(
         ClientCase clientCase,
         ClientCaseCourtEvent courtEvent,
         string action,
@@ -2367,12 +2367,18 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         int actorUserId,
         IReadOnlyCollection<int> recipientUserIds,
         CancellationToken cancellationToken = default)
+        => NotifyCaseCourtEventCoreAsync(clientCase, courtEvent, action, actorName, actorUserId, recipientUserIds, cancellationToken, null);
+
+    private async Task<IReadOnlyList<NotificationDelivery>> NotifyCaseCourtEventCoreAsync(
+        ClientCase clientCase, ClientCaseCourtEvent courtEvent, string action, string actorName, int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken, CaseCourtDeliveryClaim? courtClaim)
     {
         if (clientCase.Id <= 0 || courtEvent.Id <= 0)
         {
-            return;
+            return Array.Empty<NotificationDelivery>();
         }
 
+        var deliveries = new List<NotificationDelivery>();
         var isRescheduled = string.Equals(action, "rescheduled", StringComparison.OrdinalIgnoreCase);
         var notificationType = isRescheduled
             ? UserNotificationTypes.CourtHearing
@@ -2381,7 +2387,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             recipientUserIds,
             isRescheduled || notificationType == UserNotificationTypes.CourtDecisionRecorded,
             cancellationToken);
-        if (recipients.Count == 0) return;
+        if (recipients.Count == 0) return Array.Empty<NotificationDelivery>();
         var visibleRecipientUserIds = await ResolveVisibleCaseNotificationRecipientIdsAsync(
             clientCase,
             recipients,
@@ -2389,7 +2395,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             cancellationToken);
         if (visibleRecipientUserIds.Count == 0)
         {
-            return;
+            return Array.Empty<NotificationDelivery>();
         }
 
         var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
@@ -2435,7 +2441,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                 BuildCourtEventTemplateValues(clientCase, courtEvent, action, normalizedActorName, recipientTimeZone),
                 purpose: NotificationPurposes.TaskReminder,
                 cancellationToken: cancellationToken);
-            var eventKey = $"case:{clientCase.Id}:court-event:{courtEvent.Id}:{notificationType}:{version}:{recipientUserId}";
+            var eventKey = courtClaim?.EventKey ?? $"case:{clientCase.Id}:court-event:{courtEvent.Id}:{notificationType}:{version}:{recipientUserId}";
             await CreateUserNotificationAsync(
                 recipientUserId,
                 notificationType,
@@ -2463,13 +2469,17 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                     proceduralDeadlineId = courtEvent.ProceduralDeadlineId
                 },
                 cancellationToken,
-                objectVisibilityValidated: true,
-                resolvedNotificationChannels: recipientNotificationChannels[recipientUserId]);
+                objectVisibilityValidated: courtClaim is null,
+                resolvedNotificationChannels: recipientNotificationChannels[recipientUserId],
+                courtClaim: courtClaim);
             if (recipientsById.TryGetValue(recipientUserId, out var recipient))
             {
-                await SendAsync(recipient, message, [NotificationChannels.Email], eventKey, cancellationToken);
+                deliveries.AddRange(courtClaim is null
+                    ? await SendAsync(recipient, message, [NotificationChannels.Email], eventKey, cancellationToken)
+                    : await SendCourtEmailForEventAsync(clientCase, recipient, message, notificationType, courtClaim, cancellationToken));
             }
         }
+        return deliveries;
     }
 
     public async Task NotifyCaseHearingDateChangedAsync(
@@ -2618,7 +2628,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         }
     }
 
-    public async Task NotifyCaseProceduralDeadlineAsync(
+    public Task NotifyCaseProceduralDeadlineAsync(
         ClientCase clientCase,
         ClientCaseProceduralDeadline deadline,
         string action,
@@ -2626,10 +2636,15 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         int actorUserId,
         IReadOnlyCollection<int> recipientUserIds,
         CancellationToken cancellationToken = default)
+        => NotifyCaseProceduralDeadlineCoreAsync(clientCase, deadline, action, actorName, actorUserId, recipientUserIds, cancellationToken, null);
+
+    private async Task<IReadOnlyList<NotificationDelivery>> NotifyCaseProceduralDeadlineCoreAsync(
+        ClientCase clientCase, ClientCaseProceduralDeadline deadline, string action, string actorName, int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken, CaseCourtDeliveryClaim? courtClaim)
     {
         if (clientCase.Id <= 0 || deadline.Id <= 0 || recipientUserIds.Count == 0)
         {
-            return;
+            return Array.Empty<NotificationDelivery>();
         }
 
         var visibleRecipientUserIds = await ResolveVisibleCaseNotificationRecipientIdsAsync(
@@ -2639,7 +2654,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             cancellationToken);
         if (visibleRecipientUserIds.Count == 0)
         {
-            return;
+            return Array.Empty<NotificationDelivery>();
         }
 
         var normalizedAction = NormalizeCaseProceduralDeadlineAction(action);
@@ -2687,7 +2702,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             await CreateUserNotificationAsync(
                 recipientUserId,
                 UserNotificationTypes.CaseProceduralDeadline,
-                $"case:{clientCase.Id}:procedural-deadline:{deadline.Id}:{normalizedAction}:{version}:{recipientUserId}",
+                courtClaim?.EventKey ?? $"case:{clientCase.Id}:procedural-deadline:{deadline.Id}:{normalizedAction}:{version}:{recipientUserId}",
                 message.Subject,
                 message.Body,
                 ResolveCaseProceduralDeadlineTone(normalizedAction, deadline),
@@ -2714,9 +2729,11 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                     sourceId = deadline.SourceId
                 },
                 cancellationToken,
-                objectVisibilityValidated: true,
-                resolvedNotificationChannels: recipientNotificationChannels[recipientUserId]);
+                objectVisibilityValidated: courtClaim is null,
+                resolvedNotificationChannels: recipientNotificationChannels[recipientUserId],
+                courtClaim: courtClaim);
         }
+        return Array.Empty<NotificationDelivery>();
     }
 
     /// <summary>
@@ -4811,7 +4828,8 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         object? metadata,
         CancellationToken cancellationToken,
         bool objectVisibilityValidated = false,
-        IReadOnlySet<string>? resolvedNotificationChannels = null)
+        IReadOnlySet<string>? resolvedNotificationChannels = null,
+        CaseCourtDeliveryClaim? courtClaim = null)
         => CreateUserNotificationAsync(
             new NotificationEventEnvelope(
                 recipientUserId,
@@ -4827,7 +4845,8 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                 task),
             cancellationToken,
             objectVisibilityValidated,
-            resolvedNotificationChannels);
+            resolvedNotificationChannels,
+            courtClaim: courtClaim);
 
     private async Task<bool> CreateUserNotificationAsync(
         NotificationEventEnvelope notificationEvent,
@@ -4836,7 +4855,8 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         IReadOnlySet<string>? resolvedNotificationChannels = null,
         bool retryMaxQueue = false,
         bool replayRealtimeOnRetry = false,
-        int? expectedApprovalParticipantId = null)
+        int? expectedApprovalParticipantId = null,
+        CaseCourtDeliveryClaim? courtClaim = null)
     {
         if (notificationEvent.RecipientUserId <= 0 || string.IsNullOrWhiteSpace(notificationEvent.EventKey))
         {
@@ -4852,6 +4872,11 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         await using var accessLease = replayRealtimeOnRetry && notificationEvent.Task is not null
             ? await TaskDeadlineRequestLease.TryAcquireAsync(_context, notificationEvent.RecipientUserId, notificationEvent.Task.Id, cancellationToken)
             : null;
+        await using var courtAccessLease = courtClaim is not null
+            ? await CaseCourtNotificationLease.BeginAsync(_context, cancellationToken)
+            : null;
+        if (courtClaim is not null)
+            await PinCourtNotificationClaimAsync(courtClaim, notificationEvent, cancellationToken);
         if (replayRealtimeOnRetry)
         {
             if (notificationEvent.Task is null || accessLease is null)
@@ -4866,9 +4891,11 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                 return false;
         }
 
-        var inAppEnabled = resolvedNotificationChannels is not null
-            ? resolvedNotificationChannels.Contains(NotificationChannels.InApp)
-            : await IsUserNotificationChannelEnabledAsync(
+        var inAppEnabled = courtClaim is not null
+            ? await IsCourtRecipientCurrentAsync(notificationEvent.RecipientUserId, type, NotificationChannels.InApp, courtClaim, cancellationToken)
+            : resolvedNotificationChannels is not null
+                ? resolvedNotificationChannels.Contains(NotificationChannels.InApp)
+                : await IsUserNotificationChannelEnabledAsync(
                 notificationEvent.RecipientUserId,
                 type,
                 NotificationChannels.InApp,
@@ -4880,11 +4907,17 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
 
         var duplicates = _context.UserNotifications.AsNoTracking()
             .Where(UserNotificationAntiSpamPolicy.ExactDuplicatePredicate(notificationEvent));
-        if (retryMaxQueue)
+        if (retryMaxQueue || courtClaim is not null)
         {
             var existing = await duplicates.FirstOrDefaultAsync(cancellationToken);
             if (existing is not null)
             {
+                if (courtAccessLease is not null)
+                {
+                    await courtAccessLease.CommitAsync(cancellationToken);
+                    await ReplayCourtNotificationChannelsAsync(existing, courtClaim!, cancellationToken);
+                    return false;
+                }
                 if (accessLease is not null) await accessLease.CommitAsync(cancellationToken);
                 if (accessLease is not null && !await IsDurableTaskRecipientCurrentAsync(notificationEvent.Task!, notificationEvent.RecipientUserId,
                     type == UserNotificationTypes.TaskCompleted, cancellationToken, expectedApprovalParticipantId)) return false;
@@ -4920,7 +4953,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             return false;
         }
 
-        if (!objectVisibilityValidated
+        if ((!objectVisibilityValidated || courtClaim is not null)
             && !await CanRecipientSeeNotificationObjectAsync(notificationEvent, type, cancellationToken))
         {
             _logger.LogWarning(
@@ -4948,6 +4981,12 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         };
         _context.UserNotifications.Add(notification);
         await _context.SaveChangesAsync(cancellationToken);
+        if (courtAccessLease is not null)
+        {
+            await courtAccessLease.CommitAsync(cancellationToken);
+            await ReplayCourtNotificationChannelsAsync(notification, courtClaim!, cancellationToken);
+            return true;
+        }
         if (accessLease is not null) await accessLease.CommitAsync(cancellationToken);
         if (accessLease is not null && !await IsDurableTaskRecipientCurrentAsync(notificationEvent.Task!, notificationEvent.RecipientUserId,
             type == UserNotificationTypes.TaskCompleted, cancellationToken, expectedApprovalParticipantId)) return false;

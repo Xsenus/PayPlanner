@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Cases;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers.V2;
 
@@ -14,15 +16,33 @@ public partial class CasesV2Controller
             return await write(clientCase);
         }, ct);
 
-    private async Task CompleteCourtWriteAsync(IActionResult result, bool journalChanged, Func<Task>? notifyAfterCommit, CancellationToken ct)
+    private async Task CompleteCourtWriteAsync(IActionResult result, bool journalChanged, Func<Task>? notifyAfterCommit, CancellationToken ct,
+        long? notificationId = null)
     {
-        if (result is not (OkObjectResult or CreatedResult)) return;
+        if (result is not (OkObjectResult or CreatedResult or NoContentResult)) return;
+        if (notificationId.HasValue && _notificationService is IDurableCourtNotificationService durable)
+        {
+            await new CaseCourtNotificationDispatchProcessor(_db, durable, _realtimePublisher).ProcessAsync(notificationId.Value, ct);
+            return;
+        }
         if (notifyAfterCommit is not null)
         {
             await notifyAfterCommit();
             await _db.SaveChangesAsync(ct);
         }
         if (journalChanged) await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+    }
+
+    private async Task<long?> QueueCourtNotificationAsync(ClientCase clientCase, CaseCourtNotificationRequest request,
+        int? actorUserId, string actorName, CancellationToken ct)
+    {
+        if (_notificationService is not IDurableCourtNotificationService) return null;
+        if (ClientCaseStageClassifier.IsPretrial(clientCase))
+        {
+            if (!request.JournalChanged) return null;
+            request = new("journal", "updated", null, null, true);
+        }
+        return (await new CaseCourtNotificationQueue(_db).EnqueueBatchAsync(clientCase, actorUserId ?? 0, actorName, [request], ct)).Single();
     }
 
     private async Task PinCourtEventDeadlineRowsAsync(int caseId, CancellationToken ct)

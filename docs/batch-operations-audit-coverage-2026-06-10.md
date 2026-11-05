@@ -1,27 +1,31 @@
-## Актуальная инвентаризация — 29 октября 2026
+## Актуальная инвентаризация — 5 ноября 2026
 
-Всего **163** мест ExecuteUpdateAsync/ExecuteDeleteAsync. Для очереди статусов два условных обновления захватывают и завершают доставку по токену и сроку; данные задачи не меняются. Для доставки переназначенного запроса два условных обновления захватывают и завершают только текущую попытку по токену; данные задачи и решения не меняются. Технический UPDATE удерживает строку чата в существующей транзакции без изменения её значения; условный UPDATE меняет только личную границу истории и её версию у авторизованного участника. При изменении счёта и переходе заявки технический UPDATE удерживает заявку в общей транзакции без изменения версии; связанные проверки и фактический переход выполняются в этой транзакции. При удалении дела техническая блокировка после проверки видимости сериализует действие с операциями над документами; изменения дела и аудит сохраняются штатно. Для таймера технические UPDATE блокируют задачу и сотрудника без изменения данных; условные обновления останавливают собственный интервал, закрывают активные интервалы при деактивации, удалении сотрудника, завершении или удалении задачи либо исправляют длительность с проверкой версии и записью причины в той же транзакции. При объединении учётных записей интервалы переносятся к основному сотруднику после остановки активного интервала источника. Публикация сообщений и личное состояние фиксируются в соответствующих транзакциях; общие сообщения не удаляются. Проверки конкурентных сценариев ещё выполняются. Прежние разделы сохранены как история.
+Всего **171** мест ExecuteUpdateAsync/ExecuteDeleteAsync. Для очереди статусов два условных обновления захватывают и завершают доставку по токену и сроку; данные задачи не меняются. Для доставки переназначенного запроса два условных обновления захватывают и завершают только текущую попытку по токену; данные задачи и решения не меняются. Технический UPDATE удерживает строку чата в существующей транзакции без изменения её значения; условный UPDATE меняет только личную границу истории и её версию у авторизованного участника. При изменении счёта и переходе заявки технический UPDATE удерживает заявку в общей транзакции без изменения версии; связанные проверки и фактический переход выполняются в этой транзакции. При удалении дела техническая блокировка после проверки видимости сериализует действие с операциями над документами; изменения дела и аудит сохраняются штатно. Для таймера технические UPDATE блокируют задачу и сотрудника без изменения данных; условные обновления останавливают собственный интервал, закрывают активные интервалы при деактивации, удалении сотрудника, завершении или удалении задачи либо исправляют длительность с проверкой версии и записью причины в той же транзакции. При объединении учётных записей интервалы переносятся к основному сотруднику после остановки активного интервала источника. Публикация сообщений и личное состояние фиксируются в соответствующих транзакциях; общие сообщения не удаляются. Проверки конкурентных сценариев ещё выполняются. Прежние разделы сохранены как история.
 
 
 Тринадцать технических UPDATE в CashOrdersController повторно подтверждают компанию, кассу и исходную операцию/ордер в одной Serializable-транзакции. Присваиваются прежние значения; предикат проверяет принадлежность, активность, валюту и известную версию/реквизиты. Порядок блокировки — компания → касса → операция или ордер. После блокировки заново проверяются права и видимость. Нулевой результат запрещает изменение; фактическое создание, проведение и копирование сохраняются штатным ChangeTracker с аудитом. Эти блокировки не создают фиктивные предметные события. Остальные изменения перечня — актуальные номера строк уже описанных операций.
 
-- `backend/Controllers/CashOrdersController.cs:1117`
+Четыре условных UPDATE судебной очереди изменяют только техническое намерение доставки: захват текущего задания, отдельное завершение журнала, отдельное завершение уведомления и итоговое освобождение своей попытки. Завершающие обновления проверяют токен, срок владения, исходный ключ, дело, вид источника, идентификатор источника и неизменный снимок. Предметные события, сроки, задачи и связи не обновляются. Их принятие и аудит сохраняются прежней судебной транзакцией; новые намерения добавляются в неё через ChangeTracker.
+
+В перечень также включены пять ранее не внесённых технических операций: блокировка профиля компании перед банковской привязкой без изменения реквизитов; блокировка графа платежей перед сверкой оплаченного счёта без изменения дат; захват и завершение очереди просрочки платежей по собственному токену и ограниченное удаление не более 200 её завершённых записей старше 30 дней. Ожидающие задания, предметные документы и оплаты при очистке не затрагиваются. Удалённая из исходника прежняя пакетная операция карточки дела больше не входит в актуальный перечень. Предметные банковские связи и распределение средств сохраняются соответствующими штатными транзакциями и аудитом.
+
 - `backend/Controllers/CashOrdersController.cs:1120`
-- `backend/Controllers/CashOrdersController.cs:1125`
-- `backend/Controllers/CashOrdersController.cs:1223`
-- `backend/Controllers/CashOrdersController.cs:1227`
-- `backend/Controllers/CashOrdersController.cs:1232`
+- `backend/Controllers/CashOrdersController.cs:1123`
+- `backend/Controllers/CashOrdersController.cs:1128`
+- `backend/Controllers/CashOrdersController.cs:1226`
+- `backend/Controllers/CashOrdersController.cs:1230`
+- `backend/Controllers/CashOrdersController.cs:1235`
 - `backend/Controllers/CashOrdersController.cs:579`
 - `backend/Controllers/CashOrdersController.cs:583`
 - `backend/Controllers/CashOrdersController.cs:828`
 - `backend/Controllers/CashOrdersController.cs:832`
 - `backend/Controllers/CashOrdersController.cs:841`
-- `backend/Controllers/CashOrdersController.cs:923`
 - `backend/Controllers/CashOrdersController.cs:926`
+- `backend/Controllers/CashOrdersController.cs:929`
 - `backend/Controllers/InternalChatController.cs:592`
 - `backend/Controllers/InternalChatController.cs:789`
 - `backend/Controllers/InternalChatHistoryController.cs:75`
-- `backend/Controllers/LegalEntitiesController.cs:1028`
+- `backend/Controllers/LegalEntitiesController.cs:1063`
 - `backend/Controllers/MessengerDocumentDeliveriesController.cs:485`
 - `backend/Controllers/MessengerDocumentDeliveriesController.cs:496`
 - `backend/Controllers/MessengerDocumentDeliveriesController.cs:513`
@@ -48,25 +52,25 @@
 - `backend/Controllers/TasksController.cs:5475`
 - `backend/Controllers/UserActivityController.cs:418`
 - `backend/Controllers/UserActivityController.cs:540`
-- `backend/Controllers/V2/CasesV2Controller.cs:10909`
-- `backend/Controllers/V2/CasesV2Controller.cs:5767`
-- `backend/Controllers/V2/CasesV2Controller.cs:6104`
-- `backend/Data/PaymentContext.cs:4702`
-- `backend/Data/PaymentContext.cs:4705`
-- `backend/Data/PaymentContext.cs:4713`
+- `backend/Controllers/V2/CasesV2Controller.cs:5592`
+- `backend/Controllers/V2/CasesV2Controller.cs:5989`
+- `backend/Data/PaymentContext.cs:4808`
+- `backend/Data/PaymentContext.cs:4811`
+- `backend/Data/PaymentContext.cs:4819`
 - `backend/Services/AuthService.Accounts.cs:579`
 - `backend/Services/AuthService.Accounts.cs:582`
 - `backend/Services/AuthService.Accounts.cs:585`
 - `backend/Services/AuthService.cs:267`
 - `backend/Services/AuthService.cs:793`
 - `backend/Services/Banking/BankStatementImportService.Native.cs:74`
-- `backend/Services/Banking/BankStatementImportService.cs:532`
-- `backend/Services/Banking/BankStatementImportService.cs:551`
-- `backend/Services/Banking/BankStatementImportService.cs:557`
+- `backend/Services/Banking/BankStatementImportService.cs:541`
+- `backend/Services/Banking/BankStatementImportService.cs:560`
+- `backend/Services/Banking/BankStatementImportService.cs:566`
 - `backend/Services/Banking/BankSyncService.cs:523`
 - `backend/Services/CalendarSyncConnectionFailureLog.cs:107`
 - `backend/Services/CalendarSyncLogRetentionService.cs:198`
 - `backend/Services/CalendarSyncLogRetentionService.cs:209`
+- `backend/Services/Companies/CompanyBankAccountBindingService.cs:167`
 - `backend/Services/DatabaseBackupService.cs:1110`
 - `backend/Services/DatabaseRestoreManagedReplicas.cs:29`
 - `backend/Services/DatabaseRestoreManagedReplicas.cs:92`
@@ -80,19 +84,27 @@
 - `backend/Services/MessengerDocumentDeliveryService.cs:699`
 - `backend/Services/MessengerDocumentDeliveryService.cs:771`
 - `backend/Services/MoneyBalanceReconciliationService.cs:35`
+- `backend/Services/MoneyOperationInvoiceAllocationService.cs:53`
+- `backend/Services/Notifications/CaseCourtNotificationDispatchProcessor.cs:104`
+- `backend/Services/Notifications/CaseCourtNotificationDispatchProcessor.cs:115`
+- `backend/Services/Notifications/CaseCourtNotificationDispatchProcessor.cs:43`
+- `backend/Services/Notifications/CaseCourtNotificationDispatchProcessor.cs:65`
 - `backend/Services/Notifications/CaseDocumentNotificationDispatchProcessor.cs:42`
 - `backend/Services/Notifications/CaseDocumentNotificationDispatchProcessor.cs:68`
 - `backend/Services/Notifications/InternalChatNotificationRecoveryService.cs:56`
 - `backend/Services/Notifications/MaxWebhookService.cs:268`
 - `backend/Services/Notifications/NotificationDeliveryRetentionService.cs:150`
+- `backend/Services/Notifications/PaymentOverdueNotificationDispatchProcessor.cs:102`
+- `backend/Services/Notifications/PaymentOverdueNotificationDispatchProcessor.cs:40`
+- `backend/Services/Notifications/PaymentOverdueNotificationDispatchProcessor.cs:62`
 - `backend/Services/Notifications/TaskDeadlineReviewerDispatchProcessor.cs:51`
 - `backend/Services/Notifications/TaskDeadlineReviewerDispatchProcessor.cs:74`
 - `backend/Services/Notifications/TaskStatusNotificationDispatchProcessor.cs:100`
 - `backend/Services/Notifications/TaskStatusNotificationDispatchProcessor.cs:48`
-- `backend/Services/Requests/SalesRequestService.cs:1128`
-- `backend/Services/Requests/SalesRequestService.cs:1140`
-- `backend/Services/Requests/SalesRequestService.cs:1150`
+- `backend/Services/Requests/SalesRequestService.cs:1139`
+- `backend/Services/Requests/SalesRequestService.cs:1151`
 - `backend/Services/Requests/SalesRequestService.cs:1161`
+- `backend/Services/Requests/SalesRequestService.cs:1172`
 - `backend/Services/Requests/SalesRequestService.cs:340`
 - `backend/Services/Requests/SalesRequestService.cs:432`
 - `backend/Services/Requests/SalesRequestService.cs:647`
@@ -103,8 +115,8 @@
 - `backend/Services/Storage/CaseDocumentPublicationProcessor.cs:172`
 - `backend/Services/Storage/CaseDocumentPublicationProcessor.cs:187`
 - `backend/Services/Storage/CaseDocumentUploadRetirementService.cs:25`
-- `backend/Services/Storage/CourtDocumentSourceRegistry.cs:413`
-- `backend/Services/Storage/CourtDocumentSourceRegistry.cs:50`
+- `backend/Services/Storage/CourtDocumentSourceRegistry.cs:534`
+- `backend/Services/Storage/CourtDocumentSourceRegistry.cs:77`
 - `backend/Services/Storage/GeneratedCaseReservationRecovery.cs:37`
 - `backend/Services/Storage/GeneratedCaseReservationRecovery.cs:51`
 - `backend/Services/Storage/GeneratedCaseReservationRecovery.cs:98`

@@ -4,7 +4,7 @@ using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Services.Notifications;
 
-public sealed class SignalRRealtimeNotificationPublisher : IRealtimeNotificationPublisher, IReliableRealtimeNotificationPublisher, IRolePermissionsChangePublisher, IUserRoleChangePublisher
+public sealed class SignalRRealtimeNotificationPublisher : IRealtimeNotificationPublisher, IReliableRealtimeNotificationPublisher, IReliableTaskJournalChangePublisher, IRolePermissionsChangePublisher, IUserRoleChangePublisher
 {
     private readonly IHubContext<NotificationsHub> _hubContext;
     private readonly ILogger<SignalRRealtimeNotificationPublisher> _logger;
@@ -63,15 +63,16 @@ public sealed class SignalRRealtimeNotificationPublisher : IRealtimeNotification
     {
         try
         {
-            await _hubContext.Clients.All.SendAsync(
-                NotificationsHub.TaskJournalChangedEvent,
-                cancellationToken);
+            await PublishTaskJournalChangedOrThrowAsync(cancellationToken);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to publish task journal realtime change signal.");
         }
     }
+
+    public Task PublishTaskJournalChangedOrThrowAsync(CancellationToken cancellationToken = default)
+        => _hubContext.Clients.All.SendAsync(NotificationsHub.TaskJournalChangedEvent, cancellationToken);
 
     public async Task PublishRolePermissionsChangedAsync(IReadOnlyCollection<int> userIds, CancellationToken cancellationToken = default)
     {

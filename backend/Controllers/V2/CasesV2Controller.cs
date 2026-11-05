@@ -3315,6 +3315,7 @@ public partial class CasesV2Controller : ControllerBase
     {
         var journalChanged = false;
         Func<Task>? notifyAfterCommit = null;
+        long? notificationId = null;
         var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
             var validation = ValidateProceduralDeadlineRequest(request);
@@ -3367,10 +3368,11 @@ public partial class CasesV2Controller : ControllerBase
             await SyncDeadlineCourtEventLinkAsync(deadline, null, null, actorUserId, actorName, ct);
             notifyAfterCommit = () => AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "created", actorUserId, actorName, ct);
             await _db.SaveChangesAsync(ct);
+            notificationId = await QueueCourtNotificationAsync(clientCase, new("deadline", "created", null, deadline, journalChanged), actorUserId, actorName, ct);
 
             return Created($"/api/v2/cases/{id}/procedural-deadlines/{deadline.Id}", MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
         }, ct);
-        await CompleteCourtWriteAsync(result, journalChanged, notifyAfterCommit, ct);
+        await CompleteCourtWriteAsync(result, journalChanged, notifyAfterCommit, ct, notificationId);
         return (ActionResult)result;
     }
 
@@ -3389,6 +3391,7 @@ public partial class CasesV2Controller : ControllerBase
     {
         var journalChanged = false;
         Func<Task>? notifyAfterCommit = null;
+        long? notificationId = null;
         var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
             await PinCourtEventDeadlineRowsAsync(id, ct);
@@ -3462,10 +3465,11 @@ public partial class CasesV2Controller : ControllerBase
             await SyncDeadlineCourtEventLinkAsync(deadline, oldSourceType, oldSourceId, actorUserId, actorName, ct);
             notifyAfterCommit = () => AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "updated", actorUserId, actorName, ct);
             await _db.SaveChangesAsync(ct);
+            notificationId = await QueueCourtNotificationAsync(clientCase, new("deadline", "updated", null, deadline, journalChanged), actorUserId, actorName, ct);
 
             return Ok(MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
         }, ct);
-        await CompleteCourtWriteAsync(result, journalChanged, notifyAfterCommit, ct);
+        await CompleteCourtWriteAsync(result, journalChanged, notifyAfterCommit, ct, notificationId);
         return (ActionResult)result;
     }
 
@@ -3478,6 +3482,7 @@ public partial class CasesV2Controller : ControllerBase
     {
         var journalChanged = false;
         Func<Task>? notifyAfterCommit = null;
+        long? notificationId = null;
         var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
             await PinCourtEventDeadlineRowsAsync(id, ct);
@@ -3511,10 +3516,11 @@ public partial class CasesV2Controller : ControllerBase
             journalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
             notifyAfterCommit = () => AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "closed", actorUserId, actorName, ct);
             await _db.SaveChangesAsync(ct);
+            notificationId = await QueueCourtNotificationAsync(clientCase, new("deadline", "closed", null, deadline, journalChanged), actorUserId, actorName, ct);
 
             return Ok(MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
         }, ct);
-        await CompleteCourtWriteAsync(result, journalChanged, notifyAfterCommit, ct);
+        await CompleteCourtWriteAsync(result, journalChanged, notifyAfterCommit, ct, notificationId);
         return (ActionResult)result;
     }
 
@@ -3645,6 +3651,7 @@ public partial class CasesV2Controller : ControllerBase
         CancellationToken ct)
     {
         var journalChanged = false;
+        long? notificationId = null;
         var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
             var normalizedInstance = NormalizeCourtInstance(instance);
@@ -3685,11 +3692,11 @@ public partial class CasesV2Controller : ControllerBase
             _db.SetAuditReason($"Добавлена жалоба по судебной инстанции: {complaint.Title}");
             await _db.SaveChangesAsync(ct);
             journalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
+            if (journalChanged) notificationId = await QueueCourtNotificationAsync(clientCase, new("journal", "updated", null, null, true), actorUserId, actorName, ct);
 
             return Created($"/api/v2/cases/{id}/court-instances/{normalizedInstance}/complaints/{complaint.Id}", MapCourtComplaint(complaint));
         }, ct);
-        if (journalChanged && result is CreatedResult or OkObjectResult or NoContentResult)
-            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        await CompleteCourtWriteAsync(result, journalChanged, null, ct, notificationId);
         return (ActionResult)result;
     }
 
@@ -3702,6 +3709,7 @@ public partial class CasesV2Controller : ControllerBase
         CancellationToken ct)
     {
         var journalChanged = false;
+        long? notificationId = null;
         var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
             var normalizedInstance = NormalizeCourtInstance(instance);
@@ -3737,11 +3745,11 @@ public partial class CasesV2Controller : ControllerBase
             _db.SetAuditReason($"Обновлена жалоба по судебной инстанции: {complaint.Title}");
             await _db.SaveChangesAsync(ct);
             journalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
+            if (journalChanged) notificationId = await QueueCourtNotificationAsync(clientCase, new("journal", "updated", null, null, true), actorUserId, actorName, ct);
 
             return Ok(MapCourtComplaint(complaint));
         }, ct);
-        if (journalChanged && result is CreatedResult or OkObjectResult or NoContentResult)
-            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        await CompleteCourtWriteAsync(result, journalChanged, null, ct, notificationId);
         return (ActionResult)result;
     }
 
@@ -3753,6 +3761,7 @@ public partial class CasesV2Controller : ControllerBase
         CancellationToken ct)
     {
         var journalChanged = false;
+        long? notificationId = null;
         var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
             var normalizedInstance = NormalizeCourtInstance(instance);
@@ -3773,11 +3782,11 @@ public partial class CasesV2Controller : ControllerBase
             _db.SetAuditReason($"Жалоба по судебной инстанции перенесена в архив: {complaint.Title}");
             await _db.SaveChangesAsync(ct);
             journalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
+            if (journalChanged) notificationId = await QueueCourtNotificationAsync(clientCase, new("journal", "updated", null, null, true), actorUserId, actorName, ct);
 
             return NoContent();
         }, ct);
-        if (journalChanged && result is CreatedResult or OkObjectResult or NoContentResult)
-            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        await CompleteCourtWriteAsync(result, journalChanged, null, ct, notificationId);
         return result;
     }
 
@@ -3824,6 +3833,7 @@ public partial class CasesV2Controller : ControllerBase
     {
         var journalChanged = false;
         Func<Task>? notifyAfterCommit = null;
+        long? notificationId = null;
         var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
             await PinCourtDirectoryItemAsync(request?.CourtId, ct);
@@ -3889,10 +3899,11 @@ public partial class CasesV2Controller : ControllerBase
             await _db.SaveChangesAsync(ct);
             await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
             journalChanged = true;
+            notificationId = await QueueCourtNotificationAsync(clientCase, new("event", "created", courtEvent, null, journalChanged), actorUserId, actorName, ct);
 
             return Created($"/api/v2/cases/{id}/court-events/{courtEvent.Id}", MapCourtEvent(courtEvent, await ResolveCaseStatusClockAsync(ct)));
         }, ct);
-        await CompleteCourtWriteAsync(result, journalChanged, notifyAfterCommit, ct);
+        await CompleteCourtWriteAsync(result, journalChanged, notifyAfterCommit, ct, notificationId);
         return (ActionResult)result;
     }
 
@@ -3910,6 +3921,7 @@ public partial class CasesV2Controller : ControllerBase
     {
         var journalChanged = false;
         Func<Task>? notifyAfterCommit = null;
+        long? notificationId = null;
         var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
             await PinCourtEventDeadlineRowsAsync(id, ct);
@@ -3990,10 +4002,11 @@ public partial class CasesV2Controller : ControllerBase
             await _db.SaveChangesAsync(ct);
             await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
             journalChanged = true;
+            notificationId = await QueueCourtNotificationAsync(clientCase, new("event", wasRescheduled ? "rescheduled" : "updated", courtEvent, null, journalChanged), actorUserId, actorName, ct);
 
             return Ok(MapCourtEvent(courtEvent, await ResolveCaseStatusClockAsync(ct)));
         }, ct);
-        await CompleteCourtWriteAsync(result, journalChanged, notifyAfterCommit, ct);
+        await CompleteCourtWriteAsync(result, journalChanged, notifyAfterCommit, ct, notificationId);
         return (ActionResult)result;
     }
 
@@ -9075,6 +9088,7 @@ public partial class CasesV2Controller : ControllerBase
         CancellationToken ct, bool queuePublicationChanges = false)
     {
         var notificationsAfterCommit = new List<Func<Task>>();
+        var notificationRequests = new List<CaseCourtNotificationRequest>();
         var actorUserId = User.GetUserId();
         var previousNextHearingAt = clientCase.NextHearingAt;
         var changedFields = new List<string>();
@@ -9418,6 +9432,7 @@ public partial class CasesV2Controller : ControllerBase
                 && ReferenceEquals(courtEvent, movedHearingForHistory);
             notificationsAfterCommit.Add(() => AddCourtEventUserNotificationsAsync(
                 clientCase, courtEvent, isRescheduledHearing ? "rescheduled" : "created", actorUserId, actorName, ct));
+            notificationRequests.Add(new("event", isRescheduledHearing ? "rescheduled" : "created", courtEvent, null, false));
             rescheduleNotificationSent |= isRescheduledHearing;
         }
 
@@ -9428,6 +9443,7 @@ public partial class CasesV2Controller : ControllerBase
                 && ReferenceEquals(courtEvent, movedHearingForHistory);
             notificationsAfterCommit.Add(() => AddCourtEventUserNotificationsAsync(
                 clientCase, courtEvent, isRescheduledHearing ? "rescheduled" : "updated", actorUserId, actorName, ct));
+            notificationRequests.Add(new("event", isRescheduledHearing ? "rescheduled" : "updated", courtEvent, null, false));
             rescheduleNotificationSent |= isRescheduledHearing;
         }
 
@@ -9596,7 +9612,7 @@ public partial class CasesV2Controller : ControllerBase
                 conflictItems,
                 restoredDeadlineIds,
                 associatedDeadlines,
-                ct, notificationsAfterCommit);
+                ct, notificationsAfterCommit, notificationRequests);
             var legacyDocumentKey = document is not null && document.DocumentKey.Length == 34
                 ? document.DocumentKey : courtActWithKey.LegacyDocumentKey;
             preparedCourtActs.Add((courtAct, documentKey, legacyDocumentKey, courtActWithKey.FileName, document, associatedDeadlines, fileConflict));
@@ -9640,13 +9656,29 @@ public partial class CasesV2Controller : ControllerBase
             foreach (var control in acceptedCourtControls.Values)
                 publicationChanges.Controls.Add(control.Id, control);
         }
+        IReadOnlyList<long> queuedNotificationIds = [];
+        if (_notificationService is IDurableCourtNotificationService)
+        {
+            if (ClientCaseStageClassifier.IsPretrial(clientCase)) notificationRequests.Clear();
+            if (taskJournalChanged) notificationRequests.Add(new("journal", "updated", null, null, true));
+            queuedNotificationIds = await new CaseCourtNotificationQueue(_db).EnqueueBatchAsync(clientCase,
+                actorUserId ?? 0, actorName, notificationRequests, ct);
+        }
         return new CourtSyncPrepared(clientCase, CompleteAsync, publicationChanges);
 
         async Task<CourtSyncApplyResult> CompleteAsync()
         {
-            foreach (var notify in notificationsAfterCommit) await notify();
-            if (notificationsAfterCommit.Count > 0) await _db.SaveChangesAsync(ct);
-            if (taskJournalChanged) await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+            if (_notificationService is IDurableCourtNotificationService durable)
+            {
+                var processor = new CaseCourtNotificationDispatchProcessor(_db, durable, _realtimePublisher);
+                foreach (var notificationId in queuedNotificationIds) await processor.ProcessAsync(notificationId, ct);
+            }
+            else
+            {
+                foreach (var notify in notificationsAfterCommit) await notify();
+                if (notificationsAfterCommit.Count > 0) await _db.SaveChangesAsync(ct);
+                if (taskJournalChanged) await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+            }
 
             // Keep existing durable attempts behind the copy gate even when routing is disabled.
             var useCourtSourceRegistry = _managedCaseUploads?.Enabled == true
@@ -10071,7 +10103,8 @@ public partial class CasesV2Controller : ControllerBase
         ICollection<string> conflictItems,
         ISet<int> restoredDeadlineIds,
         ICollection<ClientCaseProceduralDeadline> associatedDeadlines,
-        CancellationToken ct, ICollection<Func<Task>> notificationsAfterCommit)
+        CancellationToken ct, ICollection<Func<Task>> notificationsAfterCommit,
+        ICollection<CaseCourtNotificationRequest> notificationRequests)
     {
         if (!courtAct.ActDate.HasValue)
         {
@@ -10179,6 +10212,7 @@ public partial class CasesV2Controller : ControllerBase
             foreach (var deadline in createdDeadlines)
             {
                 notificationsAfterCommit.Add(() => AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "created", actorUserId, actorName, ct));
+                notificationRequests.Add(new("deadline", "created", null, deadline, false));
             }
         }
 

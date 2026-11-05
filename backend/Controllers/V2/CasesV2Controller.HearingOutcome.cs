@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Services.Notifications;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
@@ -23,6 +24,7 @@ public partial class CasesV2Controller
         CancellationToken ct)
     {
         var journalChanged = false;
+        long? notificationId = null;
         var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
             var outcome = request?.Outcome?.Trim().ToLowerInvariant();
@@ -91,10 +93,11 @@ public partial class CasesV2Controller
             await _db.SaveChangesAsync(ct);
             await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
             journalChanged = true;
+            notificationId = await QueueCourtNotificationAsync(clientCase, new("journal", "updated", null, null, true), actorUserId, actorName, ct);
 
             return Ok(MapCourtEvent(courtEvent, await ResolveCaseStatusClockAsync(ct)));
         }, ct);
-        await CompleteCourtWriteAsync(result, journalChanged, null, ct);
+        await CompleteCourtWriteAsync(result, journalChanged, null, ct, notificationId);
         return (ActionResult)result;
     }
 }

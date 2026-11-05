@@ -221,6 +221,7 @@ builder.Services.AddScoped<IWebPushNotificationService, WebPushNotificationServi
 builder.Services.AddScoped<NotificationService>();
 builder.Services.AddScoped<INotificationService>(sp => sp.GetRequiredService<NotificationService>());
 builder.Services.AddScoped<IDurableTaskStatusNotificationService>(sp => sp.GetRequiredService<NotificationService>());
+builder.Services.AddScoped<IDurableCourtNotificationService>(sp => sp.GetRequiredService<NotificationService>());
 builder.Services.AddScoped<ICaseDocumentNotificationLiveDispatcher>(sp => (ICaseDocumentNotificationLiveDispatcher)sp.GetRequiredService<INotificationService>());
 builder.Services.AddScoped<CaseDocumentNotificationDispatchProcessor>();
 builder.Services.AddScoped<ISmsChannelWarningPublisher, SmsChannelWarningPublisher>();
@@ -332,6 +333,7 @@ builder.Services.AddSingleton<InternalChatNoReplyReminderService>();
 builder.Services.AddSingleton<InternalChatNotificationRecoveryService>();
 builder.Services.AddScoped<TaskDeadlineReviewerDispatchProcessor>();
 builder.Services.AddScoped<TaskStatusNotificationDispatchProcessor>();
+builder.Services.AddScoped<CaseCourtNotificationDispatchProcessor>();
 builder.Services.AddSingleton<StickyNoteReminderNotificationService>();
 builder.Services.AddSingleton<NotificationRetrySchedulerService>();
 builder.Services.AddSingleton<NotificationDeliveryRetentionService>();
@@ -361,6 +363,7 @@ if (builder.Configuration.GetValue("BackgroundServices:Enabled", true))
     builder.Services.AddHostedService<CaseDocumentNotificationDispatchWorker>();
     builder.Services.AddHostedService<TaskDeadlineReviewerDispatchWorker>();
     builder.Services.AddHostedService<TaskStatusNotificationDispatchWorker>();
+    builder.Services.AddHostedService<CaseCourtNotificationDispatchWorker>();
     builder.Services.AddHostedService<ExternalCalendarTaskSyncOutboxWorker>();
     builder.Services.AddHostedService<ExternalWorkOrderApprovalExpirationService>();
     builder.Services.AddHostedService<PaymentStatusUpdater>();

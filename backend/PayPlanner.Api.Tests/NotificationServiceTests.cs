@@ -11141,7 +11141,7 @@ public partial class NotificationServiceTests
             service.HandleTelegramWebhookFlowAsync(update, context.Request, CancellationToken.None));
     }
 
-    private static NotificationService CreateService(
+    internal static NotificationService CreateService(
         PaymentContext db,
         IEmailService emailService,
         ITelegramNotificationService telegramService,
@@ -11599,7 +11599,7 @@ public partial class NotificationServiceTests
         }
     }
 
-    private sealed class RecordingEmailService : IEmailService
+    internal sealed class RecordingEmailService : IEmailService
     {
         public List<(string To, string Subject, string Body)> Messages { get; } = [];
 
@@ -11622,7 +11622,7 @@ public partial class NotificationServiceTests
         public Task SendEmailWithAttachmentAsync(string toEmail, string subject, string body, string attachmentFileName, byte[] attachmentBytes, string attachmentContentType) => Task.CompletedTask;
     }
 
-    private sealed class RecordingTelegramService : ITelegramNotificationService
+    internal sealed class RecordingTelegramService : ITelegramNotificationService
     {
         public List<(long ChatId, string Text)> Messages { get; } = [];
 
@@ -11803,7 +11803,7 @@ public partial class NotificationServiceTests
             => Task.CompletedTask;
     }
 
-    private sealed class RecordingWebPushNotificationService : IWebPushNotificationService
+    internal sealed class RecordingWebPushNotificationService : IWebPushNotificationService
     {
         public List<UserNotification> Notifications { get; } = [];
 
