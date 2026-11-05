@@ -95,14 +95,7 @@ public partial class CasesV2Controller
         public CourtBindingInstanceState? BindingInstance { get; set; }
         public Dictionary<int, CourtDocumentChange> Documents { get; } = [];
         public Dictionary<int, CourtDeadlineLink> Deadlines { get; } = [];
-        public Dictionary<int, CourtControlState> Controls { get; } = [];
-    }
-
-    private sealed record CourtControlState(int Id, int CaseId, string? SourceKey, string SourceType,
-        string SourceUrl, string Status, int? DocumentId)
-    {
-        public static CourtControlState Capture(ClientCaseProceduralDeadline deadline) => new(deadline.Id, deadline.ClientCaseId,
-            deadline.SourceDocumentKey, deadline.SourceType, deadline.SourceUrl, deadline.Status, deadline.ClientCaseDocumentId);
+        public Dictionary<int, CourtDocumentControlState> Controls { get; } = [];
     }
 
     private async Task<bool> CanContinueCourtPublicationAsync(int id, CourtPublicationPlan plan, CancellationToken ct)
@@ -116,14 +109,15 @@ public partial class CasesV2Controller
     }
 
     private async Task<CourtDocumentSourceBatchResult> CaptureCourtSourceBatchAsync(int id, int actorId, string actorName,
-        string bindingUrl, DateTime checkedAt, IReadOnlyCollection<CourtDocumentSourceInput> inputs, CourtPublicationPlan? plan, CancellationToken ct)
+        string bindingUrl, DateTime checkedAt, IReadOnlyCollection<CourtDocumentSourceInput> inputs, CourtPublicationPlan? plan,
+        IReadOnlyCollection<CourtDocumentControlState> controls, CancellationToken ct)
     {
         if (plan is null)
-            return await new CourtDocumentSourceRegistry(_db).RecordAcceptedBatchAsync(id, actorId, actorName, bindingUrl, checkedAt, inputs, ct);
+            return await new CourtDocumentSourceRegistry(_db).RecordAcceptedBatchAsync(id, actorId, actorName, bindingUrl, checkedAt, inputs, ct, controls);
         var result = await WithCurrentCourtPublicationAsync(id, plan, async _ =>
         {
             var captured = await new CourtDocumentSourceRegistry(_db).RecordAcceptedBatchInTransactionAsync(id, actorId, actorName,
-                bindingUrl, checkedAt, inputs, ct);
+                bindingUrl, checkedAt, inputs, ct, controls);
             return captured.Status == "recorded" ? Ok(captured)
                 : Conflict(new { message = "Судебный источник изменился или недоступен для добавления сводок. Обновите дело перед повторной проверкой." });
         }, ct);
@@ -132,7 +126,7 @@ public partial class CasesV2Controller
     }
 
     private async Task<(ActionResult? Failure, Dictionary<int, int?> Links)> ReadCourtPublicationControlsAsync(
-        int caseId, IReadOnlyCollection<CourtControlState> controls, CancellationToken ct)
+        int caseId, IReadOnlyCollection<CourtDocumentControlState> controls, CancellationToken ct)
     {
         if (controls.Count == 0) return (null, []);
         var ids = controls.Select(row => row.Id).ToArray();
@@ -141,20 +135,20 @@ public partial class CasesV2Controller
         var rows = await _db.ClientCaseProceduralDeadlines.AsNoTracking().Where(row => row.ClientCaseId == caseId && ids.Contains(row.Id))
             .ToDictionaryAsync(row => row.Id, ct);
         foreach (var expected in controls)
-            if (!rows.TryGetValue(expected.Id, out var row) || (CourtControlState.Capture(row) with { DocumentId = expected.DocumentId }) != expected)
+            if (!rows.TryGetValue(expected.Id, out var row) || (CourtDocumentControlState.Capture(row) with { DocumentId = expected.DocumentId }) != expected)
                 return (Conflict(new { message = "Процессуальный срок изменился во время подготовки сводки. Обновите дело перед повторной проверкой." }), []);
         return (null, rows.ToDictionary(pair => pair.Key, pair => pair.Value.ClientCaseDocumentId));
     }
 
     private async Task AdoptCourtReplayLinksAsync(int caseId, int documentId, CourtPublicationPlan plan,
-        IReadOnlyCollection<CourtControlState> controls, CancellationToken ct)
+        IReadOnlyCollection<CourtDocumentControlState> controls, CancellationToken ct)
     {
         if (controls.Count == 0) return;
         var ids = controls.Select(row => row.Id).ToArray();
         var rows = await _db.ClientCaseProceduralDeadlines.AsNoTracking().Where(row => row.ClientCaseId == caseId && ids.Contains(row.Id)).ToDictionaryAsync(row => row.Id, ct);
         foreach (var expected in controls)
             if (rows.TryGetValue(expected.Id, out var row) && row.ClientCaseDocumentId == documentId
-                && (CourtControlState.Capture(row) with { DocumentId = expected.DocumentId }) == expected)
+                && (CourtDocumentControlState.Capture(row) with { DocumentId = expected.DocumentId }) == expected)
                 plan.Controls[expected.Id] = expected with { DocumentId = documentId };
     }
 

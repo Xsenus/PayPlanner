@@ -5826,7 +5826,7 @@ public partial class CasesV2Controller : ControllerBase
     }
 
     private async Task<ManagedCaseDocumentUploadResult> GenerateManagedCourtDocumentAsync(
-        CourtDocumentSourceReceipt receipt, CourtPublicationPlan? plan, IReadOnlyCollection<CourtControlState> controls, CancellationToken ct)
+        CourtDocumentSourceReceipt receipt, CourtPublicationPlan? plan, IReadOnlyCollection<CourtDocumentControlState> controls, CancellationToken ct)
     {
         if (_managedCaseUploads is null) return new("disabled");
         var registry = new CourtDocumentSourceRegistry(_db);
@@ -9630,13 +9630,15 @@ public partial class CasesV2Controller : ControllerBase
         // before any summary file can fail or wait for its mandatory copies.
         await _db.SaveChangesAsync(ct);
         var taskJournalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
+        var acceptedCourtControls = preparedCourtActs.SelectMany(act => act.Deadlines).DistinctBy(deadline => deadline.Id)
+            .Select(CourtDocumentControlState.Capture).ToDictionary(control => control.Id);
         CourtPublicationPlan? publicationChanges = null;
         if (queuePublicationChanges)
         {
             await _db.Entry(clientCase).ReloadAsync(ct);
             publicationChanges = new CourtPublicationPlan(clientCase);
-            foreach (var control in preparedCourtActs.SelectMany(act => act.Deadlines).DistinctBy(deadline => deadline.Id))
-                publicationChanges.Controls.Add(control.Id, CourtControlState.Capture(control));
+            foreach (var control in acceptedCourtControls.Values)
+                publicationChanges.Controls.Add(control.Id, control);
         }
         return new CourtSyncPrepared(clientCase, CompleteAsync, publicationChanges);
 
@@ -9656,7 +9658,9 @@ public partial class CasesV2Controller : ControllerBase
                     clientCase.Id, actorUserId.Value, actorName, clientCase.CourtUrl, checkedAt,
                     preparedCourtActs.Where(p => !p.FileConflict).Select(p => new CourtDocumentSourceInput(p.Key, SanitizeCourtSummaryFileName(p.FileName),
                         p.Act.Title, FirstNonEmpty(p.Act.SourceUrl, courtData.SourceUrl),
-                        BuildSudrfCourtActHtml(clientCase, courtData, p.Act), p.LegacyKey)).ToArray(), publicationChanges, ct);
+                        BuildSudrfCourtActHtml(clientCase, courtData, p.Act), p.LegacyKey)).ToArray(), publicationChanges,
+                    preparedCourtActs.Where(p => !p.FileConflict).SelectMany(p => p.Deadlines).DistinctBy(deadline => deadline.Id)
+                        .Select(deadline => acceptedCourtControls[deadline.Id]).ToArray(), ct);
             }
             var courtReceipts = courtSourceBatch?.Sources.ToDictionary(r => r.Snapshot.DocumentKey, StringComparer.Ordinal)
                 ?? new Dictionary<string, CourtDocumentSourceReceipt>(StringComparer.Ordinal);
@@ -9685,7 +9689,7 @@ public partial class CasesV2Controller : ControllerBase
                         }
                         // Earlier legacy metadata/link changes must not enter the writer's transaction.
                         await _db.SaveChangesAsync(ct);
-                        var controls = publicationChanges is null ? Array.Empty<CourtControlState>()
+                        var controls = publicationChanges is null ? Array.Empty<CourtDocumentControlState>()
                             : prepared.Deadlines.Select(deadline => publicationChanges.Controls[deadline.Id]).ToArray();
                         var outcome = await GenerateManagedCourtDocumentAsync(receipt, publicationChanges, controls, ct);
                         if (outcome.Status != "uploaded" || !outcome.DocumentId.HasValue)

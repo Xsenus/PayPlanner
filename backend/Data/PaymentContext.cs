@@ -2189,6 +2189,7 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<CourtDocumentSource>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.Property(e => e.AcceptedControlsJson).HasColumnType("text");
             entity.Property(e => e.DocumentKey).HasMaxLength(64).IsRequired();
             entity.HasIndex(e => new { e.ClientCaseId, e.DocumentKey }).IsUnique();
             entity.HasOne(e => e.Scope).WithMany().HasForeignKey(e => new { e.ScopeId, e.ClientCaseId })

@@ -4712,6 +4712,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AcceptedControlsJson")
+                        .HasColumnType("text");
+
                     b.Property<long>("AcceptedScopeVersion")
                         .HasColumnType("bigint");
 

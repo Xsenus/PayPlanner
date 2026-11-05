@@ -25,6 +25,9 @@ public sealed class CourtDocumentSource
     public long AcceptedScopeVersion { get; set; } = 1;
     public bool IsActive { get; set; } = true;
     public int CurrentAttemptVersion { get; set; } = 1;
+    // Fresh accepted controls are independent of the attempt's immutable file and author.
+    // NULL retains unknown provenance for attempts accepted before this proof existed.
+    public string? AcceptedControlsJson { get; set; }
 }
 
 public sealed class CourtDocumentSourceAttempt

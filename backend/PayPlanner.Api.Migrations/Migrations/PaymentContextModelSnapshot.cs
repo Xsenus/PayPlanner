@@ -4615,6 +4615,9 @@ namespace PayPlanner.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AcceptedControlsJson")
+                        .HasColumnType("text");
+
                     b.Property<long>("AcceptedScopeVersion")
                         .HasColumnType("INTEGER");
 

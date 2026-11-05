@@ -11,7 +11,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed class CourtDocumentSourceRegistryTests(
+public sealed partial class CourtDocumentSourceRegistryTests(
     PostgreSqlMigratedTemplate postgresTemplate,
     SqliteMigratedTemplate sqliteTemplate)
     : IClassFixture<PostgreSqlMigratedTemplate>, IClassFixture<SqliteMigratedTemplate>

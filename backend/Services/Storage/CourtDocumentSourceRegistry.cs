@@ -19,6 +19,12 @@ public sealed record GeneratedCourtDocumentSnapshot(int Version, int CaseId, Gui
     string BindingUrl, string SourceUrl, DateTime CheckedAt, long ContentSizeBytes, string ContentSha256);
 public sealed record CourtDocumentSourceReceipt(GeneratedCourtDocumentSnapshot Snapshot, ManagedCaseDocumentGeneration Generation);
 public sealed record CourtDocumentSourceBatchResult(string Status, IReadOnlyList<CourtDocumentSourceReceipt> Sources);
+public sealed record CourtDocumentControlState(int Id, int CaseId, string? SourceKey, string SourceType,
+    string SourceUrl, string Status, int? DocumentId)
+{
+    public static CourtDocumentControlState Capture(ClientCaseProceduralDeadline deadline) => new(deadline.Id, deadline.ClientCaseId,
+        deadline.SourceDocumentKey, deadline.SourceType, deadline.SourceUrl, deadline.Status, deadline.ClientCaseDocumentId);
+}
 
 // Called only with accepted server-side court evidence, in a clean unit of work.
 // It owns a short metadata transaction and performs no provider/network I/O.
@@ -29,17 +35,22 @@ public sealed class CourtDocumentSourceRegistry(PaymentContext db)
 
     private IDbContextTransaction? pinnedTransaction;
     private readonly HashSet<(int ActorId, int CaseId)> pinnedActors = [];
+    private sealed record AcceptedControls(int Version, int CaseId, Guid SourceId, Guid AttemptId,
+        long ScopeVersion, DateTime CheckedAt, int ActorId, CourtDocumentControlState[] Controls);
 
     public Task<CourtDocumentSourceBatchResult> RecordAcceptedBatchAsync(int caseId, int actorId, string actorName,
-        string bindingUrl, DateTime checkedAt, IReadOnlyCollection<CourtDocumentSourceInput> inputs, CancellationToken ct)
-        => RecordAcceptedBatchCoreAsync(caseId, actorId, actorName, bindingUrl, checkedAt, inputs, ct, ownsTransaction: true);
+        string bindingUrl, DateTime checkedAt, IReadOnlyCollection<CourtDocumentSourceInput> inputs, CancellationToken ct,
+        IReadOnlyCollection<CourtDocumentControlState>? expectedControls = null)
+        => RecordAcceptedBatchCoreAsync(caseId, actorId, actorName, bindingUrl, checkedAt, inputs, ct, ownsTransaction: true, expectedControls);
 
     internal Task<CourtDocumentSourceBatchResult> RecordAcceptedBatchInTransactionAsync(int caseId, int actorId, string actorName,
-        string bindingUrl, DateTime checkedAt, IReadOnlyCollection<CourtDocumentSourceInput> inputs, CancellationToken ct)
-        => RecordAcceptedBatchCoreAsync(caseId, actorId, actorName, bindingUrl, checkedAt, inputs, ct, ownsTransaction: false);
+        string bindingUrl, DateTime checkedAt, IReadOnlyCollection<CourtDocumentSourceInput> inputs, CancellationToken ct,
+        IReadOnlyCollection<CourtDocumentControlState>? expectedControls = null)
+        => RecordAcceptedBatchCoreAsync(caseId, actorId, actorName, bindingUrl, checkedAt, inputs, ct, ownsTransaction: false, expectedControls);
 
     private async Task<CourtDocumentSourceBatchResult> RecordAcceptedBatchCoreAsync(int caseId, int actorId, string actorName,
-        string bindingUrl, DateTime checkedAt, IReadOnlyCollection<CourtDocumentSourceInput> inputs, CancellationToken ct, bool ownsTransaction)
+        string bindingUrl, DateTime checkedAt, IReadOnlyCollection<CourtDocumentSourceInput> inputs, CancellationToken ct, bool ownsTransaction,
+        IReadOnlyCollection<CourtDocumentControlState>? expectedControls)
     {
         if ((ownsTransaction ? db.Database.CurrentTransaction is not null : db.Database.CurrentTransaction is null)
             || db.ChangeTracker.HasChanges())
@@ -103,6 +114,11 @@ public sealed class CourtDocumentSourceRegistry(PaymentContext db)
                 return unique.All(i => existingByKey.ContainsKey(i.DocumentKey))
                     ? new("recorded", unique.Select(i => existingByKey[i.DocumentKey]).ToArray()) : Result("conflict");
 
+            if (expectedControls is not null && !await MatchAcceptedControlsAsync(caseId, unique, expectedControls, ct))
+                return Result("conflict");
+            var controlsByKey = expectedControls?.GroupBy(control => control.SourceKey!, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.OrderBy(control => control.Id).ToArray(), StringComparer.Ordinal);
+
             // A new accepted observation may replace a deleted published summary.
             // Pending, malformed and retired attempts keep their original identity.
             var renewKeys = await FindDeletedPublishedSourcesAsync(existingByKey.Values, unique, ct);
@@ -127,6 +143,8 @@ public sealed class CourtDocumentSourceRegistry(PaymentContext db)
                     existing.IsActive = true;
                     if (!renewKeys.Contains(input.DocumentKey))
                     {
+                        existing.AcceptedControlsJson = CaptureControls(existing, existingByKey[input.DocumentKey].Snapshot.AttemptId,
+                            controlsByKey, checkedAt, actorId);
                         result.Add(existingByKey[input.DocumentKey]);
                         continue;
                     }
@@ -155,6 +173,7 @@ public sealed class CourtDocumentSourceRegistry(PaymentContext db)
                 attempt.FrozenSnapshotJson = JsonSerializer.Serialize(snapshot, JsonOptions);
                 attempt.FrozenSnapshotSha256 = Hash(attempt.FrozenSnapshotJson);
                 attempt.RequestSha256 = RequestHash(snapshot);
+                source.AcceptedControlsJson = CaptureControls(source, attempt.Id, controlsByKey, checkedAt, actorId);
                 db.CourtDocumentSourceAttempts.Add(attempt);
                 var content = new CourtDocumentSourceContent
                 {
@@ -220,6 +239,73 @@ public sealed class CourtDocumentSourceRegistry(PaymentContext db)
                 }
             }
             throw;
+        }
+    }
+
+    private static string? CaptureControls(CourtDocumentSource source, Guid attemptId,
+        Dictionary<string, CourtDocumentControlState[]>? controlsByKey, DateTime checkedAt, int actorId)
+        => controlsByKey is null ? null : JsonSerializer.Serialize(new AcceptedControls(1, source.ClientCaseId, source.Id,
+            attemptId, source.AcceptedScopeVersion, checkedAt, actorId, controlsByKey.GetValueOrDefault(source.DocumentKey) ?? []), JsonOptions);
+
+    private async Task<bool> MatchAcceptedControlsAsync(int caseId, IReadOnlyCollection<CourtDocumentSourceInput> inputs,
+        IReadOnlyCollection<CourtDocumentControlState> controls, CancellationToken ct)
+    {
+        var byKey = inputs.ToDictionary(input => input.DocumentKey, StringComparer.Ordinal);
+        if (controls.Any(control => control.Id <= 0 || control.CaseId != caseId || control.SourceType != "sudrf"
+            || control.SourceKey is null || !byKey.TryGetValue(control.SourceKey, out var input)
+            || control.SourceUrl != input.SourceUrl || string.IsNullOrEmpty(control.Status)
+            || control.DocumentId is <= 0) || controls.Select(control => control.Id).Distinct().Count() != controls.Count)
+            return false;
+        if (controls.Count == 0) return true;
+        var ids = controls.Select(control => control.Id).Order().ToArray();
+        await PinControlsAsync(caseId, ids, ct);
+        var current = await db.ClientCaseProceduralDeadlines.AsNoTracking()
+            .Where(deadline => deadline.ClientCaseId == caseId && ids.Contains(deadline.Id)).ToDictionaryAsync(deadline => deadline.Id, ct);
+        return controls.All(control => current.TryGetValue(control.Id, out var deadline)
+            && CourtDocumentControlState.Capture(deadline) == control);
+    }
+
+    private Task PinControlsAsync(int caseId, int[] ids, CancellationToken ct)
+        => db.Database.IsNpgsql()
+            ? db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"ClientCaseProceduralDeadlines\" WHERE \"ClientCaseId\" = {caseId} AND \"Id\" = ANY ({ids}) ORDER BY \"Id\" FOR UPDATE NOWAIT", ct)
+            : Task.CompletedTask;
+
+    internal async Task LinkAcceptedControlsAsync(GeneratedCourtDocumentSnapshot snapshot, int documentId, CancellationToken ct)
+    {
+        if (db.Database.CurrentTransaction is null || documentId <= 0)
+            throw new InvalidOperationException("Court control links require their document publication transaction.");
+        var source = await db.CourtDocumentSources.AsNoTracking().Include(row => row.Scope)
+            .SingleOrDefaultAsync(row => row.Id == snapshot.SourceId && row.ClientCaseId == snapshot.CaseId
+                && row.DocumentKey == snapshot.DocumentKey && row.IsActive
+                && row.CurrentAttemptVersion == snapshot.AttemptVersion && row.AcceptedScopeVersion == row.Scope.Version, ct);
+        if (source?.AcceptedControlsJson is null) return;
+        AcceptedControls? proof;
+        try { proof = JsonSerializer.Deserialize<AcceptedControls>(source.AcceptedControlsJson, JsonOptions); }
+        catch (JsonException) { return; }
+        if (proof is not { Version: 1, Controls: not null } || proof.CaseId != snapshot.CaseId
+            || proof.SourceId != source.Id || proof.AttemptId != snapshot.AttemptId
+            || proof.ScopeVersion != source.AcceptedScopeVersion || proof.CheckedAt != source.Scope.LastAcceptedAt
+            || proof.ActorId != source.Scope.LastActorId || source.Scope.BindingUrl != snapshot.BindingUrl
+            || proof.Controls.Any(control => control is null || control.Id <= 0 || control.CaseId != snapshot.CaseId
+                || control.SourceKey != snapshot.DocumentKey || control.SourceType != "sudrf"
+                || control.SourceUrl != snapshot.SourceUrl || string.IsNullOrEmpty(control.Status)
+                || control.DocumentId is <= 0)
+            || proof.Controls.Select(control => control.Id).Distinct().Count() != proof.Controls.Length)
+            return;
+        if (proof.Controls.Length == 0) return;
+        var ids = proof.Controls.Select(control => control.Id).Order().ToArray();
+        await PinControlsAsync(snapshot.CaseId, ids, ct);
+        var current = await db.ClientCaseProceduralDeadlines.AsNoTracking()
+            .Where(deadline => deadline.ClientCaseId == snapshot.CaseId && ids.Contains(deadline.Id))
+            .ToDictionaryAsync(deadline => deadline.Id, ct);
+        foreach (var expected in proof.Controls)
+        {
+            if (expected.Status == "archived" || !current.TryGetValue(expected.Id, out var deadline)
+                || CourtDocumentControlState.Capture(deadline) != expected) continue;
+            var local = db.ChangeTracker.Entries<ClientCaseProceduralDeadline>().SingleOrDefault(entry => entry.Entity.Id == deadline.Id);
+            if (local is not null && local.State != EntityState.Unchanged)
+                throw new InvalidOperationException("Court publication cannot replace pending deadline changes.");
+            TrackFresh(deadline).ClientCaseDocumentId = documentId;
         }
     }
 
@@ -474,6 +560,7 @@ public sealed class CourtDocumentSourceRegistry(PaymentContext db)
         if (tracked is null) { incoming.State = EntityState.Unchanged; return fresh; }
         tracked.CurrentValues.SetValues(fresh);
         tracked.OriginalValues.SetValues(fresh);
+        tracked.State = EntityState.Unchanged;
         return tracked.Entity;
     }
 

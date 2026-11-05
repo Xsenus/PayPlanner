@@ -46,11 +46,7 @@ public sealed class CaseDocumentPublicationRecords(PaymentContext db, CaseDocume
         AppendEvent(clientCase, $"{text} Автор: {source.ActorName}.",
             DateTime.SpecifyKind(document.UploadedAt, DateTimeKind.Utc).ToLocalTime());
         await db.SaveChangesAsync(ct);
-        // Canonical source keys were assigned by the accepted control pass before file I/O.
-        // Do not guess legacy/null identities or create deadlines and reminders a second time.
-        var deadlines = await db.ClientCaseProceduralDeadlines.Where(d => d.ClientCaseId == source.CaseId
-            && d.SourceType == "sudrf" && d.SourceDocumentKey == source.DocumentKey && d.Status != "archived").ToListAsync(ct);
-        foreach (var deadline in deadlines) deadline.ClientCaseDocumentId = document.Id;
+        await new CourtDocumentSourceRegistry(db).LinkAcceptedControlsAsync(source, document.Id, ct);
         AddAuditEvent(db, clientCase, document, "Created", text, source.ActorId, source.ActorName);
         await notifications.NotifyAsync(clientCase, document, "uploaded", source.ActorId, source.ActorName, ct);
         await db.SaveChangesAsync(ct);

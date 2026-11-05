@@ -1050,6 +1050,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests : IClassFixture<Po
             Notes = "Ручная дата и примечание",
             SourceType = "sudrf",
             SourceDocumentKey = key,
+            SourceUrl = f.Case.CourtUrl,
             Status = "closed"
         };
         f.Db.ClientCaseProceduralDeadlines.Add(deadline);
@@ -1058,7 +1059,8 @@ public sealed partial class ManagedGeneratedCaseDocumentTests : IClassFixture<Po
         var input = new CourtDocumentSourceInput(key, "court-original.html", "Исходное событие", f.Case.CourtUrl,
             "<!doctype html><html><body>Исходный текст суда</body></html>");
         var receipt = Assert.Single((await new CourtDocumentSourceRegistry(f.Db).RecordAcceptedBatchAsync(f.Case.Id,
-            actor.Id, actor.FullName, f.Case.CourtUrl, DateTime.UtcNow, [input], default)).Sources);
+            actor.Id, actor.FullName, f.Case.CourtUrl, DateTime.UtcNow, [input], default,
+            [CourtDocumentControlState.Capture(deadline)])).Sources);
         Assert.Equal("pending", (await f.PublishCourt(receipt)).Status);
         Assert.Empty(await f.Db.ClientCaseDocuments.ToArrayAsync());
         Assert.Empty(await f.Db.StorageProductBindings.ToArrayAsync());
