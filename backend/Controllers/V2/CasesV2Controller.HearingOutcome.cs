@@ -22,91 +22,79 @@ public partial class CasesV2Controller
         [FromBody] RecordHearingOutcomeRequest? request,
         CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        var journalChanged = false;
+        var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
-            return forbidden;
-        }
+            var outcome = request?.Outcome?.Trim().ToLowerInvariant();
+            var outcomeLabel = outcome switch
+            {
+                "postponed" => "Заседание отложено",
+                "considered" => "Дело рассмотрено по существу",
+                "interim" => "Принято промежуточное решение",
+                _ => null,
+            };
+            if (outcomeLabel is null)
+            {
+                return BadRequest(new { message = "Выберите итог заседания." });
+            }
 
-        var outcome = request?.Outcome?.Trim().ToLowerInvariant();
-        var outcomeLabel = outcome switch
-        {
-            "postponed" => "Заседание отложено",
-            "considered" => "Дело рассмотрено по существу",
-            "interim" => "Принято промежуточное решение",
-            _ => null,
-        };
-        if (outcomeLabel is null)
-        {
-            return BadRequest(new { message = "Выберите итог заседания." });
-        }
+            var note = request?.Note?.Trim() ?? string.Empty;
+            if (note.Length > 1000)
+            {
+                return BadRequest(new { message = "Пояснение к итогу не должно превышать 1000 символов." });
+            }
 
-        var note = request?.Note?.Trim() ?? string.Empty;
-        if (note.Length > 1000)
-        {
-            return BadRequest(new { message = "Пояснение к итогу не должно превышать 1000 символов." });
-        }
+            await PinCourtEventDeadlineRowsAsync(id, ct);
+            var courtEvent = await _db.ClientCaseCourtEvents
+                .FirstOrDefaultAsync(item => item.Id == courtEventId && item.ClientCaseId == id, ct);
+            if (courtEvent is null)
+            {
+                return NotFound();
+            }
+            if (!string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new { message = "Итог заседания можно записать только для события типа «Заседание»." });
+            }
+            if (IsUnavailableHearingOutcomeStatus(courtEvent.MovementStatus))
+            {
+                return Conflict(new { message = "Отменённому или архивному заседанию нельзя записать итог. Проверьте актуальное событие суда." });
+            }
 
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return MissingCasesVisibilityResult();
-        }
+            var clock = await ResolveCaseStatusClockAsync(ct);
+            if (!CanRecordHearingOutcome(courtEvent, clock))
+            {
+                return Conflict(new { message = "Итог можно записать после наступления даты заседания." });
+            }
+            var now = clock.NowInstantUtc;
 
-        var clientCase = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
+            if (string.Equals(courtEvent.HearingOutcome, outcome, StringComparison.Ordinal)
+                && string.Equals(courtEvent.HearingOutcomeNote ?? string.Empty, note, StringComparison.Ordinal))
+            {
+                return Ok(MapCourtEvent(courtEvent, await ResolveCaseStatusClockAsync(ct)));
+            }
 
-        var courtEvent = await _db.ClientCaseCourtEvents
-            .FirstOrDefaultAsync(item => item.Id == courtEventId && item.ClientCaseId == id, ct);
-        if (courtEvent is null)
-        {
-            return NotFound();
-        }
-        if (!string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase))
-        {
-            return BadRequest(new { message = "Итог заседания можно записать только для события типа «Заседание»." });
-        }
-        if (IsUnavailableHearingOutcomeStatus(courtEvent.MovementStatus))
-        {
-            return Conflict(new { message = "Отменённому или архивному заседанию нельзя записать итог. Проверьте актуальное событие суда." });
-        }
+            var actorUserId = User.GetUserId();
+            var actorName = User.GetDisplayName();
+            courtEvent.HearingOutcome = outcome;
+            courtEvent.HearingOutcomeNote = note;
+            courtEvent.HearingOutcomeRecordedAt = now;
+            courtEvent.HearingOutcomeRecordedByUserId = actorUserId;
+            courtEvent.HearingOutcomeRecordedByUserName = Truncate(actorName, 256);
+            courtEvent.UpdatedAt = now;
+            courtEvent.UpdatedByUserId = actorUserId;
+            courtEvent.UpdatedByUserName = Truncate(actorName, 256);
 
-        var clock = await ResolveCaseStatusClockAsync(ct);
-        if (!CanRecordHearingOutcome(courtEvent, clock))
-        {
-            return Conflict(new { message = "Итог можно записать после наступления даты заседания." });
-        }
-        var now = clock.NowInstantUtc;
+            var description = $"Итог заседания «{courtEvent.Title}»: {outcomeLabel}. Записал(а): {actorName}.";
+            AppendCaseEvent(clientCase, description);
+            AddCourtEventHistory(courtEvent, "hearing-outcome", description, actorUserId, actorName);
+            _db.SetAuditReason($"Зафиксирован итог судебного заседания: {outcomeLabel}");
+            await _db.SaveChangesAsync(ct);
+            await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
+            journalChanged = true;
 
-        if (string.Equals(courtEvent.HearingOutcome, outcome, StringComparison.Ordinal)
-            && string.Equals(courtEvent.HearingOutcomeNote ?? string.Empty, note, StringComparison.Ordinal))
-        {
             return Ok(MapCourtEvent(courtEvent, await ResolveCaseStatusClockAsync(ct)));
-        }
-
-        var actorUserId = User.GetUserId();
-        var actorName = User.GetDisplayName();
-        courtEvent.HearingOutcome = outcome;
-        courtEvent.HearingOutcomeNote = note;
-        courtEvent.HearingOutcomeRecordedAt = now;
-        courtEvent.HearingOutcomeRecordedByUserId = actorUserId;
-        courtEvent.HearingOutcomeRecordedByUserName = Truncate(actorName, 256);
-        courtEvent.UpdatedAt = now;
-        courtEvent.UpdatedByUserId = actorUserId;
-        courtEvent.UpdatedByUserName = Truncate(actorName, 256);
-
-        var description = $"Итог заседания «{courtEvent.Title}»: {outcomeLabel}. Записал(а): {actorName}.";
-        AppendCaseEvent(clientCase, description);
-        AddCourtEventHistory(courtEvent, "hearing-outcome", description, actorUserId, actorName);
-        _db.SetAuditReason($"Зафиксирован итог судебного заседания: {outcomeLabel}");
-        await _db.SaveChangesAsync(ct);
-        await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
-        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-
-        return Ok(MapCourtEvent(courtEvent, await ResolveCaseStatusClockAsync(ct)));
+        }, ct);
+        await CompleteCourtWriteAsync(result, journalChanged, null, ct);
+        return (ActionResult)result;
     }
 }

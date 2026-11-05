@@ -3313,81 +3313,65 @@ public partial class CasesV2Controller : ControllerBase
         [FromBody] UpsertClientCaseProceduralDeadlineRequest? request,
         CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        var journalChanged = false;
+        Func<Task>? notifyAfterCommit = null;
+        var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
-            return forbidden;
-        }
+            var validation = ValidateProceduralDeadlineRequest(request);
+            if (validation.Error is not null)
+            {
+                return BadRequest(new { message = validation.Error });
+            }
 
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
+            await PinCourtEventDeadlineRowsAsync(id, ct);
+            await PinCourtComplaintDocumentAsync(id, request?.ClientCaseDocumentId, ct);
+            var linkError = await ValidateProceduralDeadlineLinksAsync(id, request, ct);
+            if (linkError is not null)
+            {
+                return BadRequest(new { message = linkError });
+            }
 
-        var clientCase = await _db.ClientCases
-            .Include(item => item.Client)
-            .Include(item => item.LegalEntity)
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
+            var actorUserId = User.GetUserId();
+            var actorName = User.GetDisplayName();
+            var now = DateTime.UtcNow;
+            var deadline = new ClientCaseProceduralDeadline
+            {
+                ClientCaseId = id,
+                DeadlineType = validation.DeadlineType,
+                Title = validation.Title,
+                Description = validation.Description,
+                DueAt = validation.DueAt,
+                AllDay = validation.AllDay,
+                Status = validation.Status,
+                WarningDaysBefore = validation.WarningDaysBefore,
+                TaskJournalItemId = request?.TaskJournalItemId,
+                ClientCaseDocumentId = request?.ClientCaseDocumentId,
+                SourceType = validation.SourceType,
+                SourceId = request?.SourceId,
+                Notes = validation.Notes,
+                CreatedAt = now,
+                CreatedByUserId = actorUserId,
+                CreatedByUserName = Truncate(actorName, 256),
+                UpdatedAt = now,
+                UpdatedByUserId = actorUserId,
+                UpdatedByUserName = Truncate(actorName, 256),
+            };
 
-        var validation = ValidateProceduralDeadlineRequest(request);
-        if (validation.Error is not null)
-        {
-            return BadRequest(new { message = validation.Error });
-        }
+            _db.ClientCaseProceduralDeadlines.Add(deadline);
+            AppendCaseEvent(clientCase, $"Добавлен процессуальный срок «{deadline.Title}» на {deadline.DueAt:dd.MM.yyyy}. Автор: {actorName}.");
+            _db.SetAuditReason($"Добавлен процессуальный срок дела: {deadline.Title}");
+            await _db.SaveChangesAsync(ct);
 
-        var linkError = await ValidateProceduralDeadlineLinksAsync(id, request, ct);
-        if (linkError is not null)
-        {
-            return BadRequest(new { message = linkError });
-        }
+            journalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
+            await LinkProceduralDeadlineTaskAsync(deadline.Id, ct);
+            await SyncDeadlineCourtEventLinkAsync(deadline, null, null, actorUserId, actorName, ct);
+            notifyAfterCommit = () => AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "created", actorUserId, actorName, ct);
+            await _db.SaveChangesAsync(ct);
 
-        var actorUserId = User.GetUserId();
-        var actorName = User.GetDisplayName();
-        var now = DateTime.UtcNow;
-        var deadline = new ClientCaseProceduralDeadline
-        {
-            ClientCaseId = id,
-            DeadlineType = validation.DeadlineType,
-            Title = validation.Title,
-            Description = validation.Description,
-            DueAt = validation.DueAt,
-            AllDay = validation.AllDay,
-            Status = validation.Status,
-            WarningDaysBefore = validation.WarningDaysBefore,
-            TaskJournalItemId = request?.TaskJournalItemId,
-            ClientCaseDocumentId = request?.ClientCaseDocumentId,
-            SourceType = validation.SourceType,
-            SourceId = request?.SourceId,
-            Notes = validation.Notes,
-            CreatedAt = now,
-            CreatedByUserId = actorUserId,
-            CreatedByUserName = Truncate(actorName, 256),
-            UpdatedAt = now,
-            UpdatedByUserId = actorUserId,
-            UpdatedByUserName = Truncate(actorName, 256),
-        };
-
-        _db.ClientCaseProceduralDeadlines.Add(deadline);
-        AppendCaseEvent(clientCase, $"Добавлен процессуальный срок «{deadline.Title}» на {deadline.DueAt:dd.MM.yyyy}. Автор: {actorName}.");
-        _db.SetAuditReason($"Добавлен процессуальный срок дела: {deadline.Title}");
-        await _db.SaveChangesAsync(ct);
-
-        var taskJournalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
-        await LinkProceduralDeadlineTaskAsync(deadline.Id, ct);
-        await SyncDeadlineCourtEventLinkAsync(deadline, null, null, actorUserId, actorName, ct);
-        await AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "created", actorUserId, actorName, ct);
-        await _db.SaveChangesAsync(ct);
-        if (taskJournalChanged)
-        {
-            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        }
-
-        return Created($"/api/v2/cases/{id}/procedural-deadlines/{deadline.Id}", MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
+            return Created($"/api/v2/cases/{id}/procedural-deadlines/{deadline.Id}", MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
+        }, ct);
+        await CompleteCourtWriteAsync(result, journalChanged, notifyAfterCommit, ct);
+        return (ActionResult)result;
     }
 
     /// <summary>
@@ -3403,102 +3387,86 @@ public partial class CasesV2Controller : ControllerBase
         [FromBody] UpsertClientCaseProceduralDeadlineRequest? request,
         CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        var journalChanged = false;
+        Func<Task>? notifyAfterCommit = null;
+        var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
-            return forbidden;
-        }
+            await PinCourtEventDeadlineRowsAsync(id, ct);
+            var deadline = await _db.ClientCaseProceduralDeadlines
+                .FirstOrDefaultAsync(item => item.Id == deadlineId && item.ClientCaseId == id, ct);
+            if (deadline is null)
+            {
+                return NotFound();
+            }
 
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
+            var validation = ValidateProceduralDeadlineRequest(request);
+            if (validation.Error is not null)
+            {
+                return BadRequest(new { message = validation.Error });
+            }
 
-        var clientCase = await _db.ClientCases
-            .Include(item => item.Client)
-            .Include(item => item.LegalEntity)
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
+            await PinCourtComplaintDocumentAsync(id, request?.ClientCaseDocumentId, ct);
+            var linkError = await ValidateProceduralDeadlineLinksAsync(id, request, ct);
+            if (linkError is not null)
+            {
+                return BadRequest(new { message = linkError });
+            }
 
-        var deadline = await _db.ClientCaseProceduralDeadlines
-            .FirstOrDefaultAsync(item => item.Id == deadlineId && item.ClientCaseId == id, ct);
-        if (deadline is null)
-        {
-            return NotFound();
-        }
+            var actorUserId = User.GetUserId();
+            var actorName = User.GetDisplayName();
+            var oldDueAt = deadline.DueAt;
+            var oldStatus = deadline.Status;
+            var oldSourceType = deadline.SourceType;
+            var oldSourceId = deadline.SourceId;
 
-        var validation = ValidateProceduralDeadlineRequest(request);
-        if (validation.Error is not null)
-        {
-            return BadRequest(new { message = validation.Error });
-        }
+            deadline.DeadlineType = validation.DeadlineType;
+            deadline.Title = validation.Title;
+            deadline.Description = validation.Description;
+            deadline.DueAt = validation.DueAt;
+            deadline.AllDay = validation.AllDay;
+            deadline.Status = validation.Status;
+            deadline.WarningDaysBefore = validation.WarningDaysBefore;
+            deadline.TaskJournalItemId = request?.TaskJournalItemId;
+            deadline.ClientCaseDocumentId = request?.ClientCaseDocumentId;
+            deadline.SourceType = validation.SourceType;
+            deadline.SourceId = request?.SourceId;
+            deadline.Notes = validation.Notes;
+            deadline.UpdatedAt = DateTime.UtcNow;
+            deadline.UpdatedByUserId = actorUserId;
+            deadline.UpdatedByUserName = Truncate(actorName, 256);
 
-        var linkError = await ValidateProceduralDeadlineLinksAsync(id, request, ct);
-        if (linkError is not null)
-        {
-            return BadRequest(new { message = linkError });
-        }
+            if (deadline.Status == "closed" && oldStatus != "closed")
+            {
+                deadline.ClosedAt = DateTime.UtcNow;
+                deadline.ClosedByUserId = actorUserId;
+                deadline.ClosedByUserName = Truncate(actorName, 256);
+                deadline.CloseReason = Truncate(NormalizeOptional(request?.CloseReason) ?? string.Empty, 1000);
+            }
+            else if (deadline.Status != "closed")
+            {
+                deadline.ClosedAt = null;
+                deadline.ClosedByUserId = null;
+                deadline.ClosedByUserName = string.Empty;
+                deadline.CloseReason = string.Empty;
+            }
 
-        var actorUserId = User.GetUserId();
-        var actorName = User.GetDisplayName();
-        var oldDueAt = deadline.DueAt;
-        var oldStatus = deadline.Status;
-        var oldSourceType = deadline.SourceType;
-        var oldSourceId = deadline.SourceId;
+            var moveSuffix = oldDueAt.Date == deadline.DueAt.Date
+                ? string.Empty
+                : $" Перенос: {oldDueAt:dd.MM.yyyy} -> {deadline.DueAt:dd.MM.yyyy}.";
+            AppendCaseEvent(clientCase, $"Процессуальный срок «{deadline.Title}» обновлен.{moveSuffix} Изменил: {actorName}.");
+            _db.SetAuditReason($"Обновлен процессуальный срок дела: {deadline.Title}");
+            await _db.SaveChangesAsync(ct);
 
-        deadline.DeadlineType = validation.DeadlineType;
-        deadline.Title = validation.Title;
-        deadline.Description = validation.Description;
-        deadline.DueAt = validation.DueAt;
-        deadline.AllDay = validation.AllDay;
-        deadline.Status = validation.Status;
-        deadline.WarningDaysBefore = validation.WarningDaysBefore;
-        deadline.TaskJournalItemId = request?.TaskJournalItemId;
-        deadline.ClientCaseDocumentId = request?.ClientCaseDocumentId;
-        deadline.SourceType = validation.SourceType;
-        deadline.SourceId = request?.SourceId;
-        deadline.Notes = validation.Notes;
-        deadline.UpdatedAt = DateTime.UtcNow;
-        deadline.UpdatedByUserId = actorUserId;
-        deadline.UpdatedByUserName = Truncate(actorName, 256);
+            journalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
+            await LinkProceduralDeadlineTaskAsync(deadline.Id, ct);
+            await SyncDeadlineCourtEventLinkAsync(deadline, oldSourceType, oldSourceId, actorUserId, actorName, ct);
+            notifyAfterCommit = () => AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "updated", actorUserId, actorName, ct);
+            await _db.SaveChangesAsync(ct);
 
-        if (deadline.Status == "closed" && oldStatus != "closed")
-        {
-            deadline.ClosedAt = DateTime.UtcNow;
-            deadline.ClosedByUserId = actorUserId;
-            deadline.ClosedByUserName = Truncate(actorName, 256);
-            deadline.CloseReason = Truncate(NormalizeOptional(request?.CloseReason) ?? string.Empty, 1000);
-        }
-        else if (deadline.Status != "closed")
-        {
-            deadline.ClosedAt = null;
-            deadline.ClosedByUserId = null;
-            deadline.ClosedByUserName = string.Empty;
-            deadline.CloseReason = string.Empty;
-        }
-
-        var moveSuffix = oldDueAt.Date == deadline.DueAt.Date
-            ? string.Empty
-            : $" Перенос: {oldDueAt:dd.MM.yyyy} -> {deadline.DueAt:dd.MM.yyyy}.";
-        AppendCaseEvent(clientCase, $"Процессуальный срок «{deadline.Title}» обновлен.{moveSuffix} Изменил: {actorName}.");
-        _db.SetAuditReason($"Обновлен процессуальный срок дела: {deadline.Title}");
-        await _db.SaveChangesAsync(ct);
-
-        var taskJournalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
-        await LinkProceduralDeadlineTaskAsync(deadline.Id, ct);
-        await SyncDeadlineCourtEventLinkAsync(deadline, oldSourceType, oldSourceId, actorUserId, actorName, ct);
-        await AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "updated", actorUserId, actorName, ct);
-        await _db.SaveChangesAsync(ct);
-        if (taskJournalChanged)
-        {
-            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        }
-
-        return Ok(MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
+            return Ok(MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
+        }, ct);
+        await CompleteCourtWriteAsync(result, journalChanged, notifyAfterCommit, ct);
+        return (ActionResult)result;
     }
 
     [HttpPost("{id:int}/procedural-deadlines/{deadlineId:int}/close")]
@@ -3508,60 +3476,46 @@ public partial class CasesV2Controller : ControllerBase
         [FromBody] CloseClientCaseProceduralDeadlineRequest? request,
         CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        var journalChanged = false;
+        Func<Task>? notifyAfterCommit = null;
+        var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
-            return forbidden;
-        }
+            await PinCourtEventDeadlineRowsAsync(id, ct);
+            var deadline = await _db.ClientCaseProceduralDeadlines
+                .FirstOrDefaultAsync(item => item.Id == deadlineId && item.ClientCaseId == id, ct);
+            if (deadline is null)
+            {
+                return NotFound();
+            }
 
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
+            if (deadline.Status == "closed")
+            {
+                return Ok(MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
+            }
 
-        var clientCase = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
+            var actorUserId = User.GetUserId();
+            var actorName = User.GetDisplayName();
+            deadline.Status = "closed";
+            deadline.ClosedAt = DateTime.UtcNow;
+            deadline.ClosedByUserId = actorUserId;
+            deadline.ClosedByUserName = Truncate(actorName, 256);
+            deadline.CloseReason = Truncate(NormalizeOptional(request?.Reason) ?? string.Empty, 1000);
+            deadline.UpdatedAt = deadline.ClosedAt;
+            deadline.UpdatedByUserId = actorUserId;
+            deadline.UpdatedByUserName = Truncate(actorName, 256);
 
-        var deadline = await _db.ClientCaseProceduralDeadlines
-            .FirstOrDefaultAsync(item => item.Id == deadlineId && item.ClientCaseId == id, ct);
-        if (deadline is null)
-        {
-            return NotFound();
-        }
+            AppendCaseEvent(clientCase, $"Процессуальный срок «{deadline.Title}» закрыт. Закрыл: {actorName}.{FormatOptionalComment(deadline.CloseReason)}");
+            _db.SetAuditReason($"Закрыт процессуальный срок дела: {deadline.Title}");
+            await _db.SaveChangesAsync(ct);
 
-        if (deadline.Status == "closed")
-        {
+            journalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
+            notifyAfterCommit = () => AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "closed", actorUserId, actorName, ct);
+            await _db.SaveChangesAsync(ct);
+
             return Ok(MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
-        }
-
-        var actorUserId = User.GetUserId();
-        var actorName = User.GetDisplayName();
-        deadline.Status = "closed";
-        deadline.ClosedAt = DateTime.UtcNow;
-        deadline.ClosedByUserId = actorUserId;
-        deadline.ClosedByUserName = Truncate(actorName, 256);
-        deadline.CloseReason = Truncate(NormalizeOptional(request?.Reason) ?? string.Empty, 1000);
-        deadline.UpdatedAt = deadline.ClosedAt;
-        deadline.UpdatedByUserId = actorUserId;
-        deadline.UpdatedByUserName = Truncate(actorName, 256);
-
-        AppendCaseEvent(clientCase, $"Процессуальный срок «{deadline.Title}» закрыт. Закрыл: {actorName}.{FormatOptionalComment(deadline.CloseReason)}");
-        _db.SetAuditReason($"Закрыт процессуальный срок дела: {deadline.Title}");
-        await _db.SaveChangesAsync(ct);
-
-        var taskJournalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
-        await AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "closed", actorUserId, actorName, ct);
-        await _db.SaveChangesAsync(ct);
-        if (taskJournalChanged)
-        {
-            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        }
-        return Ok(MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
+        }, ct);
+        await CompleteCourtWriteAsync(result, journalChanged, notifyAfterCommit, ct);
+        return (ActionResult)result;
     }
 
     [HttpGet("{id:int}/court-instances")]
@@ -3868,87 +3822,78 @@ public partial class CasesV2Controller : ControllerBase
         [FromBody] UpsertClientCaseCourtEventRequest? request,
         CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        var journalChanged = false;
+        Func<Task>? notifyAfterCommit = null;
+        var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
-            return forbidden;
-        }
+            await PinCourtDirectoryItemAsync(request?.CourtId, ct);
+            var court = await ResolveCourtDirectoryItemForRequestAsync(request?.CourtId, ct);
+            if (request?.CourtId is not null && court is null)
+            {
+                return BadRequest(new { message = "Судебная инстанция не найдена в справочнике." });
+            }
 
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
+            var validation = ValidateCourtEventRequest(request, clientCase, court);
+            if (validation.Error is not null)
+            {
+                return BadRequest(new { message = validation.Error });
+            }
 
-        var clientCase = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
+            await PinCourtEventDeadlineRowsAsync(id, ct);
+            await PinCourtComplaintDocumentAsync(id, request?.ClientCaseDocumentId, ct);
+            var linkError = await ValidateCourtEventLinksAsync(id, request, ct);
+            if (linkError is not null)
+            {
+                return BadRequest(new { message = linkError });
+            }
 
-        var court = await ResolveCourtDirectoryItemForRequestAsync(request?.CourtId, ct);
-        if (request?.CourtId is not null && court is null)
-        {
-            return BadRequest(new { message = "Судебная инстанция не найдена в справочнике." });
-        }
+            var actorUserId = User.GetUserId();
+            var actorName = User.GetDisplayName();
+            var now = DateTime.UtcNow;
+            var courtEvent = new ClientCaseCourtEvent
+            {
+                ClientCaseId = id,
+                EventType = validation.EventType,
+                Title = validation.Title,
+                Description = validation.Description,
+                ScheduledAt = validation.ScheduledAt,
+                AllDay = validation.AllDay,
+                CourtInstance = validation.CourtInstance,
+                CourtId = court?.Id,
+                CourtName = validation.CourtName,
+                CourtCaseNumber = validation.CourtCaseNumber,
+                Courtroom = validation.Courtroom,
+                JudgeName = validation.JudgeName,
+                SecretaryName = validation.SecretaryName,
+                MovementStatus = validation.MovementStatus,
+                ResultSummary = validation.ResultSummary,
+                SourceType = validation.SourceType,
+                ClientCaseDocumentId = request?.ClientCaseDocumentId,
+                ProceduralDeadlineId = request?.ProceduralDeadlineId,
+                CreatedAt = now,
+                CreatedByUserId = actorUserId,
+                CreatedByUserName = Truncate(actorName, 256),
+                UpdatedAt = now,
+                UpdatedByUserId = actorUserId,
+                UpdatedByUserName = Truncate(actorName, 256),
+            };
 
-        var validation = ValidateCourtEventRequest(request, clientCase, court);
-        if (validation.Error is not null)
-        {
-            return BadRequest(new { message = validation.Error });
-        }
+            _db.ClientCaseCourtEvents.Add(courtEvent);
+            AppendCaseEvent(clientCase, $"Добавлено судебное событие «{courtEvent.Title}» на {courtEvent.ScheduledAt:dd.MM.yyyy HH:mm}. Автор: {actorName}.");
+            _db.SetAuditReason($"Добавлено судебное событие дела: {courtEvent.Title}");
+            await _db.SaveChangesAsync(ct);
 
-        var linkError = await ValidateCourtEventLinksAsync(id, request, ct);
-        if (linkError is not null)
-        {
-            return BadRequest(new { message = linkError });
-        }
+            AddCourtEventHistory(courtEvent, "created", $"Событие создано: {courtEvent.Title}.", actorUserId, actorName);
+            await SyncCourtEventDeadlineSourceAsync(courtEvent, null, actorUserId, actorName, ct);
+            notifyAfterCommit = () => AddCourtEventUserNotificationsAsync(clientCase, courtEvent, "created", actorUserId, actorName, ct);
+            await _db.SaveChangesAsync(ct);
+            await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
+            journalChanged = true;
 
-        var actorUserId = User.GetUserId();
-        var actorName = User.GetDisplayName();
-        var now = DateTime.UtcNow;
-        var courtEvent = new ClientCaseCourtEvent
-        {
-            ClientCaseId = id,
-            EventType = validation.EventType,
-            Title = validation.Title,
-            Description = validation.Description,
-            ScheduledAt = validation.ScheduledAt,
-            AllDay = validation.AllDay,
-            CourtInstance = validation.CourtInstance,
-            CourtId = court?.Id,
-            CourtName = validation.CourtName,
-            CourtCaseNumber = validation.CourtCaseNumber,
-            Courtroom = validation.Courtroom,
-            JudgeName = validation.JudgeName,
-            SecretaryName = validation.SecretaryName,
-            MovementStatus = validation.MovementStatus,
-            ResultSummary = validation.ResultSummary,
-            SourceType = validation.SourceType,
-            ClientCaseDocumentId = request?.ClientCaseDocumentId,
-            ProceduralDeadlineId = request?.ProceduralDeadlineId,
-            CreatedAt = now,
-            CreatedByUserId = actorUserId,
-            CreatedByUserName = Truncate(actorName, 256),
-            UpdatedAt = now,
-            UpdatedByUserId = actorUserId,
-            UpdatedByUserName = Truncate(actorName, 256),
-        };
-
-        _db.ClientCaseCourtEvents.Add(courtEvent);
-        AppendCaseEvent(clientCase, $"Добавлено судебное событие «{courtEvent.Title}» на {courtEvent.ScheduledAt:dd.MM.yyyy HH:mm}. Автор: {actorName}.");
-        _db.SetAuditReason($"Добавлено судебное событие дела: {courtEvent.Title}");
-        await _db.SaveChangesAsync(ct);
-
-        AddCourtEventHistory(courtEvent, "created", $"Событие создано: {courtEvent.Title}.", actorUserId, actorName);
-        await SyncCourtEventDeadlineSourceAsync(courtEvent, null, actorUserId, actorName, ct);
-        await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, "created", actorUserId, actorName, ct);
-        await _db.SaveChangesAsync(ct);
-        await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
-        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-
-        return Created($"/api/v2/cases/{id}/court-events/{courtEvent.Id}", MapCourtEvent(courtEvent, await ResolveCaseStatusClockAsync(ct)));
+            return Created($"/api/v2/cases/{id}/court-events/{courtEvent.Id}", MapCourtEvent(courtEvent, await ResolveCaseStatusClockAsync(ct)));
+        }, ct);
+        await CompleteCourtWriteAsync(result, journalChanged, notifyAfterCommit, ct);
+        return (ActionResult)result;
     }
 
     /// <summary>
@@ -3963,102 +3908,93 @@ public partial class CasesV2Controller : ControllerBase
         [FromBody] UpsertClientCaseCourtEventRequest? request,
         CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        var journalChanged = false;
+        Func<Task>? notifyAfterCommit = null;
+        var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
-            return forbidden;
-        }
+            await PinCourtEventDeadlineRowsAsync(id, ct);
+            var courtEvent = await _db.ClientCaseCourtEvents
+                .FirstOrDefaultAsync(item => item.Id == courtEventId && item.ClientCaseId == id, ct);
+            if (courtEvent is null)
+            {
+                return NotFound();
+            }
 
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
+            await PinCourtDirectoryItemAsync(request?.CourtId, ct);
+            var court = await ResolveCourtDirectoryItemForRequestAsync(request?.CourtId, ct);
+            if (request?.CourtId is not null && court is null)
+            {
+                return BadRequest(new { message = "Судебная инстанция не найдена в справочнике." });
+            }
 
-        var clientCase = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
+            var validation = ValidateCourtEventRequest(request, clientCase, court);
+            if (validation.Error is not null)
+            {
+                return BadRequest(new { message = validation.Error });
+            }
 
-        var courtEvent = await _db.ClientCaseCourtEvents
-            .FirstOrDefaultAsync(item => item.Id == courtEventId && item.ClientCaseId == id, ct);
-        if (courtEvent is null)
-        {
-            return NotFound();
-        }
+            await PinCourtComplaintDocumentAsync(id, request?.ClientCaseDocumentId, ct);
+            var linkError = await ValidateCourtEventLinksAsync(id, request, ct);
+            if (linkError is not null)
+            {
+                return BadRequest(new { message = linkError });
+            }
 
-        var court = await ResolveCourtDirectoryItemForRequestAsync(request?.CourtId, ct);
-        if (request?.CourtId is not null && court is null)
-        {
-            return BadRequest(new { message = "Судебная инстанция не найдена в справочнике." });
-        }
+            var actorUserId = User.GetUserId();
+            var actorName = User.GetDisplayName();
+            var oldProceduralDeadlineId = courtEvent.ProceduralDeadlineId;
+            var previousScheduledAt = courtEvent.ScheduledAt;
+            var previousAllDay = courtEvent.AllDay;
+            var wasRescheduled = string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(validation.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
+                && (courtEvent.ScheduledAt != validation.ScheduledAt || courtEvent.AllDay != validation.AllDay);
+            if (wasRescheduled)
+            {
+                courtEvent.PreviousScheduledAt = previousScheduledAt;
+                courtEvent.PreviousAllDay = previousAllDay;
+            }
+            else if (!string.Equals(validation.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase))
+            {
+                courtEvent.PreviousScheduledAt = null;
+                courtEvent.PreviousAllDay = null;
+            }
+            courtEvent.EventType = validation.EventType;
+            courtEvent.Title = validation.Title;
+            courtEvent.Description = validation.Description;
+            courtEvent.ScheduledAt = validation.ScheduledAt;
+            courtEvent.AllDay = validation.AllDay;
+            courtEvent.CourtInstance = validation.CourtInstance;
+            courtEvent.CourtId = court?.Id;
+            courtEvent.CourtName = validation.CourtName;
+            courtEvent.CourtCaseNumber = validation.CourtCaseNumber;
+            courtEvent.Courtroom = validation.Courtroom;
+            courtEvent.JudgeName = validation.JudgeName;
+            courtEvent.SecretaryName = validation.SecretaryName;
+            courtEvent.MovementStatus = validation.MovementStatus;
+            courtEvent.ResultSummary = validation.ResultSummary;
+            courtEvent.SourceType = validation.SourceType;
+            courtEvent.ClientCaseDocumentId = request?.ClientCaseDocumentId;
+            courtEvent.ProceduralDeadlineId = request?.ProceduralDeadlineId;
+            courtEvent.UpdatedAt = DateTime.UtcNow;
+            courtEvent.UpdatedByUserId = actorUserId;
+            courtEvent.UpdatedByUserName = Truncate(actorName, 256);
 
-        var validation = ValidateCourtEventRequest(request, clientCase, court);
-        if (validation.Error is not null)
-        {
-            return BadRequest(new { message = validation.Error });
-        }
+            AppendCaseEvent(clientCase, $"Обновлено судебное событие «{courtEvent.Title}». Автор: {actorName}.");
+            _db.SetAuditReason($"Обновлено судебное событие дела: {courtEvent.Title}");
+            AddCourtEventHistory(courtEvent, wasRescheduled ? "rescheduled" : "updated",
+                wasRescheduled
+                    ? $"Расписание заседания изменено: {previousScheduledAt:dd.MM.yyyy HH:mm}{(previousAllDay ? " (весь день)" : "")} → {validation.ScheduledAt:dd.MM.yyyy HH:mm}{(validation.AllDay ? " (весь день)" : "")}."
+                    : $"Событие обновлено: {courtEvent.Title}.", actorUserId, actorName);
+            await SyncCourtEventDeadlineSourceAsync(courtEvent, oldProceduralDeadlineId, actorUserId, actorName, ct);
+            notifyAfterCommit = () => AddCourtEventUserNotificationsAsync(clientCase, courtEvent, wasRescheduled ? "rescheduled" : "updated", actorUserId, actorName, ct);
+            await _db.SaveChangesAsync(ct);
+            await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
+            journalChanged = true;
 
-        var linkError = await ValidateCourtEventLinksAsync(id, request, ct);
-        if (linkError is not null)
-        {
-            return BadRequest(new { message = linkError });
-        }
-
-        var actorUserId = User.GetUserId();
-        var actorName = User.GetDisplayName();
-        var oldProceduralDeadlineId = courtEvent.ProceduralDeadlineId;
-        var previousScheduledAt = courtEvent.ScheduledAt;
-        var previousAllDay = courtEvent.AllDay;
-        var wasRescheduled = string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(validation.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
-            && (courtEvent.ScheduledAt != validation.ScheduledAt || courtEvent.AllDay != validation.AllDay);
-        if (wasRescheduled)
-        {
-            courtEvent.PreviousScheduledAt = previousScheduledAt;
-            courtEvent.PreviousAllDay = previousAllDay;
-        }
-        else if (!string.Equals(validation.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase))
-        {
-            courtEvent.PreviousScheduledAt = null;
-            courtEvent.PreviousAllDay = null;
-        }
-        courtEvent.EventType = validation.EventType;
-        courtEvent.Title = validation.Title;
-        courtEvent.Description = validation.Description;
-        courtEvent.ScheduledAt = validation.ScheduledAt;
-        courtEvent.AllDay = validation.AllDay;
-        courtEvent.CourtInstance = validation.CourtInstance;
-        courtEvent.CourtId = court?.Id;
-        courtEvent.CourtName = validation.CourtName;
-        courtEvent.CourtCaseNumber = validation.CourtCaseNumber;
-        courtEvent.Courtroom = validation.Courtroom;
-        courtEvent.JudgeName = validation.JudgeName;
-        courtEvent.SecretaryName = validation.SecretaryName;
-        courtEvent.MovementStatus = validation.MovementStatus;
-        courtEvent.ResultSummary = validation.ResultSummary;
-        courtEvent.SourceType = validation.SourceType;
-        courtEvent.ClientCaseDocumentId = request?.ClientCaseDocumentId;
-        courtEvent.ProceduralDeadlineId = request?.ProceduralDeadlineId;
-        courtEvent.UpdatedAt = DateTime.UtcNow;
-        courtEvent.UpdatedByUserId = actorUserId;
-        courtEvent.UpdatedByUserName = Truncate(actorName, 256);
-
-        AppendCaseEvent(clientCase, $"Обновлено судебное событие «{courtEvent.Title}». Автор: {actorName}.");
-        _db.SetAuditReason($"Обновлено судебное событие дела: {courtEvent.Title}");
-        AddCourtEventHistory(courtEvent, wasRescheduled ? "rescheduled" : "updated",
-            wasRescheduled
-                ? $"Расписание заседания изменено: {previousScheduledAt:dd.MM.yyyy HH:mm}{(previousAllDay ? " (весь день)" : "")} → {validation.ScheduledAt:dd.MM.yyyy HH:mm}{(validation.AllDay ? " (весь день)" : "")}."
-                : $"Событие обновлено: {courtEvent.Title}.", actorUserId, actorName);
-        await SyncCourtEventDeadlineSourceAsync(courtEvent, oldProceduralDeadlineId, actorUserId, actorName, ct);
-        await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, wasRescheduled ? "rescheduled" : "updated", actorUserId, actorName, ct);
-        await _db.SaveChangesAsync(ct);
-        await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
-        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-
-        return Ok(MapCourtEvent(courtEvent, await ResolveCaseStatusClockAsync(ct)));
+            return Ok(MapCourtEvent(courtEvent, await ResolveCaseStatusClockAsync(ct)));
+        }, ct);
+        await CompleteCourtWriteAsync(result, journalChanged, notifyAfterCommit, ct);
+        return (ActionResult)result;
     }
 
     [HttpGet("{id:int}/court-events/{courtEventId:int}/history")]
@@ -4150,100 +4086,72 @@ public partial class CasesV2Controller : ControllerBase
         [FromBody] UpsertClientCaseCourtPartyRequest? request,
         CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
-            return forbidden;
-        }
+            await PinCourtRelatedPartyAsync(id, request?.RelatedPartyId, ct);
+            var validation = await ValidateCourtPartyRequestAsync(id, request, ct);
+            if (validation.Error is not null)
+            {
+                return BadRequest(new { message = validation.Error });
+            }
 
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
+            var actorUserId = User.GetUserId();
+            var actorName = User.GetDisplayName();
+            var now = DateTime.UtcNow;
+            var party = new ClientCaseCourtParty
+            {
+                ClientCaseId = id,
+                RelatedPartyId = validation.RelatedPartyId,
+                DisplayName = validation.DisplayName,
+                Side = validation.Side,
+                ProcessRole = validation.ProcessRole,
+                RepresentativeName = validation.RepresentativeName,
+                Notes = validation.Notes,
+                CreatedAt = now,
+                CreatedByUserId = actorUserId,
+                CreatedByUserName = Truncate(actorName, 256),
+                UpdatedAt = now,
+                UpdatedByUserId = actorUserId,
+                UpdatedByUserName = Truncate(actorName, 256),
+            };
 
-        var clientCase = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
+            _db.ClientCaseCourtParties.Add(party);
+            AppendCaseEvent(clientCase, $"Добавлена сторона процесса: {party.DisplayName} ({ResolveCourtPartySideLabel(party.Side)}). Автор: {actorName}.");
+            _db.SetAuditReason($"Добавлена сторона процесса по делу: {party.DisplayName}");
+            await _db.SaveChangesAsync(ct);
 
-        var validation = await ValidateCourtPartyRequestAsync(id, request, ct);
-        if (validation.Error is not null)
-        {
-            return BadRequest(new { message = validation.Error });
-        }
-
-        var actorUserId = User.GetUserId();
-        var actorName = User.GetDisplayName();
-        var now = DateTime.UtcNow;
-        var party = new ClientCaseCourtParty
-        {
-            ClientCaseId = id,
-            RelatedPartyId = validation.RelatedPartyId,
-            DisplayName = validation.DisplayName,
-            Side = validation.Side,
-            ProcessRole = validation.ProcessRole,
-            RepresentativeName = validation.RepresentativeName,
-            Notes = validation.Notes,
-            CreatedAt = now,
-            CreatedByUserId = actorUserId,
-            CreatedByUserName = Truncate(actorName, 256),
-            UpdatedAt = now,
-            UpdatedByUserId = actorUserId,
-            UpdatedByUserName = Truncate(actorName, 256),
-        };
-
-        _db.ClientCaseCourtParties.Add(party);
-        AppendCaseEvent(clientCase, $"Добавлена сторона процесса: {party.DisplayName} ({ResolveCourtPartySideLabel(party.Side)}). Автор: {actorName}.");
-        _db.SetAuditReason($"Добавлена сторона процесса по делу: {party.DisplayName}");
-        await _db.SaveChangesAsync(ct);
-
-        return Created($"/api/v2/cases/{id}/court-parties/{party.Id}", MapCourtParty(party));
+            return Created($"/api/v2/cases/{id}/court-parties/{party.Id}", MapCourtParty(party));
+        }, ct);
+        return (ActionResult)result;
     }
 
     [HttpDelete("{id:int}/court-parties/{partyId:int}")]
     public async Task<IActionResult> ArchiveCourtParty(int id, int partyId, CancellationToken ct)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        var result = await WithCurrentCourtWriteAsync(id, async clientCase =>
         {
-            return forbidden;
-        }
+            await PinCourtPartyForWriteAsync(id, partyId, ct);
+            var party = await _db.ClientCaseCourtParties
+                .FirstOrDefaultAsync(item => item.Id == partyId && item.ClientCaseId == id, ct);
+            if (party is null)
+            {
+                return NotFound();
+            }
 
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
+            if (!party.IsArchived)
+            {
+                party.IsArchived = true;
+                party.UpdatedAt = DateTime.UtcNow;
+                party.UpdatedByUserId = User.GetUserId();
+                party.UpdatedByUserName = Truncate(User.GetDisplayName(), 256);
+                AppendCaseEvent(clientCase, $"Сторона процесса архивирована: {party.DisplayName}. Автор: {User.GetDisplayName()}.");
+                _db.SetAuditReason($"Сторона процесса архивирована: {party.DisplayName}");
+                await _db.SaveChangesAsync(ct);
+            }
 
-        var clientCase = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
-        {
-            return NotFound();
-        }
-
-        var party = await _db.ClientCaseCourtParties
-            .FirstOrDefaultAsync(item => item.Id == partyId && item.ClientCaseId == id, ct);
-        if (party is null)
-        {
-            return NotFound();
-        }
-
-        if (!party.IsArchived)
-        {
-            party.IsArchived = true;
-            party.UpdatedAt = DateTime.UtcNow;
-            party.UpdatedByUserId = User.GetUserId();
-            party.UpdatedByUserName = Truncate(User.GetDisplayName(), 256);
-            AppendCaseEvent(clientCase, $"Сторона процесса архивирована: {party.DisplayName}. Автор: {User.GetDisplayName()}.");
-            _db.SetAuditReason($"Сторона процесса архивирована: {party.DisplayName}");
-            await _db.SaveChangesAsync(ct);
-        }
-
-        return NoContent();
+            return NoContent();
+        }, ct);
+        return result;
     }
 
     [HttpPost("{id:int}/access-request")]
@@ -14189,7 +14097,7 @@ public partial class CasesV2Controller : ControllerBase
         if (previousDeadlineId.HasValue && previousDeadlineId != courtEvent.ProceduralDeadlineId)
         {
             var previousDeadline = await _db.ClientCaseProceduralDeadlines
-                .FirstOrDefaultAsync(item => item.Id == previousDeadlineId && item.SourceId == courtEvent.Id, ct);
+                .FirstOrDefaultAsync(item => item.Id == previousDeadlineId && item.ClientCaseId == courtEvent.ClientCaseId && item.SourceId == courtEvent.Id, ct);
             if (previousDeadline is not null && IsCourtEventSourceType(previousDeadline.SourceType))
             {
                 previousDeadline.SourceType = "manual";
@@ -14235,7 +14143,7 @@ public partial class CasesV2Controller : ControllerBase
         if (IsCourtEventSourceType(previousSourceType) && previousSourceId.HasValue && previousSourceId != deadline.SourceId)
         {
             var previousCourtEvent = await _db.ClientCaseCourtEvents
-                .FirstOrDefaultAsync(item => item.Id == previousSourceId && item.ProceduralDeadlineId == deadline.Id, ct);
+                .FirstOrDefaultAsync(item => item.Id == previousSourceId && item.ClientCaseId == deadline.ClientCaseId && item.ProceduralDeadlineId == deadline.Id, ct);
             if (previousCourtEvent is not null)
             {
                 previousCourtEvent.ProceduralDeadlineId = null;

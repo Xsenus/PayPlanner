@@ -6255,6 +6255,8 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.True(saved.CanRecordHearingOutcome);
         Assert.Equal("Решение оглашено", saved.HearingOutcomeNote);
         Assert.Equal(lawyer.Id, saved.HearingOutcomeRecordedByUserId);
+        hearing = await db.ClientCaseCourtEvents.AsNoTracking().SingleAsync(item => item.Id == hearing.Id);
+        preparation = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == preparation.Id);
         Assert.Equal("Данные суда", hearing.ResultSummary);
         Assert.Equal("cancelled", preparation.Status);
         Assert.Single(await db.ClientCaseCourtEventHistory.Where(item => item.ClientCaseCourtEventId == hearing.Id && item.Action == "hearing-outcome").ToListAsync());
@@ -6787,6 +6789,9 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Equal(owner.Id, closed.ClosedByUserId);
         Assert.NotNull(closed.ClosedAt);
         Assert.Equal(secondCourtEvent.Id, closed.SourceId);
+        firstCourtEvent = await db.ClientCaseCourtEvents.AsNoTracking().SingleAsync(item => item.Id == firstCourtEvent.Id);
+        secondCourtEvent = await db.ClientCaseCourtEvents.AsNoTracking().SingleAsync(item => item.Id == secondCourtEvent.Id);
+        clientCase = await db.ClientCases.AsNoTracking().SingleAsync(item => item.Id == clientCase.Id);
         Assert.Null(firstCourtEvent.ProceduralDeadlineId);
         Assert.Equal(created.Id, secondCourtEvent.ProceduralDeadlineId);
         Assert.Contains("Перенос: 08.08.2026 -> 18.08.2026", clientCase.EventHistory, StringComparison.Ordinal);
@@ -6812,6 +6817,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Empty(reopened.ClosedByUserName);
         Assert.Empty(reopened.CloseReason);
         Assert.Null(reopened.SourceId);
+        secondCourtEvent = await db.ClientCaseCourtEvents.AsNoTracking().SingleAsync(item => item.Id == secondCourtEvent.Id);
         Assert.Null(secondCourtEvent.ProceduralDeadlineId);
     }
 
@@ -6896,6 +6902,8 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Equal("Оглашение решения", updated.Title);
         Assert.Equal("completed", updated.MovementStatus);
         Assert.Equal(secondDeadline.Id, updated.ProceduralDeadlineId);
+        firstDeadline = await db.ClientCaseProceduralDeadlines.AsNoTracking().SingleAsync(item => item.Id == firstDeadline.Id);
+        secondDeadline = await db.ClientCaseProceduralDeadlines.AsNoTracking().SingleAsync(item => item.Id == secondDeadline.Id);
         Assert.Equal("manual", firstDeadline.SourceType);
         Assert.Null(firstDeadline.SourceId);
         Assert.Equal("court-event", secondDeadline.SourceType);
