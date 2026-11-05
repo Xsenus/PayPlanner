@@ -135,7 +135,7 @@
 | SmsDeliveryStatusReconciliationService | backend/Services/Notifications/SmsDeliveryStatusReconciliationService.cs | 12 | да | нет |
 | StickyNoteReminderNotificationService | backend/Services/Notifications/StickyNoteReminderNotificationService.cs | 7 | да | нет |
 | TaskDeadlineReviewerDispatchWorker | backend/Services/Notifications/TaskDeadlineReviewerDispatchProcessor.cs | 88 | нет | нет |
-| TaskJournalReminderNotificationService | backend/Services/Notifications/TaskJournalReminderNotificationService.cs | 9 | да | docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
+| TaskJournalReminderNotificationService | backend/Services/Notifications/TaskJournalReminderNotificationService.cs | 10 | да | docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | TaskStatusNotificationDispatchWorker | backend/Services/Notifications/TaskStatusNotificationDispatchProcessor.cs | 113 | нет | нет |
 | TelegramBotPollingService | backend/Services/Notifications/TelegramBotPollingService.cs | 3 | да | docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | PaymentAdvanceReviewMonitoringService | backend/Services/PaymentAdvanceReviewMonitoringService.cs | 11 | да | нет |

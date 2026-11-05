@@ -13,6 +13,10 @@ namespace PayPlanner.Api.Services.Cases;
 internal static class CaseTaskSyncScope
 {
     private static readonly long PostgreSqlEpochTicks = new DateTime(2000, 1, 1).Ticks;
+    private static readonly object ConfirmedRollbackKey = new();
+
+    public static bool IsRolledBackConflict(Exception error)
+        => error.Data[ConfirmedRollbackKey] is true && BalanceApplicationLease.IsConflict(error);
 
     private sealed record TrackingSnapshot(object Entity, EntityState State, PropertyValues Current,
         PropertyValues Original, string[] Modified, string[] Temporary);
@@ -50,6 +54,8 @@ internal static class CaseTaskSyncScope
         }
         catch (Exception error)
         {
+            // An exception instance can be reused by a persistence interceptor.
+            if (error.Data.Contains(ConfirmedRollbackKey)) error.Data.Remove(ConfirmedRollbackKey);
             var restored = false;
             if (!commitStarted || BalanceApplicationLease.IsDefiniteDatabaseAbort(error)
                 || error is SqliteException { SqliteErrorCode: 5 or 6 })
@@ -67,7 +73,11 @@ internal static class CaseTaskSyncScope
                 }
                 catch (Exception rollbackError) { error.Data["CaseTaskSyncRollbackFailure"] = rollbackError; }
             }
-            if (restored) RestoreTracking(db, before);
+            if (restored)
+            {
+                RestoreTracking(db, before);
+                if (BalanceApplicationLease.IsConflict(error)) error.Data[ConfirmedRollbackKey] = true;
+            }
             throw;
         }
         finally

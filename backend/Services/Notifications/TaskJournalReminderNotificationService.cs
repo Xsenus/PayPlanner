@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Cases;
 
 namespace PayPlanner.Api.Services.Notifications;
 
@@ -264,18 +265,22 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
         var taskJournalChanged = false;
         foreach (var caseId in caseIds)
         {
-            taskJournalChanged |= await ClientCaseDeadlineTaskSyncService.SyncAsync(
-                context,
-                caseId,
-                actorUserId: null,
-                actorName: "Система",
-                cancellationToken);
+            try
+            {
+                taskJournalChanged |= await ClientCaseDeadlineTaskSyncService.SyncAsync(
+                    context,
+                    caseId,
+                    actorUserId: null,
+                    actorName: "Система",
+                    cancellationToken);
+            }
+            catch (Exception error) when (error is not OperationCanceledException && !cancellationToken.IsCancellationRequested
+                && CaseTaskSyncScope.IsRolledBackConflict(error))
+            {
+                _logger.LogDebug("Deferred deadline task synchronization for busy or changed case {ClientCaseId}. A later traversal will retry.", caseId);
+            }
             context.ChangeTracker.Clear();
-        }
-
-        if (caseIds.Count > 0)
-        {
-            _lastCaseDeadlineSyncId = caseIds[^1];
+            _lastCaseDeadlineSyncId = caseId;
         }
 
         return taskJournalChanged;

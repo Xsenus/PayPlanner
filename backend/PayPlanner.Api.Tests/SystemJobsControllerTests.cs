@@ -28,7 +28,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class SystemJobsControllerTests
+public partial class SystemJobsControllerTests
 {
     [Fact]
     public async Task AdminFilter_ReturnsForbid_ForUserWithoutAdminRoleInDatabase()
