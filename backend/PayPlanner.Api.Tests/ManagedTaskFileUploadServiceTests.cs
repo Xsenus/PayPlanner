@@ -1214,6 +1214,8 @@ public sealed partial class ManagedTaskFileUploadServiceTests
     public async Task SoftDeletedCaseCanBeRestoredWithBothManagedFilesAndNoPhysicalDeleteDebt(bool loaded)
     {
         await using var f = await Fixture.CreateAsync(useObjectAuditModel: true);
+        await f.Db.Users.Where(user => user.Id == f.UserId)
+            .ExecuteUpdateAsync(update => update.SetProperty(user => user.IsApproved, true));
         var uploaded = await f.Upload(Guid.NewGuid());
         var caseId = (await f.Db.TaskJournalItems.AsNoTracking().SingleAsync()).ClientCaseId!.Value;
         f.Db.ChangeTracker.Clear();

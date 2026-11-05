@@ -239,7 +239,7 @@ public class ClientsControllerInternalCoverageTests
             ],
         };
 
-        var result = Assert.IsType<ClientRequirementsModel>(InvokePrivateStatic("BuildClientRequirementsModel", model));
+        var result = Assert.IsType<ClientRequirementsModel>(InvokePrivateStatic("BuildClientRequirementsModel", model, null));
 
         Assert.Equal([11, 29], result.PowersOfAttorney);
     }

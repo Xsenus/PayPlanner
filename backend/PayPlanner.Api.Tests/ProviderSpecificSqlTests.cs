@@ -9,7 +9,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class ProviderSpecificSqlTests
+public partial class ProviderSpecificSqlTests
 {
     [Fact]
     public async Task InvoiceDeletionLock_ExecutesAgainstPostgreSql()
@@ -690,19 +690,22 @@ public class ProviderSpecificSqlTests
         var balanceSource = ReadSource("backend/Services/Payments/BalanceApplicationLease.cs");
         var balanceStart = balanceSource.IndexOf("private static async Task<BalanceApplicationLease> BeginCoreAsync", StringComparison.Ordinal);
         Assert.True(balanceStart >= 0);
+        var actorPinStart = balanceSource.IndexOf("internal static async Task PinActorAsync", balanceStart, StringComparison.Ordinal);
         var ownedStart = balanceSource.IndexOf("public async Task LockOwnedPaymentAsync", balanceStart, StringComparison.Ordinal);
         var paymentStart = balanceSource.IndexOf("public async Task LockPaymentAsync", ownedStart, StringComparison.Ordinal);
         var paymentsStart = balanceSource.IndexOf("public async Task LockPaymentsAsync", paymentStart, StringComparison.Ordinal);
         var balanceEnd = balanceSource.IndexOf("public async Task CommitAsync", paymentsStart, StringComparison.Ordinal);
-        Assert.True(ownedStart > balanceStart && paymentStart > ownedStart && paymentsStart > paymentStart && balanceEnd > paymentsStart);
-        AssertOrdered(balanceSource[balanceStart..ownedStart], "db.Database.CurrentTransaction is not null || db.ChangeTracker.HasChanges()", "if (db.Database.IsNpgsql())",
-            "IsolationLevel.Serializable", "if (actorId.HasValue)", "FROM \\\"Users\\\"", "FROM \\\"Roles\\\"", "FROM \\\"RolePermissions\\\"", "FROM \\\"UserCompanyAccesses\\\"",
+        Assert.True(actorPinStart > balanceStart && ownedStart > actorPinStart && paymentStart > ownedStart && paymentsStart > paymentStart && balanceEnd > paymentsStart);
+        AssertOrdered(balanceSource[balanceStart..actorPinStart], "db.Database.CurrentTransaction is not null || db.ChangeTracker.HasChanges()", "if (db.Database.IsNpgsql())",
+            "IsolationLevel.Serializable", "if (actorId.HasValue) await PinActorAsync(db, actorId.Value, ct);",
             "else if (db.Database.IsSqlite())", "deferred: false", "else throw new NotSupportedException");
-        Approve("backend/Services/Payments/BalanceApplicationLease.cs", balanceSource, "BeginCoreAsync", balanceStart, ownedStart,
-            ["""await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = {actorId.Value} FOR SHARE NOWAIT", ct);""",
-             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Roles\" WHERE \"Id\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId.Value}) FOR SHARE NOWAIT", ct);""",
-             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId.Value}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);""",
-             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"UserId\" FROM \"UserCompanyAccesses\" WHERE \"UserId\" = {actorId.Value} ORDER BY \"LegalEntityId\" FOR SHARE NOWAIT", ct);"""], "FOR SHARE");
+        AssertOrdered(balanceSource[actorPinStart..ownedStart], "if (db.Database.CurrentTransaction is null)", "if (!db.Database.IsNpgsql()) return;",
+            "FROM \\\"Users\\\"", "FROM \\\"Roles\\\"", "FROM \\\"RolePermissions\\\"", "FROM \\\"UserCompanyAccesses\\\"");
+        Approve("backend/Services/Payments/BalanceApplicationLease.cs", balanceSource, "PinActorAsync", actorPinStart, ownedStart,
+            ["""await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = {actorId} FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Roles\" WHERE \"Id\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId}) FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"UserId\" FROM \"UserCompanyAccesses\" WHERE \"UserId\" = {actorId} ORDER BY \"LegalEntityId\" FOR SHARE NOWAIT", ct);"""], "FOR SHARE");
         AssertOrdered(balanceSource[ownedStart..paymentStart], "if (!db.Database.IsNpgsql()) return;", "if (clientId.HasValue)", "{clientId.Value} AND", "{legalEntityId!.Value} AND");
         Approve("backend/Services/Payments/BalanceApplicationLease.cs", balanceSource, "LockOwnedPaymentAsync", ownedStart, paymentStart,
             ["""await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"Id\" = {id} AND \"ClientId\" = {clientId.Value} AND \"LegalEntityId\" IS NULL FOR UPDATE NOWAIT", ct);""",
@@ -739,6 +742,10 @@ public class ProviderSpecificSqlTests
         Assert.Equal(46, approved.Count(statement => statement.Contains("FOR UPDATE", StringComparison.Ordinal)));
         Assert.Equal(57, approved.Count(statement => statement.Contains("FOR SHARE", StringComparison.Ordinal)));
         Assert.Equal(103, approved.Count);
+        ApproveSupplementarySqlLocks(root, ReadSource, approved);
+        Assert.Equal(105, approved.Count(statement => statement.Contains("FOR UPDATE", StringComparison.Ordinal)));
+        Assert.Equal(129, approved.Count(statement => statement.Contains("FOR SHARE", StringComparison.Ordinal)));
+        Assert.Equal(234, approved.Count);
 
         // Exact identities include owner, method range, line and complete SQL call.
         // An extra statement in any other production file/method remains a failure.

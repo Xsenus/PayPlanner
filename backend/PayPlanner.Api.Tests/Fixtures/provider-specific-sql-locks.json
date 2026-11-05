@@ -1,0 +1,863 @@
+{
+  "SchemaVersion": 1,
+  "Entries": [
+    {
+      "Path": "backend/Controllers/ContactsController.ClientPromotion.cs",
+      "SourceSha256": "6fe674654f204a16fe5c8932454659445691446765f423e70fa6885bebe38be2",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "PromoteClientContactAsync",
+          "Line": 32,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Roles\\\" WHERE \\\"Id\\\" = (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {actorId.Value}) FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PromoteClientContactAsync",
+          "Line": 40,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ExternalContacts\\\" WHERE \\\"Id\\\" = {id} FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PromoteClientContactAsync",
+          "Line": 55,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ExternalContacts\\\" WHERE \\\"Id\\\" = {parentId} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PromoteClientContactAsync",
+          "Line": 68,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"LegalEntities\\\" WHERE \\\"Id\\\" = {legalId} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PromoteClientContactAsync",
+          "Line": 79,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientStatuses\\\" WHERE \\\"Id\\\" = {statusId.Value} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PromoteClientContactAsync",
+          "Line": 83,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Controllers/ContactsController.ClientUpdate.cs",
+      "SourceSha256": "09eba650e0d324ed244424bbe5b21df9878fb1b01a9c338711a73b48881476d8",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "UpdateClientContactAtomicallyAsync",
+          "Line": 31,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Roles\\\" WHERE \\\"Id\\\" = (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {actorId.Value}) FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "UpdateClientContactAtomicallyAsync",
+          "Line": 40,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Clients\\\" WHERE \\\"Id\\\" = {id} FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "UpdateClientContactAtomicallyAsync",
+          "Line": 54,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"LegalEntities\\\" WHERE \\\"Id\\\" = {legal.Id} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "UpdateClientContactAtomicallyAsync",
+          "Line": 60,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Controllers/ContactsController.ExternalWrites.cs",
+      "SourceSha256": "d2c7d8c39447fc63c3e65e4832358ecdc20f3cbff958d8ba424b10ef32649f71",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "WriteExternalContactAsync",
+          "Line": 34,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Roles\\\" WHERE \\\"Id\\\" = (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {actorId.Value}) FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "WriteExternalContactAsync",
+          "Line": 47,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ExternalContacts\\\" WHERE \\\"Id\\\" = {id.Value} FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "WriteExternalContactAsync",
+          "Line": 70,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"LegalEntities\\\" WHERE \\\"Id\\\" = {legalId} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "WriteExternalContactAsync",
+          "Line": 86,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ExternalContacts\\\" WHERE \\\"Id\\\" = {parent.Id} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "WriteExternalContactAsync",
+          "Line": 102,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Controllers/ContactsController.MergeBoundary.cs",
+      "SourceSha256": "9815e97fd1147d52f9265736c57c8c2731e3c01a63359a2f8ff13cda30d6d074",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "MergeSectionAsync",
+          "Line": 51,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Roles\\\" WHERE \\\"Id\\\" = (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {actor}) FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LockMergeRecordsAsync",
+          "Line": 63,
+          "Text": "if (execute) await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Clients\\\" WHERE \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LockMergeRecordsAsync",
+          "Line": 64,
+          "Text": "else await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Clients\\\" WHERE \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LockMergeRecordsAsync",
+          "Line": 68,
+          "Text": "if (execute) await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ExternalContacts\\\" WHERE \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LockMergeRecordsAsync",
+          "Line": 69,
+          "Text": "else await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ExternalContacts\\\" WHERE \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LockMergeRecordsAsync",
+          "Line": 73,
+          "Text": "if (execute) await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"LegalEntities\\\" WHERE \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LockMergeRecordsAsync",
+          "Line": 74,
+          "Text": "else await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"LegalEntities\\\" WHERE \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "AdmitMergePairAsync",
+          "Line": 87,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"SystemSettings\\\" WHERE \\\"Key\\\" = ANY ({keys}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "AdmitMergePairAsync",
+          "Line": 159,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Controllers/ContactsController.YealinkImport.cs",
+      "SourceSha256": "3b1124686d9cc69b6664af480d03e1a76d60200d48040be81a672c83210781c2",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "LockYealinkMatchAsync",
+          "Line": 46,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Clients\\\" WHERE \\\"Id\\\" = {id} FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LockYealinkMatchAsync",
+          "Line": 48,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ExternalContacts\\\" WHERE \\\"Id\\\" = {id} FOR UPDATE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Controllers/V2/CasesV2Controller.ConfirmationTransaction.cs",
+      "SourceSha256": "12307a6ae3cb997a71afdd6692850f30d13317375bda2d7c63b7716d1d66be32",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "RunCaseConfirmationAsync",
+          "Line": 36,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCases\\\" WHERE \\\"Id\\\" = {id} FOR UPDATE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Controllers/V2/CasesV2Controller.CourtBinding.cs",
+      "SourceSha256": "30dbbd771ab41a0f2d401f9ec53a8f1f93d00474c3f8f6722e7c396a2209b5c5",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "LoadCourtBindingInstanceAsync",
+          "Line": 30,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseCourtInstances\\\" WHERE \\\"ClientCaseId\\\" = {caseId} AND \\\"Instance\\\" = {instance} FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "HasCurrentCourtBindingInstanceAsync",
+          "Line": 41,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseCourtInstances\\\" WHERE \\\"Id\\\" = {expected.Id} AND \\\"ClientCaseId\\\" = {expected.CaseId} FOR UPDATE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Controllers/V2/CasesV2Controller.CourtPublication.cs",
+      "SourceSha256": "583dbd59743f334a1aa4cf8fd25a1caf187f844c433c8c044a0e2c373927262b",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "ReadCourtPublicationControlsAsync",
+          "Line": 134,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseProceduralDeadlines\\\" WHERE \\\"ClientCaseId\\\" = {caseId} AND \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "ApplyCourtPublicationChangesAsync",
+          "Line": 209,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseDocuments\\\" WHERE \\\"Id\\\" = ANY ({documentIds}) ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "ApplyCourtPublicationChangesAsync",
+          "Line": 211,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseProceduralDeadlines\\\" WHERE \\\"Id\\\" = ANY ({deadlineIds}) ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Controllers/V2/CasesV2Controller.CourtRecoveries.cs",
+      "SourceSha256": "0eda764e51fab0a4102b30c701b7d9bdb630fec4a33135b14b48f2fad55f1e98",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "LockCourtRecoveryCaseAsync",
+          "Line": 258,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCases\\\" WHERE \\\"Id\\\" = {id} FOR SHARE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Controllers/V2/CasesV2Controller.CourtWrites.cs",
+      "SourceSha256": "9df63489a6dd36b47dd70d5af1e353204d14912bd7adb304cfe917f2baeafbb3",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "PinCourtEventDeadlineRowsAsync",
+          "Line": 52,
+          "Text": "SELECT \"Id\" FROM \"ClientCaseProceduralDeadlines\" WHERE \"ClientCaseId\" = {caseId} ORDER BY \"Id\" FOR UPDATE NOWAIT;"
+        },
+        {
+          "Method": "PinCourtEventDeadlineRowsAsync",
+          "Line": 53,
+          "Text": "SELECT \"Id\" FROM \"ClientCaseCourtEvents\" WHERE \"ClientCaseId\" = {caseId} ORDER BY \"Id\" FOR UPDATE NOWAIT;"
+        },
+        {
+          "Method": "PinCourtRelatedPartyAsync",
+          "Line": 61,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseRelatedParties\\\" WHERE \\\"Id\\\" = {id.Value} AND \\\"ClientCaseId\\\" = {caseId} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PinCourtPartyForWriteAsync",
+          "Line": 67,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseCourtParties\\\" WHERE \\\"Id\\\" = {id} AND \\\"ClientCaseId\\\" = {caseId} FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PinCourtDirectoryItemAsync",
+          "Line": 73,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseCourts\\\" WHERE \\\"Id\\\" = {id.Value} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PinCourtComplaintDocumentAsync",
+          "Line": 79,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseDocuments\\\" WHERE \\\"Id\\\" = {id.Value} AND \\\"ClientCaseId\\\" = {caseId} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LoadCourtComplaintForWriteAsync",
+          "Line": 87,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseCourtComplaints\\\" WHERE \\\"Id\\\" = {complaintId} AND \\\"ClientCaseId\\\" = {caseId} AND \\\"CourtInstanceId\\\" = {parent.Id} FOR UPDATE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Cases/CaseEditTransaction.Bulk.cs",
+      "SourceSha256": "b5cef91bf96e79fa3fb09209f0b9e704490311703071356fe482a02885ded91c",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "RunManyAsync",
+          "Line": 33,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCases\\\" WHERE \\\"Id\\\" = ANY ({visibleIds}) ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LockVisibleOwnersAsync",
+          "Line": 55,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Clients\\\" WHERE \\\"Id\\\" = ANY ({clients}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LockVisibleOwnersAsync",
+          "Line": 60,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"LegalEntities\\\" WHERE \\\"Id\\\" = ANY ({legal}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LockUsersAsync",
+          "Line": 69,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LockUserAccessAsync",
+          "Line": 76,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Roles\\\" WHERE \\\"Id\\\" = (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {id}) FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LockUserAccessAsync",
+          "Line": 77,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"RolePermissions\\\" WHERE \\\"RoleId\\\" = (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {id}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LockUserAccessAsync",
+          "Line": 78,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"UserId\\\" FROM \\\"UserCompanyAccesses\\\" WHERE \\\"UserId\\\" = {id} ORDER BY \\\"LegalEntityId\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LockLinkedTasksAsync",
+          "Line": 84,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"TaskJournalItems\\\" WHERE \\\"ClientCaseId\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Cases/CaseEditTransaction.Links.cs",
+      "SourceSha256": "2f85fddcce1406432da23faf6ecbc6745462b3728fe0441ebde6602ec0b3cc8e",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "ValidateEditedLinksAsync",
+          "Line": 23,
+          "Text": "if (hasClient) await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Clients\\\" WHERE \\\"Id\\\" = {requested.ClientId!.Value} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "ValidateEditedLinksAsync",
+          "Line": 24,
+          "Text": "else await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"LegalEntities\\\" WHERE \\\"Id\\\" = {requested.LegalEntityId!.Value} FOR SHARE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Cases/CaseEditTransaction.cs",
+      "SourceSha256": "42cd94909da259a36eccb0dba064ce079682d2f22920904807286c88ee15692a",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "RunSingleAsync",
+          "Line": 46,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCases\\\" WHERE \\\"Id\\\" = {id} FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "RunSingleAsync",
+          "Line": 58,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Payments\\\" WHERE \\\"ClientCaseId\\\" = {id} ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "HasForeignCourtDeletionReferencesAsync",
+          "Line": 97,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseCourtInstances\\\" WHERE \\\"ClientCaseId\\\" = {id} ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "HasForeignCourtDeletionReferencesAsync",
+          "Line": 98,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseCourtComplaints\\\" WHERE \\\"CourtInstanceId\\\" IN (SELECT \\\"Id\\\" FROM \\\"ClientCaseCourtInstances\\\" WHERE \\\"ClientCaseId\\\" = {id}) ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "HasForeignCourtDeletionReferencesAsync",
+          "Line": 99,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseDocuments\\\" WHERE \\\"ClientCaseId\\\" = {id} ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "HasForeignCourtDeletionReferencesAsync",
+          "Line": 100,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseHearingPreparations\\\" WHERE \\\"Id\\\" IN (SELECT \\\"ClientCaseHearingPreparationId\\\" FROM \\\"ClientCaseHearingPreparationDocuments\\\" WHERE \\\"ClientCaseDocumentId\\\" IN (SELECT \\\"Id\\\" FROM \\\"ClientCaseDocuments\\\" WHERE \\\"ClientCaseId\\\" = {id})) ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "HasForeignCourtDeletionReferencesAsync",
+          "Line": 101,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"ClientCaseHearingPreparationId\\\", \\\"ClientCaseDocumentId\\\" FROM \\\"ClientCaseHearingPreparationDocuments\\\" WHERE \\\"ClientCaseDocumentId\\\" IN (SELECT \\\"Id\\\" FROM \\\"ClientCaseDocuments\\\" WHERE \\\"ClientCaseId\\\" = {id}) ORDER BY \\\"ClientCaseHearingPreparationId\\\", \\\"ClientCaseDocumentId\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "HasForeignCourtDeletionReferencesAsync",
+          "Line": 104,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseCourtEvents\\\" WHERE \\\"ClientCaseId\\\" = {id} ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "HasForeignCourtDeletionReferencesAsync",
+          "Line": 105,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseCourtEventHistory\\\" WHERE \\\"ClientCaseCourtEventId\\\" IN (SELECT \\\"Id\\\" FROM \\\"ClientCaseCourtEvents\\\" WHERE \\\"ClientCaseId\\\" = {id}) ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "HasForeignCourtDeletionReferencesAsync",
+          "Line": 106,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseProceduralDeadlines\\\" WHERE \\\"ClientCaseId\\\" = {id} ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LockVisibleOwnersAsync",
+          "Line": 137,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Clients\\\" WHERE \\\"Id\\\" = {clientId} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LockVisibleOwnersAsync",
+          "Line": 143,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"LegalEntities\\\" WHERE \\\"Id\\\" = {legalId} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "LockVisibleOwnersAsync",
+          "Line": 150,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Cases/CaseRelatedPartyTransaction.cs",
+      "SourceSha256": "2e2876eaf939e7bcc7a9bf83f3543e76c6535da081301e45bb2c700196e82f54",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "LockPartyAsync",
+          "Line": 18,
+          "Text": "if (db.Database.IsNpgsql()) await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseRelatedParties\\\" WHERE \\\"Id\\\" = {id} FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "AddAsync",
+          "Line": 42,
+          "Text": "if (db.Database.IsNpgsql()) await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Clients\\\" WHERE \\\"Id\\\" = {sourceId} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "AddAsync",
+          "Line": 50,
+          "Text": "if (db.Database.IsNpgsql()) await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ExternalContacts\\\" WHERE \\\"Id\\\" = {sourceId} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "AddAsync",
+          "Line": 62,
+          "Text": "if (db.Database.IsNpgsql()) await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"LegalEntities\\\" WHERE \\\"Id\\\" = {legal.Id} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "AddAsync",
+          "Line": 77,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "EditAsync",
+          "Line": 105,
+          "Text": "if (db.Database.IsNpgsql()) await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Roles\\\" WHERE \\\"Id\\\" = (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {actorId.Value}) FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "EditAsync",
+          "Line": 113,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCases\\\" WHERE \\\"Id\\\" = {id} FOR UPDATE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Cases/CaseTaskSyncScope.cs",
+      "SourceSha256": "cb5a4157c2cc188ab21e4f39435c3fc34338f4c51a795de9f5f70e11eb154e13",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "PinInputsAsync",
+          "Line": 95,
+          "Text": "SELECT \"Id\" FROM \"ClientCases\" WHERE \"Id\" = {caseId} FOR UPDATE NOWAIT;"
+        },
+        {
+          "Method": "PinInputsAsync",
+          "Line": 96,
+          "Text": "SELECT \"Id\" FROM \"TaskJournalItems\" WHERE \"ClientCaseId\" = {caseId} ORDER BY \"Id\" FOR UPDATE NOWAIT;"
+        },
+        {
+          "Method": "PinInputsAsync",
+          "Line": 98,
+          "Text": "(SELECT \"Id\" FROM \"TaskJournalItems\" WHERE \"ClientCaseId\" = {caseId}) ORDER BY \"Id\" FOR UPDATE NOWAIT;"
+        },
+        {
+          "Method": "PinInputsAsync",
+          "Line": 99,
+          "Text": "SELECT \"Id\" FROM \"ClientCaseProceduralDeadlines\" WHERE \"ClientCaseId\" = {caseId} ORDER BY \"Id\" FOR SHARE NOWAIT;"
+        },
+        {
+          "Method": "PinInputsAsync",
+          "Line": 100,
+          "Text": "SELECT \"Id\" FROM \"ClientCaseCourtEvents\" WHERE \"ClientCaseId\" = {caseId} ORDER BY \"Id\" FOR SHARE NOWAIT;"
+        },
+        {
+          "Method": "PinInputsAsync",
+          "Line": 101,
+          "Text": "SELECT \"Id\" FROM \"ClientCaseCourtInstances\" WHERE \"ClientCaseId\" = {caseId} ORDER BY \"Id\" FOR SHARE NOWAIT;"
+        },
+        {
+          "Method": "PinInputsAsync",
+          "Line": 102,
+          "Text": "SELECT \"Id\" FROM \"ClientCaseCourtComplaints\" WHERE \"ClientCaseId\" = {caseId} ORDER BY \"Id\" FOR SHARE NOWAIT;"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Clients/ClientBatchTransaction.cs",
+      "SourceSha256": "13132cd9d939ff63a793ca093f5c270beda233a6463c7aba2a81c74e51a22902",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "RunAsync",
+          "Line": 38,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Roles\\\" WHERE \\\"Id\\\" = (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {actorId.Value}) FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "RunAsync",
+          "Line": 52,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Clients\\\" WHERE \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "RunAsync",
+          "Line": 59,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = ANY ({userIds}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Clients/ClientCreateTransaction.cs",
+      "SourceSha256": "ae3210a342f2b545107380c94ee89141c20a3fc501e40cc57f36413270280eb8",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "RunAsync",
+          "Line": 38,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Roles\\\" WHERE \\\"Id\\\" = (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {actorId.Value}) FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "RunAsync",
+          "Line": 58,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientStatuses\\\" WHERE \\\"Id\\\" = {statusId} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "RunAsync",
+          "Line": 63,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Clients/ClientDeletionRules.cs",
+      "SourceSha256": "c297f2478ca9421d5e84c58d136422912521fc806b20ed38d104e312dc178719",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "RemoveProfileAsync",
+          "Line": 53,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"AddressRecords\\\" WHERE \\\"ClientId\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "RemoveProfileAsync",
+          "Line": 54,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientPassports\\\" WHERE \\\"ClientId\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "RemoveProfileAsync",
+          "Line": 55,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ExternalContacts\\\" WHERE \\\"LinkedClientId\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Clients/ClientLegalReferences.cs",
+      "SourceSha256": "3131d0c82a0edadd73b88d03e73f284211e065cafb4bfa9ac6ad1313ec65764b",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "FindSelectionAsync",
+          "Line": 29,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"LegalEntities\\\" WHERE \\\"Id\\\" = {id} FOR SHARE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Clients/ClientPassportAccess.cs",
+      "SourceSha256": "dc194a29648af69d8e003f925e8303059f76863edc894052e9889390df35c9f5",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "ResolveAsync",
+          "Line": 31,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Roles\\\" WHERE \\\"Id\\\" = (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {actorId.Value}) FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "WriteAsync",
+          "Line": 60,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Clients\\\" WHERE \\\"Id\\\" = {clientId} FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "WriteAsync",
+          "Line": 62,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {owner} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "WriteAsync",
+          "Line": 63,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientPassports\\\" WHERE \\\"ClientId\\\" = {clientId} ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Clients/ClientPowerOfAttorneyTransaction.cs",
+      "SourceSha256": "79cbdd6fd96148768e661dd70425188b02852b4bcb16a9b18670b75f8addeac4",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "ResolveAsync",
+          "Line": 33,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Roles\\\" WHERE \\\"Id\\\" = (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {actorId.Value}) FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "RunAsync",
+          "Line": 73,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Clients\\\" WHERE \\\"Id\\\" = {clientId} FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "RunAsync",
+          "Line": 75,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {owner.Value} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "RunAsync",
+          "Line": 77,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"PowersOfAttorney\\\" WHERE \\\"Id\\\" = {entity.Id} FOR UPDATE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Clients/ClientReadTransaction.cs",
+      "SourceSha256": "c643244f9e168ff90580beeff0e53dad511e366566e899d1f3561f5980b7899e",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "RunAsync",
+          "Line": 35,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {actorId.Value} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "RunAsync",
+          "Line": 57,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Roles\\\" WHERE \\\"Id\\\" = (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {actorId.Value}) FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "RunAsync",
+          "Line": 58,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"RolePermissions\\\" WHERE \\\"RoleId\\\" = (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {actorId.Value}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Clients/ClientUpdateTransaction.cs",
+      "SourceSha256": "0f4a90a2e13268c5f3ced9dcc78c6b937537697f59bcb5211d5f656542340461",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "RunAsync",
+          "Line": 37,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Roles\\\" WHERE \\\"Id\\\" = (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {actorId.Value}) FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "RunAsync",
+          "Line": 44,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Clients\\\" WHERE \\\"Id\\\" = {id} FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "RunAsync",
+          "Line": 64,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientStatuses\\\" WHERE \\\"Id\\\" = {statusId} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "RunAsync",
+          "Line": 69,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Notifications/CaseCourtCurrentState.cs",
+      "SourceSha256": "37eadeb36d923c56a3e8080ed79349d1cc8992c4a9d581eeb03801f481061c80",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "AdoptAsync",
+          "Line": 95,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCases\\\" WHERE \\\"Id\\\" = {source.CaseId} FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "AdoptAsync",
+          "Line": 96,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {userId} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "AdoptAsync",
+          "Line": 97,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Roles\\\" WHERE \\\"Id\\\" IN (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {userId}) FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "AdoptAsync",
+          "Line": 98,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"RoleId\\\" FROM \\\"RolePermissions\\\" WHERE \\\"RoleId\\\" IN (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {userId}) ORDER BY \\\"Section\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "AdoptAsync",
+          "Line": 99,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"UserId\\\" FROM \\\"UserSettings\\\" WHERE \\\"UserId\\\" = {userId} ORDER BY \\\"Key\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "AdoptAsync",
+          "Line": 100,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Clients\\\" WHERE \\\"Id\\\" IN (SELECT \\\"ClientId\\\" FROM \\\"ClientCases\\\" WHERE \\\"Id\\\" = {source.CaseId}) FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "AdoptAsync",
+          "Line": 101,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"LegalEntities\\\" WHERE \\\"Id\\\" IN (SELECT \\\"LegalEntityId\\\" FROM \\\"ClientCases\\\" WHERE \\\"Id\\\" = {source.CaseId}) FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "AdoptAsync",
+          "Line": 103,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Key\\\" FROM \\\"SystemSettings\\\" WHERE \\\"Key\\\" = ANY ({settings}) ORDER BY \\\"Key\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "AdoptAsync",
+          "Line": 104,
+          "Text": "if (source.Kind == \"event\") await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseCourtEvents\\\" WHERE \\\"Id\\\" = {source.SourceId} AND \\\"ClientCaseId\\\" = {source.CaseId} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "AdoptAsync",
+          "Line": 105,
+          "Text": "if (source.Kind == \"deadline\") await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseProceduralDeadlines\\\" WHERE \\\"Id\\\" = {source.SourceId} AND \\\"ClientCaseId\\\" = {source.CaseId} FOR SHARE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Notifications/NotificationService.CourtRecovery.cs",
+      "SourceSha256": "b2fca71bc9e330e55036763c20f3345aa499164c2a5d888297fd1712398c8728",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "PinCourtNotificationClaimAsync",
+          "Line": 72,
+          "Text": "await _context.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {envelope.RecipientUserId} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PinCourtNotificationClaimAsync",
+          "Line": 73,
+          "Text": "await _context.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Roles\\\" WHERE \\\"Id\\\" IN (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {envelope.RecipientUserId}) FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PinCourtNotificationClaimAsync",
+          "Line": 74,
+          "Text": "await _context.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"RoleId\\\" FROM \\\"RolePermissions\\\" WHERE \\\"RoleId\\\" IN (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = {envelope.RecipientUserId}) ORDER BY \\\"Section\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PinCourtNotificationClaimAsync",
+          "Line": 75,
+          "Text": "await _context.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"CaseCourtNotificationOutboxes\\\" WHERE \\\"Id\\\" = {claim.OutboxId} FOR UPDATE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PinCourtNotificationClaimAsync",
+          "Line": 76,
+          "Text": "await _context.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCases\\\" WHERE \\\"Id\\\" = {claim.CaseId} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PinCourtNotificationClaimAsync",
+          "Line": 78,
+          "Text": "await _context.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseCourtEvents\\\" WHERE \\\"Id\\\" = {claim.SourceId} AND \\\"ClientCaseId\\\" = {claim.CaseId} FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PinCourtNotificationClaimAsync",
+          "Line": 80,
+          "Text": "await _context.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseProceduralDeadlines\\\" WHERE \\\"Id\\\" = {claim.SourceId} AND \\\"ClientCaseId\\\" = {claim.CaseId} FOR SHARE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Notifications/NotificationService.CourtReminders.cs",
+      "SourceSha256": "e5e7e9a3f3f3c11b68f33d22630905630ae948a1b1c97082faedd40b1700ca18",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "PersistCourtReminderBatchAsync",
+          "Line": 34,
+          "Text": "caseIds = await _context.ClientCases.FromSqlInterpolated($\"SELECT * FROM \\\"ClientCases\\\" WHERE \\\"Id\\\" = ANY ({caseIds}) ORDER BY \\\"Id\\\" FOR UPDATE SKIP LOCKED\")"
+        },
+        {
+          "Method": "PersistCourtReminderBatchAsync",
+          "Line": 37,
+          "Text": "await _context.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseProceduralDeadlines\\\" WHERE \\\"Id\\\" = ANY ({deadlineIds}) AND \\\"ClientCaseId\\\" = ANY ({caseIds}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PersistCourtReminderBatchAsync",
+          "Line": 38,
+          "Text": "await _context.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Clients\\\" WHERE \\\"Id\\\" IN (SELECT \\\"ClientId\\\" FROM \\\"ClientCases\\\" WHERE \\\"Id\\\" = ANY ({caseIds})) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PersistCourtReminderBatchAsync",
+          "Line": 39,
+          "Text": "await _context.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"LegalEntities\\\" WHERE \\\"Id\\\" IN (SELECT \\\"LegalEntityId\\\" FROM \\\"ClientCases\\\" WHERE \\\"Id\\\" = ANY ({caseIds})) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PersistCourtReminderBatchAsync",
+          "Line": 76,
+          "Text": "await _context.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = ANY ({userIds}) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PersistCourtReminderBatchAsync",
+          "Line": 77,
+          "Text": "await _context.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Roles\\\" WHERE \\\"Id\\\" IN (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = ANY ({userIds})) ORDER BY \\\"Id\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PersistCourtReminderBatchAsync",
+          "Line": 78,
+          "Text": "await _context.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"RoleId\\\" FROM \\\"RolePermissions\\\" WHERE \\\"RoleId\\\" IN (SELECT \\\"RoleId\\\" FROM \\\"Users\\\" WHERE \\\"Id\\\" = ANY ({userIds})) ORDER BY \\\"RoleId\\\", \\\"Section\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PersistCourtReminderBatchAsync",
+          "Line": 79,
+          "Text": "await _context.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"UserId\\\" FROM \\\"UserSettings\\\" WHERE \\\"UserId\\\" = ANY ({userIds}) ORDER BY \\\"UserId\\\", \\\"Key\\\" FOR SHARE NOWAIT\", ct);"
+        },
+        {
+          "Method": "PersistCourtReminderBatchAsync",
+          "Line": 81,
+          "Text": "await _context.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Key\\\" FROM \\\"SystemSettings\\\" WHERE \\\"Key\\\" = ANY ({settingKeys}) ORDER BY \\\"Key\\\" FOR SHARE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Requests/SalesRequestService.cs",
+      "SourceSha256": "b1d79ae7182d70d9c5f2c856c00cc0cb6aa8061f72f64d9066c09a0aaf70d6b2",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "ResolveClientAsync",
+          "Line": 1006,
+          "Text": "await _db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"Clients\\\" WHERE \\\"Id\\\" = {clientId} FOR SHARE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Storage/CaseDocumentUploadAuthorization.cs",
+      "SourceSha256": "42a6c66ea260aef97c3614a498bb7b4f486392a6c8d5ff09649a0a8d426adaa5",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "CanPublishAsync",
+          "Line": 22,
+          "Text": "await db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCases\\\" WHERE \\\"Id\\\" = {caseId} FOR UPDATE NOWAIT\", ct);"
+        }
+      ]
+    },
+    {
+      "Path": "backend/Services/Storage/CourtDocumentSourceRegistry.cs",
+      "SourceSha256": "77ea00083a24316787957817b5b428dc5ec5c0a495e6bc22228a9ff24a2fc8c2",
+      "HasDirectProviderGuard": true,
+      "Statements": [
+        {
+          "Method": "PinControlsAsync",
+          "Line": 270,
+          "Text": "? db.Database.ExecuteSqlInterpolatedAsync($\"SELECT \\\"Id\\\" FROM \\\"ClientCaseProceduralDeadlines\\\" WHERE \\\"ClientCaseId\\\" = {caseId} AND \\\"Id\\\" = ANY ({ids}) ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT\", ct)"
+        }
+      ]
+    }
+  ]
+}

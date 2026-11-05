@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { validateReusePlumbing, validateReuseStep } from './qualified-check-reuse.mjs';
 
 function requireValue(condition, message) {
   if (!condition) throw new Error(message);
@@ -124,6 +125,10 @@ export function validateDeployWorkflow(source) {
     deploy: ['backend', 'backend-format', 'frontend'],
   };
   requireValue(jobs && Object.keys(jobs).sort().join(',') === Object.keys(dependencies).sort().join(','), 'Preserve all seven mandatory release gates plus four independent shard workers');
+  requireValue(workflow.permissions?.contents === 'read'
+    && Object.entries(workflow.permissions).every(([key, value]) => ['contents', 'actions'].includes(key) && value === 'read'),
+  'Only read-only source and Actions evidence permissions are allowed');
+  validateReusePlumbing(workflow);
   requireValue(workflow.defaults === undefined, 'Custom workflow shell/defaults require explicit gate review');
   requireValue(workflow.env?.PAYPLANNER_CI_ARTIFACT_ROOT === storeRoot,
     'Pin the separate private production artifact store without a fallback path');
@@ -205,7 +210,8 @@ export function validateDeployWorkflow(source) {
         || (id === 'backend-browser' && step.run === `${store} put --kind restored-diagnostics --source test-results/restored-browser/ --retention-days 14`));
       const qualifiedAlias = shardJobs.includes(id) && step.uses === undefined
         && step.run === `${store} put --kind qualified-shard --source test-results/ --retention-days 14`;
-      requireValue(step.if === undefined || (diagnostic && step.if === 'always()') || (qualifiedAlias && step.if === 'success()'), `${id}: conditional step can skip a release gate`);
+      requireValue(step.if === undefined || (diagnostic && step.if === 'always()') || (qualifiedAlias && step.if === 'success()')
+        || validateReuseStep(id, step), `${id}: conditional step can skip a release gate`);
       if (diagnostic) requireValue(step.if === 'always()', `${id}: preserve immutable attempt evidence unconditionally`);
       if (qualifiedAlias) requireValue(step.if === 'success()', `${id}: only successful tests may publish a qualified receipt`);
       requireValue(!step.uses?.match(/^actions\/(?:upload|download)-artifact@/), `${id}: no hosted artifact or fallback transport`);

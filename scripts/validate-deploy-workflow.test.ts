@@ -84,7 +84,8 @@ describe('merged production workflow protections', () => {
   ])('rejects an unreviewed %s heap %s', (mode, heap) => {
     const phase = mode === 'analyzers' ? 'analyzer' : mode;
     const expected = mode === 'analyzers' ? '280000000' : '240000000';
-    const before = `      - name: Verify all Migrations ${phase} formatting\n        env:\n          DOTNET_GCHeapHardLimit: "${expected}"`;
+    const proofCondition = "${{ steps.format-reuse.outputs.reused != 'true' }}";
+    const before = `      - name: Verify all Migrations ${phase} formatting\n        if: ${proofCondition}\n        env:\n          DOTNET_GCHeapHardLimit: "${expected}"`;
     expect(() => validateDeployWorkflow(replaceOnce(before, before.replace(expected, heap)))).toThrow();
   });
 });

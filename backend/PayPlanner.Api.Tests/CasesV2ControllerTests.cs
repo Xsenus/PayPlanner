@@ -6146,8 +6146,9 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.StartsWith("Перенесено судебное заседание:", rescheduled.Title, StringComparison.Ordinal);
         Assert.Contains("Новая дата: 12.07.2026 12:30", rescheduled.BodyPreview);
         Assert.Contains("\"action\":\"rescheduled\"", rescheduled.MetadataJson, StringComparison.Ordinal);
-        Assert.Equal(newHearingAt.AddDays(-3), hearingTask.DueAt);
-        Assert.Equal("Учесть новую дату, проверить готовность", hearingTask.Title);
+        var rescheduledTask = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == hearingTask.Id);
+        Assert.Equal(newHearingAt.AddDays(-3), rescheduledTask.DueAt);
+        Assert.Equal("Учесть новую дату, проверить готовность", rescheduledTask.Title);
 
         var reclassifiedResult = await controller.UpdateCourtEvent(
             clientCase.Id,
