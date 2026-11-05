@@ -38,7 +38,7 @@ internal static class BoundedTestRunner
                 File.Move(temporary, file, overwrite: true);
             }
         }
-        async Task ExecuteBatch(ExecutionBatch batch)
+        async Task ExecuteBatch(ExecutionBatch batch, bool serialMemoryProfile)
         {
             var root = Path.Combine(directory, "batches", batch.Id);
             Directory.CreateDirectory(root);
@@ -53,7 +53,7 @@ internal static class BoundedTestRunner
             };
             foreach (var argument in new[] { "exec", vstestConsolePath, ShardPlan.Resolve(manifest, plan.AssemblyPath), "/Settings:" + settings,
                          "/Logger:console;verbosity=normal", "/Logger:trx;LogFileName=results.trx", "/ResultsDirectory:" + root }) start.ArgumentList.Add(argument);
-            ExecutionScheduling.ConfigureWorkerEnvironment(start.Environment, batch.Lane, HostResources.Read().AvailableBytes);
+            ExecutionScheduling.ConfigureWorkerEnvironment(start.Environment, batch.Lane, HostResources.Read().AvailableBytes, serialMemoryProfile);
             var batchStarted = DateTime.UtcNow;
             var batchExit = -1;
             string? batchError = null;
@@ -74,7 +74,8 @@ internal static class BoundedTestRunner
                         Utc = batchStarted,
                         ProcessId = process.Id,
                         Cases = batch.Cases.Length,
-                        GcHeapHardLimit = start.Environment["DOTNET_GCHeapHardLimit"]
+                        GcHeapHardLimit = start.Environment["DOTNET_GCHeapHardLimit"],
+                        SerialMemoryProfile = serialMemoryProfile
                     });
                     Console.WriteLine(JsonSerializer.Serialize(new
                     {
@@ -154,7 +155,7 @@ internal static class BoundedTestRunner
                     value.AvailableBytes,
                     value.Processors,
                     value.Active
-                }));
+                }), allowSerialFallback: true);
             ShardPlan.VerifyArtifacts(plan, manifest);
             BatchResults.Merge(plan, hash, shard, directory, suite, Path.Combine(directory, suite == "all" ? "results.trx" : "subset-results.trx"), partitionCount);
             exit = 0;

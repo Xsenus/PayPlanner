@@ -10,6 +10,54 @@ public sealed class BoundedBatchSchedulerTests
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(10);
 
     [Fact]
+    public async Task ExplicitSerialFallbackRunsEveryBatchWithoutASiblingAtThreeGiB()
+    {
+        var started = Signal();
+        var release = Signal();
+        var completed = new ConcurrentBag<string>();
+        var active = 0;
+        var maximum = 0;
+        var run = BoundedBatchScheduler.RunAsync(Batches("heavy", 4), "auto", 4, () => new(3 * Gib, 8),
+            async (batch, serial) =>
+            {
+                Assert.True(serial);
+                var count = Interlocked.Increment(ref active);
+                maximum = Math.Max(maximum, count);
+                var environment = new Dictionary<string, string?>();
+                ExecutionScheduling.ConfigureWorkerEnvironment(environment, batch.Lane, 3 * Gib, serial);
+                Assert.Equal("60000000", environment["DOTNET_GCHeapHardLimit"]);
+                started.TrySetResult();
+                try { await release.Task; completed.Add(batch.Id); }
+                finally { Interlocked.Decrement(ref active); }
+            }, recheckInterval: TimeSpan.FromMilliseconds(10), allowSerialFallback: true);
+        try { await started.Task.WaitAsync(Deadline); Assert.Equal(1, Volatile.Read(ref active)); }
+        finally { release.TrySetResult(); }
+        await run.WaitAsync(Deadline);
+        Assert.Equal(1, maximum);
+        Assert.Equal(new[] { "heavy-0", "heavy-1", "heavy-2", "heavy-3" }, completed.Order());
+    }
+
+    [Fact]
+    public async Task SerialFallbackStillFailsTheGateWhenMemoryFallsBelowEmergencyFloor()
+    {
+        var started = Signal();
+        var floor = Signal();
+        var release = Signal();
+        var available = 3 * Gib;
+        var starts = 0;
+        var run = BoundedBatchScheduler.RunAsync(Batches("fast", 2), "1", 1, () => new(Volatile.Read(ref available), 8),
+            async (_, serial) =>
+            {
+                Assert.True(serial); Interlocked.Increment(ref starts); started.TrySetResult(); await release.Task;
+            }, observation => { if (observation.Kind == "memory-floor") floor.TrySetResult(); },
+            recheckInterval: TimeSpan.FromMilliseconds(10), allowSerialFallback: true);
+        try { await started.Task.WaitAsync(Deadline); Volatile.Write(ref available, Gib - 1); await floor.Task.WaitAsync(Deadline); }
+        finally { release.TrySetResult(); }
+        await Assert.ThrowsAsync<InvalidDataException>(() => run.WaitAsync(Deadline));
+        Assert.Equal(1, starts);
+    }
+
+    [Fact]
     public async Task MemoryRecoveryStartsAnotherBatchBeforeTheFirstBatchFinishes()
     {
         var available = 7 * Gib;

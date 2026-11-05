@@ -516,8 +516,10 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
         // Preserve the existing catalog ID. The user's mandatory-key decision
         // replaces keyless success: the notification tail must not execute at all.
         await using var fixture = await CreateFixtureAsync(postgres);
-        await using var db = fixture.Open();
+        var assignment = new AddServerOwnedAssignment();
+        await using var db = fixture.Open(assignment);
         var actor = await SeedActorAsync(db);
+        assignment.UserId = actor;
         var api = CheckedNotificationProxy.Create();
         var check = (CheckedNotificationProxy)api;
         check.Before = _ => throw new InvalidOperationException("A keyless request must not dispatch notifications.");
@@ -529,9 +531,12 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
             Type = PaymentType.Income,
             Status = PaymentStatus.Pending,
         };
+        Assert.Empty(payment.Responsibles);
         Assert.IsType<BadRequestObjectResult>(await Controller(db, actor, api).Create(payment, default));
         Assert.Empty(check.Calls);
         Assert.Empty(await db.Payments.ToArrayAsync());
+        Assert.False(assignment.Triggered);
+        Assert.Empty(await db.PaymentResponsibles.ToArrayAsync());
         Assert.Empty(await db.PaymentCreateAttempts.ToArrayAsync());
         Assert.Null(db.Database.CurrentTransaction);
     }
@@ -965,6 +970,28 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
         return Element(command.ToJsonString());
     }
     private static JsonElement Element(string raw) { using var document = JsonDocument.Parse(raw); return document.RootElement.Clone(); }
+
+    private sealed class AddServerOwnedAssignment : SaveChangesInterceptor
+    {
+        public int UserId { get; set; }
+        public bool Triggered { get; private set; }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken ct = default)
+        {
+            if (!Triggered && UserId > 0)
+            {
+                var payment = eventData.Context!.ChangeTracker.Entries<Payment>()
+                    .SingleOrDefault(entry => entry.State == EntityState.Added)?.Entity;
+                if (payment is not null)
+                {
+                    payment.Responsibles.Add(new PaymentResponsible { UserId = UserId });
+                    Triggered = true;
+                }
+            }
+            return ValueTask.FromResult(result);
+        }
+    }
 
     private sealed class HoldPrimaryDelete : SaveChangesInterceptor
     {

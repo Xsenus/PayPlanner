@@ -81,10 +81,34 @@ internal static class Probe
         }
         catch (Exception error)
         {
-            Console.WriteLine(JsonSerializer.Serialize(new { status = "failed", exception = error.GetType().Name, message = error.Message, cases }, JsonOptions));
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                status = "failed",
+                exception = error.GetType().Name,
+                message = error.Message,
+                hResult = error.HResult,
+                innerMessage = error.InnerException?.Message,
+                runtimeFile = CheckRuntimeFile(),
+                cases
+            }, JsonOptions));
             return 1;
         }
     }
+
+    private static object CheckRuntimeFile()
+    {
+        var file = Path.Combine(Path.GetDirectoryName(typeof(object).Assembly.Location)!, "System.Linq.dll");
+        var descriptor = Open(file, 0);
+        var error = descriptor < 0 ? Marshal.GetLastPInvokeError() : 0;
+        if (descriptor >= 0) Close(descriptor);
+        return new { name = "System.Linq.dll", exists = File.Exists(file), openError = error };
+    }
+
+    [DllImport("libc.so.6", EntryPoint = "open", SetLastError = true)]
+    private static extern int Open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
+
+    [DllImport("libc.so.6", EntryPoint = "close")]
+    private static extern int Close(int descriptor);
 }
 
 internal static class Fixture

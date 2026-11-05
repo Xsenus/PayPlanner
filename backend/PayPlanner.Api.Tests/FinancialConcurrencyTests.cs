@@ -1,4 +1,6 @@
 using System.Data.Common;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -53,13 +55,15 @@ public sealed class FinancialConcurrencyTests
                 Pooling = false,
             };
             var baseOptions = CreateOptions(testBuilder.ConnectionString);
+            int actorId;
             await using (var migrationDb = new PostgreSqlPaymentContext(baseOptions))
             {
                 await migrationDb.Database.MigrateAsync();
+                actorId = await SeedActorAsync(migrationDb);
             }
 
-            await VerifyClientBalanceAsync(testBuilder.ConnectionString);
-            await VerifyLegalEntityBalanceAsync(testBuilder.ConnectionString);
+            await VerifyClientBalanceAsync(testBuilder.ConnectionString, actorId);
+            await VerifyLegalEntityBalanceAsync(testBuilder.ConnectionString, actorId);
         }
         finally
         {
@@ -68,7 +72,7 @@ public sealed class FinancialConcurrencyTests
         }
     }
 
-    private static async Task VerifyClientBalanceAsync(string connectionString)
+    private static async Task VerifyClientBalanceAsync(string connectionString, int actorId)
     {
         int clientId;
         int paymentId;
@@ -94,7 +98,7 @@ public sealed class FinancialConcurrencyTests
             paymentId = payment.Id;
         }
 
-        var results = await ApplyClientCreditConcurrentlyAsync(connectionString, clientId, paymentId);
+        var results = await ApplyClientCreditConcurrentlyAsync(connectionString, clientId, paymentId, actorId);
         Assert.Single(results, result => result is OkObjectResult);
         Assert.Single(results, result => result is ConflictObjectResult);
 
@@ -106,7 +110,7 @@ public sealed class FinancialConcurrencyTests
         Assert.Equal(0m, await ClientBalanceService.GetBalanceAsync(verifyDb, clientId));
     }
 
-    private static async Task VerifyLegalEntityBalanceAsync(string connectionString)
+    private static async Task VerifyLegalEntityBalanceAsync(string connectionString, int actorId)
     {
         int legalEntityId;
         int paymentId;
@@ -132,7 +136,7 @@ public sealed class FinancialConcurrencyTests
             paymentId = payment.Id;
         }
 
-        var results = await ApplyLegalEntityCreditConcurrentlyAsync(connectionString, legalEntityId, paymentId);
+        var results = await ApplyLegalEntityCreditConcurrentlyAsync(connectionString, legalEntityId, paymentId, actorId);
         Assert.Single(results, result => result is OkObjectResult);
         Assert.Single(results, result => result is ConflictObjectResult);
 
@@ -147,31 +151,95 @@ public sealed class FinancialConcurrencyTests
     private static async Task<IActionResult[]> ApplyClientCreditConcurrentlyAsync(
         string connectionString,
         int clientId,
-        int paymentId)
+        int paymentId,
+        int actorId)
     {
         var barrier = new BalanceReadBarrier();
         await using var firstDb = new PostgreSqlPaymentContext(CreateOptions(connectionString, barrier));
         await using var secondDb = new PostgreSqlPaymentContext(CreateOptions(connectionString, barrier));
-        var first = new ClientBalancesController(firstDb);
-        var second = new ClientBalancesController(secondDb);
-        return await Task.WhenAll(
-            first.ApplyCredit(clientId, new ApplyClientBalanceRequest { PaymentId = paymentId, Amount = 1_000m }, CancellationToken.None),
-            second.ApplyCredit(clientId, new ApplyClientBalanceRequest { PaymentId = paymentId, Amount = 1_000m }, CancellationToken.None));
+        var first = new ClientBalancesController(firstDb) { ControllerContext = ActorContext(actorId) };
+        var second = new ClientBalancesController(secondDb) { ControllerContext = ActorContext(actorId) };
+        return await ObserveConcurrentApplicationsAsync(barrier,
+            token => first.ApplyCredit(clientId, new ApplyClientBalanceRequest { PaymentId = paymentId, Amount = 1_000m }, token),
+            token => second.ApplyCredit(clientId, new ApplyClientBalanceRequest { PaymentId = paymentId, Amount = 1_000m }, token));
     }
 
     private static async Task<IActionResult[]> ApplyLegalEntityCreditConcurrentlyAsync(
         string connectionString,
         int legalEntityId,
-        int paymentId)
+        int paymentId,
+        int actorId)
     {
         var barrier = new BalanceReadBarrier();
         await using var firstDb = new PostgreSqlPaymentContext(CreateOptions(connectionString, barrier));
         await using var secondDb = new PostgreSqlPaymentContext(CreateOptions(connectionString, barrier));
-        var first = new LegalEntityBalancesController(firstDb);
-        var second = new LegalEntityBalancesController(secondDb);
-        return await Task.WhenAll(
-            first.ApplyCredit(legalEntityId, new ApplyClientBalanceRequest { PaymentId = paymentId, Amount = 1_500m }, CancellationToken.None),
-            second.ApplyCredit(legalEntityId, new ApplyClientBalanceRequest { PaymentId = paymentId, Amount = 1_500m }, CancellationToken.None));
+        var first = new LegalEntityBalancesController(firstDb) { ControllerContext = ActorContext(actorId) };
+        var second = new LegalEntityBalancesController(secondDb) { ControllerContext = ActorContext(actorId) };
+        return await ObserveConcurrentApplicationsAsync(barrier,
+            token => first.ApplyCredit(legalEntityId, new ApplyClientBalanceRequest { PaymentId = paymentId, Amount = 1_500m }, token),
+            token => second.ApplyCredit(legalEntityId, new ApplyClientBalanceRequest { PaymentId = paymentId, Amount = 1_500m }, token));
+    }
+
+    private static async Task<int> SeedActorAsync(PostgreSqlPaymentContext db)
+    {
+        var role = new Role { Name = "financial-concurrency", Description = "Synthetic concurrency test role" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        db.RolePermissions.AddRange(new[] { "clients", "legalEntities", "payments" }.Select(section =>
+            new RolePermission { RoleId = role.Id, Section = section, CanView = true, CanEdit = true, ViewScope = "all" }));
+        var actor = new User
+        {
+            Email = "financial-concurrency@test.local",
+            FullName = "Synthetic financial concurrency actor",
+            PasswordHash = "unused",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+            IsEmployee = true
+        };
+        db.Users.Add(actor);
+        await db.SaveChangesAsync();
+        return actor.Id;
+    }
+
+    private static ControllerContext ActorContext(int actorId)
+        => new()
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [new Claim(ClaimTypes.NameIdentifier, actorId.ToString())], "synthetic"))
+            }
+        };
+
+    private static async Task<IActionResult[]> ObserveConcurrentApplicationsAsync(
+        BalanceReadBarrier barrier,
+        Func<CancellationToken, Task<IActionResult>> first,
+        Func<CancellationToken, Task<IActionResult>> second)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var winner = first(timeout.Token);
+        Task<IActionResult>? contender = null;
+        try
+        {
+            await barrier.Entered.Task.WaitAsync(TimeSpan.FromSeconds(15), timeout.Token);
+            contender = second(timeout.Token);
+            await contender.WaitAsync(TimeSpan.FromSeconds(10), timeout.Token);
+        }
+        catch
+        {
+            timeout.Cancel();
+            throw;
+        }
+        finally
+        {
+            barrier.Release.TrySetResult();
+            // Drain both calls before disposing either context or dropping the database.
+            if (contender is null) await winner;
+            else await Task.WhenAll(winner, contender);
+        }
+        Assert.NotNull(contender);
+        return [await winner, await contender];
     }
 
     private static DbContextOptions<PostgreSqlPaymentContext> CreateOptions(
@@ -206,7 +274,8 @@ public sealed class FinancialConcurrencyTests
 
     private sealed class BalanceReadBarrier : DbCommandInterceptor
     {
-        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _arrivals;
 
         public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
@@ -218,15 +287,12 @@ public sealed class FinancialConcurrencyTests
             if (command.CommandText.Contains("ClientBalanceTransactions", StringComparison.Ordinal)
                 && command.CommandText.Contains("SUM", StringComparison.OrdinalIgnoreCase))
             {
-                var arrival = Interlocked.Increment(ref _arrivals);
-                if (arrival == 2)
+                if (Interlocked.Increment(ref _arrivals) == 1)
                 {
-                    _release.TrySetResult();
-                }
-
-                if (arrival <= 2)
-                {
-                    await _release.Task.WaitAsync(TimeSpan.FromSeconds(15), cancellationToken);
+                    // The winner already owns the payment lock. Keep it pending
+                    // while the contender exercises the real NOWAIT conflict path.
+                    Entered.TrySetResult();
+                    await Release.Task.WaitAsync(TimeSpan.FromSeconds(15), cancellationToken);
                 }
             }
 

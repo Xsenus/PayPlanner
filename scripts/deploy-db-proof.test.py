@@ -264,7 +264,7 @@ class CandidateRowProtectionTests(unittest.TestCase):
         proof.compare_candidate_rows(*self.states(False), False)
 
     def test_rejects_changed_cash_or_request_content_count_and_identity(self):
-        for index in range(3):
+        for index in range(len(proof.SUPPLEMENTAL_TABLES)):
             for field, value in [('hash', 'altered'), ('count', 3), ('table', 'Other')]:
                 with self.subTest(index=index, field=field):
                     before, after = self.states()
@@ -314,9 +314,11 @@ class CandidateRowProtectionTests(unittest.TestCase):
             calls.append(sql)
             return [0]
         defaults, counts = proof.candidate_row_controls(columns, objects, query)
-        self.assertEqual(set(defaults), {'CashInventories', 'CashOrders', 'SalesRequests', 'TaskJournalDeadlineChangeRequests', 'TaskJournalItems'})
-        self.assertEqual(set(counts), {'PaymentCreateAttempts', 'TaskStatusNotificationOutboxes', 'TaskTimeCorrections', 'TaskTimeEntries'})
-        self.assertEqual(len(calls), 9)
+        self.assertEqual(set(defaults), {'Payments', 'CashInventories', 'CashOrders', 'SalesRequests', 'TaskJournalDeadlineChangeRequests', 'TaskJournalItems', 'CourtDocumentSources'})
+        self.assertEqual(set(counts), {'BalanceApplicationReceipts', 'CompanyBankAccountBindings', 'PaymentCreateAttempts', 'PaymentOverdueNotificationOutboxes', 'TaskStatusNotificationOutboxes', 'TaskTimeCorrections', 'TaskTimeEntries', 'CaseCourtNotificationOutboxes'})
+        self.assertEqual(len(calls), 15)
+        self.assertIn('SELECT to_json(count(*)) FROM "Payments" WHERE "OverdueNotificationToken" IS NOT NULL;', calls)
+        self.assertIn('SELECT to_json(count(*)) FROM "CourtDocumentSources" WHERE "AcceptedControlsJson" IS NOT NULL;', calls)
         self.assertTrue(all(value == 0 for value in [*defaults.values(), *counts.values()]))
         columns = [c for c in columns if not (c['table'] == 'SalesRequests' and c['name'] == 'ServiceInvoiceId')]
         with self.assertRaisesRegex(AssertionError, 'Incomplete reviewed candidate columns'):
@@ -381,7 +383,7 @@ class ReviewedCandidateAdmissionTests(unittest.TestCase):
                        lambda p: p.update(expectedReleaseCatalogSha256='c'*64),
                        lambda p: p['expectedReleaseSeeds'].pop(),
                        lambda p: p['expectedReleaseSeeds'].reverse(),
-                       lambda p: p['expectedReleaseSeeds'][0].update(isActive=True),
+                       lambda p: p['expectedReleaseSeeds'][0].update(isActive=False),
                        lambda p: p['expectedReleaseSeeds'][0]['items'][0].update(text='unreviewed')]:
             changed = copy.deepcopy(plan)
             mutate(changed)
@@ -403,8 +405,8 @@ class ReviewedCandidateAdmissionTests(unittest.TestCase):
     def test_only_the_complete_ordered_reviewed_chain_is_admitted(self):
         ids = proof.reviewed_candidate()['migrationIds']
         self.assertEqual(proof.reviewed_migration_ids('+'.join(ids)), ids)
-        self.assertEqual(len(ids), 11)
-        for changed in [ids[:-1], ids+['unexpected'], list(reversed(ids)), [ids[0]+'_unexpected', *ids[1:]]]:
+        self.assertEqual(len(ids), 18)
+        for changed in [ids[:11], ids[:-1], ids+['unexpected'], list(reversed(ids)), [ids[0]+'_unexpected', *ids[1:]]]:
             with self.subTest(changed=changed):
                 with self.assertRaisesRegex(AssertionError, 'Unreviewed migration'):
                     proof.reviewed_migration_ids('+'.join(changed))

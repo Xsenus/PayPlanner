@@ -80,14 +80,36 @@ public class FinancialNotificationInventoryTests
         var advanceReviewSource = ReadSourceFile("backend", "Services", "PaymentAdvanceReviewService.cs");
         var advanceReviewMonitoringSource = ReadSourceFile("backend", "Services", "PaymentAdvanceReviewMonitoringService.cs");
         var contractExpirationSource = ReadSourceFile("backend", "Services", "ContractExpirationNotificationService.cs");
+        var overdueQueueSource = ReadSourceFile("backend", "Services", "Notifications", "PaymentOverdueNotificationQueue.cs");
+        var overdueDispatcherSource = ReadSourceFile("backend", "Services", "Notifications", "PaymentOverdueNotificationDispatchProcessor.cs");
+        var overdueNotificationSource = ReadSourceFile("backend", "Services", "Notifications", "NotificationService.PaymentOverdue.cs");
 
         AssertMethodContains(
             statusUpdaterSource,
             "RunOnceAsync",
-            "NotifyInvoiceChangedAsync",
-            "NotifyPaymentChangedAsync",
-            "ResolveInvoiceNotificationRecipientsAsync",
-            "ResolvePaymentNotificationRecipientsAsync");
+            "PaymentOverdueNotificationQueue.Stage",
+            "db.SaveChangesAsync",
+            "lease.CommitAsync",
+            "PaymentOverdueNotificationDispatchProcessor",
+            "ProcessBatchAsync");
+        var statusBody = ExtractMethodBody(statusUpdaterSource, "RunOnceAsync");
+        var staged = statusBody.IndexOf("PaymentOverdueNotificationQueue.Stage", StringComparison.Ordinal);
+        var saved = statusBody.IndexOf("await db.SaveChangesAsync(ct)", staged, StringComparison.Ordinal);
+        var committed = statusBody.IndexOf("await lease.CommitAsync(ct)", saved, StringComparison.Ordinal);
+        Assert.True(staged >= 0 && saved > staged && committed > saved);
+        Assert.True(statusBody.LastIndexOf("await RecoverAsync();", StringComparison.Ordinal) > committed);
+        AssertMethodContains(overdueQueueSource, "Stage", "CurrentTransaction", "PaymentStatus.Pending", "PaymentStatus.Overdue",
+            "TransitionToken", "EventKey", "PaymentOverdueNotificationOutboxes.AddRange");
+        AssertMethodContains(overdueQueueSource, "CurrentPayments", "PaymentStatus.Overdue", "!payment.IsPaid", "TransitionToken", "CancellationProtectedPayments");
+        AssertMethodContains(overdueQueueSource, "RecipientIds", "RolePermissionCatalog.Accounts", "RolePermissionCatalog.Payments",
+            "user.IsActive", "user.IsApproved", "PaymentResponsible", "permission.CanView");
+        AssertMethodContains(overdueDispatcherSource, "ProcessBatchAsync", "ProcessAsync");
+        AssertMethodContains(overdueDispatcherSource, "ProcessAsync", "CurrentPayments", "RecipientIds",
+            "IDurablePaymentOverdueNotificationService", "NotifyOverdueForEventAsync", "row.LeaseToken == token", "row.CompletedAt == null");
+        AssertMethodContains(overdueNotificationSource, "NotifyOverdueForEventAsync", "DocumentKind.Invoice",
+            "UserNotificationTypes.InvoiceChanged", "UserNotificationTypes.PaymentChanged", "BalanceApplicationLease.BeginAsync",
+            "lease.LockPaymentAsync", "IsOverdueRecipientCurrentAsync", "_context.UserNotifications.Add", "lease.CommitAsync",
+            "QueueMaxNotificationIfAvailableAsync", "PublishDurableRealtimeAsync", "SendUserNotificationAsync");
         AssertMethodContains(
             advanceReviewSource,
             "EnsureReviewRequiredNotificationAsync",

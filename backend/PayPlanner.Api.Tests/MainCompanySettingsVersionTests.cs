@@ -171,8 +171,8 @@ public partial class LegalEntitiesControllerTests
         if (!overlapping) await a;
         var b = secondController.UpdateMainCompanySettings(MainSettingsRequest(initial, [second], second), default);
         var outcomes = await Task.WhenAll(a, b);
-        Assert.Single(outcomes.Where(result => result.Result is OkObjectResult));
-        Assert.Single(outcomes.Where(result => result.Result is ConflictObjectResult));
+        Assert.Single(outcomes, result => result.Result is OkObjectResult);
+        Assert.Single(outcomes, result => result.Result is ConflictObjectResult);
         if (overlapping) Assert.Equal(2, barrier.Arrivals);
         var current = await ReadMainSettings(firstController);
         var winner = Assert.IsType<MainCompanySettingsDto>(Assert.IsType<OkObjectResult>(outcomes.Single(result => result.Result is OkObjectResult).Result).Value);

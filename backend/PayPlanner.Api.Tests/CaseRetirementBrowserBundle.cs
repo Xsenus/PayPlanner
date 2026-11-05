@@ -57,7 +57,7 @@ public sealed class CaseRetirementBrowserBundle : IAsyncLifetime, IAsyncDisposab
         if (File.ReadAllText(path) != marker) throw new IOException("Bundle ownership changed.");
     }
 
-    internal void ConfigureNodeTemporaryDirectory(IDictionary<string, string?> environment)
+    internal void ConfigureNodeEnvironment(IDictionary<string, string?> environment)
     {
         ValidateOwner();
         // Windows .NET prefers TMP, while Node prefers TEMP. Pin both child aliases
@@ -65,6 +65,8 @@ public sealed class CaseRetirementBrowserBundle : IAsyncLifetime, IAsyncDisposab
         var parent = Path.GetDirectoryName(Root)!;
         environment["TEMP"] = parent;
         environment["TMP"] = parent;
+        // Match the existing twelve bounded dependency readers in this child only.
+        environment["UV_THREADPOOL_SIZE"] = "12";
     }
 
     private static TcpListener Reserve(int port)
@@ -110,7 +112,7 @@ public sealed class CaseRetirementBrowserBundle : IAsyncLifetime, IAsyncDisposab
             foreach (var (key, value) in inherited)
                 if (new[] { "PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "HOME", "USERPROFILE" }
                     .Contains(key, StringComparer.OrdinalIgnoreCase)) start.Environment[key] = value;
-            ConfigureNodeTemporaryDirectory(start.Environment);
+            ConfigureNodeEnvironment(start.Environment);
             start.ArgumentList.Add(Path.Combine(repository.FullName, "scripts", "case-retirement-production-bundle.mjs"));
             start.ArgumentList.Add("--finalize");
             start.ArgumentList.Add(Root);
@@ -120,7 +122,8 @@ public sealed class CaseRetirementBrowserBundle : IAsyncLifetime, IAsyncDisposab
             var stderr = process.StandardError.ReadToEndAsync();
             try
             {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+                // Full dependency verification needs the same bound as cold preparation.
+                using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
                 await process.WaitForExitAsync(timeout.Token);
                 Console.WriteLine(await stdout);
                 if (process.ExitCode != 0) throw new IOException("Class bundle inputs changed or could not be verified. " + await stderr);
@@ -173,10 +176,10 @@ public sealed class CaseRetirementBrowserBundle : IAsyncLifetime, IAsyncDisposab
         internal Uri ApiAddress => owner.ApiAddress;
         internal string Root => owner.Root;
         internal string OwnerId => owner.OwnerId;
-        internal void ConfigureNodeTemporaryDirectory(IDictionary<string, string?> environment)
+        internal void ConfigureNodeEnvironment(IDictionary<string, string?> environment)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            owner.ConfigureNodeTemporaryDirectory(environment);
+            owner.ConfigureNodeEnvironment(environment);
         }
         internal void ReleaseReservationForStart()
         {

@@ -132,7 +132,7 @@ public partial class LegalEntitiesControllerTests
         var response = await CreateController(db, id).CheckRequisites(companyId, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(response.Result);
-        var query = Assert.Single(capture.Queries.Where(sql => sql.Contains("FROM \"LegalEntities\"", StringComparison.Ordinal)));
+        var query = Assert.Single(capture.Queries, sql => sql.Contains("FROM \"LegalEntities\"", StringComparison.Ordinal));
         foreach (var field in new[] { "LogoDataUrl", "SealDataUrl", "DirectorSignatureDataUrl", "DocumentDirectorJson", "ChiefAccountantJson", "CardsJson", "CashRegistersJson" }) Assert.DoesNotContain(field, query);
         Assert.Contains("BankAccountsJson", query);
     }

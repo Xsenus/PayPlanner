@@ -3,7 +3,7 @@
 Файл сформирован командой `npm run audit:encryption-inventory:update`.
 Он дополняет ручную карту и не является утверждённой бизнес-классификацией.
 
-Всего кандидатов вне ручной карты: 344.
+Всего кандидатов вне ручной карты: 370.
 
 - `Act`: `Act.Comment`, `Act.CounterpartyInn`
 - `ActLineItem`: `ActLineItem.Name`
@@ -12,13 +12,14 @@
 - `Bank`: `Bank.CorrespondentAccount`, `Bank.Name`
 - `BankConnection`: `BankConnection.AccessTokenExpiresAt`, `BankConnection.AccessTokenProtected`, `BankConnection.Accounts`, `BankConnection.LastAccountsSyncAt`, `BankConnection.RefreshTokenExpiresAt`, `BankConnection.RefreshTokenProtected`
 - `BankConnectionAccount`: `BankConnectionAccount.AccountNumber`, `BankConnectionAccount.ExternalAccountId`
-- `BankStatementImportBatch`: `BankStatementImportBatch.FileName`
+- `BankStatementImportBatch`: `BankStatementImportBatch.BankConnectionAccount`, `BankStatementImportBatch.BankConnectionAccountId`, `BankStatementImportBatch.FileName`, `BankStatementImportBatch.MoneyAccount`, `BankStatementImportBatch.MoneyAccountId`
 - `BankStatementOperation`: `BankStatementOperation.BankConnectionAccount`, `BankStatementOperation.BankConnectionAccountId`, `BankStatementOperation.CounterpartyAccount`, `BankStatementOperation.CounterpartyInn`, `BankStatementOperation.CounterpartyName`, `BankStatementOperation.Purpose`
 - `BankSyncLog`: `BankSyncLog.BankConnectionAccountId`
 - `BaseCurrencyDictionaryItem`: `BaseCurrencyDictionaryItem.Description`, `BaseCurrencyDictionaryItem.Name`
+- `CaseCourtNotificationOutbox`: `CaseCourtNotificationOutbox.LeaseToken`
 - `CasePositionTemplate`: `CasePositionTemplate.Text`
-- `CashInventory`: `CashInventory.AccountName`, `CashInventory.AccountingBalance`, `CashInventory.Comment`
-- `CashOrder`: `CashOrder.Account`, `CashOrder.Comment`, `CashOrder.CreatedByUserName`, `CashOrder.PayerName`, `CashOrder.ReceiverName`, `CashOrder.UpdatedByUserName`
+- `CashInventory`: `CashInventory.AccountName`, `CashInventory.AccountingBalance`, `CashInventory.Comment`, `CashInventory.MoneyAccountId`
+- `CashOrder`: `CashOrder.Account`, `CashOrder.Comment`, `CashOrder.CreatedByUserName`, `CashOrder.MoneyAccountId`, `CashOrder.PayerName`, `CashOrder.ReceiverName`, `CashOrder.SelectedMoneyAccountId`, `CashOrder.UpdatedByUserName`
 - `Client`: `Client.Addresses`, `Client.AuditCreatedByUserName`, `Client.AuditDeletedByUserName`, `Client.AuditUpdatedByUserName`, `Client.Passports`, `Client.ResponsibleUserName`
 - `ClientBalanceTransaction`: `ClientBalanceTransaction.CreatedByUserName`, `ClientBalanceTransaction.Description`
 - `ClientCase`: `ClientCase.AccessRequestedByUserName`, `ClientCase.ActivityConfirmedByUserName`, `ClientCase.AuditCreatedByUserName`, `ClientCase.AuditDeletedByUserName`, `ClientCase.AuditUpdatedByUserName`, `ClientCase.ClaimantInn`, `ClientCase.ClaimantOgrn`, `ClientCase.ControlMarkedByUserName`, `ClientCase.CourtName`, `ClientCase.DefendantInn`, `ClientCase.DefendantOgrn`, `ClientCase.Description`, `ClientCase.HiddenFromExecutorByUserName`, `ClientCase.JudgeName`, `ClientCase.LastViewedByResponsibleUserName`, `ClientCase.LastViewedByUserName`, `ClientCase.NextHearingConfirmedByName`, `ClientCase.PositionReviewedByName`
@@ -44,6 +45,7 @@
 - `ClientPortalSession`: `ClientPortalSession.Account`, `ClientPortalSession.ClientPortalAccountId`
 - `ClientStats`: `ClientStats.ClientName`
 - `ClientStatusEntity`: `ClientStatusEntity.Description`, `ClientStatusEntity.Name`
+- `CompanyBankAccountBinding`: `CompanyBankAccountBinding.AccountNumber`, `CompanyBankAccountBinding.BankConnectionAccountId`, `CompanyBankAccountBinding.CreatedByUserName`, `CompanyBankAccountBinding.ExternalAccountId`, `CompanyBankAccountBinding.ProfileAccountId`, `CompanyBankAccountBinding.ProfileAccountKey`, `CompanyBankAccountBinding.RevokedByUserName`
 - `CompanyBranch`: `CompanyBranch.Address`, `CompanyBranch.BankAccountId`, `CompanyBranch.Kpp`, `CompanyBranch.Name`, `CompanyBranch.Notes`
 - `Contract`: `Contract.Description`
 - `CountryDictionaryItem`: `CountryDictionaryItem.Description`, `CountryDictionaryItem.Name`
@@ -77,8 +79,8 @@
 - `MaxRecipientLink`: `MaxRecipientLink.ClientPortalAccount`, `MaxRecipientLink.ClientPortalAccountId`, `MaxRecipientLink.LinkTokenExpiresAt`
 - `MessengerDocumentDelivery`: `MessengerDocumentDelivery.OriginalFileName`
 - `MessengerRecipientBinding`: `MessengerRecipientBinding.ClientPortalAccount`, `MessengerRecipientBinding.ClientPortalAccountId`
-- `MoneyAccount`: `MoneyAccount.BankName`, `MoneyAccount.Name`
-- `MoneyBalanceReconciliationResult`: `MoneyBalanceReconciliationResult.AccountName`
+- `MoneyAccount`: `MoneyAccount.BankConnectionAccount`, `MoneyAccount.BankConnectionAccountId`, `MoneyAccount.BankName`, `MoneyAccount.Name`
+- `MoneyBalanceReconciliationResult`: `MoneyBalanceReconciliationResult.AccountName`, `MoneyBalanceReconciliationResult.MoneyAccountId`
 - `MoneyOperation`: `MoneyOperation.AccountName`, `MoneyOperation.AccountingType`, `MoneyOperation.CategoryName`, `MoneyOperation.CounterpartyName`, `MoneyOperation.DirectionName`, `MoneyOperation.MatchComment`, `MoneyOperation.MoneyAccount`, `MoneyOperation.MoneyAccountId`, `MoneyOperation.PaidAccountName`, `MoneyOperation.ProjectName`, `MoneyOperation.Purpose`, `MoneyOperation.SalesPointName`
 - `NotificationBotSubscription`: `NotificationBotSubscription.DisplayName`, `NotificationBotSubscription.Username`
 - `NotificationDelivery`: `NotificationDelivery.SenderName`
@@ -89,6 +91,7 @@
 - `OksoDictionaryItem`: `OksoDictionaryItem.Name`
 - `OrganizationFormDictionaryItem`: `OrganizationFormDictionaryItem.Description`, `OrganizationFormDictionaryItem.Name`
 - `Payment`: `Payment.Account`, `Payment.AccountDate`, `Payment.AdvanceReviewedByUserName`, `Payment.AuditCreatedByUserName`, `Payment.AuditDeletedByUserName`, `Payment.AuditUpdatedByUserName`, `Payment.ContractorUserName`, `Payment.CounterpartyName`, `Payment.IsNotForAccounting`, `Payment.LegacyAccountDate`, `Payment.LegacyAccountNumber`, `Payment.OverpaymentComment`
+- `PaymentOverdueNotificationOutbox`: `PaymentOverdueNotificationOutbox.LeaseToken`, `PaymentOverdueNotificationOutbox.TransitionToken`
 - `PaymentSource`: `PaymentSource.Description`, `PaymentSource.Name`
 - `PaymentStatusEntity`: `PaymentStatusEntity.Description`, `PaymentStatusEntity.Name`
 - `PowerOfAttorney`: `PowerOfAttorney.Notes`
@@ -108,13 +111,15 @@
 - `StorageCapacityReservation`: `StorageCapacityReservation.GeneratedRecoveryLeaseToken`, `StorageCapacityReservation.ProductContextJson`
 - `StorageObject`: `StorageObject.LogicalName`
 - `TaskJournalComment`: `TaskJournalComment.AuthorName`, `TaskJournalComment.ExternalCommentId`
-- `TaskJournalDeadlineChangeRequest`: `TaskJournalDeadlineChangeRequest.CreatedComment`, `TaskJournalDeadlineChangeRequest.CreatedCommentId`, `TaskJournalDeadlineChangeRequest.DecidedByName`, `TaskJournalDeadlineChangeRequest.DecisionComment`, `TaskJournalDeadlineChangeRequest.DecisionCommentEntry`, `TaskJournalDeadlineChangeRequest.DecisionCommentId`, `TaskJournalDeadlineChangeRequest.RequestedByName`, `TaskJournalDeadlineChangeRequest.ReviewerName`
+- `TaskJournalDeadlineChangeRequest`: `TaskJournalDeadlineChangeRequest.CreatedComment`, `TaskJournalDeadlineChangeRequest.CreatedCommentId`, `TaskJournalDeadlineChangeRequest.DecidedByName`, `TaskJournalDeadlineChangeRequest.DecisionComment`, `TaskJournalDeadlineChangeRequest.DecisionCommentEntry`, `TaskJournalDeadlineChangeRequest.DecisionCommentId`, `TaskJournalDeadlineChangeRequest.RequestedByName`, `TaskJournalDeadlineChangeRequest.ReviewerDispatchLeaseToken`, `TaskJournalDeadlineChangeRequest.ReviewerName`
 - `TaskJournalFile`: `TaskJournalFile.StoredFileName`, `TaskJournalFile.UploadedByName`
-- `TaskJournalItem`: `TaskJournalItem.AssigneeName`, `TaskJournalItem.AuthorName`, `TaskJournalItem.Comments`, `TaskJournalItem.ControlMarkedByUserName`, `TaskJournalItem.Description`, `TaskJournalItem.ObjectName`
+- `TaskJournalItem`: `TaskJournalItem.AssigneeName`, `TaskJournalItem.AuthorName`, `TaskJournalItem.Comments`, `TaskJournalItem.ControlMarkedByUserName`, `TaskJournalItem.Description`, `TaskJournalItem.ObjectName`, `TaskJournalItem.StatusTransitionToken`
 - `TaskJournalParticipant`: `TaskJournalParticipant.DisplayName`, `TaskJournalParticipant.Email`
 - `TaskJournalTemplate`: `TaskJournalTemplate.AssigneeName`, `TaskJournalTemplate.CreatedByName`, `TaskJournalTemplate.Description`, `TaskJournalTemplate.Name`, `TaskJournalTemplate.TaskDescription`
 - `TaskJournalTemplateParticipant`: `TaskJournalTemplateParticipant.DisplayName`, `TaskJournalTemplateParticipant.Email`
+- `TaskStatusNotificationOutbox`: `TaskStatusNotificationOutbox.ActorName`, `TaskStatusNotificationOutbox.LeaseToken`, `TaskStatusNotificationOutbox.StatusTransitionToken`
 - `TaskStickerStyle`: `TaskStickerStyle.TextColor`
+- `TaskTimeEntry`: `TaskTimeEntry.UserNameSnapshot`
 - `TaxRegisterEntry`: `TaxRegisterEntry.BankConnectionAccountId`, `TaxRegisterEntry.Description`
 - `TaxRegisterEvent`: `TaxRegisterEvent.Comment`
 - `TaxSystemDictionaryItem`: `TaxSystemDictionaryItem.Description`, `TaxSystemDictionaryItem.Name`

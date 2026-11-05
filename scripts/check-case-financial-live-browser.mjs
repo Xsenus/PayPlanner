@@ -102,7 +102,10 @@ try {
   assert.equal(vite.config.isProduction, true, 'The financial browser must qualify production React behavior.');
   assert.equal(vite.config.env.DEV, false, 'The release browser must not use development-only mount effects.');
   phase('cli-open');
-  await cli('open', 'about:blank', '--browser', browser); opened = true;
+  const openResult = await cli('open', 'about:blank', '--browser', browser);
+  assert.ok(openResult.includes(`Browser \`${session}\` opened with pid `),
+    'Financial browser did not confirm an owned session: ' + openResult);
+  opened = true;
   phase('cli-goto');
   await cli('goto', ui + '/cases/' + caseId);
   phase('cli-snapshot');
@@ -125,7 +128,7 @@ try {
     let firstHandled; const first = new Promise(resolve => { firstHandled = resolve; });
     const path = '/api/v2/cases/' + settings.caseId + '/work-order/create-' + kind;
     const keys = []; const outside = []; const errors = []; const unexpectedWrites = [];
-    let otherWrites = 0; let invoiceId = 0; let checkingInvoiceCard = false; let tablePreferenceWrites = 0;
+    let otherWrites = 0; let invoiceId = 0; let checkingInvoiceCard = false; let tablePreferenceWrites = 0; let invoicePrintWrites = 0;
     page.setDefaultTimeout(45000);
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => {
@@ -139,7 +142,9 @@ try {
       if (url.origin === settings.api && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method())
         && !['/api/auth/login', '/api/user-activity', '/api/user-activity/heartbeat', '/api/notifications/mark-read',
           '/api/v2/cases/' + settings.caseId + '/activity'].includes(url.pathname)) {
-        if (checkingInvoiceCard && request.method() === 'PUT' && url.pathname === '/api/user-settings/accounts_table_settings') {
+        if (checkingInvoiceCard && request.method() === 'POST' && url.pathname === '/api/invoices/' + invoiceId + '/print') {
+          invoicePrintWrites++;
+        } else if (checkingInvoiceCard && request.method() === 'PUT' && url.pathname === '/api/user-settings/accounts_table_settings') {
           tablePreferenceWrites++;
         } else if (url.pathname !== path && !url.pathname.startsWith('/hubs/')) {
           otherWrites++; unexpectedWrites.push(request.method() + ' ' + url.pathname);
@@ -245,19 +250,31 @@ try {
           return popup;
         };
       });
+      const confirmImages = async (signed, label) => {
+        const dialog = page.getByRole('dialog', { name: 'Изображения в документе', exact: true });
+        await dialog.waitFor();
+        check(await dialog.getByRole('checkbox', { name: 'Логотип', exact: true }).isChecked(), 'Logo choice was lost');
+        check(await dialog.getByRole('checkbox', { name: 'Печать', exact: true }).isChecked() === signed, 'Seal choice was lost');
+        check(await dialog.getByRole('checkbox', { name: 'Подпись', exact: true }).isChecked() === signed, 'Signature choice was lost');
+        await dialog.getByRole('button', { name: label, exact: true }).click();
+        await dialog.waitFor({ state: 'hidden' });
+      };
       for (const signed of [false, true]) {
         await page.getByRole('button', { name: /^Печать/ }).click();
         const responseReady = page.waitForResponse(response => {
           const url = new URL(response.url());
-          return url.origin === settings.api && url.pathname === '/api/invoices/' + invoiceId + '/document'
-            && url.searchParams.get('format') === 'html';
+          return url.origin === settings.api && url.pathname === '/api/invoices/' + invoiceId + '/print'
+            && response.request().method() === 'POST';
         });
         const popupReady = page.waitForEvent('popup');
         await page.getByRole('button', { name: signed ? 'С подписью и печатью' : 'Без подписи и печати', exact: true }).first().click();
+        await confirmImages(signed, 'Печатать');
         const popup = await popupReady;
         const response = await responseReady;
         check(response.status() === 200, 'Live invoice print failed: HTTP ' + response.status());
-        check(new URL(response.url()).searchParams.get('includeSignatureAndSeal') === String(signed), 'Incorrect print variant');
+        const options = new URL(response.url()).searchParams;
+        check(options.get('includeLogo') === 'true' && options.get('includeSeal') === String(signed)
+          && options.get('includeSignature') === String(signed), 'Incorrect print variant');
         await popup.waitForFunction(() => document.body.textContent.includes('Original lost response service') && globalThis.__ppInvoicePrinted === true);
         check((await popup.locator('body').textContent()).includes('Синтетическая организация для проверки печати'), 'Invoice seller was not rendered');
         check(await popup.getByAltText('Печать', { exact: true }).count() === Number(signed), 'Incorrect seal visibility');
@@ -273,11 +290,13 @@ try {
         await page.getByRole('button', { name: /^Скачать$/ }).click();
         const ready = page.waitForEvent('download');
         await page.getByRole('button', { name: 'Счет: ' + format + ' без подписи и печати', exact: true }).click();
+        await confirmImages(false, 'Скачать ' + format);
         const file = await ready;
         check(await file.failure() === null, 'Invoice ' + format + ' download failed');
         check(file.suggestedFilename().endsWith(format === 'PDF' ? '.pdf' : '.docx'), 'Invoice download format mismatch');
         await file.saveAs(settings.printRoot + '/invoice-download-' + format.toLowerCase() + (format === 'PDF' ? '.pdf' : '.docx'));
       }
+      check(invoicePrintWrites === 2, 'Invoice print did not use exactly two explicit preparation requests');
     }
     check(otherWrites === 0, 'Financial generation caused another business write: ' + otherWrites + ' ' + unexpectedWrites.join(', '));
     check(tablePreferenceWrites <= 1, 'Invoice table preferences were written repeatedly');

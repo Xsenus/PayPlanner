@@ -86,10 +86,10 @@ class DeliveryAdmissionTests(unittest.TestCase):
 
     def test_exact_candidate_is_admitted_before_any_shell_phase(self):
         self.use_current_candidate()
-        self.assertEqual(len(self.plan['expectedMigration'].split('+')), 11)
-        self.assertEqual(len(self.plan['expectedReleaseSeeds']), 249)
-        self.assertEqual([seed['version'] for seed in self.plan['expectedReleaseSeeds'][:5]], ['1.14.391', '1.14.390', '1.14.389', '1.14.388', '1.14.387'])
-        self.assertTrue(all(seed['isActive'] is False for seed in self.plan['expectedReleaseSeeds'][:5]))
+        self.assertEqual(len(self.plan['expectedMigration'].split('+')), 18)
+        self.assertEqual(len(self.plan['expectedReleaseSeeds']), 768)
+        self.assertEqual([seed['version'] for seed in self.plan['expectedReleaseSeeds'][:5]], ['1.14.910', '1.14.909', '1.14.908', '1.14.907', '1.14.906'])
+        self.assertTrue(all(seed['isActive'] is True for seed in self.plan['expectedReleaseSeeds'][:5]))
         self.assertTrue(self.admission().stdout.startswith(self.revision+'|'))
 
     def test_candidate_rejects_migration_and_release_substitutions(self):
@@ -99,7 +99,7 @@ class DeliveryAdmissionTests(unittest.TestCase):
                      lambda p: p.update(expectedMigration='+'.join(reversed(p['expectedMigration'].split('+')))),
                      lambda p: p['expectedReleaseSeeds'].pop(),
                      lambda p: p['expectedReleaseSeeds'].reverse(),
-                     lambda p: p['expectedReleaseSeeds'][0].update(isActive=True),
+                     lambda p: p['expectedReleaseSeeds'][0].update(isActive=False),
                      lambda p: p['expectedReleaseSeeds'][0]['items'][0].update(text='unreviewed'),
                      lambda p: p.update(expectedReleaseCatalogSha256='c'*64)]
         for mutate in mutations:
@@ -147,7 +147,7 @@ class DeliveryAdmissionTests(unittest.TestCase):
         self.assertEqual(copied.returncode, 0, copied.stderr)
         verify = '''import importlib.util,json,sys
 spec=importlib.util.spec_from_file_location('copied_proof',sys.argv[1]);proof=importlib.util.module_from_spec(spec);spec.loader.exec_module(proof)
-assert len(proof.validate_candidate_plan(json.load(open(sys.argv[2],encoding='utf-8'))))==11
+assert len(proof.validate_candidate_plan(json.load(open(sys.argv[2],encoding='utf-8'))))==18
 '''
         result = subprocess.run([sys.executable, '-B', '-', str(backup/'deploy-db-proof.py'), str(self.root/'installer-plan.json')],
                                 input=verify, text=True, capture_output=True, timeout=15)

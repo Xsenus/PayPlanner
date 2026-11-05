@@ -9,9 +9,15 @@ public sealed record SchedulingEvent(string Kind, string Lane, int Workers, ulon
 /// </summary>
 public static class BoundedBatchScheduler
 {
-    public static async Task RunAsync(IReadOnlyCollection<ExecutionBatch> batches, string requestedWorkers, int initialBudget,
+    public static Task RunAsync(IReadOnlyCollection<ExecutionBatch> batches, string requestedWorkers, int initialBudget,
         Func<ExecutionResources> readResources, Func<ExecutionBatch, Task> executeBatch, Action<SchedulingEvent>? observe = null,
-        TimeSpan? recheckInterval = null, TimeSpan? admissionTimeout = null, TimeProvider? timeProvider = null)
+        TimeSpan? recheckInterval = null, TimeSpan? admissionTimeout = null, TimeProvider? timeProvider = null, bool allowSerialFallback = false)
+        => RunAsync(batches, requestedWorkers, initialBudget, readResources, (batch, _) => executeBatch(batch), observe,
+            recheckInterval, admissionTimeout, timeProvider, allowSerialFallback);
+
+    public static async Task RunAsync(IReadOnlyCollection<ExecutionBatch> batches, string requestedWorkers, int initialBudget,
+        Func<ExecutionResources> readResources, Func<ExecutionBatch, bool, Task> executeBatch, Action<SchedulingEvent>? observe = null,
+        TimeSpan? recheckInterval = null, TimeSpan? admissionTimeout = null, TimeProvider? timeProvider = null, bool allowSerialFallback = false)
     {
         ShardPlan.Require(initialBudget is 1 or 2 or 4, "Invalid initial worker budget.");
         var interval = recheckInterval ?? TimeSpan.FromSeconds(1);
@@ -55,7 +61,7 @@ public static class BoundedBatchScheduler
                             observe?.Invoke(new("budget-change", lane, budget, resource.AvailableBytes, resource.Processors, active.Count));
                         }
                     }
-                    while (!resourceFailure && queue.Count > 0 && ExecutionScheduling.CanLaunchAdditional(active.Count, budget, resource.AvailableBytes, lane))
+                    while (!resourceFailure && queue.Count > 0 && ExecutionScheduling.CanLaunchAdditional(active.Count, budget, resource.AvailableBytes, lane, allowSerialFallback))
                     {
                         if (admissionStarted is not null)
                         {
@@ -64,7 +70,8 @@ public static class BoundedBatchScheduler
                         }
                         observe?.Invoke(new("launch-budget", lane, budget, resource.AvailableBytes, resource.Processors, active.Count));
                         var batch = queue.Dequeue();
-                        try { active.Add(executeBatch(batch)); }
+                        var serialMemoryProfile = allowSerialFallback && active.Count == 0 && budget == 1;
+                        try { active.Add(executeBatch(batch, serialMemoryProfile)); }
                         catch (Exception error) { active.Add(Task.FromException(error)); }
                         resource = readResources();
                     }

@@ -1,5 +1,6 @@
+// @vitest-environment node
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { it as test } from 'vitest';
 import { mkdtemp, mkdir, readFile, readdir, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -14,17 +15,20 @@ function container() {
   return { Image: 'test-image-id', Config: { Entrypoint: ['/usr/bin/timeout'], Cmd: ['--signal=KILL', '40s', 'dotnet', '/probe/PayPlanner.CompanyImageProbe.dll'], User: '65532:65532', Labels: { 'payplanner.probe': 'company-image', 'payplanner.probe.run': runId },
     Env: ['PAYPLANNER_IMAGE_PROBE=isolated-linux', 'Email__Enabled=false', 'BackgroundServices__Enabled=false'] },
   HostConfig: { ReadonlyRootfs: true, Privileged: false, NetworkMode: 'none', Memory: memoryBytes, MemorySwap: memoryBytes, NanoCpus: 1_000_000_000,
-    PidsLimit: 64, CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges=true'], IpcMode: 'private', RestartPolicy: { Name: 'no' }, LogConfig: { Type: 'none' }, Tmpfs: { '/tmp': 'rw,noexec,nosuid,nodev,size=16m' } },
+    PidsLimit: 64, CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges=true'], IpcMode: 'private', RestartPolicy: { Name: 'no' }, LogConfig: { Type: 'none' }, Tmpfs: { '/tmp': 'rw,noexec,nosuid,nodev,size=16m' },
+    Ulimits: [{ Name: 'core', Soft: 0, Hard: 0 }, { Name: 'nofile', Soft: 128, Hard: 128 }] },
   Mounts: [{ Type: 'bind', Source: app, Destination: '/probe', RW: false }], State: { ExitCode: 0, OOMKilled: false, Running: false } };
 }
-function fakeDocker({ alter, startError, oom = false } = {}) {
+function fakeDocker({ alter, alterEngine, startError, oom = false } = {}) {
   const calls = [];
   const state = container();
   state.State.OOMKilled = oom;
   if (alter) alter(state);
+  const engine = { MemoryLimit: true, SwapLimit: true, CpuCfsQuota: true, PidsLimit: true, SecurityOptions: ['name=seccomp,profile=builtin'] };
+  if (alterEngine) alterEngine(engine);
   return { calls, docker(args) {
     calls.push(args);
-    if (args[0] === 'info') return { stdout: JSON.stringify({ MemoryLimit: true, SwapLimit: true, CPUCfsQuota: true, PidsLimit: true, SecurityOptions: ['name=seccomp,profile=builtin'] }) };
+    if (args[0] === 'info') return { stdout: JSON.stringify(engine) };
     if (args[0] === 'image') return { stdout: JSON.stringify([{ Id: 'test-image-id', Os: 'linux', Architecture: 'amd64', RepoDigests: [image], Config: { Env: ['DOTNET_VERSION=9.0.22'] } }]) };
     if (args[0] === 'create') return { stdout: id };
     if (args[0] === 'inspect') return { stdout: JSON.stringify([state]) };
@@ -37,7 +41,7 @@ function fakeDocker({ alter, startError, oom = false } = {}) {
 
 test('plan has one readonly bind, no network/pull/ports/root and bounded resources', () => {
   const args = createArguments({ app, image, runId });
-  for (const flag of ['--pull=never', '--network=none', '--read-only', '--memory=512m', '--memory-swap=512m', '--cpus=1', '--user=65532:65532', '--pids-limit=64']) assert.ok(args.includes(flag));
+  for (const flag of ['--pull=never', '--network=none', '--read-only', '--memory=512m', '--memory-swap=512m', '--cpus=1', '--user=65532:65532', '--pids-limit=64', '--ulimit=core=0:0', '--ulimit=nofile=128:128']) assert.ok(args.includes(flag));
   assert.equal(args.filter(arg => arg.startsWith('--mount=')).length, 1);
   assert.ok(args.find(arg => arg.startsWith('--mount=')).endsWith(',readonly'));
   assert.ok(args.includes('--entrypoint=/usr/bin/timeout'));
@@ -56,6 +60,18 @@ test('successful fake run removes only its own container', () => {
   assert.equal(result.status, 'passed');
   assert.equal(result.ownedContainerRemoved, true);
   assert.deepEqual(fake.calls.find(args => args[0] === 'rm'), ['rm', id]);
+});
+
+test('requires Docker API CpuCfsQuota and refuses missing, disabled or incorrectly cased capability', () => {
+  for (const alterEngine of [
+    engine => { delete engine.CpuCfsQuota; },
+    engine => { engine.CpuCfsQuota = false; },
+    engine => { delete engine.CpuCfsQuota; engine.CPUCfsQuota = true; },
+  ]) {
+    const fake = fakeDocker({ alterEngine });
+    assert.throws(() => executeProbe({ app, image, runId, docker: fake.docker }), /must support.*CPU/);
+    assert.ok(!fake.calls.some(args => ['create', 'start', 'kill', 'rm'].includes(args[0])));
+  }
 });
 test('OOM is failure, never success even when JSON says passed', () => {
   const fake = fakeDocker({ oom: true });
@@ -88,11 +104,28 @@ test('foreign ownership prevents both start and cleanup', () => {
   assert.ok(!fake.calls.some(args => ['start', 'kill', 'rm'].includes(args[0])));
 });
 
+test('missing or changed file/core limits refuse native start and clean only the owned container', () => {
+  for (const alter of [
+    state => { delete state.HostConfig.Ulimits; },
+    state => { state.HostConfig.Ulimits = []; },
+    state => { state.HostConfig.Ulimits[1].Soft = 64; },
+    state => { state.HostConfig.Ulimits[1].Hard = 256; },
+    state => { state.HostConfig.Ulimits[0].Hard = -1; },
+    state => { state.HostConfig.Ulimits.push({ Name: 'nofile', Soft: 128, Hard: 128 }); },
+  ]) {
+    const fake = fakeDocker({ alter });
+    const result = executeProbe({ app, image, runId, docker: fake.docker });
+    assert.equal(result.status, 'failed');
+    assert.ok(!fake.calls.some(args => args[0] === 'start'));
+    assert.equal(result.ownedContainerRemoved, true);
+  }
+});
+
 async function artifactFixture(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'payplanner-image-probe-test-'));
   const app = path.join(directory, 'app');
   await mkdir(app);
-  t.after(async () => {
+  t.onTestFinished(async () => {
     assert.equal(path.dirname(directory), tmpdir());
     assert.ok(path.basename(directory).startsWith('payplanner-image-probe-test-'));
     for (const file of await readdir(app)) await unlink(path.join(app, file));

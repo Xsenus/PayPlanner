@@ -55,6 +55,10 @@ describe('main artifact transport caller and worker bindings', () => {
     expect(() => need({ needs: { 'backend-test': { result, outputs: { shard_0_id: id } } } },
       'backend-test-0', 'qualified-artifact-id', id)).toThrow();
   });
+  it.each(['failure', 'cancelled', 'skipped'])('does not consume a %s direct worker producer', result => {
+    expect(() => need({ needs: { 'backend-test-0': { result, outputs: { 'qualified-artifact-id': id } } } },
+      'backend-test-0', 'qualified-artifact-id', id)).toThrow();
+  });
   it('rejects unexported direct diagnostic matrix downloads', () => {
     expect(() => need({ needs: { 'backend-test': { result: 'success', outputs: { diagnostics_0_id: id } } } },
       'backend-test-0', 'diagnostics-artifact-id', id)).toThrow();

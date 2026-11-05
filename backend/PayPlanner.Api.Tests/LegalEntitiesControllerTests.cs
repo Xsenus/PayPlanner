@@ -913,6 +913,8 @@ public partial class LegalEntitiesControllerTests
     public async Task Suggest_DeduplicatesSameInnSuggestions_AndKeepsFullAddress()
     {
         await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db);
+        await SetLegalEntityPermissionAsync(db, userId, canCreate: true, canEdit: false, canDelete: false);
         var controller = CreateController(
             db,
             new StubLegalEntityEnrichmentService
@@ -951,7 +953,8 @@ public partial class LegalEntitiesControllerTests
                         null),
                 ]
             },
-            userId: 18);
+            userId: userId,
+            isAdmin: false);
 
         var action = await controller.Suggest(
             new LegalEntitySuggestionRequest

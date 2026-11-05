@@ -6,14 +6,16 @@ PAYMENT_ATTEMPT_DELTA_SHA256='e9a204366b5fd6df332dec56e96ca98c2f6b31778197c36c75
 CHAT_HISTORY_MIGRATION='20261027014154_AddPersonalChatHistory'
 PAYMENT_AND_HISTORY_MIGRATIONS=PAYMENT_ATTEMPT_MIGRATION+'+'+CHAT_HISTORY_MIGRATION
 PAYMENT_AND_HISTORY_DELTA_SHA256='1d53d5c0f92ce1c36fa84d49d0f257328ec7b30d8310db3d5af7b8ff310c2327'
-CANDIDATE_REVIEW_SHA256='5c08211062c8a0d4ed7ad5c2a9abc619c7634da43328177fb6687d691a134e83'
+CANDIDATE_REVIEW_SHA256='9ac7d5e7a25ef125e84e6f348e8d0f32d2f9719d77d3c7376320f250080ec85a'
 CHAT_TABLES=['InternalChatAttachments','InternalChatMembers','InternalChatMentions','InternalChatMessages','InternalChatReactions','InternalChatThreads']
 POLICY_TABLES=['Acts','Contracts','Payments']
 POLICY_COLUMN='SellerSnapshotPolicy'
-SUPPLEMENTAL_TABLES=['CashInventories','CashOrders','SalesRequests']
-CANDIDATE_NEW_TABLES=['PaymentCreateAttempts','TaskStatusNotificationOutboxes','TaskTimeCorrections','TaskTimeEntries']
+SUPPLEMENTAL_TABLES=['CashInventories','CashOrders','SalesRequests','CourtDocumentSources']
+CANDIDATE_NEW_TABLES=['BalanceApplicationReceipts','CompanyBankAccountBindings','PaymentCreateAttempts','PaymentOverdueNotificationOutboxes','TaskStatusNotificationOutboxes','TaskTimeCorrections','TaskTimeEntries','CaseCourtNotificationOutboxes']
 CANDIDATE_LINKED_TABLES=['TaskStatusNotificationOutboxes','TaskTimeEntries']
 CANDIDATE_DEFAULTS={
+ 'CourtDocumentSources':({'AcceptedControlsJson'},'"AcceptedControlsJson" IS NOT NULL'),
+ 'Payments':({'OverdueNotificationToken'},'"OverdueNotificationToken" IS NOT NULL'),
  'CashInventories':({'CompanyId','MoneyAccountId'},'"CompanyId" IS NOT NULL OR "MoneyAccountId" IS NOT NULL'),
  'CashOrders':({'CompanyId','MoneyAccountId'},'"CompanyId" IS NOT NULL OR "MoneyAccountId" IS NOT NULL'),
  'SalesRequests':({'ServiceInvoiceId','ServiceInvoiceAllocationAmount'},'"ServiceInvoiceId" IS NOT NULL OR "ServiceInvoiceAllocationAmount" IS NOT NULL'),
@@ -36,7 +38,7 @@ def reviewed_candidate():
  review=read_json(path)
  # Pin parsed contents; Git/Windows newline conversion must not change approval.
  need(hashlib.sha256(canonical(review).encode()).hexdigest()==CANDIDATE_REVIEW_SHA256,'Reviewed candidate admission changed')
- need(review['schemaVersion']==1 and len(review['migrationIds'])==11 and len(set(review['migrationIds']))==11,'Exact reviewed candidate migration set required')
+ need(review['schemaVersion']==1 and len(review['migrationIds'])==18 and len(set(review['migrationIds']))==18,'Exact reviewed candidate migration set required')
  return review
 
 def reviewed_migration_ids(value):
@@ -49,7 +51,7 @@ def reviewed_migration_ids(value):
 
 def validate_candidate_plan(plan):
  ids=reviewed_migration_ids(plan['expectedMigration'])
- if len(ids)==11:
+ if len(ids)==18:
   review=reviewed_candidate()
   need(plan['previousRevision']==review['previousRevision'],'Reviewed candidate previous revision differs')
   need(plan['expectedReleaseCatalogSha256']==review['releaseCatalogSha256'],'Reviewed candidate catalog differs')
@@ -125,7 +127,7 @@ def compare_payment_attempt_schema(a,b,expected=PAYMENT_ATTEMPT_DELTA_SHA256):
 
 def compare_releases(a,b,plan,phase):
  need(a['releaseSeen']==b['releaseSeen'],'Release read markers changed during read-only delivery')
- candidate=len(reviewed_migration_ids(plan['expectedMigration']))==11
+ candidate=len(reviewed_migration_ids(plan['expectedMigration']))==18
  if candidate:
   review=reviewed_candidate()
   need(len(plan['expectedReleaseSeeds'])==review['releaseSeedsCount'] and hashlib.sha256(json.dumps(plan['expectedReleaseSeeds'],ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()==review['releaseSeedsSha256'],'Exact reviewed candidate release seeds required')
@@ -156,7 +158,7 @@ def compare(plan_path,a_path,b_path,phase):
  need(phase in ['unchanged','startup'],'Unknown comparison boundary')
  plan,a,b=map(read_json,[plan_path,a_path,b_path])
  admitted_ids=validate_candidate_plan(plan)
- candidate=len(admitted_ids)==11
+ candidate=len(admitted_ids)==18
  need(a['schemaVersion']==b['schemaVersion']==2 and a['baselineSha256'] is None,'Immutable stopped baseline required')
  need(b['baselineSha256']==digest(a_path),'Later proof not bound to exact baseline bytes')
  need(a['fingerprints']==b['fingerprints'],'Protected rows/counts/all-column contents changed')

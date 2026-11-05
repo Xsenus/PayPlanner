@@ -54,14 +54,14 @@ public sealed class PaymentCreateAttemptMigrationTests
         if (upgrade)
         {
             await db.Database.MigrateAsync(previous);
-            db.Payments.Add(new Payment
+            await HistoricalPaymentMigrationSeed.InsertPaymentAsync(db, new Payment
             {
+                Id = 2001,
                 Account = "SYNTHETIC-OLD",
                 Type = PaymentType.Income,
                 DocumentKind = DocumentKind.Invoice,
                 Amount = 123.45m
             });
-            await db.SaveChangesAsync();
             db.ChangeTracker.Clear();
             Assert.DoesNotContain(current, await db.Database.GetAppliedMigrationsAsync());
         }

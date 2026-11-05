@@ -292,6 +292,41 @@ public sealed class BoundedTestExecutionTests
     }
 
     [Theory]
+    [InlineData("fast", 3072, "60000000")]
+    [InlineData("heavy", 3584, "80000000")]
+    [InlineData("exclusive", 3072, "60000000")]
+    [InlineData("exclusive", 3584, "80000000")]
+    [InlineData("exclusive", 4608, "C0000000")]
+    [InlineData("exclusive", 7168, "C0000000")]
+    public void ExplicitSerialProfileKeepsHeapAndChildReserveBounded(string lane, int availableMiB, string expected)
+    {
+        var available = (ulong)availableMiB * 1024 * 1024;
+        Assert.True(ExecutionScheduling.CanLaunchAdditional(0, 1, available, lane, serialMemoryProfile: true));
+        Assert.False(ExecutionScheduling.CanLaunchAdditional(1, 1, available, lane, serialMemoryProfile: true));
+        var environment = new Dictionary<string, string?> { ["DOTNET_GCHeapHardLimitPercent"] = "95" };
+        ExecutionScheduling.ConfigureWorkerEnvironment(environment, lane, available, serialMemoryProfile: true);
+        Assert.Equal(expected, environment["DOTNET_GCHeapHardLimit"]);
+        Assert.Single(environment.Keys, key => key.Contains("GCHeapHardLimit", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("2", environment["DOTNET_PROCESSOR_COUNT"]);
+        Assert.Equal("false", environment["Email__Enabled"]);
+        Assert.Equal("false", environment["BackgroundServices__Enabled"]);
+        var heap = Convert.ToUInt64(expected, 16);
+        Assert.True(available - heap >= Fixture.Gib + Fixture.Gib / 2);
+    }
+
+    [Fact]
+    public void SerialFallbackCannotBypassParallelOrLastMomentAdmission()
+    {
+        var minimum = 3 * Fixture.Gib;
+        Assert.False(ExecutionScheduling.CanLaunchAdditional(0, 1, minimum - 1, serialMemoryProfile: true));
+        Assert.False(ExecutionScheduling.CanLaunchAdditional(0, 4, minimum, serialMemoryProfile: true));
+        Assert.False(ExecutionScheduling.CanLaunchAdditional(1, 4, minimum, serialMemoryProfile: true));
+        var environment = new Dictionary<string, string?> { ["KEEP"] = "exact" };
+        Assert.Throws<InvalidDataException>(() => ExecutionScheduling.ConfigureWorkerEnvironment(environment, "heavy", minimum - 1, serialMemoryProfile: true));
+        Assert.Single(environment); Assert.Equal("exact", environment["KEEP"]);
+    }
+
+    [Theory]
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(4)]

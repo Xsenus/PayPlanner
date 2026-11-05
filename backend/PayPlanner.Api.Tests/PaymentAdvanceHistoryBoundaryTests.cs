@@ -176,7 +176,7 @@ public sealed class PaymentAdvanceHistoryBoundaryTests
         await db.SaveChangesAsync(); var controller = BalanceApplicationPaymentWriterTests.Controller(db, seed.Source);
         var detail = await VersionedPaymentWriterTests.ModelAsync(db, seed.Source);
         var list = Assert.IsAssignableFrom<IEnumerable<Payment>>(Assert.IsType<OkObjectResult>(await controller.Get(null, null, null, null)).Value);
-        foreach (var read in new[] { detail, Assert.Single(list.Where(p => p.Id == source.Id)) })
+        foreach (var read in new[] { detail, Assert.Single(list, p => p.Id == source.Id) })
         {
             Assert.Equal(source.AdvanceReviewStatus, read.AdvanceReviewStatus); Assert.Equal(source.AdvanceReviewReason, read.AdvanceReviewReason);
             Assert.Equal(source.AdvanceReviewedAt, read.AdvanceReviewedAt); Assert.Equal(source.AdvanceReviewedByUserId, read.AdvanceReviewedByUserId); Assert.Equal(source.AdvanceReviewedByUserName, read.AdvanceReviewedByUserName);

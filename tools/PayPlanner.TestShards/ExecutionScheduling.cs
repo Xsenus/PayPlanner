@@ -56,6 +56,8 @@ public static class ExecutionScheduling
     private const ulong OrdinaryHeapBytes = 2 * Gib;
     private const ulong ExclusiveHeapBytes = 3 * Gib;
     private const ulong ReservedBytes = 4 * Gib;
+    private const ulong SerialReserveBytes = Gib + Gib / 2;
+    private const ulong MinimumSerialHeapBytes = Gib + Gib / 2;
 
     public static void RequireSerialXunit(string runtime)
     {
@@ -150,27 +152,37 @@ public static class ExecutionScheduling
         return requested == "auto" ? processorLimit : Math.Min(processorLimit, int.Parse(requested, System.Globalization.CultureInfo.InvariantCulture));
     }
 
-    public static bool CanLaunchAdditional(int active, int initialBudget, ulong availableBytes, string lane = "heavy")
+    public static bool CanLaunchAdditional(int active, int initialBudget, ulong availableBytes, string lane = "heavy", bool serialMemoryProfile = false)
     {
         ShardPlan.Require(active >= 0 && initialBudget is 1 or 2 or 4, "Invalid execution worker state.");
         ShardPlan.Require(lane is "fast" or "heavy" or "exclusive", "Unsupported execution lane.");
-        // The first process needs the same reserve as its siblings. The 1 GiB
-        // floor is an emergency stop, not enough headroom to admit a test host.
-        // Exclusive still runs alone. Below its preferred 3 GiB heap, use the
-        // same bounded 2 GiB host as ordinary batches, retaining all 4 GiB reserve.
+        // Parallel admission retains its full reserve. The explicitly selected
+        // serial profile needs a bounded heap plus 1.5 GiB for the host and owned
+        // children. A later parallel sibling still needs the ordinary reserve.
         return active < initialBudget && (lane != "exclusive" || active == 0)
-            && availableBytes >= ReservedBytes + OrdinaryHeapBytes;
+            && (availableBytes >= ReservedBytes + OrdinaryHeapBytes
+                || serialMemoryProfile && active == 0 && initialBudget == 1 && availableBytes >= SerialReserveBytes + MinimumSerialHeapBytes);
     }
 
-    public static void ConfigureWorkerEnvironment(IDictionary<string, string?> environment, string lane, ulong? availableBytes = null)
+    public static void ConfigureWorkerEnvironment(IDictionary<string, string?> environment, string lane, ulong? availableBytes = null, bool serialMemoryProfile = false)
     {
         ShardPlan.Require(lane is "fast" or "heavy" or "exclusive", "Unsupported execution lane.");
         var heap = lane == "exclusive" ? ExclusiveHeapBytes : OrdinaryHeapBytes;
         if (availableBytes is { } available)
         {
-            ShardPlan.Require(available >= ReservedBytes + OrdinaryHeapBytes,
-                "The test-host memory reserve is unavailable immediately before launch.");
-            if (lane == "exclusive" && available < ReservedBytes + ExclusiveHeapBytes) heap = OrdinaryHeapBytes;
+            if (serialMemoryProfile)
+            {
+                ShardPlan.Require(available >= SerialReserveBytes + MinimumSerialHeapBytes,
+                    "The serial test-host memory reserve is unavailable immediately before launch.");
+                heap = available >= SerialReserveBytes + heap ? heap
+                    : available >= SerialReserveBytes + OrdinaryHeapBytes ? OrdinaryHeapBytes : MinimumSerialHeapBytes;
+            }
+            else
+            {
+                ShardPlan.Require(available >= ReservedBytes + OrdinaryHeapBytes,
+                    "The test-host memory reserve is unavailable immediately before launch.");
+                if (lane == "exclusive" && available < ReservedBytes + ExclusiveHeapBytes) heap = OrdinaryHeapBytes;
+            }
         }
         environment["Email__Enabled"] = "false";
         environment["BackgroundServices__Enabled"] = "false";

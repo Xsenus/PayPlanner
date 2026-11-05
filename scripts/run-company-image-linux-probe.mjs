@@ -19,7 +19,7 @@ export function createArguments({ app, image, runId }) {
   if (!path.posix.isAbsolute(app) || app.includes(',') || !/^[a-f0-9-]{36}$/.test(runId)) throw new Error('Invalid isolated probe path/owner.');
   return ['create', '--pull=never', '--network=none', '--read-only', '--user=65532:65532', '--cap-drop=ALL',
     '--security-opt=no-new-privileges=true', '--pids-limit=64', '--memory=512m', '--memory-swap=512m', '--cpus=1',
-    '--ipc=private', '--restart=no', '--log-driver=none', '--ulimit=core=0:0', '--ulimit=nofile=64:64',
+    '--ipc=private', '--restart=no', '--log-driver=none', '--ulimit=core=0:0', '--ulimit=nofile=128:128',
     '--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=16m', `--mount=type=bind,src=${app},dst=/probe,readonly`,
     '--label=payplanner.probe=company-image', `--label=payplanner.probe.run=${runId}`,
     '--env=PAYPLANNER_IMAGE_PROBE=isolated-linux', '--env=Email__Enabled=false', '--env=BackgroundServices__Enabled=false',
@@ -36,6 +36,8 @@ export function checkIsolation(container, runId, app) {
   checkOwnership(container, runId);
   const host = container.HostConfig;
   const bind = container.Mounts?.filter(mount => mount.Type === 'bind');
+  const core = host.Ulimits?.find(limit => limit.Name === 'core');
+  const files = host.Ulimits?.find(limit => limit.Name === 'nofile');
   if (JSON.stringify(container.Config.Entrypoint) !== JSON.stringify(['/usr/bin/timeout'])
     || JSON.stringify(container.Config.Cmd) !== JSON.stringify(['--signal=KILL', '40s', 'dotnet', '/probe/PayPlanner.CompanyImageProbe.dll'])
     || container.Config.User !== '65532:65532' || !host.ReadonlyRootfs || host.Privileged || host.NetworkMode !== 'none'
@@ -44,6 +46,7 @@ export function checkIsolation(container, runId, app) {
     || Object.keys(host.PortBindings ?? {}).length || host.PublishAllPorts || (host.PidMode && host.PidMode !== 'private') || host.IpcMode !== 'private'
     || host.Devices?.length || host.DeviceRequests?.length || host.VolumesFrom?.length
     || host.RestartPolicy?.Name !== 'no' || host.LogConfig?.Type !== 'none' || Object.keys(host.Tmpfs ?? {}).join() !== '/tmp'
+    || host.Ulimits?.length !== 2 || core?.Soft !== 0 || core?.Hard !== 0 || files?.Soft !== 128 || files?.Hard !== 128
     || bind?.length !== 1 || bind[0].Source !== app || bind[0].Destination !== '/probe' || bind[0].RW
     || container.Mounts?.some(mount => mount.Type !== 'bind' && !(mount.Type === 'tmpfs' && mount.Destination === '/tmp')))
     throw new Error('Docker did not apply the required isolation; probe was not started.');
@@ -99,7 +102,7 @@ export function parseProbeOutput(stdout) {
 
 export function executeProbe({ app, image, runId, docker }) {
   const engine = JSON.parse(docker(['info', '--format', '{{json .}}']).stdout);
-  if (!engine.MemoryLimit || !engine.SwapLimit || !engine.CPUCfsQuota || !engine.PidsLimit
+  if (!engine.MemoryLimit || !engine.SwapLimit || !engine.CpuCfsQuota || !engine.PidsLimit
     || !engine.SecurityOptions?.some(value => value.startsWith('name=seccomp')))
     throw new Error('Existing Docker daemon must support memory/swap/CPU/PID limits and normal seccomp isolation.');
   const imageInfo = JSON.parse(docker(['image', 'inspect', image]).stdout)[0];

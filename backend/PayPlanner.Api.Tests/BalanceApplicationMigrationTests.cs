@@ -59,6 +59,44 @@ public sealed class BalanceApplicationMigrationTests
         }
     }
 
+    private static async Task<BalanceApplicationIdempotencyTests.Fixture> SeedHistoricalReceiptOwnerAsync(PaymentContext db)
+    {
+        var role = new Role { Name = "historical-balance-v1", Description = "Synthetic historical receipt role" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        db.RolePermissions.AddRange(new[] { "clients", "legalEntities", "payments" }.Select(section =>
+            new RolePermission { RoleId = role.Id, Section = section, CanView = true, CanEdit = true, CanCreate = true, ViewScope = "all" }));
+        var actor = new User { Email = "historical-balance-v1@test.local", FullName = "Historical receipt actor", PasswordHash = "unused", RoleId = role.Id, IsActive = true, IsApproved = true, IsEmployee = true };
+        var client = new Client { Name = "Historical receipt owner" };
+        db.AddRange(actor, client);
+        await db.SaveChangesAsync();
+        await HistoricalPaymentMigrationSeed.InsertPaymentAsync(db, new Payment
+        {
+            Id = 2002,
+            ClientId = client.Id,
+            Amount = 100m,
+            PaidAmount = 0m,
+            Date = new DateTime(2026, 10, 31),
+            PlannedDate = new DateTime(2026, 10, 31),
+            Description = "Synthetic target",
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            DocumentKind = DocumentKind.Payment,
+            Notes = "",
+            SystemNotes = ""
+        });
+        await HistoricalPaymentMigrationSeed.InsertLedgerAsync(db, new ClientBalanceTransaction
+        {
+            Id = 3002,
+            ClientId = client.Id,
+            Amount = 100m,
+            Direction = ClientBalanceDirection.Credit,
+            Type = ClientBalanceTransactionType.ManualAdjustment,
+            Description = "Synthetic credit"
+        });
+        return new(actor.Id, false, client.Id, 2002);
+    }
+
     private static async Task VerifyAsync(PaymentContext db, bool upgrade, string previous, string current)
     {
         int? paymentId = null;
@@ -70,30 +108,29 @@ public sealed class BalanceApplicationMigrationTests
         {
             await db.Database.MigrateAsync(previous);
             var client = new Client { Name = "Historical synthetic owner" };
-            var payment = new Payment { Account = "OLD-BALANCE-RECEIPT", Client = client, Type = PaymentType.Income, DocumentKind = DocumentKind.Payment, Amount = 123.45m, PaidAmount = 23.45m, Notes = "Preserve history" };
-            db.Payments.Add(payment);
+            db.Clients.Add(client);
             await db.SaveChangesAsync();
-            var ledger = new ClientBalanceTransaction { ClientId = client.Id, PaymentId = payment.Id, Amount = 67.89m, Type = ClientBalanceTransactionType.ManualAdjustment, Direction = ClientBalanceDirection.Credit, Description = "Preserve old credit", ExternalKey = "historical-synthetic-key" };
-            db.ClientBalanceTransactions.Add(ledger);
-            await db.SaveChangesAsync();
+            var payment = new Payment { Id = 2001, Account = "OLD-BALANCE-RECEIPT", ClientId = client.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Payment, Amount = 123.45m, PaidAmount = 23.45m, Notes = "Preserve history" };
+            await HistoricalPaymentMigrationSeed.InsertPaymentAsync(db, payment);
+            var ledger = new ClientBalanceTransaction { Id = 3001, ClientId = client.Id, PaymentId = payment.Id, Amount = 67.89m, Type = ClientBalanceTransactionType.ManualAdjustment, Direction = ClientBalanceDirection.Credit, Description = "Preserve old credit", ExternalKey = "historical-synthetic-key" };
+            await HistoricalPaymentMigrationSeed.InsertLedgerAsync(db, ledger);
             paymentId = payment.Id; ledgerId = ledger.Id;
             db.ChangeTracker.Clear();
             // Exercise a genuinely old receipt table: its schema has no State column yet.
             await db.Database.MigrateAsync(current);
-            originalFixture = await BalanceApplicationIdempotencyTests.SeedAsync(db, false);
+            originalFixture = await SeedHistoricalReceiptOwnerAsync(db);
             originalRequest = BalanceApplicationIdempotencyTests.Request(originalFixture);
-            var target = await db.Payments.SingleAsync(p => p.Id == originalFixture.PaymentId);
-            target.PaidAmount = 25m;
-            db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+            Assert.Equal(1, await db.Database.ExecuteSqlInterpolatedAsync($"""UPDATE "Payments" SET "PaidAmount" = {25m} WHERE "Id" = {originalFixture.PaymentId}"""));
+            await HistoricalPaymentMigrationSeed.InsertLedgerAsync(db, new ClientBalanceTransaction
             {
+                Id = 3003,
                 ClientId = originalFixture.OwnerId,
-                PaymentId = target.Id,
+                PaymentId = originalFixture.PaymentId,
                 Type = ClientBalanceTransactionType.CreditApplied,
                 Direction = ClientBalanceDirection.Debit,
                 Amount = 25m,
                 Description = "Preserve old application"
             });
-            await db.SaveChangesAsync();
             // Frozen v1 fixture, independent of the current private command builder.
             var command = FormattableString.Invariant($"{{\"Version\":\"balance-apply-v1\",\"ClientId\":{originalFixture.OwnerId},\"LegalEntityId\":null,\"PaymentId\":{originalFixture.PaymentId},\"Amount\":\"25\",\"Description\":\"\",\"SourcePaymentId\":null}}");
             originalHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(command)));

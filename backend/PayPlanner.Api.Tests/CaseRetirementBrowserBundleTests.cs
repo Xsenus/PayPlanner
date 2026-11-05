@@ -24,13 +24,15 @@ public sealed class CaseRetirementBrowserBundleTests
         };
         var parentTemp = Environment.GetEnvironmentVariable("TEMP");
         var parentTmp = Environment.GetEnvironmentVariable("TMP");
+        var parentThreadPoolSize = Environment.GetEnvironmentVariable("UV_THREADPOOL_SIZE");
+        start.Environment["UV_THREADPOOL_SIZE"] = "2";
         if (temp is null) start.Environment.Remove("TEMP");
         else start.Environment["TEMP"] = Path.Combine(Path.GetTempPath(), temp);
         if (tmp is null) start.Environment.Remove("TMP");
         else start.Environment["TMP"] = Path.Combine(Path.GetTempPath(), tmp);
-        lease.ConfigureNodeTemporaryDirectory(start.Environment);
+        lease.ConfigureNodeEnvironment(start.Environment);
         start.ArgumentList.Add("-e");
-        start.ArgumentList.Add("console.log(require('node:path').resolve(require('node:os').tmpdir()))");
+        start.ArgumentList.Add("console.log(require('node:path').resolve(require('node:os').tmpdir())); console.log(process.env.UV_THREADPOOL_SIZE)");
         using var process = Process.Start(start)!;
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
@@ -39,7 +41,10 @@ public sealed class CaseRetirementBrowserBundleTests
         {
             await process.WaitForExitAsync(timeout.Token);
             Assert.True(process.ExitCode == 0, await stderr);
-            Assert.Equal(Path.GetDirectoryName(owner.Root), (await stdout).Trim());
+            var lines = (await stdout).Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+            Assert.Collection(lines,
+                line => Assert.Equal(Path.GetDirectoryName(owner.Root), line),
+                line => Assert.Equal("12", line));
         }
         finally
         {
@@ -52,6 +57,7 @@ public sealed class CaseRetirementBrowserBundleTests
         }
         Assert.Equal(parentTemp, Environment.GetEnvironmentVariable("TEMP"));
         Assert.Equal(parentTmp, Environment.GetEnvironmentVariable("TMP"));
+        Assert.Equal(parentThreadPoolSize, Environment.GetEnvironmentVariable("UV_THREADPOOL_SIZE"));
     }
 
     [Fact]
@@ -61,12 +67,13 @@ public sealed class CaseRetirementBrowserBundleTests
         var marker = Path.Combine(owner.Root, "owner.json");
         var original = await File.ReadAllTextAsync(marker);
         await File.WriteAllTextAsync(marker, "foreign-owner");
-        var environment = new Dictionary<string, string?> { ["TEMP"] = "original-temp", ["TMP"] = "original-tmp" };
+        var environment = new Dictionary<string, string?> { ["TEMP"] = "original-temp", ["TMP"] = "original-tmp", ["UV_THREADPOOL_SIZE"] = "4" };
         try
         {
-            Assert.Throws<IOException>(() => owner.ConfigureNodeTemporaryDirectory(environment));
+            Assert.Throws<IOException>(() => owner.ConfigureNodeEnvironment(environment));
             Assert.Equal("original-temp", environment["TEMP"]);
             Assert.Equal("original-tmp", environment["TMP"]);
+            Assert.Equal("4", environment["UV_THREADPOOL_SIZE"]);
         }
         finally
         {
@@ -81,10 +88,11 @@ public sealed class CaseRetirementBrowserBundleTests
         await using var owner = new CaseRetirementBrowserBundle();
         var lease = owner.Acquire();
         lease.Dispose();
-        var environment = new Dictionary<string, string?> { ["TEMP"] = "original-temp", ["TMP"] = "original-tmp" };
-        Assert.Throws<ObjectDisposedException>(() => lease.ConfigureNodeTemporaryDirectory(environment));
+        var environment = new Dictionary<string, string?> { ["TEMP"] = "original-temp", ["TMP"] = "original-tmp", ["UV_THREADPOOL_SIZE"] = "4" };
+        Assert.Throws<ObjectDisposedException>(() => lease.ConfigureNodeEnvironment(environment));
         Assert.Equal("original-temp", environment["TEMP"]);
         Assert.Equal("original-tmp", environment["TMP"]);
+        Assert.Equal("4", environment["UV_THREADPOOL_SIZE"]);
     }
 
     [Fact]

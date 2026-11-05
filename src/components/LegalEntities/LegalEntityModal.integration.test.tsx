@@ -1634,7 +1634,7 @@ describe('LegalEntityModal integration', () => {
           const view = render(<LegalEntityModal {...p} />); fireEvent.click(screen.getByRole('button', { name: 'Найти' }));
           if (change === 'close') { view.rerender(<LegalEntityModal {...p} isOpen={false} />); view.rerender(<LegalEntityModal {...p} />); }
           if (change === 'readonly') view.rerender(<LegalEntityModal {...p} allowEdit={false} />);
-          if (change === 'session') iterationSession.replace();
+          if (change === 'session') { iterationSession.replace(); view.rerender(<LegalEntityModal {...p} />); }
           if (change === 'refresh') view.rerender(<LegalEntityModal {...p} initial={{ ...p.initial }} />);
           await act(async () => { if (outcome === 'success') resolve([first]); else reject(new Error('Устаревшая ошибка DaData')); });
           expect(screen.queryByText('Первый кандидат')).toBeNull(); expect(screen.queryByText('Устаревшая ошибка DaData')).toBeNull();
@@ -1841,7 +1841,8 @@ describe('LegalEntityModal integration', () => {
       mode="page" canManageOwnCompanySettings={false} canViewCases={false} canViewAccounts={false}
       canCreateAccounts={false} canViewActs={false} canViewPayments={false} />);
     await screen.findByText('Печать компании');
-    expect(vi.mocked(apiService.getCompanyBranches)).not.toHaveBeenCalled();
+    expect(vi.mocked(apiService.getCompanyBranches)).toHaveBeenCalledExactlyOnceWith(9, true, expect.any(AbortSignal));
+    expect(screen.getByTestId('company-branches-section').querySelector('button')).toBeNull();
     if (checkFailed) expect(await screen.findByText('Проверка временно недоступна')).toBeTruthy();
     else expect(await screen.findByText('По проверяемым реквизитам замечаний нет.')).toBeTruthy();
     expect(vi.mocked(apiService.getCompanyRequisitesCheck)).toHaveBeenCalledExactlyOnceWith(9, expect.any(AbortSignal));
@@ -2378,7 +2379,7 @@ describe('LegalEntityModal integration', () => {
     const view = render(<LegalEntityModal {...props} />);
     expect(await screen.findByRole('checkbox', { name: 'Свой набор для счетов' })).toHaveProperty('disabled', true);
     view.rerender(<LegalEntityModal {...props} allowEdit={false} initial={{ ...initial, documentImagePrintDefaultsVersion: 'A'.repeat(64) }} />);
-    expect(screen.getByRole('checkbox', { name: 'Свой набор для счетов' })).toHaveProperty('disabled', true);
+    expect(await screen.findByRole('checkbox', { name: 'Свой набор для счетов' })).toHaveProperty('disabled', true);
     expect(screen.getByRole('button', { name: 'Сбросить настройки изображений' })).toHaveProperty('disabled', true);
     expect(props.onSubmit).not.toHaveBeenCalled();
   });

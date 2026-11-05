@@ -45,7 +45,7 @@ env:
 jobs:
   frontend:
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
-    timeout-minutes: 30
+    timeout-minutes: 45
     outputs:
       frontend-artifact-id: ${{ steps.frontend-upload.outputs.artifact-id }}
     defaults:
@@ -223,7 +223,7 @@ jobs:
 
       - name: Verify all Migrations analyzer formatting
         env:
-          DOTNET_GCHeapHardLimit: "240000000"
+          DOTNET_GCHeapHardLimit: "280000000"
           CompilerResponseFile: ${{ github.workspace }}/scripts/compiler-serial.rsp
         run: dotnet format analyzers backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --verify-no-changes --no-restore --verbosity diagnostic
 

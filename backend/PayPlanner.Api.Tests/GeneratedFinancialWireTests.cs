@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using Xunit;
 
@@ -9,6 +10,15 @@ namespace PayPlanner.Api.Tests;
 
 public sealed partial class ManagedCaseDocumentWireTests
 {
+    private static async Task SeedFinancialBrowserProfileAsync(PaymentContext db, SyntheticWritableBackendProcess runtime)
+    {
+        // Profile onboarding is separate from the financial no-extra-write assertion.
+        // Seed its real persisted value rather than exempting another browser write.
+        var userId = await db.Users.Where(user => user.Email == runtime.Email).Select(user => user.Id).SingleAsync();
+        Assert.False(await db.UserSettings.AnyAsync(setting => setting.UserId == userId && setting.Key == "profile.timeZoneId"));
+        db.UserSettings.Add(new UserSetting { UserId = userId, Key = "profile.timeZoneId", Value = "UTC" });
+    }
+
     [Theory]
     [InlineData("invoice", false, false)]
     [InlineData("invoice", true, false)]
@@ -25,11 +35,11 @@ public sealed partial class ManagedCaseDocumentWireTests
         var caseId = await LoginAndCreateCaseAsync(runtime); int clientId;
         await using (var seed = runtime.OpenDatabase())
         {
+            await SeedFinancialBrowserProfileAsync(seed, runtime);
             var clientCase = await seed.ClientCases.SingleAsync(c => c.Id == caseId);
             clientId = Assert.IsType<int>(clientCase.ClientId); clientCase.Title = "Synthetic financial browser case";
             if (kind == "invoice" && editor)
             {
-                static string Image(string svg) => "data:image/svg+xml;base64," + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(svg));
                 var company = new LegalEntity
                 {
                     ShortName = "ТЕСТОВЫЙ ПОСТАВЩИК",
@@ -38,8 +48,8 @@ public sealed partial class ManagedCaseDocumentWireTests
                     Kpp = "000000000",
                     Address = "Тестовый адрес, дом 1",
                     BankAccountsJson = "[{\"bank\":\"Тестовый банк\",\"bik\":\"000000000\",\"accountNumber\":\"00000000000000000000\"}]",
-                    SealDataUrl = Image("<svg xmlns='http://www.w3.org/2000/svg' width='90' height='90'><circle cx='45' cy='45' r='40' fill='none' stroke='blue' stroke-width='3'/><text x='45' y='50' font-size='16' text-anchor='middle' fill='blue'>ТЕСТ</text></svg>"),
-                    DirectorSignatureDataUrl = Image("<svg xmlns='http://www.w3.org/2000/svg' width='120' height='40'><text x='5' y='28' font-size='20' fill='blue'>ОБРАЗЕЦ</text></svg>"),
+                    SealDataUrl = CompanyImageTestData.TransparentPng,
+                    DirectorSignatureDataUrl = CompanyImageTestData.TransparentPng,
                     DocumentDirectorJson = "{\"position\":\"Директор\",\"lastName\":\"Тестовый\",\"firstName\":\"Иван\",\"noMiddleName\":true}",
                 };
                 seed.LegalEntities.Add(company);
@@ -111,6 +121,7 @@ public sealed partial class ManagedCaseDocumentWireTests
         var caseId = await LoginAndCreateCaseAsync(runtime); int clientId;
         await using (var seed = runtime.OpenDatabase())
         {
+            await SeedFinancialBrowserProfileAsync(seed, runtime);
             var clientCase = await seed.ClientCases.SingleAsync(c => c.Id == caseId);
             clientId = Assert.IsType<int>(clientCase.ClientId); clientCase.Title = "Synthetic financial browser case";
             seed.ClientCaseWorkOrders.Add(new ClientCaseWorkOrder

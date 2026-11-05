@@ -93,6 +93,8 @@ local-db-backups/
 backup-before-deploy-*/
 
 # Кеши инструментов
+__pycache__/
+*.py[cod]
 .sass-cache/
 .stylelintcache
 .eslintcache
