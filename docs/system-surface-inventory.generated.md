@@ -125,11 +125,11 @@
 | CourtSyncMetricsRollupService | backend/Services/LegalIntegrations/CourtSyncMetricsRollupService.cs | 8 | да | docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | MessengerDocumentOutboxWorker | backend/Services/MessengerDocumentOutboxService.cs | 288 | нет | нет |
 | MoneyBalanceReconciliationSchedulerService | backend/Services/MoneyBalanceReconciliationSchedulerService.cs | 6 | да | docs/date-time-inventory.md, docs/development-bank-import-verification-2026-10-16.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/payplanner-bank-roadmap-2026-10-14.md, docs/payplanner-handoff-2026-10-21.md, docs/payplanner-release-roadmap-2026-10-14.md, docs/payplanner-work-order-2026-10-21.md |
-| CaseCourtNotificationDispatchWorker | backend/Services/Notifications/CaseCourtNotificationDispatchProcessor.cs | 178 | да | docs/company-court-command-ownership-checkpoint-2026-11-04.md |
+| CaseCourtNotificationDispatchWorker | backend/Services/Notifications/CaseCourtNotificationDispatchProcessor.cs | 182 | да | docs/company-court-command-ownership-checkpoint-2026-11-04.md |
 | CaseDocumentNotificationDispatchWorker | backend/Services/Notifications/CaseDocumentNotificationDispatchWorker.cs | 3 | нет | docs/unpushed-changes-map-2026-10-03.md |
 | InternalChatNoReplyReminderService | backend/Services/Notifications/InternalChatNoReplyReminderService.cs | 7 | да | docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | InternalChatNotificationRecoveryService | backend/Services/Notifications/InternalChatNotificationRecoveryService.cs | 8 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/unpushed-changes-map-2026-10-03.md |
-| MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs | 642 | нет | нет |
+| MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs | 648 | нет | нет |
 | NotificationDeliveryRetentionService | backend/Services/Notifications/NotificationDeliveryRetentionService.cs | 6 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | NotificationRetrySchedulerService | backend/Services/Notifications/NotificationRetrySchedulerService.cs | 8 | да | docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | SmsChannelMonitoringService | backend/Services/Notifications/SmsChannelMonitoringService.cs | 122 | да | нет |
@@ -155,7 +155,7 @@
 | ExternalCalendarTaskSyncOutboxWorker | backend/Services/ExternalCalendarTaskSyncOutboxService.cs:194 | нет |
 | MessengerDocumentOutboxWorker | backend/Services/MessengerDocumentOutboxService.cs:288 | нет |
 | CaseDocumentNotificationDispatchWorker | backend/Services/Notifications/CaseDocumentNotificationDispatchWorker.cs:3 | docs/unpushed-changes-map-2026-10-03.md |
-| MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs:642 | нет |
+| MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs:648 | нет |
 | TaskDeadlineReviewerDispatchWorker | backend/Services/Notifications/TaskDeadlineReviewerDispatchProcessor.cs:88 | нет |
 | TaskStatusNotificationDispatchWorker | backend/Services/Notifications/TaskStatusNotificationDispatchProcessor.cs:113 | нет |
 | SalesRequestAutomationService | backend/Services/Requests/SalesRequestAutomationService.cs:9 | docs/pay-33-36-implementation-log-2026-10-09.md |

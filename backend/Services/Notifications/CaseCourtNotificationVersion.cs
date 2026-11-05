@@ -20,13 +20,21 @@ internal static class CaseCourtNotificationVersion
         source.MovementStatus,
         ScheduledTicks = CalendarTimeZoneHelper.NormalizeUtcInstant(source.ScheduledAt).Ticks / 10,
         source.AllDay,
+        PreviousScheduledTicks = source.PreviousScheduledAt.HasValue
+            ? CalendarTimeZoneHelper.NormalizeUtcInstant(source.PreviousScheduledAt.Value).Ticks / 10 : (long?)null,
+        source.PreviousAllDay,
+        source.CourtInstance,
+        source.CourtId,
         source.CourtName,
         source.CourtCaseNumber,
         source.Courtroom,
         source.JudgeName,
+        source.SecretaryName,
         source.ResultSummary,
         source.SourceType,
         source.SourceUrl,
+        source.SourceConfidence,
+        source.ExternalKey,
         source.ProceduralDeadlineId,
         source.HearingOutcome,
         source.HearingOutcomeNote
@@ -47,6 +55,7 @@ internal static class CaseCourtNotificationVersion
         source.SourceId,
         source.SourceUrl,
         source.SourceDocumentKey,
+        source.SourceConfidence,
         source.TaskJournalItemId
     });
 

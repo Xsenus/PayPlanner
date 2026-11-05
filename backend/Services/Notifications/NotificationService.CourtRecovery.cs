@@ -5,6 +5,22 @@ namespace PayPlanner.Api.Services.Notifications;
 
 public sealed partial class NotificationService : IDurableCourtNotificationService
 {
+    private async Task<IReadOnlyList<NotificationDelivery>> RetryCourtDeliveryAsync(NotificationDelivery original, CancellationToken ct)
+    {
+        if (original.Channel is not (NotificationChannels.Email or NotificationChannels.WebPush)
+            || original.Status != NotificationDeliveryStatus.Failed || original.RecipientUserId is not > 0) return [];
+        var key = CaseCourtNotificationDeliveryGuard.RootKey(original.EventKey);
+        if (key is null) return [];
+        var intent = await _context.CaseCourtNotificationOutboxes.AsNoTracking().SingleOrDefaultAsync(row => row.EventKey == key, ct);
+        // Unknown outcomes, completed work and live leases retain their original fences.
+        if (intent is null || intent.CompletedAt.HasValue || intent.BlockedAt.HasValue || intent.NotificationCompletedAt.HasValue) return [];
+        var before = await _context.NotificationDeliveries.AsNoTracking().Where(row => row.EventKey == key)
+            .Select(row => (int?)row.Id).MaxAsync(ct) ?? 0;
+        await new CaseCourtNotificationDispatchProcessor(_context, this, _realtimePublisher, _timeProvider).RetryAsync(intent.Id, ct);
+        return await _context.NotificationDeliveries.AsNoTracking().Where(row => row.EventKey == key && row.Id > before
+            && row.RecipientUserId == original.RecipientUserId && row.Channel == original.Channel).OrderBy(row => row.Id).ToArrayAsync(ct);
+    }
+
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyCourtEventForEventAsync(ClientCase clientCase, ClientCaseCourtEvent courtEvent,
         string action, string actorName, int actorUserId, IReadOnlyCollection<int> recipients, CaseCourtDeliveryClaim claim, CancellationToken ct)
     {

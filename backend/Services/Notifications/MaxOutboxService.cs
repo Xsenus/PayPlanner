@@ -581,6 +581,12 @@ public sealed class MaxOutboxProcessor(
                         }
                     }
                 }
+                if (!await CaseCourtNotificationDeliveryGuard.CanSendAsync(db, message.EventKey, message.RecipientUserId,
+                    NotificationChannels.Max, ct))
+                {
+                    await CancelAsync(message, "court-event-no-longer-deliverable", ct);
+                    continue;
+                }
                 if (text.Length > MaxApiClient.MaxTextLength)
                 {
                     await CancelAsync(message, "message-too-long", ct);

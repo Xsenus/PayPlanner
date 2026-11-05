@@ -1,0 +1,51 @@
+using System.Globalization;
+using System.Security.Claims;
+using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Models;
+
+namespace PayPlanner.Api.Services.Notifications;
+
+internal static class CaseCourtNotificationDeliveryGuard
+{
+    internal static bool IsManaged(string? eventKey) => eventKey?.StartsWith("case-court:", StringComparison.OrdinalIgnoreCase) == true;
+
+    internal static string? RootKey(string? eventKey)
+    {
+        if (eventKey is null || eventKey.Length < 43) return null;
+        var root = eventKey[..43];
+        return CaseCourtNotificationVersion.IsValidEventKey(root)
+            && (eventKey.Length == 43 || eventKey[43..].StartsWith(":retry:", StringComparison.Ordinal)) ? root : null;
+    }
+
+    internal static async Task<bool> CanSendAsync(PaymentContext db, string eventKey, int? userId, string channel, CancellationToken ct)
+    {
+        if (!IsManaged(eventKey)) return true;
+        var root = RootKey(eventKey);
+        if (root is null || userId is not > 0) return false;
+        var intent = await db.CaseCourtNotificationOutboxes.AsNoTracking().SingleOrDefaultAsync(row => row.EventKey == root, ct);
+        if (intent is null || intent.PayloadJson.Length > 65536 || intent.Kind is not ("event" or "deadline")
+            || !CaseCourtNotificationDispatchProcessor.TryReadPayload(intent, out var payload)) return false;
+        var fingerprint = intent.Kind == "event" ? CaseCourtNotificationVersion.Capture(payload.CourtEvent!)
+            : CaseCourtNotificationVersion.Capture(payload.Deadline!);
+        if (!await CaseCourtNotificationVersion.IsCurrentAsync(db, intent.Id, intent.ClientCaseId, intent.Kind, intent.SourceId, fingerprint, ct)) return false;
+        var type = intent.Kind == "deadline" ? UserNotificationTypes.CaseProceduralDeadline
+            : payload.Action == "rescheduled" ? UserNotificationTypes.CourtHearing
+            : NotificationService.ResolveCourtEventNotificationType(payload.CourtEvent!);
+        if (channel == NotificationChannels.Email && type != UserNotificationTypes.CourtDecisionRecorded) return false;
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString(CultureInfo.InvariantCulture))], "CourtDelivery"));
+        var access = await db.ResolveSectionAccessAsync(principal, RolePermissionCatalog.Cases, ct, requireApprovedUser: true);
+        if (access?.Permission?.CanView != true || !await db.ClientCases.AsNoTracking()
+            .Where(row => row.Id == intent.ClientCaseId).ApplyClientCaseVisibility(access.Visibility).AnyAsync(ct)) return false;
+        var preferences = await MaxNotificationRecipientPolicy.LoadAsync(db, [userId.Value], ct);
+        if (!preferences.TryGetValue(userId.Value, out var preference)
+            || !UserNotificationPreferenceSettings.IsChannelEnabled(preference, type, channel)) return false;
+        if (channel is NotificationChannels.WebPush or NotificationChannels.Max)
+            return await db.UserNotifications.AsNoTracking().AnyAsync(row => row.EventKey == root && row.RecipientUserId == userId
+                && row.Type == type && row.ObjectType == "case" && row.ObjectId == intent.ClientCaseId
+                && !row.IsRead && !row.IsArchived && row.DeletedAt == null, ct);
+        return true;
+    }
+}

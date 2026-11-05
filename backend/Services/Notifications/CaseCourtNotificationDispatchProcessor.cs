@@ -31,13 +31,17 @@ public sealed class CaseCourtNotificationDispatchProcessor(PaymentContext db, ID
         return completed;
     }
 
-    public async Task<bool> ProcessAsync(long id, CancellationToken ct)
+    public Task<bool> ProcessAsync(long id, CancellationToken ct) => ProcessAsync(id, false, ct);
+
+    internal Task<bool> RetryAsync(long id, CancellationToken ct) => ProcessAsync(id, true, ct);
+
+    private async Task<bool> ProcessAsync(long id, bool retryNow, CancellationToken ct)
     {
         RequireCleanContext();
         var now = Clock.GetUtcNow().UtcDateTime;
         var token = Guid.NewGuid().ToString("N");
         var claimed = await db.CaseCourtNotificationOutboxes
-            .Where(row => row.Id == id && row.CompletedAt == null && row.NextAttemptAt <= now
+            .Where(row => row.Id == id && row.CompletedAt == null && (row.NextAttemptAt <= now || retryNow)
                 && (row.LeaseUntil == null || row.LeaseUntil <= now)
                 && (row.BlockedAt == null || (row.JournalChanged && row.JournalCompletedAt == null)))
             .ExecuteUpdateAsync(set => set.SetProperty(row => row.LeaseToken, token).SetProperty(row => row.LeaseUntil, (DateTime?)now.AddMinutes(2))
@@ -148,7 +152,7 @@ public sealed class CaseCourtNotificationDispatchProcessor(PaymentContext db, ID
         return await CaseCourtNotificationVersion.IsCurrentAsync(db, item.Id, item.ClientCaseId, item.Kind, item.SourceId, fingerprint, ct);
     }
 
-    private static bool TryReadPayload(CaseCourtNotificationOutbox item, [NotNullWhen(true)] out CaseCourtNotificationPayload? payload)
+    internal static bool TryReadPayload(CaseCourtNotificationOutbox item, [NotNullWhen(true)] out CaseCourtNotificationPayload? payload)
     {
         payload = null;
         try { payload = JsonSerializer.Deserialize<CaseCourtNotificationPayload>(item.PayloadJson, CaseCourtNotificationQueue.JsonOptions); }

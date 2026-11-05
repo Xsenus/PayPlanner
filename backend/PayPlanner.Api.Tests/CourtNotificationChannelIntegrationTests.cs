@@ -11,8 +11,10 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed class CourtNotificationChannelIntegrationTests(PostgreSqlModelTemplate template) : IClassFixture<PostgreSqlModelTemplate>
+public sealed partial class CourtNotificationChannelIntegrationTests(PostgreSqlModelTemplate template) : IClassFixture<PostgreSqlModelTemplate>
 {
+    private PostgreSqlModelTemplate SecondaryTemplate => template;
+
     public static IEnumerable<object[]> EmailCases() =>
         from mode in new[] { "failed", "pending", "ban", "journal", "stale", "two" }
         from postgres in new[] { false, true }

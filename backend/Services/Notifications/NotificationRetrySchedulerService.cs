@@ -203,6 +203,9 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
             .Where(item =>
                 item.Status == NotificationDeliveryStatus.Failed &&
                 item.CreatedAt <= cutoff &&
+                // Court retries belong to their durable worker. Stable keys must not
+                // occupy this scheduler's bounded candidate window forever.
+                !item.EventKey.ToLower().StartsWith("case-court:") &&
                 (item.Channel == NotificationChannels.Email
                     || item.Channel == NotificationChannels.Telegram
                     || item.Channel == NotificationChannels.WebPush))

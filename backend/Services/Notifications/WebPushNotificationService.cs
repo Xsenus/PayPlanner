@@ -131,6 +131,14 @@ public class WebPushNotificationService : IWebPushNotificationService
 
         foreach (var (delivery, subscription) in pendingDeliveries)
         {
+            if (!await CaseCourtNotificationDeliveryGuard.CanSendAsync(_context, notification.EventKey, notification.RecipientUserId,
+                NotificationChannels.WebPush, cancellationToken))
+            {
+                delivery.Status = NotificationDeliveryStatus.Skipped;
+                delivery.Error = "Судебное уведомление устарело или больше не разрешено получателю.";
+                continue;
+            }
+
             if (!config.Ready)
             {
                 delivery.Status = NotificationDeliveryStatus.Skipped;
@@ -208,6 +216,9 @@ public class WebPushNotificationService : IWebPushNotificationService
         {
             throw new InvalidOperationException("NotificationDeliveryRecipientMissing");
         }
+
+        // Managed court retries are dispatched by NotificationService through the original durable claim.
+        if (CaseCourtNotificationDeliveryGuard.IsManaged(original.EventKey)) return null;
 
         var baseEventKey = ResolveBaseEventKey(original.EventKey);
         var notification = await _context.UserNotifications

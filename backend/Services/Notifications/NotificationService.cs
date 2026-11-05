@@ -4550,6 +4550,9 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             throw new InvalidOperationException("NotificationDeliveryPending");
         }
 
+        if (CaseCourtNotificationDeliveryGuard.IsManaged(original.EventKey))
+            return await RetryCourtDeliveryAsync(original, cancellationToken);
+
         var channel = NormalizeChannel(original.Channel);
         if (channel is not (NotificationChannels.Email or NotificationChannels.Telegram))
         {
@@ -4608,6 +4611,14 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
 
         if (delivery.Channel == NotificationChannels.Email)
         {
+            if (!await CaseCourtNotificationDeliveryGuard.CanSendAsync(_context, delivery.EventKey, delivery.RecipientUserId,
+                NotificationChannels.Email, cancellationToken))
+            {
+                delivery.Status = NotificationDeliveryStatus.Skipped;
+                delivery.Error = "Судебное уведомление устарело или больше не разрешено получателю.";
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(recipient.Email))
             {
                 delivery.Status = NotificationDeliveryStatus.Skipped;
@@ -7766,7 +7777,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             ?? clientCase.LegalEntity?.FullName
             ?? "Контрагент не указан";
 
-    private static string ResolveCourtEventNotificationType(ClientCaseCourtEvent courtEvent)
+    internal static string ResolveCourtEventNotificationType(ClientCaseCourtEvent courtEvent)
     {
         var isScheduled = string.Equals(courtEvent.MovementStatus, "scheduled", StringComparison.OrdinalIgnoreCase)
             || string.Equals(courtEvent.MovementStatus, "pending", StringComparison.OrdinalIgnoreCase);
