@@ -11,7 +11,7 @@
 - HTTP endpoints с точной ссылкой из документации: 280; критичных без такой ссылки: 526.
 - Критичных endpoints без прямой тестовой связи: 238.
 - Реальных HTML-форм: 21; с найденной тестовой связью: 19.
-- Фоновых сервисов: 36; с найденной тестовой связью: 28.
+- Фоновых сервисов: 36; с найденной тестовой связью: 29.
 - Исходящих HTTP-интеграций: 12; с найденной тестовой связью: 12.
 
 ## Разделы frontend
@@ -125,7 +125,7 @@
 | CourtSyncMetricsRollupService | backend/Services/LegalIntegrations/CourtSyncMetricsRollupService.cs | 8 | да | docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | MessengerDocumentOutboxWorker | backend/Services/MessengerDocumentOutboxService.cs | 288 | нет | нет |
 | MoneyBalanceReconciliationSchedulerService | backend/Services/MoneyBalanceReconciliationSchedulerService.cs | 6 | да | docs/date-time-inventory.md, docs/development-bank-import-verification-2026-10-16.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/payplanner-bank-roadmap-2026-10-14.md, docs/payplanner-handoff-2026-10-21.md, docs/payplanner-release-roadmap-2026-10-14.md, docs/payplanner-work-order-2026-10-21.md |
-| CaseCourtNotificationDispatchWorker | backend/Services/Notifications/CaseCourtNotificationDispatchProcessor.cs | 178 | нет | docs/company-court-command-ownership-checkpoint-2026-11-04.md |
+| CaseCourtNotificationDispatchWorker | backend/Services/Notifications/CaseCourtNotificationDispatchProcessor.cs | 178 | да | docs/company-court-command-ownership-checkpoint-2026-11-04.md |
 | CaseDocumentNotificationDispatchWorker | backend/Services/Notifications/CaseDocumentNotificationDispatchWorker.cs | 3 | нет | docs/unpushed-changes-map-2026-10-03.md |
 | InternalChatNoReplyReminderService | backend/Services/Notifications/InternalChatNoReplyReminderService.cs | 7 | да | docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | InternalChatNotificationRecoveryService | backend/Services/Notifications/InternalChatNotificationRecoveryService.cs | 8 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/unpushed-changes-map-2026-10-03.md |
@@ -154,7 +154,6 @@
 | --- | --- | --- |
 | ExternalCalendarTaskSyncOutboxWorker | backend/Services/ExternalCalendarTaskSyncOutboxService.cs:194 | нет |
 | MessengerDocumentOutboxWorker | backend/Services/MessengerDocumentOutboxService.cs:288 | нет |
-| CaseCourtNotificationDispatchWorker | backend/Services/Notifications/CaseCourtNotificationDispatchProcessor.cs:178 | docs/company-court-command-ownership-checkpoint-2026-11-04.md |
 | CaseDocumentNotificationDispatchWorker | backend/Services/Notifications/CaseDocumentNotificationDispatchWorker.cs:3 | docs/unpushed-changes-map-2026-10-03.md |
 | MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs:642 | нет |
 | TaskDeadlineReviewerDispatchWorker | backend/Services/Notifications/TaskDeadlineReviewerDispatchProcessor.cs:88 | нет |
@@ -1437,12 +1436,12 @@
 | POST | api/v2/cases/{id:int}/court-sync/bind | CasesV2Controller | BindCourtSyncCase | backend/Controllers/V2/CasesV2Controller.cs:8701 | [Authorize] | да | нет |
 | PUT | api/v2/cases/court-sync/settings | CasesV2Controller | UpdateCourtSyncSettings | backend/Controllers/V2/CasesV2Controller.cs:8864 | [Authorize] | да | нет |
 | POST | api/v2/cases/{id:int}/court-sync/run | CasesV2Controller | RunCourtSync | backend/Controllers/V2/CasesV2Controller.cs:8888 | [Authorize] | да | нет |
-| POST | api/v2/cases | CasesV2Controller | Create | backend/Controllers/V2/CasesV2Controller.cs:10452 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/case-registry-query-optimization.md, docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/full-project-audit-2026-06-10.md, docs/storage-resilience-runbook.md |
-| PUT | api/v2/cases/{id:int} | CasesV2Controller | UpdateWithSource | backend/Controllers/V2/CasesV2Controller.cs:10520 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/company-reference-ownership-checkpoint-2026-11-01.md |
-| PUT | api/v2/cases/{id:int}/checked | CasesV2Controller | UpdateWithSource | backend/Controllers/V2/CasesV2Controller.cs:10521 | [Authorize] | да | нет |
-| PATCH | api/v2/cases/{id:int}/control | CasesV2Controller | UpdateControl | backend/Controllers/V2/CasesV2Controller.cs:10674 | [Authorize] | да | нет |
-| DELETE | api/v2/cases/{id:int} | CasesV2Controller | Delete | backend/Controllers/V2/CasesV2Controller.cs:10713 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/company-reference-ownership-checkpoint-2026-11-01.md |
-| POST | api/v2/cases/bulk-update | CasesV2Controller | BulkUpdate | backend/Controllers/V2/CasesV2Controller.cs:10762 | [Authorize] | да | нет |
+| POST | api/v2/cases | CasesV2Controller | Create | backend/Controllers/V2/CasesV2Controller.cs:10460 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/case-registry-query-optimization.md, docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/full-project-audit-2026-06-10.md, docs/storage-resilience-runbook.md |
+| PUT | api/v2/cases/{id:int} | CasesV2Controller | UpdateWithSource | backend/Controllers/V2/CasesV2Controller.cs:10528 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/company-reference-ownership-checkpoint-2026-11-01.md |
+| PUT | api/v2/cases/{id:int}/checked | CasesV2Controller | UpdateWithSource | backend/Controllers/V2/CasesV2Controller.cs:10529 | [Authorize] | да | нет |
+| PATCH | api/v2/cases/{id:int}/control | CasesV2Controller | UpdateControl | backend/Controllers/V2/CasesV2Controller.cs:10682 | [Authorize] | да | нет |
+| DELETE | api/v2/cases/{id:int} | CasesV2Controller | Delete | backend/Controllers/V2/CasesV2Controller.cs:10721 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/company-reference-ownership-checkpoint-2026-11-01.md |
+| POST | api/v2/cases/bulk-update | CasesV2Controller | BulkUpdate | backend/Controllers/V2/CasesV2Controller.cs:10770 | [Authorize] | да | нет |
 | PUT | {id:int}/court-events/{courtEventId:int}/hearing-outcome | CasesV2Controller | RecordHearingOutcome | backend/Controllers/V2/CasesV2Controller.HearingOutcome.cs:19 | не задано | да | нет |
 | GET | {id:int}/hearing-preparation | CasesV2Controller | GetHearingPreparation | backend/Controllers/V2/CasesV2Controller.HearingPreparation.cs:32 | не задано | да | нет |
 | PUT | {id:int}/hearing-preparation | CasesV2Controller | UpdateHearingPreparation | backend/Controllers/V2/CasesV2Controller.HearingPreparation.cs:57 | не задано | да | нет |

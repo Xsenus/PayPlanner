@@ -8958,6 +8958,7 @@ public partial class CasesV2Controller : ControllerBase
             CourtSyncApplyResult syncResult;
             try { syncResult = await prepared.CompleteAsync(); }
             catch (CourtPublicationRejectedException denied) { return denied.Result; }
+            long? completionJournalId = null;
             var completion = await WithCurrentCourtPublicationAsync(id, prepared.Changes!, async currentCase =>
             {
                 var invalid = await ApplyCourtPublicationChangesAsync(id, prepared.Changes!, ct);
@@ -8971,6 +8972,9 @@ public partial class CasesV2Controller : ControllerBase
                 AppendCaseEvent(clientCase, $"{syncMessage} Инициатор: {actorName}.");
                 _db.SetAuditReason($"Обновление дела #{clientCase.Id} из судебного источника {courtSyncProvider.Label}.");
                 await _db.SaveChangesAsync(ct);
+                if (syncResult.HasChanges && _notificationService is IDurableCourtNotificationService)
+                    completionJournalId = await QueueCourtNotificationAsync(clientCase, new("journal", "updated", null, null, true),
+                        User.GetUserId(), actorName, ct);
                 return Ok(new ClientCaseCourtSyncRunDto
                 {
                     ClientCaseId = clientCase.Id,
@@ -9000,7 +9004,11 @@ public partial class CasesV2Controller : ControllerBase
                 });
             }, ct);
             if (completion is OkObjectResult && syncResult.HasChanges)
-                await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+            {
+                if (completionJournalId.HasValue && _notificationService is IDurableCourtNotificationService durable)
+                    await new CaseCourtNotificationDispatchProcessor(_db, durable, _realtimePublisher).ProcessAsync(completionJournalId.Value, ct);
+                else await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+            }
             return (ActionResult)completion;
         }
 
