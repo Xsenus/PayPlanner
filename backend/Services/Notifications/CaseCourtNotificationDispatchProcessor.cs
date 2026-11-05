@@ -99,7 +99,8 @@ public sealed class CaseCourtNotificationDispatchProcessor(PaymentContext db, ID
                     else
                     {
                         IReadOnlyList<NotificationDelivery> deliveries = [];
-                        if (item.Kind != "journal" && await SourceIsCurrentAsync(item, payload!, timeout.Token))
+                        if (item.Kind != "journal" && !CaseCourtNotificationVersion.IsCaseDateMarker(item.Kind)
+                            && await SourceIsCurrentAsync(item, payload!, timeout.Token))
                         {
                             var clientCase = new ClientCase { Id = item.ClientCaseId, Title = payload!.CaseTitle, CaseNumber = payload.CaseNumber };
                             var claim = new CaseCourtDeliveryClaim(item.Id, item.EventKey, item.ClientCaseId, item.Kind, item.SourceId,
@@ -176,7 +177,8 @@ public sealed class CaseCourtNotificationDispatchProcessor(PaymentContext db, ID
             || payload.ActorUserId < 0 || payload.RecipientUserIds.Any(id => id <= 0)
             || payload.RecipientUserIds.Distinct().Count() != payload.RecipientUserIds.Length
             || !CaseCourtNotificationVersion.IsValidEventKey(item.EventKey)) return false;
-        if (payload.DateChange is not null && !CaseCourtNotificationVersion.IsCaseDateKind(item.Kind)) return false;
+        if (payload.DateChange is not null && !CaseCourtNotificationVersion.IsCaseDateKind(item.Kind)
+            && !CaseCourtNotificationVersion.IsCaseDateMarker(item.Kind)) return false;
         return item.Kind switch
         {
             "event" => payload.CourtEvent is not null && payload.Deadline is null && payload.CourtEvent.Id == item.SourceId
@@ -186,6 +188,10 @@ public sealed class CaseCourtNotificationDispatchProcessor(PaymentContext db, ID
             "journal" => item.SourceId == 0 && payload.CourtEvent is null && payload.Deadline is null,
             "hearing-date" or "decision-date" => item.SourceId == item.ClientCaseId && payload.CourtEvent is null && payload.Deadline is null
                 && payload.DateChange is not null && payload.Action == "updated",
+            "hearing-marker" or "decision-marker" => item.SourceId == item.ClientCaseId && payload.CourtEvent is null && payload.Deadline is null
+                && payload.DateChange is { SuppressDelivery: true } && payload.Action == "updated" && payload.RecipientUserIds.Length == 0
+                && CaseCourtNotificationVersion.CaseDateValue(item.Kind, payload.DateChange.PreviousAt)
+                    != CaseCourtNotificationVersion.CaseDateValue(item.Kind, payload.DateChange.CurrentAt),
             _ => false
         };
     }

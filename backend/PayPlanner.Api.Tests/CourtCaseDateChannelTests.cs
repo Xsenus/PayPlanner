@@ -12,7 +12,7 @@ public sealed partial class CourtNotificationChannelIntegrationTests
 {
     public static IEnumerable<object[]> CaseDateChannelCases() =>
         from channel in new[] { "email", "push", "max" }
-        from mode in new[] { "active", "stale", "ban", "access", "newer" }
+        from mode in new[] { "active", "stale", "ban", "access", "newer", "auto-marker" }
         from postgres in new[] { false, true }
         select new object[] { channel, mode, postgres };
 
@@ -86,6 +86,16 @@ public sealed partial class CourtNotificationChannelIntegrationTests
             await using var transaction = await db.Database.BeginTransactionAsync();
             await new CaseCourtNotificationQueue(db).EnqueueCaseEditAsync(await db.ClientCases.SingleAsync(),
                 channel == "email" ? null : date.AddDays(-1), channel == "email" ? date.AddDays(-1) : null, 0, "Сотрудник", default);
+            await transaction.CommitAsync();
+        }
+        if (mode == "auto-marker")
+        {
+            var current = await db.ClientCases.SingleAsync();
+            await using var transaction = await db.Database.BeginTransactionAsync();
+            var markers = CaseCourtNotificationQueue.CaseDateSupersessionMarkers(current,
+                channel == "email" ? null : date.AddDays(2), channel == "email" ? date.AddDays(2) : null);
+            Assert.Single(markers);
+            await new CaseCourtNotificationQueue(db).EnqueueBatchAsync(current, 0, "Сотрудник", markers, default);
             await transaction.CommitAsync();
         }
         if (mode == "access") await db.Roles.ExecuteUpdateAsync(set => set.SetProperty(row => row.Name, "restricted-synthetic"));

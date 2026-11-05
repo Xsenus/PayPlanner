@@ -9006,7 +9006,7 @@ public partial class CasesV2Controller : ControllerBase
             if (completion is OkObjectResult && syncResult.HasChanges)
             {
                 if (completionJournalId.HasValue && _notificationService is IDurableCourtNotificationService durable)
-                    await new CaseCourtNotificationDispatchProcessor(_db, durable, _realtimePublisher).ProcessAsync(completionJournalId.Value, ct);
+                    await DispatchAcceptedCaseEditNotificationsAsync([completionJournalId.Value], durable, ct);
                 else await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
             }
             return (ActionResult)completion;
@@ -9099,6 +9099,7 @@ public partial class CasesV2Controller : ControllerBase
         var notificationRequests = new List<CaseCourtNotificationRequest>();
         var actorUserId = User.GetUserId();
         var previousNextHearingAt = clientCase.NextHearingAt;
+        var previousCourtDecisionAt = clientCase.CourtDecisionAt;
         var changedFields = new List<string>();
         var createdEvents = new List<ClientCaseCourtEvent>();
         var updatedEvents = new List<ClientCaseCourtEvent>();
@@ -9668,6 +9669,7 @@ public partial class CasesV2Controller : ControllerBase
         if (_notificationService is IDurableCourtNotificationService)
         {
             if (ClientCaseStageClassifier.IsPretrial(clientCase)) notificationRequests.Clear();
+            notificationRequests.AddRange(CaseCourtNotificationQueue.CaseDateSupersessionMarkers(clientCase, previousNextHearingAt, previousCourtDecisionAt));
             if (taskJournalChanged) notificationRequests.Add(new("journal", "updated", null, null, true));
             queuedNotificationIds = await new CaseCourtNotificationQueue(_db).EnqueueBatchAsync(clientCase,
                 actorUserId ?? 0, actorName, notificationRequests, ct);
@@ -9678,8 +9680,7 @@ public partial class CasesV2Controller : ControllerBase
         {
             if (_notificationService is IDurableCourtNotificationService durable)
             {
-                var processor = new CaseCourtNotificationDispatchProcessor(_db, durable, _realtimePublisher);
-                foreach (var notificationId in queuedNotificationIds) await processor.ProcessAsync(notificationId, ct);
+                await DispatchAcceptedCaseEditNotificationsAsync(queuedNotificationIds, durable, ct);
             }
             else
             {

@@ -22,7 +22,7 @@ public partial class CasesV2Controller
         if (result is not (OkObjectResult or CreatedResult or NoContentResult)) return;
         if (notificationId.HasValue && _notificationService is IDurableCourtNotificationService durable)
         {
-            await new CaseCourtNotificationDispatchProcessor(_db, durable, _realtimePublisher).ProcessAsync(notificationId.Value, ct);
+            await DispatchAcceptedCaseEditNotificationsAsync([notificationId.Value], durable, ct);
             return;
         }
         if (notifyAfterCommit is not null)

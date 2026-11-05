@@ -61,8 +61,10 @@ public partial class CasesV2ControllerTests
             .OrderBy(row => row.Id).Select(row => row.Id).ToArrayAsync());
         foreach (var group in realtime.Delivered.Where(row => row.EventKey.StartsWith("case-court:")).GroupBy(row => row.EventKey))
             Assert.Single(group);
-        Assert.Equal(intents.Where(row => row.Kind != "journal").Select(row => row.EventKey).Order(),
+        Assert.Equal(intents.Where(row => row.Kind is "event" or "deadline").Select(row => row.EventKey).Order(),
             realtime.Delivered.Where(row => row.EventKey.StartsWith("case-court:")).Select(row => row.EventKey).Order());
+        var markerKeys = intents.Where(row => row.Kind is "hearing-marker" or "decision-marker").Select(row => row.EventKey).ToArray();
+        Assert.DoesNotContain(realtime.Delivered, row => markerKeys.Contains(row.EventKey));
         if (mode == "file")
         {
             storage.Throw = false;

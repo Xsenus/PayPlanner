@@ -19,6 +19,21 @@ public sealed class CaseCourtNotificationQueue(PaymentContext db, TimeProvider? 
 {
     internal static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    public static IReadOnlyList<CaseCourtNotificationRequest> CaseDateSupersessionMarkers(ClientCase clientCase,
+        DateTime? previousHearingAt, DateTime? previousDecisionAt)
+    {
+        var requests = new List<CaseCourtNotificationRequest>(2);
+        Add("hearing-marker", previousHearingAt, clientCase.NextHearingAt);
+        Add("decision-marker", previousDecisionAt, clientCase.CourtDecisionAt);
+        return requests;
+
+        void Add(string kind, DateTime? previous, DateTime? current)
+        {
+            if (CaseCourtNotificationVersion.CaseDateValue(kind, previous) != CaseCourtNotificationVersion.CaseDateValue(kind, current))
+                requests.Add(new(kind, "updated", null, null, false, new(previous, current, true)));
+        }
+    }
+
     public Task<IReadOnlyList<long>> EnqueueCaseEditAsync(ClientCase clientCase, DateTime? previousHearingAt, DateTime? previousDecisionAt,
         int actorUserId, string actorName, CancellationToken ct)
     {
@@ -41,7 +56,7 @@ public sealed class CaseCourtNotificationQueue(PaymentContext db, TimeProvider? 
         if (db.Database.CurrentTransaction is null || clientCase.Id <= 0 || actorUserId < 0)
             throw new InvalidOperationException("Court notification intents require their accepted case transaction.");
         if (requests.Count == 0) return [];
-        var recipients = requests.All(row => row.Kind == "journal")
+        var recipients = requests.All(row => row.Kind == "journal" || CaseCourtNotificationVersion.IsCaseDateMarker(row.Kind))
             ? [] : (await CaseNotificationRecipients.ResolveAsync(db, clientCase.Id, ct)).Order().ToArray();
         var now = (timeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime;
         var rows = new List<CaseCourtNotificationOutbox>(requests.Count);
@@ -50,14 +65,15 @@ public sealed class CaseCourtNotificationQueue(PaymentContext db, TimeProvider? 
         {
             var courtEvent = request.CourtEvent is null ? null : (ClientCaseCourtEvent)db.Entry(request.CourtEvent).CurrentValues.ToObject();
             var deadline = request.Deadline is null ? null : (ClientCaseProceduralDeadline)db.Entry(request.Deadline).CurrentValues.ToObject();
-            var caseDate = CaseCourtNotificationVersion.IsCaseDateKind(request.Kind);
+            var marker = CaseCourtNotificationVersion.IsCaseDateMarker(request.Kind);
+            var caseDate = CaseCourtNotificationVersion.IsCaseDateKind(request.Kind) || marker;
             var sourceId = caseDate ? clientCase.Id : courtEvent?.Id ?? deadline?.Id ?? 0;
             var validAction = request.Kind switch
             {
                 "event" => request.Action is "created" or "updated" or "rescheduled",
                 "deadline" => request.Action is "created" or "updated" or "closed",
                 "journal" => request.Action == "updated",
-                "hearing-date" or "decision-date" => request.Action == "updated",
+                "hearing-date" or "decision-date" or "hearing-marker" or "decision-marker" => request.Action == "updated",
                 _ => false
             };
             if ((request.Kind == "event" && (courtEvent is null || deadline is not null))
@@ -67,9 +83,11 @@ public sealed class CaseCourtNotificationQueue(PaymentContext db, TimeProvider? 
                 || (!caseDate && request.DateChange is not null)
                 || (caseDate && request.DateChange is not null
                     && (CaseCourtNotificationVersion.CaseDateValue(request.Kind, request.DateChange.CurrentAt)
-                        != CaseCourtNotificationVersion.CaseDateValue(request.Kind, request.Kind == "hearing-date" ? clientCase.NextHearingAt : clientCase.CourtDecisionAt)
-                        || request.DateChange.SuppressDelivery != (ClientCaseStageClassifier.IsPretrial(clientCase)
-                            || (request.Kind == "hearing-date" && !clientCase.NextHearingAt.HasValue))))
+                        != CaseCourtNotificationVersion.CaseDateValue(request.Kind, request.Kind is "hearing-date" or "hearing-marker" ? clientCase.NextHearingAt : clientCase.CourtDecisionAt)
+                        || request.DateChange.SuppressDelivery != (marker || ClientCaseStageClassifier.IsPretrial(clientCase)
+                            || (request.Kind == "hearing-date" && !clientCase.NextHearingAt.HasValue))
+                        || (marker && CaseCourtNotificationVersion.CaseDateValue(request.Kind, request.DateChange.PreviousAt)
+                            == CaseCourtNotificationVersion.CaseDateValue(request.Kind, request.DateChange.CurrentAt))))
                 || !validAction
                 || (request.Kind != "journal" && sourceId <= 0)
                 || (courtEvent is not null && courtEvent.ClientCaseId != clientCase.Id)
@@ -77,7 +95,7 @@ public sealed class CaseCourtNotificationQueue(PaymentContext db, TimeProvider? 
                 throw new InvalidOperationException("Court notification source does not belong to its accepted case.");
             if (!seen.Add((request.Kind, sourceId))) continue;
             var payload = new CaseCourtNotificationPayload(1, clientCase.Title, clientCase.CaseNumber, request.Action,
-                actorUserId, actorName, recipients, courtEvent, deadline, request.DateChange);
+                actorUserId, actorName, marker ? [] : recipients, courtEvent, deadline, request.DateChange);
             var json = JsonSerializer.Serialize(payload, JsonOptions);
             if (Encoding.UTF8.GetByteCount(json) > 65536)
                 throw new InvalidOperationException("Court notification snapshot exceeds its bounded payload size.");

@@ -10,8 +10,17 @@ internal static class CaseCourtNotificationVersion
 {
     public static bool IsCaseDateKind(string kind) => kind is "hearing-date" or "decision-date";
 
+    public static bool IsCaseDateMarker(string kind) => kind is "hearing-marker" or "decision-marker";
+
+    public static string? CaseDateMarkerKind(string kind) => kind switch
+    {
+        "hearing-date" => "hearing-marker",
+        "decision-date" => "decision-marker",
+        _ => null
+    };
+
     public static long? CaseDateValue(string kind, DateTime? value) => value.HasValue
-        ? kind == "decision-date" ? value.Value.Date.Ticks : CalendarTimeZoneHelper.NormalizeUtcInstant(value.Value).Ticks / 10 : null;
+        ? kind is "decision-date" or "decision-marker" ? value.Value.Date.Ticks : CalendarTimeZoneHelper.NormalizeUtcInstant(value.Value).Ticks / 10 : null;
 
     public static string Capture(string kind, CaseCourtNotificationPayload payload) => kind switch
     {
@@ -81,8 +90,9 @@ internal static class CaseCourtNotificationVersion
     public static async Task<bool> IsCurrentAsync(PaymentContext db, long outboxId, int caseId, string kind, int sourceId,
         string fingerprint, CancellationToken ct)
     {
+        var markerKind = CaseDateMarkerKind(kind);
         if (await db.CaseCourtNotificationOutboxes.AsNoTracking().AnyAsync(row => row.ClientCaseId == caseId
-            && row.Kind == kind && row.SourceId == sourceId && row.Id > outboxId, ct)) return false;
+            && (row.Kind == kind || (markerKind != null && row.Kind == markerKind)) && row.SourceId == sourceId && row.Id > outboxId, ct)) return false;
         if (IsCaseDateKind(kind))
         {
             if (sourceId != caseId) return false;
