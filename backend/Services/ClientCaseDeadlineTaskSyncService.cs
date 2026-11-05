@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Cases;
 using PayPlanner.Api.Services.LegalIntegrations;
 
 namespace PayPlanner.Api.Services;
@@ -22,12 +23,15 @@ public static class ClientCaseDeadlineTaskSyncService
         "done", "cancelled"
     };
 
-    public static async Task<bool> SyncAsync(
+    public static Task<bool> SyncAsync(
         PaymentContext db,
         int clientCaseId,
         int? actorUserId,
         string actorName,
         CancellationToken ct)
+        => CaseTaskSyncScope.RunAsync(db, clientCaseId, () => SyncCoreAsync(db, clientCaseId, actorUserId, actorName, ct), ct);
+
+    private static async Task<bool> SyncCoreAsync(PaymentContext db, int clientCaseId, int? actorUserId, string actorName, CancellationToken ct)
     {
         var clientCase = await db.ClientCases
             .Include(item => item.Client)
@@ -48,6 +52,7 @@ public static class ClientCaseDeadlineTaskSyncService
             .Include(item => item.Participants)
             .Where(item => item.ClientCaseId == clientCase.Id && item.TagsJson.Contains(DeadlineTag))
             .ToListAsync(ct);
+        existingTasks.RemoveAll(item => item.ClientCaseId != clientCase.Id);
 
         if (IsFinishedCaseStatus(clientCase.Status))
         {

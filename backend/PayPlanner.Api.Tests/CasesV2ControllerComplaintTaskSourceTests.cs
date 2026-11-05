@@ -202,7 +202,8 @@ public partial class CasesV2ControllerTests
         {
             recorder.Commands.Clear();
             await ClientCaseDeadlineTaskSyncService.SyncAsync(db, seed.Base.Cases[0], seed.Base.User.Id, seed.Base.User.FullName, default);
-            return recorder.Commands.Count(command => command.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase));
+            return recorder.Commands.Sum(command => command.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Count(statement => statement.StartsWith("SELECT", StringComparison.OrdinalIgnoreCase)));
         }
         await AddForeignComplaints(1);
         var one = await ReadQueryCount();
