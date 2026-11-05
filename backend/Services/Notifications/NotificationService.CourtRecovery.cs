@@ -37,9 +37,28 @@ public sealed partial class NotificationService : IDurableCourtNotificationServi
         return await ReadCourtPushOutcomesAsync(claim, ct);
     }
 
+    public async Task<IReadOnlyList<NotificationDelivery>> NotifyCaseDateForEventAsync(ClientCase clientCase, CaseCourtDateChange change,
+        string actorName, int actorUserId, IReadOnlyCollection<int> recipients, DateTime changedAtUtc, CaseCourtDeliveryClaim claim, CancellationToken ct)
+    {
+        await RequireCourtDeliveryClaimAsync(claim, ct);
+        if (!CaseCourtNotificationVersion.IsCaseDateKind(claim.Kind) || clientCase.Id != claim.CaseId)
+            throw new InvalidOperationException("Case date notification does not match its accepted source.");
+        if (change.SuppressDelivery) return [];
+        IReadOnlyList<NotificationDelivery> deliveries = [];
+        if (claim.Kind == "hearing-date")
+        {
+            if (!change.CurrentAt.HasValue) return [];
+            await NotifyCaseHearingDateChangedCoreAsync(clientCase, change.PreviousAt, change.CurrentAt.Value,
+                actorName, actorUserId, recipients, changedAtUtc, ct, claim);
+        }
+        else deliveries = await NotifyCaseDecisionDateChangedCoreAsync(clientCase, change.PreviousAt, change.CurrentAt,
+            actorName, actorUserId, recipients, changedAtUtc, ct, claim);
+        return deliveries.Concat(await ReadCourtPushOutcomesAsync(claim, ct)).ToArray();
+    }
+
     private static async Task RequireCourtDeliveryClaimAsync(CaseCourtDeliveryClaim claim, CancellationToken ct)
     {
-        if (claim.OutboxId <= 0 || claim.CaseId <= 0 || claim.SourceId <= 0 || claim.Kind is not ("event" or "deadline")
+        if (claim.OutboxId <= 0 || claim.CaseId <= 0 || claim.SourceId <= 0 || claim.Kind is not ("event" or "deadline" or "hearing-date" or "decision-date")
             || !CaseCourtNotificationVersion.IsValidEventKey(claim.EventKey) || claim.SourceFingerprint.Length != 64 || !await claim.OwnsLease(ct))
             throw new InvalidOperationException("Court notification delivery claim is no longer current.");
     }
@@ -57,7 +76,7 @@ public sealed partial class NotificationService : IDurableCourtNotificationServi
             await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"ClientCases\" WHERE \"Id\" = {claim.CaseId} FOR SHARE NOWAIT", ct);
             if (claim.Kind == "event")
                 await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"ClientCaseCourtEvents\" WHERE \"Id\" = {claim.SourceId} AND \"ClientCaseId\" = {claim.CaseId} FOR SHARE NOWAIT", ct);
-            else
+            else if (claim.Kind == "deadline")
                 await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"ClientCaseProceduralDeadlines\" WHERE \"Id\" = {claim.SourceId} AND \"ClientCaseId\" = {claim.CaseId} FOR SHARE NOWAIT", ct);
         }
         await RequireCourtDeliveryClaimAsync(claim, ct);

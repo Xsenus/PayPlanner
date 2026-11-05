@@ -25,12 +25,14 @@ internal static class CaseCourtNotificationDeliveryGuard
         var root = RootKey(eventKey);
         if (root is null || userId is not > 0) return false;
         var intent = await db.CaseCourtNotificationOutboxes.AsNoTracking().SingleOrDefaultAsync(row => row.EventKey == root, ct);
-        if (intent is null || intent.PayloadJson.Length > 65536 || intent.Kind is not ("event" or "deadline")
+        if (intent is null || intent.PayloadJson.Length > 65536 || intent.Kind is not ("event" or "deadline" or "hearing-date" or "decision-date")
             || !CaseCourtNotificationDispatchProcessor.TryReadPayload(intent, out var payload)) return false;
-        var fingerprint = intent.Kind == "event" ? CaseCourtNotificationVersion.Capture(payload.CourtEvent!)
-            : CaseCourtNotificationVersion.Capture(payload.Deadline!);
+        if (payload.DateChange?.SuppressDelivery == true) return false;
+        var fingerprint = CaseCourtNotificationVersion.Capture(intent.Kind, payload);
         if (!await CaseCourtNotificationVersion.IsCurrentAsync(db, intent.Id, intent.ClientCaseId, intent.Kind, intent.SourceId, fingerprint, ct)) return false;
         var type = intent.Kind == "deadline" ? UserNotificationTypes.CaseProceduralDeadline
+            : intent.Kind == "hearing-date" ? UserNotificationTypes.CourtHearing
+            : intent.Kind == "decision-date" ? UserNotificationTypes.CourtDecisionRecorded
             : payload.Action == "rescheduled" ? UserNotificationTypes.CourtHearing
             : NotificationService.ResolveCourtEventNotificationType(payload.CourtEvent!);
         if (channel == NotificationChannels.Email && type != UserNotificationTypes.CourtDecisionRecorded) return false;

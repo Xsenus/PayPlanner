@@ -146,6 +146,9 @@ public sealed class CourtNotificationWorkerIntegrationTests(PostgreSqlModelTempl
     }
     private sealed class ForbiddenCourtDelivery : IDurableCourtNotificationService
     {
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyCaseDateForEventAsync(ClientCase clientCase, CaseCourtDateChange change,
+            string actorName, int actorUserId, IReadOnlyCollection<int> recipients, DateTime changedAtUtc, CaseCourtDeliveryClaim claim, CancellationToken ct)
+            => throw new InvalidOperationException("Journal recovery must not deliver case date");
         public Task<IReadOnlyList<NotificationDelivery>> NotifyCourtEventForEventAsync(ClientCase clientCase, ClientCaseCourtEvent courtEvent,
             string action, string actorName, int actorUserId, IReadOnlyCollection<int> recipients, CaseCourtDeliveryClaim claim, CancellationToken ct)
             => throw new InvalidOperationException("Journal recovery must not deliver court event");

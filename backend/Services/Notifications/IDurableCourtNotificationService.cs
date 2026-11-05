@@ -9,6 +9,9 @@ public interface IDurableCourtNotificationService
 
     Task<IReadOnlyList<NotificationDelivery>> NotifyProceduralDeadlineForEventAsync(ClientCase clientCase, ClientCaseProceduralDeadline deadline,
         string action, string actorName, int actorUserId, IReadOnlyCollection<int> recipients, CaseCourtDeliveryClaim claim, CancellationToken ct);
+
+    Task<IReadOnlyList<NotificationDelivery>> NotifyCaseDateForEventAsync(ClientCase clientCase, CaseCourtDateChange change,
+        string actorName, int actorUserId, IReadOnlyCollection<int> recipients, DateTime changedAtUtc, CaseCourtDeliveryClaim claim, CancellationToken ct);
 }
 
 public sealed record CaseCourtDeliveryClaim(long OutboxId, string EventKey, int CaseId, string Kind, int SourceId,

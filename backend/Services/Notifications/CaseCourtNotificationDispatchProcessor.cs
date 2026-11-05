@@ -13,6 +13,19 @@ public sealed class CaseCourtNotificationDispatchProcessor(PaymentContext db, ID
     private TimeProvider Clock => timeProvider ?? TimeProvider.System;
     private ILogger Log => logger ?? NullLogger<CaseCourtNotificationDispatchProcessor>.Instance;
 
+    public async Task TryProcessAcceptedBatchAsync(IReadOnlyList<long> ids, CancellationToken ct)
+    {
+        foreach (var id in ids)
+        {
+            try { await ProcessAsync(id, ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+            catch (Exception error)
+            {
+                Log.LogWarning("Accepted court notification {EventId} remains queued after {ExceptionType}.", id, error.GetType().Name);
+            }
+        }
+    }
+
     public async Task<int> ProcessBatchAsync(CancellationToken ct)
     {
         RequireCleanContext();
@@ -91,13 +104,16 @@ public sealed class CaseCourtNotificationDispatchProcessor(PaymentContext db, ID
                             var clientCase = new ClientCase { Id = item.ClientCaseId, Title = payload!.CaseTitle, CaseNumber = payload.CaseNumber };
                             var claim = new CaseCourtDeliveryClaim(item.Id, item.EventKey, item.ClientCaseId, item.Kind, item.SourceId,
                                 async tokenCt => await Owned(item, token).AnyAsync(tokenCt),
-                                item.Kind == "event" ? CaseCourtNotificationVersion.Capture(payload.CourtEvent!)
-                                    : CaseCourtNotificationVersion.Capture(payload.Deadline!));
-                            deliveries = item.Kind == "event"
-                                ? await notifications.NotifyCourtEventForEventAsync(clientCase, payload.CourtEvent!, payload.Action, payload.ActorName,
-                                    payload.ActorUserId, payload.RecipientUserIds, claim, timeout.Token)
-                                : await notifications.NotifyProceduralDeadlineForEventAsync(clientCase, payload.Deadline!, payload.Action, payload.ActorName,
-                                    payload.ActorUserId, payload.RecipientUserIds, claim, timeout.Token);
+                                CaseCourtNotificationVersion.Capture(item.Kind, payload));
+                            deliveries = item.Kind switch
+                            {
+                                "event" => await notifications.NotifyCourtEventForEventAsync(clientCase, payload.CourtEvent!, payload.Action, payload.ActorName,
+                                    payload.ActorUserId, payload.RecipientUserIds, claim, timeout.Token),
+                                "deadline" => await notifications.NotifyProceduralDeadlineForEventAsync(clientCase, payload.Deadline!, payload.Action, payload.ActorName,
+                                    payload.ActorUserId, payload.RecipientUserIds, claim, timeout.Token),
+                                _ => await notifications.NotifyCaseDateForEventAsync(clientCase, payload.DateChange!, payload.ActorName, payload.ActorUserId,
+                                    payload.RecipientUserIds, item.CreatedAt, claim, timeout.Token)
+                            };
                         }
                         blocked = deliveries.Any(row => row.Status == NotificationDeliveryStatus.Pending);
                         if (blocked) failure = "External delivery outcome requires review.";
@@ -147,8 +163,7 @@ public sealed class CaseCourtNotificationDispatchProcessor(PaymentContext db, ID
     private async Task<bool> SourceIsCurrentAsync(CaseCourtNotificationOutbox item, CaseCourtNotificationPayload payload, CancellationToken ct)
     {
         if (!await db.ClientCases.AsNoTracking().AnyAsync(row => row.Id == item.ClientCaseId, ct)) return false;
-        var fingerprint = item.Kind == "event" ? CaseCourtNotificationVersion.Capture(payload.CourtEvent!)
-            : CaseCourtNotificationVersion.Capture(payload.Deadline!);
+        var fingerprint = CaseCourtNotificationVersion.Capture(item.Kind, payload);
         return await CaseCourtNotificationVersion.IsCurrentAsync(db, item.Id, item.ClientCaseId, item.Kind, item.SourceId, fingerprint, ct);
     }
 
@@ -161,6 +176,7 @@ public sealed class CaseCourtNotificationDispatchProcessor(PaymentContext db, ID
             || payload.ActorUserId < 0 || payload.RecipientUserIds.Any(id => id <= 0)
             || payload.RecipientUserIds.Distinct().Count() != payload.RecipientUserIds.Length
             || !CaseCourtNotificationVersion.IsValidEventKey(item.EventKey)) return false;
+        if (payload.DateChange is not null && !CaseCourtNotificationVersion.IsCaseDateKind(item.Kind)) return false;
         return item.Kind switch
         {
             "event" => payload.CourtEvent is not null && payload.Deadline is null && payload.CourtEvent.Id == item.SourceId
@@ -168,6 +184,8 @@ public sealed class CaseCourtNotificationDispatchProcessor(PaymentContext db, ID
             "deadline" => payload.Deadline is not null && payload.CourtEvent is null && payload.Deadline.Id == item.SourceId
                 && payload.Deadline.ClientCaseId == item.ClientCaseId && payload.Action is "created" or "updated" or "closed",
             "journal" => item.SourceId == 0 && payload.CourtEvent is null && payload.Deadline is null,
+            "hearing-date" or "decision-date" => item.SourceId == item.ClientCaseId && payload.CourtEvent is null && payload.Deadline is null
+                && payload.DateChange is not null && payload.Action == "updated",
             _ => false
         };
     }

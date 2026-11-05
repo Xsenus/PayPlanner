@@ -10460,6 +10460,7 @@ public partial class CasesV2Controller : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] ClientCase model, CancellationToken ct)
     {
+        IReadOnlyList<long> queuedCaseNotifications = [];
         var result = await CaseEditTransaction.RunCreateAsync(_db, User, model, async () =>
         {
             if (!IsValidOurCourtRole(model.OurCourtRole)) return BadRequest("Укажите допустимую роль в судебном деле.");
@@ -10487,41 +10488,49 @@ public partial class CasesV2Controller : ControllerBase
             _db.ClientCases.Add(model);
             await _db.SaveChangesAsync(ct);
             await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, model.Id, User.GetUserId(), User.GetDisplayName(), ct);
+            if (_notificationService is IDurableCourtNotificationService)
+                queuedCaseNotifications = await new CaseCourtNotificationQueue(_db).EnqueueCaseEditAsync(model, null, null,
+                    User.GetUserId() ?? 0, User.GetDisplayName(), ct);
             return Created($"/api/v2/cases/{model.Id}", CaseEditSnapshot.ForReply(model));
         }, ct);
         if (result is not CreatedResult) return result;
-        IReadOnlyCollection<int>? caseNotificationRecipients = null;
-        if (_notificationService is not null
-            && !ClientCaseStageClassifier.IsPretrial(model)
-            && model.NextHearingAt.HasValue)
+        if (_notificationService is IDurableCourtNotificationService durable)
+            await DispatchAcceptedCaseEditNotificationsAsync(queuedCaseNotifications, durable, ct);
+        else
         {
-            caseNotificationRecipients ??= await ResolveCaseNotificationRecipientIdsAsync(model.Id, ct);
-            await _notificationService.NotifyCaseHearingDateChangedAsync(
-                model,
-                null,
-                model.NextHearingAt.Value,
-                User.GetDisplayName(),
-                User.GetUserId() ?? 0,
-                caseNotificationRecipients,
-                DateTime.UtcNow,
-                ct);
+            IReadOnlyCollection<int>? caseNotificationRecipients = null;
+            if (_notificationService is not null
+                && !ClientCaseStageClassifier.IsPretrial(model)
+                && model.NextHearingAt.HasValue)
+            {
+                caseNotificationRecipients ??= await ResolveCaseNotificationRecipientIdsAsync(model.Id, ct);
+                await _notificationService.NotifyCaseHearingDateChangedAsync(
+                    model,
+                    null,
+                    model.NextHearingAt.Value,
+                    User.GetDisplayName(),
+                    User.GetUserId() ?? 0,
+                    caseNotificationRecipients,
+                    DateTime.UtcNow,
+                    ct);
+            }
+            if (_notificationService is not null
+                && !ClientCaseStageClassifier.IsPretrial(model)
+                && model.CourtDecisionAt.HasValue)
+            {
+                caseNotificationRecipients ??= await ResolveCaseNotificationRecipientIdsAsync(model.Id, ct);
+                await _notificationService.NotifyCaseDecisionDateChangedAsync(
+                    model,
+                    null,
+                    model.CourtDecisionAt,
+                    User.GetDisplayName(),
+                    User.GetUserId() ?? 0,
+                    caseNotificationRecipients,
+                    DateTime.UtcNow,
+                    ct);
+            }
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         }
-        if (_notificationService is not null
-            && !ClientCaseStageClassifier.IsPretrial(model)
-            && model.CourtDecisionAt.HasValue)
-        {
-            caseNotificationRecipients ??= await ResolveCaseNotificationRecipientIdsAsync(model.Id, ct);
-            await _notificationService.NotifyCaseDecisionDateChangedAsync(
-                model,
-                null,
-                model.CourtDecisionAt,
-                User.GetDisplayName(),
-                User.GetUserId() ?? 0,
-                caseNotificationRecipients,
-                DateTime.UtcNow,
-                ct);
-        }
-        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return result;
     }
 
@@ -10537,6 +10546,7 @@ public partial class CasesV2Controller : ControllerBase
     public async Task<IActionResult> Update(int id, ClientCase model, CancellationToken ct, ClientCase? expectedSource = null)
     {
         DateTime? previousNextHearingAt = null, previousCourtDecisionAt = null;
+        IReadOnlyList<long> queuedCaseNotifications = [];
         var result = await CaseEditTransaction.RunAsync(_db, User, id, async (e, access) =>
         {
             _casesAccessTask = Task.FromResult<SectionAccessContext?>(access);
@@ -10636,42 +10646,50 @@ public partial class CasesV2Controller : ControllerBase
             await _db.SaveChangesAsync(ct);
             await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
             await _db.Entry(e).ReloadAsync(ct);
+            if (_notificationService is IDurableCourtNotificationService)
+                queuedCaseNotifications = await new CaseCourtNotificationQueue(_db).EnqueueCaseEditAsync(e, previousNextHearingAt, previousCourtDecisionAt,
+                    User.GetUserId() ?? 0, User.GetDisplayName(), ct);
             return Ok(e);
         }, ct);
         if (result is not OkObjectResult { Value: ClientCase savedCase }) return result;
-        IReadOnlyCollection<int>? caseNotificationRecipients = null;
-        if (_notificationService is not null
-            && !ClientCaseStageClassifier.IsPretrial(savedCase)
-            && savedCase.NextHearingAt.HasValue
-            && previousNextHearingAt != savedCase.NextHearingAt)
+        if (_notificationService is IDurableCourtNotificationService durable)
+            await DispatchAcceptedCaseEditNotificationsAsync(queuedCaseNotifications, durable, ct);
+        else
         {
-            caseNotificationRecipients ??= await ResolveCaseNotificationRecipientIdsAsync(savedCase.Id, ct);
-            await _notificationService.NotifyCaseHearingDateChangedAsync(
-                savedCase,
-                previousNextHearingAt,
-                savedCase.NextHearingAt.Value,
-                User.GetDisplayName(),
-                User.GetUserId() ?? 0,
-                caseNotificationRecipients,
-                DateTime.UtcNow,
-                ct);
+            IReadOnlyCollection<int>? caseNotificationRecipients = null;
+            if (_notificationService is not null
+                && !ClientCaseStageClassifier.IsPretrial(savedCase)
+                && savedCase.NextHearingAt.HasValue
+                && previousNextHearingAt != savedCase.NextHearingAt)
+            {
+                caseNotificationRecipients ??= await ResolveCaseNotificationRecipientIdsAsync(savedCase.Id, ct);
+                await _notificationService.NotifyCaseHearingDateChangedAsync(
+                    savedCase,
+                    previousNextHearingAt,
+                    savedCase.NextHearingAt.Value,
+                    User.GetDisplayName(),
+                    User.GetUserId() ?? 0,
+                    caseNotificationRecipients,
+                    DateTime.UtcNow,
+                    ct);
+            }
+            if (_notificationService is not null
+                && !ClientCaseStageClassifier.IsPretrial(savedCase)
+                && previousCourtDecisionAt?.Date != savedCase.CourtDecisionAt?.Date)
+            {
+                caseNotificationRecipients ??= await ResolveCaseNotificationRecipientIdsAsync(savedCase.Id, ct);
+                await _notificationService.NotifyCaseDecisionDateChangedAsync(
+                    savedCase,
+                    previousCourtDecisionAt,
+                    savedCase.CourtDecisionAt,
+                    User.GetDisplayName(),
+                    User.GetUserId() ?? 0,
+                    caseNotificationRecipients,
+                    DateTime.UtcNow,
+                    ct);
+            }
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         }
-        if (_notificationService is not null
-            && !ClientCaseStageClassifier.IsPretrial(savedCase)
-            && previousCourtDecisionAt?.Date != savedCase.CourtDecisionAt?.Date)
-        {
-            caseNotificationRecipients ??= await ResolveCaseNotificationRecipientIdsAsync(savedCase.Id, ct);
-            await _notificationService.NotifyCaseDecisionDateChangedAsync(
-                savedCase,
-                previousCourtDecisionAt,
-                savedCase.CourtDecisionAt,
-                User.GetDisplayName(),
-                User.GetUserId() ?? 0,
-                caseNotificationRecipients,
-                DateTime.UtcNow,
-                ct);
-        }
-        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         var reply = SelectRegistryCaseRows(new[] { savedCase }.AsQueryable()).Single();
         if (!await CanViewCaseFinanceAsync(ct)) HideCaseFinanceData([reply]);
         reply.CanRevealSensitiveData = true;

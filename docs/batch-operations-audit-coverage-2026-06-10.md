@@ -85,10 +85,10 @@
 - `backend/Services/MessengerDocumentDeliveryService.cs:771`
 - `backend/Services/MoneyBalanceReconciliationService.cs:35`
 - `backend/Services/MoneyOperationInvoiceAllocationService.cs:53`
-- `backend/Services/Notifications/CaseCourtNotificationDispatchProcessor.cs:108`
-- `backend/Services/Notifications/CaseCourtNotificationDispatchProcessor.cs:119`
-- `backend/Services/Notifications/CaseCourtNotificationDispatchProcessor.cs:47`
-- `backend/Services/Notifications/CaseCourtNotificationDispatchProcessor.cs:69`
+- `backend/Services/Notifications/CaseCourtNotificationDispatchProcessor.cs:124`
+- `backend/Services/Notifications/CaseCourtNotificationDispatchProcessor.cs:135`
+- `backend/Services/Notifications/CaseCourtNotificationDispatchProcessor.cs:60`
+- `backend/Services/Notifications/CaseCourtNotificationDispatchProcessor.cs:82`
 - `backend/Services/Notifications/CaseDocumentNotificationDispatchProcessor.cs:42`
 - `backend/Services/Notifications/CaseDocumentNotificationDispatchProcessor.cs:68`
 - `backend/Services/Notifications/InternalChatNotificationRecoveryService.cs:56`

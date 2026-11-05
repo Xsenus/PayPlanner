@@ -2482,7 +2482,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         return deliveries;
     }
 
-    public async Task NotifyCaseHearingDateChangedAsync(
+    public Task NotifyCaseHearingDateChangedAsync(
         ClientCase clientCase,
         DateTime? previousAt,
         DateTime currentAt,
@@ -2491,6 +2491,17 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         IReadOnlyCollection<int> recipientUserIds,
         DateTime changedAtUtc,
         CancellationToken cancellationToken = default)
+        => NotifyCaseHearingDateChangedCoreAsync(clientCase, previousAt, currentAt, actorName, actorUserId, recipientUserIds, changedAtUtc, cancellationToken, null);
+
+    private async Task NotifyCaseHearingDateChangedCoreAsync(
+        ClientCase clientCase,
+        DateTime? previousAt,
+        DateTime currentAt,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        DateTime changedAtUtc,
+        CancellationToken cancellationToken, CaseCourtDeliveryClaim? courtClaim)
     {
         if (clientCase.Id <= 0 || previousAt == currentAt)
         {
@@ -2540,7 +2551,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             await CreateUserNotificationAsync(
                 recipientUserId,
                 UserNotificationTypes.CourtHearing,
-                $"case:{clientCase.Id}:hearing-date-changed:{changedAtUtc.Ticks}:{recipientUserId}",
+                courtClaim?.EventKey ?? $"case:{clientCase.Id}:hearing-date-changed:{changedAtUtc.Ticks}:{recipientUserId}",
                 title,
                 body,
                 "cyan",
@@ -2550,12 +2561,13 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                 null,
                 new { clientCaseId = clientCase.Id, previousAt, currentAt, actorUserId, actorName = normalizedActorName },
                 cancellationToken,
-                objectVisibilityValidated: true,
-                resolvedNotificationChannels: channelsByUserId[recipientUserId]);
+                objectVisibilityValidated: courtClaim is null,
+                resolvedNotificationChannels: channelsByUserId[recipientUserId],
+                courtClaim: courtClaim);
         }
     }
 
-    public async Task NotifyCaseDecisionDateChangedAsync(
+    public Task NotifyCaseDecisionDateChangedAsync(
         ClientCase clientCase,
         DateTime? previousAt,
         DateTime? currentAt,
@@ -2564,14 +2576,26 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         IReadOnlyCollection<int> recipientUserIds,
         DateTime changedAtUtc,
         CancellationToken cancellationToken = default)
+        => NotifyCaseDecisionDateChangedCoreAsync(clientCase, previousAt, currentAt, actorName, actorUserId, recipientUserIds, changedAtUtc, cancellationToken, null);
+
+    private async Task<IReadOnlyList<NotificationDelivery>> NotifyCaseDecisionDateChangedCoreAsync(
+        ClientCase clientCase,
+        DateTime? previousAt,
+        DateTime? currentAt,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        DateTime changedAtUtc,
+        CancellationToken cancellationToken, CaseCourtDeliveryClaim? courtClaim)
     {
+        var deliveries = new List<NotificationDelivery>();
         if (clientCase.Id <= 0 || previousAt?.Date == currentAt?.Date)
         {
-            return;
+            return [];
         }
 
         var recipients = await IncludeConfiguredCourtLeaderAsync(recipientUserIds, currentAt.HasValue, cancellationToken);
-        if (recipients.Count == 0) return;
+        if (recipients.Count == 0) return [];
         var visibleRecipientUserIds = await ResolveVisibleCaseNotificationRecipientIdsAsync(
             clientCase,
             recipients,
@@ -2579,7 +2603,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             cancellationToken);
         if (visibleRecipientUserIds.Count == 0)
         {
-            return;
+            return [];
         }
 
         var channelsByUserId = await ResolveUserNotificationChannelsAsync(
@@ -2605,7 +2629,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
 
         foreach (var recipientUserId in visibleRecipientUserIds)
         {
-            var eventKey = $"case:{clientCase.Id}:decision-date-changed:{changedAtUtc.Ticks}:{recipientUserId}";
+            var eventKey = courtClaim?.EventKey ?? $"case:{clientCase.Id}:decision-date-changed:{changedAtUtc.Ticks}:{recipientUserId}";
             await CreateUserNotificationAsync(
                 recipientUserId,
                 UserNotificationTypes.CourtDecisionRecorded,
@@ -2619,13 +2643,17 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                 null,
                 new { clientCaseId = clientCase.Id, previousAt, currentAt, actorUserId, actorName = normalizedActorName },
                 cancellationToken,
-                objectVisibilityValidated: true,
-                resolvedNotificationChannels: channelsByUserId[recipientUserId]);
+                objectVisibilityValidated: courtClaim is null,
+                resolvedNotificationChannels: channelsByUserId[recipientUserId],
+                courtClaim: courtClaim);
             if (recipientsById.TryGetValue(recipientUserId, out var recipient))
             {
-                await SendAsync(recipient, message, [NotificationChannels.Email], eventKey, cancellationToken);
+                deliveries.AddRange(courtClaim is null
+                    ? await SendAsync(recipient, message, [NotificationChannels.Email], eventKey, cancellationToken)
+                    : await SendCourtEmailForEventAsync(clientCase, recipient, message, UserNotificationTypes.CourtDecisionRecorded, courtClaim, cancellationToken));
             }
         }
+        return deliveries;
     }
 
     public Task NotifyCaseProceduralDeadlineAsync(

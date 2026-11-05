@@ -74,6 +74,7 @@ public class CasesController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] ClientCase model, CancellationToken ct)
     {
+        IReadOnlyList<long> queuedCaseNotifications = [];
         var result = await CaseEditTransaction.RunCreateAsync(_db, User, model, async () =>
         {
             if (ValidateCourtDetails(model) is { } courtError) return BadRequest(courtError);
@@ -83,10 +84,15 @@ public class CasesController : ControllerBase
             _db.ClientCases.Add(model);
             await _db.SaveChangesAsync(ct);
             await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, model.Id, User.GetUserId(), User.GetDisplayName(), ct);
+            if (_notificationService is IDurableCourtNotificationService)
+                queuedCaseNotifications = await new CaseCourtNotificationQueue(_db).EnqueueCaseEditAsync(model, null, null,
+                    User.GetUserId() ?? 0, User.GetDisplayName(), ct);
             return Created($"/api/cases/{model.Id}", CaseEditSnapshot.ForReply(model));
         }, ct);
         if (result is not CreatedResult) return result;
-        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        if (_notificationService is IDurableCourtNotificationService durable)
+            await DispatchAcceptedCaseEditNotificationsAsync(queuedCaseNotifications, durable, ct);
+        else await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return result;
     }
 
@@ -101,7 +107,8 @@ public class CasesController : ControllerBase
     [NonAction]
     public async Task<IActionResult> Update(int id, ClientCase model, CancellationToken ct, ClientCase? expectedSource = null)
     {
-        DateTime? previousCourtDecisionAt = null;
+        DateTime? previousCourtDecisionAt = null, previousNextHearingAt = null;
+        IReadOnlyList<long> queuedCaseNotifications = [];
         var canViewFinance = false;
         var result = await CaseEditTransaction.RunAsync(_db, User, id, async (e, access) =>
         {
@@ -131,6 +138,7 @@ public class CasesController : ControllerBase
             if (finalReportAssignee is not null && finalReportAssignee.Id != User.GetUserId())
                 await CaseEditTransaction.LockUserAccessAsync(_db, finalReportAssignee.Id, ct);
             previousCourtDecisionAt = e.CourtDecisionAt;
+            previousNextHearingAt = e.NextHearingAt;
             var previousSubmittedAt = e.ExecutiveWritSubmittedAt;
             var previousSubmittedTo = e.ExecutiveWritSubmittedTo;
             e.Title = model.Title;
@@ -166,17 +174,25 @@ public class CasesController : ControllerBase
             await _db.SaveChangesAsync(ct);
             await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
             await _db.Entry(e).ReloadAsync(ct);
+            if (_notificationService is IDurableCourtNotificationService)
+                queuedCaseNotifications = await new CaseCourtNotificationQueue(_db).EnqueueCaseEditAsync(e, previousNextHearingAt, previousCourtDecisionAt,
+                    User.GetUserId() ?? 0, User.GetDisplayName(), ct);
             return Ok(e);
         }, ct);
         if (result is not OkObjectResult { Value: ClientCase savedCase }) return result;
-        if (_notificationService is not null && !ClientCaseStageClassifier.IsPretrial(savedCase)
-            && previousCourtDecisionAt != savedCase.CourtDecisionAt)
+        if (_notificationService is IDurableCourtNotificationService durable)
+            await DispatchAcceptedCaseEditNotificationsAsync(queuedCaseNotifications, durable, ct);
+        else
         {
-            var recipients = await CaseNotificationRecipients.ResolveAsync(_db, savedCase.Id, ct);
-            await _notificationService.NotifyCaseDecisionDateChangedAsync(savedCase, previousCourtDecisionAt, savedCase.CourtDecisionAt,
-                User.GetDisplayName(), User.GetUserId() ?? 0, recipients, DateTime.UtcNow, ct);
+            if (_notificationService is not null && !ClientCaseStageClassifier.IsPretrial(savedCase)
+                && previousCourtDecisionAt != savedCase.CourtDecisionAt)
+            {
+                var recipients = await CaseNotificationRecipients.ResolveAsync(_db, savedCase.Id, ct);
+                await _notificationService.NotifyCaseDecisionDateChangedAsync(savedCase, previousCourtDecisionAt, savedCase.CourtDecisionAt,
+                    User.GetDisplayName(), User.GetUserId() ?? 0, recipients, DateTime.UtcNow, ct);
+            }
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         }
-        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         var reply = CaseEditSnapshot.ForReply(savedCase);
         if (!canViewFinance) CaseResponsePrivacy.HideFinanceData([reply]);
         return Ok(reply);
@@ -196,6 +212,13 @@ public class CasesController : ControllerBase
         }, ct);
         if (result is NoContentResult) await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return result;
+    }
+
+    private Task DispatchAcceptedCaseEditNotificationsAsync(IReadOnlyList<long> ids, IDurableCourtNotificationService notifications, CancellationToken ct)
+    {
+        var logger = HttpContext?.RequestServices?.GetService<ILogger<CaseCourtNotificationDispatchProcessor>>();
+        return new CaseCourtNotificationDispatchProcessor(_db, notifications, _realtimePublisher, logger: logger)
+            .TryProcessAcceptedBatchAsync(ids, ct);
     }
 
     private static void ApplyCaseDetails(ClientCase target, ClientCase source, bool preserveExistingText = false, bool canViewFinance = true)

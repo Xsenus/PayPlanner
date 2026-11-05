@@ -8,6 +8,25 @@ namespace PayPlanner.Api.Services.Notifications;
 
 internal static class CaseCourtNotificationVersion
 {
+    public static bool IsCaseDateKind(string kind) => kind is "hearing-date" or "decision-date";
+
+    public static long? CaseDateValue(string kind, DateTime? value) => value.HasValue
+        ? kind == "decision-date" ? value.Value.Date.Ticks : CalendarTimeZoneHelper.NormalizeUtcInstant(value.Value).Ticks / 10 : null;
+
+    public static string Capture(string kind, CaseCourtNotificationPayload payload) => kind switch
+    {
+        "event" => Capture(payload.CourtEvent!),
+        "deadline" => Capture(payload.Deadline!),
+        "hearing-date" or "decision-date" => Capture(kind, payload.DateChange!),
+        _ => throw new InvalidOperationException("Unsupported court notification source.")
+    };
+
+    private static string Capture(string kind, CaseCourtDateChange change) => Hash(new
+    {
+        CurrentTicks = CaseDateValue(kind, change.CurrentAt),
+        change.SuppressDelivery
+    });
+
     public static bool IsValidEventKey(string? key)
         => key is not null && key.Length == 43 && key.StartsWith("case-court:", StringComparison.Ordinal)
             && Guid.TryParseExact(key[11..], "N", out _);
@@ -64,6 +83,15 @@ internal static class CaseCourtNotificationVersion
     {
         if (await db.CaseCourtNotificationOutboxes.AsNoTracking().AnyAsync(row => row.ClientCaseId == caseId
             && row.Kind == kind && row.SourceId == sourceId && row.Id > outboxId, ct)) return false;
+        if (IsCaseDateKind(kind))
+        {
+            if (sourceId != caseId) return false;
+            var source = await db.ClientCases.AsNoTracking().Where(row => row.Id == caseId)
+                .Select(row => new { row.NextHearingAt, row.CourtDecisionAt, row.Stage, row.CaseType }).SingleOrDefaultAsync(ct);
+            if (source is null || ClientCaseStageClassifier.IsPretrial(source.Stage, source.CaseType)) return false;
+            var date = kind == "hearing-date" ? source.NextHearingAt : source.CourtDecisionAt;
+            return Capture(kind, new CaseCourtDateChange(null, date, kind == "hearing-date" && !date.HasValue)) == fingerprint;
+        }
         if (kind == "event")
         {
             var source = await db.ClientCaseCourtEvents.AsNoTracking().SingleOrDefaultAsync(row => row.Id == sourceId && row.ClientCaseId == caseId, ct);
