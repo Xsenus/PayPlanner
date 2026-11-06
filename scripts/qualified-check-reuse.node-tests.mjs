@@ -133,6 +133,22 @@ test('missing Actions access selects the ordinary gate without a network request
   } finally { rmSync(temporary, { recursive: true, force: true }); }
 });
 for (const mode of ['frontend', 'format']) {
+  test(mode + ': CLI with a token and invalid Actions context settles on the ordinary gate', { skip: process.platform !== 'win32' }, () => {
+    const temporary = mkdtempSync(join(tmpdir(), 'payplanner-reuse-cli-'));
+    try {
+      const output = join(temporary, 'output.txt');
+      // Enter the actual qualification path without any authenticated network
+      // request. Import-only tests cannot detect an entry-point await cycle.
+      const env = { ...process.env, GH_TOKEN: 'synthetic-invalid-context', GITHUB_ACTIONS: 'false',
+        GITHUB_JOB: mode === 'frontend' ? 'frontend' : 'backend-format', GITHUB_OUTPUT: output };
+      const stdout = execFileSync(process.execPath, ['scripts/qualified-check-reuse.mjs', mode],
+        { env, encoding: 'utf8', timeout: 10_000, windowsHide: true });
+      assert.equal(readFileSync(output, 'utf8'), 'reused=false\n');
+      assert.match(stdout, /Reuse proof unavailable; ordinary gate required/);
+    } finally { rmSync(temporary, { recursive: true, force: true }); }
+  });
+}
+for (const mode of ['frontend', 'format']) {
   test(mode + ': requires an actual complete producer with equivalent tools', () => assert.equal(qualifiesProducer(producer(mode)), true));
   for (const mutation of ['branch', 'event', 'head', 'path', 'job-run', 'job-head', 'name', 'runner', 'status', 'outcome', 'skipped-check',
     'missing-check', 'duplicate-check', 'stale', 'future', 'reboot', 'node', 'tool', 'missing-tools']) {

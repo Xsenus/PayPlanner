@@ -5,6 +5,7 @@ import { appendFileSync } from 'node:fs';
 import { uptime } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { parseWorkflow } from './validate-deploy-workflow.mjs';
 
 const expression = value => '$' + '{{ ' + value + ' }}';
 export const frontendChecks = ['Test FE guard and unit', 'Test FE integration'];
@@ -199,7 +200,6 @@ export async function boundedText(response) {
 }
 
 export async function previousQualification({ env = process.env, git, getJson, getLog, tools, now = Date.now(), bootTime = now - uptime() * 1000 }) {
-  const { parseWorkflow } = await import('./validate-deploy-workflow.mjs');
   const mode = env.GITHUB_JOB === 'frontend' ? 'frontend' : env.GITHUB_JOB === 'backend-format' ? 'format' : null;
   assert.ok(mode && env.GITHUB_ACTIONS === 'true' && env.COMPUTERNAME?.toUpperCase() === 'XSENUS'
     && env.GITHUB_REPOSITORY === 'Xsenus/PayPlanner' && env.GITHUB_REF === 'refs/heads/main'
