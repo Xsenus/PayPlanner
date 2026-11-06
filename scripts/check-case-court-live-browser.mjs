@@ -89,10 +89,12 @@ try {
     controlUrl = `http://127.0.0.1:${control.address().port}/apply`;
   }
   // Reuse only a fully qualified production artifact; API/data/port remain scenario-owned.
+  console.log('PP_COURT_BROWSER_PHASE ui-build');
   const browserUi = await prepareSyntheticBrowserUi({ api, port });
   vite = await browserUi.startPreview();
   assert.equal(vite.config.isProduction, true, 'The court browser must qualify production React behavior.');
   assert.equal(vite.config.env.DEV, false, 'The release browser must not use development-only mount effects.');
+  console.log('PP_COURT_BROWSER_PHASE cli-open');
   await cli('open', 'about:blank', '--browser', browser); opened = true;
   await cli('goto', ui + '/cases/' + caseId);
   await cli('snapshot');

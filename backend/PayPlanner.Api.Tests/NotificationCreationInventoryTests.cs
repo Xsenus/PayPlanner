@@ -12,7 +12,8 @@ public class NotificationCreationInventoryTests
     private static readonly string[] AllowedProductionFiles =
     [
         NormalizePath("backend/Services/Notifications/NotificationService.cs"),
-        NormalizePath("backend/Services/Notifications/NotificationService.PaymentOverdue.cs")
+        NormalizePath("backend/Services/Notifications/NotificationService.PaymentOverdue.cs"),
+        NormalizePath("backend/Services/Notifications/NotificationService.CourtReminders.cs")
     ];
 
     [Fact]
@@ -28,12 +29,14 @@ public class NotificationCreationInventoryTests
         string[] reviewedFiles =
         [
             "backend/Services/Notifications/NotificationService.cs",
-            "backend/Services/Notifications/NotificationService.PaymentOverdue.cs"
+            "backend/Services/Notifications/NotificationService.PaymentOverdue.cs",
+            "backend/Services/Notifications/NotificationService.CourtReminders.cs"
         ];
         string[] forbiddenFiles =
         [
             "backend/Services/Notifications/NotificationService.Other.cs",
             "backend/Services/Notifications/NotificationService.PaymentOverdue.cs.backup.cs",
+            "backend/Services/Notifications/NotificationService.CourtReminders.cs.backup.cs",
             "backend/Controllers/NotificationService.cs"
         ];
         try

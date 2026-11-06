@@ -242,12 +242,26 @@ public class ClientsControllerInternalCoverageTests
     public async Task RemoveClientProfileArtifactsAsync_ReturnsEarly_ForEmptyIds()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db, currentUserId: null);
-
-        await InvokePrivateAsync(controller, "RemoveClientProfileArtifactsAsync", Array.Empty<int>(), CancellationToken.None);
+        // The legacy case now exercises the shared deletion service, where
+        // profile cleanup moved. An empty selection must never change a profile.
+        var rules = typeof(ClientsController).Assembly.GetType("PayPlanner.Api.Services.Clients.ClientDeletionRules", throwOnError: true)!;
+        var remove = rules.GetMethod("RemoveProfileAsync", BindingFlags.Public | BindingFlags.Static);
+        Assert.NotNull(remove);
+        await Assert.IsAssignableFrom<Task>(remove.Invoke(null, [db, Array.Empty<int>(), CancellationToken.None]));
 
         Assert.Equal(0, await db.AddressRecords.CountAsync());
         Assert.Equal(0, await db.ClientPassports.CountAsync());
+        var client = new Client { Name = "Сохранённый профиль", IsActive = true };
+        var address = new AddressRecord { Client = client, Type = AddressType.Registration, Value = "Сохранённый адрес" };
+        var passport = new ClientPassport { Client = client, Number = "654321", IsPrimary = true };
+        db.AddRange(client, address, passport);
+        await db.SaveChangesAsync();
+
+        await Assert.IsAssignableFrom<Task>(remove.Invoke(null, [db, Array.Empty<int>(), CancellationToken.None]));
+        Assert.Equal("Сохранённый адрес", (await db.AddressRecords.AsNoTracking().SingleAsync()).Value);
+        Assert.Equal("654321", (await db.ClientPassports.AsNoTracking().SingleAsync()).Number);
+        Assert.False(db.ChangeTracker.HasChanges());
+        Assert.Null(db.Database.CurrentTransaction);
     }
 
     [Fact]

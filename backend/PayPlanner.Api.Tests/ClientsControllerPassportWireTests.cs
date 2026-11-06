@@ -19,6 +19,15 @@ public partial class ClientsControllerTests
         if (action == "detail") reply = Assert.IsType<OkObjectResult>(await controller.GetById(id, CancellationToken.None)).Value;
         if (action == "update") reply = Assert.IsType<OkObjectResult>(await controller.Update(id, Input("4511"), CancellationToken.None)).Value;
         var stored = await db.ClientPassports.AsNoTracking().SingleAsync(); Assert.Equal(id, stored.ClientId); Assert.All(PassportWireTestSupport.CryptoNames, name => Assert.NotNull(PassportWireTestSupport.Property(name).GetValue(stored))); Assert.Equal(action == "update" ? "4511" : "4510", await PassportWireTestSupport.Encryptor().DecryptAsync(stored.SeriesEncrypted!, $"ClientPassport:Series:{stored.Id}", CancellationToken.None));
-        PassportWireTestSupport.AssertSafe(reply); var response = Assert.IsType<Client>(reply); Assert.Equal(stored.Series, Assert.Single(response.Passports).Series); Assert.Equal(stored.Number, Assert.Single(response.Passports).Number); Assert.Empty(await db.Payments.ToArrayAsync()); Assert.Equal(1, await db.Clients.CountAsync());
+        PassportWireTestSupport.AssertSafe(reply); var response = Assert.IsType<Client>(reply);
+        // The fresh root detail query does not load the separately protected
+        // passport collection through a previous request's tracked entities.
+        if (action == "detail") Assert.Empty(response.Passports);
+        else
+        {
+            Assert.Equal(stored.Series, Assert.Single(response.Passports).Series);
+            Assert.Equal(stored.Number, Assert.Single(response.Passports).Number);
+        }
+        Assert.Empty(await db.Payments.ToArrayAsync()); Assert.Equal(1, await db.Clients.CountAsync());
     }
 }

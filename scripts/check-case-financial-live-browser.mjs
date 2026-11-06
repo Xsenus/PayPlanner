@@ -233,6 +233,7 @@ try {
     check(downloadFailure === null, 'Financial document download failed: ' + downloadFailureKind);
     await download.saveAs(settings.downloadPath);
     await reads.drain('browser-close');
+    const printProofs = [];
     if (kind === 'invoice' && editor && lost) {
       check(Number.isSafeInteger(invoiceId) && invoiceId > 0, 'Invoice identity is missing');
       checkingInvoiceCard = true;
@@ -245,7 +246,11 @@ try {
           const popup = open.apply(window, args);
           if (popup) {
             const print = popup.print;
-            popup.print = function () { popup.__ppInvoicePrinted = true; return print.call(popup); };
+            popup.print = function () {
+              popup.__ppInvoicePrintCalls = (popup.__ppInvoicePrintCalls ?? 0) + 1;
+              popup.__ppInvoicePrinted = true;
+              return print.call(popup);
+            };
           }
           return popup;
         };
@@ -259,6 +264,25 @@ try {
         await dialog.getByRole('button', { name: label, exact: true }).click();
         await dialog.waitFor({ state: 'hidden' });
       };
+      const printAppearance = target => target.evaluate(() => {
+        const properties = ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'color', 'backgroundColor',
+          'display', 'visibility', 'opacity', 'textAlign', 'width', 'height', 'borderTopWidth', 'borderTopStyle',
+          'borderTopColor', 'paddingTop', 'paddingRight', 'marginTop'];
+        return {
+          css: [...document.styleSheets].map(sheet => [...sheet.cssRules].map(rule => rule.cssText)),
+          styles: [...document.querySelectorAll('body,h1,h2,table,th,td,img')].map(element => ({
+            tag: element.tagName,
+            style: Object.fromEntries(properties.map(property => [property, getComputedStyle(element)[property]])),
+          })),
+          images: [...document.images].map(image => {
+            const rectangle = image.getBoundingClientRect();
+            const style = getComputedStyle(image);
+            return { alt: image.alt, source: image.currentSrc, width: image.naturalWidth, height: image.naturalHeight,
+              renderedWidth: rectangle.width, renderedHeight: rectangle.height, display: style.display,
+              visibility: style.visibility, opacity: style.opacity };
+          }),
+        };
+      });
       for (const signed of [false, true]) {
         await page.getByRole('button', { name: /^Печать/ }).click();
         const responseReady = page.waitForResponse(response => {
@@ -281,9 +305,55 @@ try {
         check(await popup.getByAltText('Подпись', { exact: true }).count() === Number(signed), 'Incorrect signature visibility');
         await popup.waitForFunction(() => [...document.images].every(image => image.complete && image.naturalWidth > 0));
         await popup.evaluate(() => document.fonts.ready);
-        const pdf = await popup.pdf({ format: 'A4', printBackground: true,
-          path: settings.printRoot + '/invoice-print-' + (signed ? 'signed' : 'plain') + '.pdf' });
-        check(pdf.subarray(0, 5).toString() === '%PDF-' && pdf.length > 1000, 'Invoice print produced no PDF');
+        check(await popup.evaluate(() => globalThis.__ppInvoicePrintCalls) === 1, 'Native invoice print was not called exactly once');
+        await popup.emulateMedia({ media: 'print' });
+        const sourceAppearance = await printAppearance(popup);
+        check(sourceAppearance.images.length > 0 && sourceAppearance.images.every(image => image.width > 0 && image.height > 0
+          && image.renderedWidth > 0 && image.renderedHeight > 0 && image.display !== 'none'
+          && image.visibility === 'visible' && Number(image.opacity) > 0), 'Printed invoice contains a hidden or empty image');
+        // The genuine native print preview may remain open. Do not issue a
+        // second print request to that same WebContents or mock window.print.
+        // Capture the identical rendered document in an isolated page instead.
+        const printHtml = await popup.evaluate(() => {
+          const copy = document.documentElement.cloneNode(true);
+          let base = copy.querySelector('head base');
+          if (!base) { base = document.createElement('base'); copy.querySelector('head').prepend(base); }
+          base.href = document.baseURI;
+          return '<!doctype html>' + copy.outerHTML;
+        });
+        const printBody = await popup.locator('body').innerHTML();
+        const metrics = await popup.evaluate(() => ({ width: innerWidth, height: innerHeight, scale: devicePixelRatio }));
+        const ownerBrowser = page.context().browser();
+        check(ownerBrowser !== null, 'The owned print browser is missing');
+        const pdfContext = await ownerBrowser.newContext({ javaScriptEnabled: false,
+          viewport: { width: metrics.width, height: metrics.height }, deviceScaleFactor: metrics.scale });
+        try {
+          const rejectedResources = [];
+          await pdfContext.route('**/*', route => {
+            const request = route.request();
+            const resource = new URL(request.url());
+            if (['data:', 'blob:', 'about:'].includes(resource.protocol)
+              || [settings.api, settings.ui].includes(resource.origin) && ['GET', 'HEAD'].includes(request.method())) return route.continue();
+            rejectedResources.push(resource.origin);
+            return route.abort();
+          });
+          const pdfPage = await pdfContext.newPage();
+          await pdfPage.emulateMedia({ media: 'print' });
+          await pdfPage.setContent(printHtml, { waitUntil: 'load' });
+          check(await pdfPage.locator('body').innerHTML() === printBody, 'Rendered invoice changed during PDF capture');
+          await pdfPage.waitForFunction(() => [...document.images].every(image => image.complete && image.naturalWidth > 0));
+          await pdfPage.evaluate(() => document.fonts.ready);
+          const replicaAppearance = await printAppearance(pdfPage);
+          check(JSON.stringify(replicaAppearance) === JSON.stringify(sourceAppearance), 'Print styles or image resources changed in PDF capture');
+          check(rejectedResources.length === 0, 'PDF capture attempted an external resource or business write');
+          const pdf = await pdfPage.pdf({ format: 'A4', printBackground: true,
+            path: settings.printRoot + '/invoice-print-' + (signed ? 'signed' : 'plain') + '.pdf' });
+          check(pdf.subarray(0, 5).toString() === '%PDF-' && pdf.length > 1000, 'Invoice print produced no PDF');
+          printProofs.push({ signed, nativePrintCalls: 1, markupEqual: true, printStylesEqual: true,
+            imageResourcesEqual: true, appearance: sourceAppearance });
+        } finally {
+          await pdfContext.close();
+        }
         await popup.close();
       }
       for (const format of ['PDF', 'Word']) {
@@ -303,10 +373,45 @@ try {
     check(outside.length === 0, 'Browser called an external host');
     check(errors.length === 0, 'Browser errors: ' + errors.join('; '));
     reads.dispose();
-    return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ flow: settings.flow, posts: keys.length });
+    return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ flow: settings.flow, posts: keys.length,
+      ...(printProofs.length ? { printProofs } : {}) });
   }`, { mode: 0o600 });
   const result = await cli('run-code', '--filename', scenarioPath);
-  assert.ok(result.includes('CASE_RETIREMENT_BROWSER_OK'), result); console.log(result);
+  assert.ok(result.includes('CASE_RETIREMENT_BROWSER_OK'), result);
+  if (flow === 'financial-invoice-editor-lost') {
+    const lines = result.split(/\r?\n/);
+    const resultIndex = lines.indexOf('### Result');
+    assert.ok(resultIndex >= 0, 'The native print scenario has no structured result.');
+    const message = JSON.parse(lines[resultIndex + 1]);
+    assert.equal(typeof message, 'string');
+    const marker = 'CASE_RETIREMENT_BROWSER_OK ';
+    assert.ok(message.startsWith(marker));
+    const browserProof = JSON.parse(message.slice(marker.length));
+    assert.equal(browserProof.printProofs.length, 2);
+    assert.deepEqual(browserProof.printProofs.map(proof => proof.signed), [false, true]);
+    assert.ok(browserProof.printProofs.every(proof => proof.nativePrintCalls === 1 && proof.markupEqual
+      && proof.printStylesEqual && proof.imageResourcesEqual));
+    const artifactDirectory = process.env.PAYPLANNER_TEST_PRINT_ARTIFACT_ROOT;
+    if (artifactDirectory) assert.ok(isAbsolute(artifactDirectory));
+    const inspected = await execute(process.env.PAYPLANNER_TEST_PDF_PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3'),
+      ['-I', '-X', 'utf8', resolve('scripts/verify-invoice-print-artifacts.py'), '--root', root,
+        ...(artifactDirectory ? ['--render-directory', artifactDirectory] : [])],
+      { timeout: 30_000, maxBuffer: 1024 * 1024, windowsHide: true });
+    const pdfProof = JSON.parse(inspected.stdout);
+    assert.equal(pdfProof.qualified, true);
+    assert.equal(pdfProof.files.length, 3);
+    for (const [index, name] of ['invoice-print-plain.pdf', 'invoice-print-signed.pdf'].entries()) {
+      const printed = pdfProof.files.find(file => file.file === name);
+      assert.ok(printed);
+      assert.equal(printed.imageOccurrences, browserProof.printProofs[index].appearance.images.length,
+        'PDF image occurrences differ from the genuine print document.');
+    }
+    const proof = JSON.stringify({ schemaVersion: 1, browser: browserProof.printProofs, pdf: pdfProof }, null, 2);
+    await writeFile(join(root, 'invoice-print-validation.json'), proof, { flag: 'wx', mode: 0o600 });
+    if (artifactDirectory) await writeFile(join(artifactDirectory, 'invoice-print-validation.json'), proof, { flag: 'wx', mode: 0o600 });
+    phase('pdf-verified');
+  }
+  console.log(result);
 } catch (error) {
   const safe = value => redactChatBrowserDiagnostic(value,
     [process.env.CASE_RETIREMENT_PASSWORD, process.env.CASE_RETIREMENT_EMAIL]).slice(0, 16000);

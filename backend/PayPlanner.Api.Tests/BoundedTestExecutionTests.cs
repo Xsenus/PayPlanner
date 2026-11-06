@@ -95,8 +95,58 @@ public sealed class BoundedTestExecutionTests
             var heavy = ExecutionScheduling.Batches(fixture.Plan, shard, "heavy").SelectMany(batch => batch.Cases).Select(row => row.Id).ToHashSet();
             Assert.Empty(fast.Intersect(heavy));
             Assert.Equal(fixture.Plan.Cases.Count(row => row.Shard == shard), fast.Union(heavy).Count());
-            Assert.All(ExecutionScheduling.Batches(fixture.Plan, shard).Where(batch => batch.Lane == "exclusive"), batch => Assert.Equal("exclusive-0", batch.Id));
+            var exclusive = ExecutionScheduling.Batches(fixture.Plan, shard).Where(batch => batch.Lane == "exclusive").ToArray();
+            var exclusiveMethods = fixture.Plan.Cases.Where(row => row.Shard == shard)
+                .Select(row => row.FullyQualifiedName).Distinct().Count(method => ExecutionScheduling.Lane(fixture.Plan, method) == "exclusive");
+            Assert.Equal(Math.Min(4, exclusiveMethods), exclusive.Length);
+            Assert.Equal(Enumerable.Range(0, exclusive.Length).Select(index => $"exclusive-{index}"), exclusive.Select(batch => batch.Id));
         }
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(4)]
+    public void ExclusivePartsRemainBoundedAndCoverEveryCaseOnceEvenWithOneRequestedPartition(int partitions)
+    {
+        using var fixture = new Fixture(allExclusive: true, partitions: partitions);
+        var batches = Enumerable.Range(0, 4)
+            .SelectMany(shard => ExecutionScheduling.Batches(fixture.Plan, shard, batchCount: partitions)).ToArray();
+        Assert.Equal(fixture.Plan.Cases.Select(row => row.Id).Order(), batches.SelectMany(batch => batch.Cases).Select(row => row.Id).Order());
+        Assert.All(batches, batch => { Assert.Equal("exclusive", batch.Lane); Assert.NotEmpty(batch.Cases); });
+        for (var shard = 0; shard < 4; shard++)
+        {
+            var parts = batches.Where(batch => batch.Cases[0].Shard == shard).ToArray();
+            Assert.Equal(Enumerable.Range(0, 4).Select(index => $"exclusive-{index}"), parts.Select(batch => batch.Id));
+            Assert.All(parts.SelectMany(batch => batch.Cases.Select(row => (row, batch))).GroupBy(pair => pair.row.FullyQualifiedName),
+                group => Assert.Single(group.Select(pair => pair.batch.Id).Distinct()));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void EarlierExclusivePartsCannotQualifyAMissingOrFailedFinalPart(bool failed)
+    {
+        using var fixture = new Fixture(allExclusive: true);
+        var directory = fixture.WriteBatches(0, "all");
+        var last = Path.Combine(directory, "batches", "exclusive-3");
+        if (failed)
+        {
+            var path = Path.Combine(last, "run.json");
+            var invocation = JsonSerializer.Deserialize<BatchRun>(File.ReadAllText(path))!;
+            File.WriteAllText(path, JsonSerializer.Serialize(invocation with { ExitCode = 1 }));
+        }
+        else
+        {
+            var path = Path.Combine(last, "results.trx");
+            var document = XDocument.Load(path);
+            document.Descendants(Fixture.Ns + "UnitTestResult").First().Remove();
+            document.Save(path);
+        }
+        var destination = Path.Combine(directory, "results.trx");
+        Assert.Throws<InvalidDataException>(() => BatchResults.Merge(fixture.Plan, fixture.Hash, 0, directory, "all", destination, 4));
+        Assert.False(File.Exists(destination));
     }
 
     [Fact]

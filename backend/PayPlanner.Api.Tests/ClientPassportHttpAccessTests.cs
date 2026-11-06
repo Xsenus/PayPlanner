@@ -51,9 +51,16 @@ public sealed class ClientPassportHttpAccessTests
         client.DefaultRequestHeaders.Add("X-Fixture-User", user.Id.ToString(CultureInfo.InvariantCulture));
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/v2/clients/{own.Id}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v2/clients/{hidden.Id}")).StatusCode);
-        permission.CanView = false;
-        await db.SaveChangesAsync();
+        // Client reads discard tracked snapshots. Revoke the persisted right,
+        // not the instance detached by the preceding HTTP requests.
+        await db.RolePermissions.Where(item => item.Id == permission.Id)
+            .ExecuteUpdateAsync(set => set.SetProperty(item => item.CanView, false));
+        Assert.False(await db.RolePermissions.AsNoTracking().Where(item => item.Id == permission.Id)
+            .Select(item => item.CanView).SingleAsync());
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/v2/clients/{own.Id}")).StatusCode);
+        await db.RolePermissions.Where(item => item.Id == permission.Id)
+            .ExecuteUpdateAsync(set => set.SetProperty(item => item.CanView, true));
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/v2/clients/{own.Id}")).StatusCode);
     }
 
     [Fact]

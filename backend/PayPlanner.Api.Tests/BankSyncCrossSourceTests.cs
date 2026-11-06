@@ -1,8 +1,12 @@
+using System.Collections.Concurrent;
+using System.Data;
+using System.Data.Common;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
@@ -63,6 +67,15 @@ public partial class BankSyncServiceTests
     private static async Task<BankStatementImportResultDto> ImportCrossSourceFileAsync(
         PaymentContext db, ClaimsPrincipal principal, MoneyAccount account, bool hasDocument)
     {
+        var result = await ImportCrossSourceFileResultAsync(db, principal, account, hasDocument);
+        Assert.True(result.Result is OkObjectResult,
+            $"Expected a successful file import, received {result.Result?.GetType().Name}: {(result.Result as ObjectResult)?.Value}");
+        return Assert.IsType<BankStatementImportResultDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+    }
+
+    private static async Task<ActionResult<BankStatementImportResultDto>> ImportCrossSourceFileResultAsync(
+        PaymentContext db, ClaimsPrincipal principal, MoneyAccount account, bool hasDocument)
+    {
         var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = principal } },
@@ -71,8 +84,7 @@ public partial class BankSyncServiceTests
             + $"02.10.2026;100;ООО Клиент;Оплата по счёту;{(hasDocument ? "101" : "")};{account.BankAccountNumber}\n";
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(text));
         var file = new FormFile(stream, 0, stream.Length, "file", "synthetic-cross-source.csv");
-        var result = await controller.ImportBankStatement(file, default, account.CompanyId, account.Id);
-        return Assert.IsType<BankStatementImportResultDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        return await controller.ImportBankStatement(file, default, account.CompanyId, account.Id);
     }
 
     [Theory]
@@ -446,13 +458,45 @@ public partial class BankSyncServiceTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task SharedNative_ConcurrentFileAndBankKeepOneFactInIndependentContexts(bool postgres)
+    public Task SharedNative_ConcurrentFileAndBankKeepOneFactInIndependentContexts(bool postgres)
+        => RunCrossSourceRaceAsync(postgres, controlledLoser: null);
+
+    [Theory]
+    [InlineData("file")]
+    [InlineData("bank")]
+    public Task SharedNative_ControlledSerializableLoserRollsBackRetriesAndPreservesOneFact(string loser)
+        => RunCrossSourceRaceAsync(postgres: true, controlledLoser: loser);
+
+    private async Task RunCrossSourceRaceAsync(bool postgres, string? controlledLoser)
     {
-        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres, bankModelTemplate);
+        Assert.True(controlledLoser is null or "file" or "bank");
+        if (controlledLoser is not null) Assert.True(postgres);
+        var nativeErrors = new ConcurrentQueue<Exception>();
+        var fileErrors = new ConcurrentQueue<Exception>();
+        var snapshotGate = new CrossSourceSnapshotGate();
+        var firstInterceptors = new List<IInterceptor>
+        {
+            new CrossSourceNativeCommandErrors(nativeErrors), new CrossSourceNativeTransactionErrors(nativeErrors)
+        };
+        if (controlledLoser == "bank") firstInterceptors.Add(snapshotGate);
+        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres, bankModelTemplate,
+            firstInterceptors.ToArray());
         var companyId = (await fixture.First.BankConnections.AsNoTracking().SingleAsync()).LegalEntityId;
         var account = await AddCrossSourceAccountAsync(fixture.First, companyId);
         var (_, principal) = await AddNativeAdminAsync(fixture.First);
         fixture.First.ChangeTracker.Clear();
+        var fileInterceptors = new List<IInterceptor>
+        {
+            new CrossSourceNativeCommandErrors(fileErrors), new CrossSourceNativeTransactionErrors(fileErrors)
+        };
+        if (controlledLoser == "file") fileInterceptors.Add(snapshotGate);
+        await using var controlledFile = controlledLoser is null ? null : new PostgreSqlPaymentContext(
+            new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(fixture.Second.Database.GetConnectionString())
+                .AddInterceptors(fileInterceptors).Options);
+        PaymentContext fileDb = controlledFile is null ? fixture.Second : controlledFile;
+        Assert.NotSame(fixture.First.Database.GetDbConnection(), fileDb.Database.GetDbConnection());
+        snapshotGate.CompanyId = companyId;
+        snapshotGate.Enabled = controlledLoser is not null;
         var bank = new FakeBank { Pages = { ["shared"] = [[Op("concurrent-cross-source", 2)]] } };
         var invocation = BankSyncInvocation.Scheduled("concurrent-cross-source");
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -462,37 +506,188 @@ public partial class BankSyncServiceTests
         {
             bankReady.SetResult();
             await start.Task;
-            return await fixture.Service(fixture.First, bank).SyncStatementAsync(
-                fixture.AccountId, SharedFrom, SharedTo, invocation, default);
+            if (controlledLoser == "file") await snapshotGate.Ready.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            try
+            {
+                return await fixture.Service(fixture.First, bank).SyncStatementAsync(
+                    fixture.AccountId, SharedFrom, SharedTo, invocation, default);
+            }
+            finally { if (controlledLoser == "file") snapshotGate.Release.TrySetResult(); }
         });
         var file = Task.Run(async () =>
         {
             fileReady.SetResult();
             await start.Task;
-            return await ImportCrossSourceFileAsync(fixture.Second, principal, account, true);
+            if (controlledLoser == "bank") await snapshotGate.Ready.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            try { return await ImportCrossSourceFileResultAsync(fileDb, principal, account, true); }
+            finally { if (controlledLoser == "bank") snapshotGate.Release.TrySetResult(); }
         });
         await Task.WhenAll(bankReady.Task, fileReady.Task);
         start.SetResult();
         await Task.WhenAll(native, file);
-        Assert.Null((await native).Error);
+        var nativeResult = await native;
+        var fileResponse = await file;
+        if (controlledLoser is not null)
+        {
+            Assert.True(snapshotGate.Fired, "The losing transaction must establish its real PostgreSQL snapshot before the winner commits.");
+            if (controlledLoser == "bank")
+            {
+                Assert.NotNull(nativeResult.Error);
+                Assert.IsType<OkObjectResult>(fileResponse.Result);
+            }
+            else
+            {
+                Assert.Null(nativeResult.Error);
+                Assert.IsType<ConflictObjectResult>(fileResponse.Result);
+            }
+        }
+        string? committedMoneyBeforeRetry = null;
+        if (nativeResult.Error is not null)
+        {
+            Assert.True(postgres);
+            var errors = nativeErrors.ToArray();
+            Assert.NotEmpty(errors);
+            Assert.All(errors, error => Assert.True(IsKnownCrossSourceTransactionConflict(error), error.GetType().Name));
+            if (controlledLoser == "bank")
+                Assert.All(errors, error => Assert.True(PayPlanner.Api.Services.FinancialConcurrencyGuard.IsSerializationFailure(error)));
+            var committedFile = Assert.IsType<BankStatementImportResultDto>(Assert.IsType<OkObjectResult>(fileResponse.Result).Value);
+            Assert.Null(fixture.First.Database.CurrentTransaction);
+            Assert.False(fixture.First.ChangeTracker.HasChanges());
+            committedMoneyBeforeRetry = System.Text.Json.JsonSerializer.Serialize(
+                Assert.Single(await fixture.First.MoneyOperations.IgnoreQueryFilters().AsNoTracking().ToArrayAsync()));
+            var batches = await fixture.First.BankStatementImportBatches.AsNoTracking().ToArrayAsync();
+            Assert.Equal(nativeResult.BatchId.HasValue ? 2 : 1, batches.Length);
+            Assert.Contains(batches, batch => batch.Id == committedFile.BatchId);
+            if (nativeResult.BatchId is { } failedBatchId)
+            {
+                var failedBatch = Assert.Single(batches, batch => batch.Id == failedBatchId);
+                Assert.Equal(BankStatementImportBatchStatus.AppliedWithErrors, failedBatch.Status);
+                Assert.Null(failedBatch.CompletedAt);
+                Assert.Null(failedBatch.SourceResultJson);
+                Assert.Empty(await fixture.First.BankStatementImportRows.AsNoTracking().Where(row => row.BatchId == failedBatchId).ToArrayAsync());
+            }
+            var previousBatchId = nativeResult.BatchId;
+            nativeResult = await fixture.Service(fixture.First, bank).SyncStatementAsync(
+                fixture.AccountId, SharedFrom, SharedTo, invocation, default);
+            Assert.Null(nativeResult.Error);
+            if (previousBatchId.HasValue) Assert.Equal(previousBatchId, nativeResult.BatchId);
+        }
+        else Assert.Empty(nativeErrors);
+        BankStatementImportResultDto fileResult;
+        int? committedMoneyIdBeforeRetry = null;
+        if (fileResponse.Result is ConflictObjectResult conflict)
+        {
+            // A serializable loser must roll back completely before the caller
+            // explicitly retries the same package after the competing import.
+            Assert.True(postgres);
+            Assert.Equal(PayPlanner.Api.Services.FinancialConcurrencyGuard.ConflictMessage, conflict.Value);
+            if (controlledLoser == "file")
+            {
+                Assert.NotEmpty(fileErrors);
+                Assert.All(fileErrors, error => Assert.True(PayPlanner.Api.Services.FinancialConcurrencyGuard.IsSerializationFailure(error)));
+            }
+            Assert.Null(fileDb.Database.CurrentTransaction);
+            Assert.False(fileDb.ChangeTracker.HasChanges());
+            var committedMoney = Assert.Single(await fixture.Second.MoneyOperations.IgnoreQueryFilters().AsNoTracking().ToArrayAsync());
+            committedMoneyIdBeforeRetry = committedMoney.Id;
+            committedMoneyBeforeRetry = System.Text.Json.JsonSerializer.Serialize(committedMoney);
+            var committedBatch = Assert.Single(await fixture.Second.BankStatementImportBatches.AsNoTracking().ToArrayAsync());
+            Assert.Equal(nativeResult.BatchId, committedBatch.Id);
+            Assert.Equal(BankStatementImportSources.BackgroundBank, committedBatch.Source);
+            var committedRow = Assert.Single(await fixture.Second.BankStatementImportRows.AsNoTracking().ToArrayAsync());
+            Assert.Equal(BankStatementImportRowStatus.Created, committedRow.Status);
+            Assert.Equal(committedMoneyIdBeforeRetry, committedRow.MoneyOperationId);
+            fileResult = await ImportCrossSourceFileAsync(fileDb, principal, account, true);
+        }
+        else
+        {
+            fileResult = Assert.IsType<BankStatementImportResultDto>(Assert.IsType<OkObjectResult>(fileResponse.Result).Value);
+        }
         fixture.Second.ChangeTracker.Clear();
         var money = await fixture.Second.MoneyOperations.IgnoreQueryFilters().AsNoTracking().ToArrayAsync();
         Assert.True(money.Length == 1, $"Concurrent source imports must keep one money fact; postgres={postgres}; money IDs={string.Join(',', money.Select(item => item.Id))}");
+        if (committedMoneyIdBeforeRetry.HasValue) Assert.Equal(committedMoneyIdBeforeRetry.Value, money[0].Id);
+        if (committedMoneyBeforeRetry is not null) Assert.Equal(committedMoneyBeforeRetry, System.Text.Json.JsonSerializer.Serialize(money[0]));
         var rows = await fixture.Second.BankStatementImportRows.AsNoTracking().ToArrayAsync();
         Assert.Equal(2, rows.Length);
         Assert.Equal(money[0].Id, Assert.Single(rows, row => row.Status == BankStatementImportRowStatus.Created).MoneyOperationId);
         Assert.Null(Assert.Single(rows, row => row.Status == BankStatementImportRowStatus.ClarificationRequired).MoneyOperationId);
         Assert.Single(await fixture.Second.BankStatementOperations.AsNoTracking().ToArrayAsync());
+        var beforeReplays = System.Text.Json.JsonSerializer.Serialize(money[0]);
 
         var replay = await fixture.Service(fixture.Second, new FakeBank { Unauthorized = true }).SyncStatementAsync(
             fixture.AccountId, SharedFrom, SharedTo, invocation, default);
-        Assert.Equal((await native).BatchId, replay.BatchId);
+        Assert.Equal(nativeResult.BatchId, replay.BatchId);
         Assert.Null(replay.Error);
-        Assert.Equal((await file).BatchId,
+        Assert.Equal(fileResult.BatchId,
             (await ImportCrossSourceFileAsync(fixture.First, principal, account, true)).BatchId);
         fixture.Second.ChangeTracker.Clear();
-        Assert.Equal(money[0].Id, (await fixture.Second.MoneyOperations.IgnoreQueryFilters().AsNoTracking().SingleAsync()).Id);
+        var afterReplays = await fixture.Second.MoneyOperations.IgnoreQueryFilters().AsNoTracking().SingleAsync();
+        Assert.Equal(money[0].Id, afterReplays.Id);
+        Assert.Equal(beforeReplays, System.Text.Json.JsonSerializer.Serialize(afterReplays));
         Assert.Equal(2, await fixture.Second.BankStatementImportBatches.CountAsync());
         Assert.Equal(2, await fixture.Second.BankStatementImportRows.CountAsync());
+        if (controlledLoser is not null)
+            Console.WriteLine($"PP_BANK_CROSS_SOURCE_PROOF loser={controlledLoser} sqlState=40001 rollback=verified retry=succeeded moneyFacts=1 retainedMoneyUnchanged=true");
+    }
+
+    private static bool IsKnownCrossSourceTransactionConflict(Exception error)
+    {
+        for (var current = error; current is not null; current = current.InnerException)
+            if (current is Npgsql.PostgresException
+                {
+                    SqlState: Npgsql.PostgresErrorCodes.SerializationFailure
+                or Npgsql.PostgresErrorCodes.LockNotAvailable or Npgsql.PostgresErrorCodes.DeadlockDetected
+                }) return true;
+        return false;
+    }
+
+    private sealed class CrossSourceSnapshotGate : DbTransactionInterceptor
+    {
+        public int CompanyId { get; set; }
+        public bool Enabled { get; set; }
+        public bool Fired { get; private set; }
+        public TaskCompletionSource Ready { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override async ValueTask<DbTransaction> TransactionStartedAsync(DbConnection connection,
+            TransactionEndEventData eventData, DbTransaction result, CancellationToken ct = default)
+        {
+            if (!Enabled || Fired || result.IsolationLevel != IsolationLevel.Serializable) return result;
+            Assert.IsType<Npgsql.NpgsqlConnection>(connection);
+            Fired = true;
+            // Establish an actual MVCC snapshot without reserving a write lock.
+            // The other request then commits its ordinary import before this
+            // request reaches the unchanged production account update.
+            await using var command = connection.CreateCommand();
+            command.Transaction = result;
+            command.CommandText = "SELECT \"Id\" FROM \"LegalEntities\" WHERE \"Id\" = @companyId";
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "companyId";
+            parameter.Value = CompanyId;
+            command.Parameters.Add(parameter);
+            Assert.Equal(CompanyId, Assert.IsType<int>(await command.ExecuteScalarAsync(ct)));
+            Ready.TrySetResult();
+            await Release.Task.WaitAsync(TimeSpan.FromSeconds(30), ct);
+            return result;
+        }
+    }
+
+    private sealed class CrossSourceNativeCommandErrors(ConcurrentQueue<Exception> errors) : DbCommandInterceptor
+    {
+        public override Task CommandFailedAsync(DbCommand command, CommandErrorEventData eventData, CancellationToken ct = default)
+        {
+            errors.Enqueue(eventData.Exception);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class CrossSourceNativeTransactionErrors(ConcurrentQueue<Exception> errors) : DbTransactionInterceptor
+    {
+        public override Task TransactionFailedAsync(DbTransaction transaction, TransactionErrorEventData eventData, CancellationToken ct = default)
+        {
+            errors.Enqueue(eventData.Exception);
+            return Task.CompletedTask;
+        }
     }
 }

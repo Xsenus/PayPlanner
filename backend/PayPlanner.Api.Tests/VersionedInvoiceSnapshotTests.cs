@@ -155,14 +155,22 @@ public sealed class VersionedInvoiceSnapshotTests(PostgreSqlModelTemplate templa
         var seller = await ConfigureAsync(db, DocumentSellerSnapshotPolicy.OnCreate);
         using var server = PaymentCreateGraphTests.Server(db, fixture); using var client = server.CreateClient();
         client.DefaultRequestHeaders.Add("X-Fixture-User", fixture.ActorId.ToString());
-        using var response = await client.PostAsJsonAsync($"/api/v{api}/payments", InvoiceFor(fixture));
+        var model = InvoiceFor(fixture);
+        var firstKey = await LegacyPaymentOperationKeyTests.RegisterAsync(db, fixture, model);
+        client.DefaultRequestHeaders.Add("Idempotency-Key", firstKey.ToString("D"));
+        using var response = await client.PostAsJsonAsync($"/api/v{api}/payments", model);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var saved = (await response.Content.ReadFromJsonAsync<Payment>(new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } }))!;
         Assert.Equal(DocumentSellerSnapshotPolicy.OnCreate, saved.SellerSnapshotPolicy); Assert.NotNull(saved.SellerSnapshotJson);
         Assert.Equal(seller.Company, saved.SellerCompanyId);
+        var refusedModel = InvoiceFor(fixture);
+        var refusedKey = await LegacyPaymentOperationKeyTests.RegisterAsync(db, fixture, refusedModel);
+        Assert.NotEqual(firstKey, refusedKey);
+        client.DefaultRequestHeaders.Remove("Idempotency-Key");
+        client.DefaultRequestHeaders.Add("Idempotency-Key", refusedKey.ToString("D"));
         (await db.SystemSettings.SingleAsync(x => x.Key == CompanyDocumentImagePrintDefaultsService.Key(seller.Company))).Value = "{broken";
         await db.SaveChangesAsync(); var before = await PaymentCreateGraphTests.SnapshotAsync(db);
-        using var refused = await client.PostAsJsonAsync($"/api/v{api}/payments", InvoiceFor(fixture));
+        using var refused = await client.PostAsJsonAsync($"/api/v{api}/payments", refusedModel);
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode); Assert.Contains("message", await refused.Content.ReadAsStringAsync());
         Assert.Equal(before, await PaymentCreateGraphTests.SnapshotAsync(db)); Assert.Equal(3, await db.CompanyBrandImageVersions.CountAsync());
     }

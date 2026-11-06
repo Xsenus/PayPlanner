@@ -38,8 +38,12 @@ public sealed partial class ManagedCaseDocumentWireTests : IClassFixture<SqliteM
             uploadCapacityChecks: true, yandexCopy: endpoint, courtSource: Source("Исходная браузерная сводка"));
         var caseId = await LoginAndCreateCaseAsync(runtime);
         await using (var seed = runtime.OpenDatabase())
+        {
+            await SeedFinancialBrowserProfileAsync(seed, runtime);
+            await seed.SaveChangesAsync();
             await seed.ClientCases.Where(c => c.Id == caseId).ExecuteUpdateAsync(update => update
                 .SetProperty(c => c.CourtUrl, SyntheticYandexHostingStartup.CourtUrl));
+        }
         int deadlineId = 0; Guid attemptId = Guid.Empty; byte[] frozenBytes = [];
         await runtime.CheckCaseRetirementBrowserAsync(caseId, Guid.NewGuid(), false, flow, applyBoundary: async () =>
         {
@@ -383,6 +387,7 @@ public sealed partial class ManagedCaseDocumentWireTests : IClassFixture<SqliteM
             clientId = Assert.IsType<int>(clientCase.ClientId);
             clientCase.CaseType = "Гражданское";
             clientCase.Title = "Synthetic generated browser case";
+            await SeedFinancialBrowserProfileAsync(seed, runtime);
             seed.ClientCaseWorkOrders.Add(new ClientCaseWorkOrder { ClientCaseId = caseId, Title = "Owned browser order", Status = "approved" });
             seed.SystemSettings.Add(new SystemSetting { Key = "cases.documentTemplates", Value = "{\"templates\":[{\"key\":\"custom\",\"label\":\"Owned browser template\",\"caseTypes\":[\"Гражданское\"]}]}" });
             await seed.SaveChangesAsync();

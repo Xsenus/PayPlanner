@@ -273,7 +273,7 @@ public sealed class BoundedBatchSchedulerTests
         var started = new ConcurrentDictionary<string, int>();
         var completed = new ConcurrentDictionary<string, int>();
         var active = 0;
-        var batches = Batches("fast", 2).Concat(Batches("heavy", 2)).Concat(Batches("exclusive", 2)).ToArray();
+        var batches = Batches("fast", 2).Concat(Batches("heavy", 2)).Concat(Batches("exclusive", 4)).ToArray();
         var run = BoundedBatchScheduler.RunAsync(batches, "4", 4, AmpleResources, async batch =>
         {
             var concurrency = Interlocked.Increment(ref active);
@@ -324,7 +324,7 @@ public sealed class BoundedBatchSchedulerTests
             releaseExclusive.TrySetResult();
         }
         await run.WaitAsync(Deadline);
-        Assert.Equal(2, completed["exclusive"]);
+        Assert.Equal(4, completed["exclusive"]);
         Assert.Equal(0, active);
     }
 
@@ -353,6 +353,27 @@ public sealed class BoundedBatchSchedulerTests
         finally { release.TrySetResult(); }
         await Assert.ThrowsAsync<InvalidDataException>(() => run.WaitAsync(Deadline));
         Assert.Equal(batches.Where(batch => batch.Id != "heavy-0").Select(batch => batch.Id).Order(), completed.Order());
+    }
+
+    [Fact]
+    public async Task FailedExclusivePartStillRunsEveryRemainingPartExactlyOnceWithoutOverlap()
+    {
+        var started = new ConcurrentDictionary<string, int>();
+        var active = 0;
+        await Assert.ThrowsAsync<InvalidDataException>(() => BoundedBatchScheduler.RunAsync(Batches("exclusive", 4), "4", 4,
+            AmpleResources, async batch =>
+            {
+                Assert.Equal(1, Interlocked.Increment(ref active));
+                try
+                {
+                    Assert.Equal(1, started.AddOrUpdate(batch.Id, 1, (_, previous) => previous + 1));
+                    await Task.Yield();
+                    if (batch.Id == "exclusive-1") throw new InvalidOperationException("Owned synthetic part failure.");
+                }
+                finally { Interlocked.Decrement(ref active); }
+            }));
+        Assert.Equal(Enumerable.Range(0, 4).Select(index => $"exclusive-{index}"), started.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(0, active);
     }
 
     [Fact]

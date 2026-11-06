@@ -117,7 +117,10 @@ public static class ExecutionScheduling
             decimal Weight((string Method, string Identity, PlannedCase[] Cases) group) => (decimal)estimates.GetValueOrDefault(group.Method, fallback) * group.Cases.Length;
             var selected = groups.Where(group => GroupLane(group.Method) == lane).OrderByDescending(Weight)
                 .ThenBy(group => group.Method, StringComparer.Ordinal).ThenBy(group => group.Identity, StringComparer.Ordinal).ToArray();
-            var count = Math.Min(selected.Length, lane == "exclusive" ? 1 : partitions);
+            // Partition exclusive work even on a one-worker host. Each part
+            // keeps its own native result; the scheduler still admits only one
+            // exclusive worker and never splits an unreviewed method's rows.
+            var count = Math.Min(selected.Length, lane == "exclusive" ? profile.BatchCount : partitions);
             var loads = new decimal[count];
             var rows = Enumerable.Range(0, count).Select(_ => new List<PlannedCase>()).ToArray();
             foreach (var group in selected)

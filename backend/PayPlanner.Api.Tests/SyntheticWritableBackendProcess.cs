@@ -613,6 +613,12 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
             start.Environment["CASE_RETIREMENT_CLI"] = cliPath;
         if (Environment.GetEnvironmentVariable("PAYPLANNER_TEST_BROWSER") is { } browser)
             start.Environment["CASE_RETIREMENT_BROWSER"] = browser;
+        if (financialDocuments && flow == "financial-invoice-editor-lost"
+            && Environment.GetEnvironmentVariable("PAYPLANNER_TEST_PRINT_ARTIFACT_ROOT") is { } printArtifacts)
+        {
+            Assert.True(Path.IsPathFullyQualified(printArtifacts));
+            start.Environment["PAYPLANNER_TEST_PRINT_ARTIFACT_ROOT"] = printArtifacts;
+        }
         start.ArgumentList.Add(Path.Combine(repository.FullName, "scripts", chatAttachments ? "check-chat-managed-live-browser.mjs"
             : financialDocuments ? "check-case-financial-live-browser.mjs"
             : courtDocuments ? "check-case-court-live-browser.mjs"
@@ -639,7 +645,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
         {
             using var timeout = new CancellationTokenSource();
             var phaseBudget = new SyntheticBrowserPhaseBudget(financialDocuments, timeout.CancelAfter, chatAttachments,
-                retirement: retirementDocuments);
+                retirement: retirementDocuments, generated: generatedDocuments, court: courtDocuments);
             var stdout = ReadOutputAsync(timeout.Token);
             await Task.WhenAll(stdout, process.WaitForExitAsync(timeout.Token));
             Assert.True(process.ExitCode == 0, process.ExitCode == 0 ? null
@@ -664,6 +670,14 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
                     if (financialDocuments && Regex.IsMatch(line,
                         @"\APP_FINANCIAL_BROWSER_PHASE (?:vite-create|vite-listen|entry-transform|requests-idle|cli-open|cli-goto|cli-snapshot|scenario|browser-close|vite-close|control-close|stdin-close|done)\z",
                         RegexOptions.CultureInvariant))
+                    {
+                        browserPhase = line;
+                        phaseBudget.ObserveLine(line);
+                        Console.WriteLine(line);
+                    }
+                    if ((generatedDocuments && line.StartsWith("PP_GENERATED_BROWSER_PHASE ", StringComparison.Ordinal)
+                        || courtDocuments && line.StartsWith("PP_COURT_BROWSER_PHASE ", StringComparison.Ordinal))
+                        && Regex.IsMatch(line, @"\APP_(?:GENERATED|COURT)_BROWSER_PHASE (?:ui-build|cli-open)\z", RegexOptions.CultureInvariant))
                     {
                         browserPhase = line;
                         phaseBudget.ObserveLine(line);
@@ -697,9 +711,9 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
                 return output.ToString();
             }
         }
-        catch (OperationCanceledException) when (financialDocuments || chatAttachments || retirementDocuments)
+        catch (OperationCanceledException) when (financialDocuments || chatAttachments || retirementDocuments || generatedDocuments || courtDocuments)
         {
-            throw new TimeoutException($"Synthetic {(chatAttachments ? "chat" : financialDocuments ? "financial" : "retirement")} browser timed out at: " + browserPhase);
+            throw new TimeoutException($"Synthetic {(chatAttachments ? "chat" : financialDocuments ? "financial" : generatedDocuments ? "generated" : courtDocuments ? "court" : "retirement")} browser timed out at: " + browserPhase);
         }
         finally
         {

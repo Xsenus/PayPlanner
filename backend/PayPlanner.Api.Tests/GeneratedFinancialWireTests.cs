@@ -73,17 +73,64 @@ public sealed partial class ManagedCaseDocumentWireTests
             $"financial-{kind}-{(editor ? "editor" : modal ? "modal" : "edit")}-lost", clientId, financialDocuments: true);
         if (kind == "invoice" && editor)
         {
+            var printedFiles = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var name in new[] { "invoice-print-plain.pdf", "invoice-print-signed.pdf", "invoice-download-pdf.pdf", "invoice-download-word.docx" })
             {
                 var bytes = await File.ReadAllBytesAsync(Path.Combine(runtime.Root, name));
                 Assert.True(bytes.Length > 1000);
                 Assert.Equal(name.EndsWith(".pdf", StringComparison.Ordinal) ? "%PDF-" : "PK", System.Text.Encoding.ASCII.GetString(bytes, 0, name.EndsWith(".pdf", StringComparison.Ordinal) ? 5 : 2));
+                printedFiles[name] = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
                 if (Environment.GetEnvironmentVariable("PAYPLANNER_TEST_PRINT_ARTIFACT_ROOT") is { } artifacts)
                 {
                     Assert.True(Path.IsPathFullyQualified(artifacts));
                     Directory.CreateDirectory(artifacts);
                     await using var file = new FileStream(Path.Combine(artifacts, name), FileMode.CreateNew);
                     await file.WriteAsync(bytes);
+                }
+            }
+            var reportBytes = await File.ReadAllBytesAsync(Path.Combine(runtime.Root, "invoice-print-validation.json"));
+            Assert.InRange(reportBytes.Length, 1, 1024 * 1024);
+            using var report = JsonDocument.Parse(reportBytes);
+            Assert.Equal(1, report.RootElement.GetProperty("schemaVersion").GetInt32());
+            var browserProofs = report.RootElement.GetProperty("browser").EnumerateArray().ToArray();
+            Assert.Equal(2, browserProofs.Length);
+            Assert.False(browserProofs[0].GetProperty("signed").GetBoolean());
+            Assert.True(browserProofs[1].GetProperty("signed").GetBoolean());
+            foreach (var browserProof in browserProofs)
+            {
+                Assert.Equal(1, browserProof.GetProperty("nativePrintCalls").GetInt32());
+                foreach (var assertion in new[] { "markupEqual", "printStylesEqual", "imageResourcesEqual" })
+                    Assert.True(browserProof.GetProperty(assertion).GetBoolean());
+                var appearance = browserProof.GetProperty("appearance");
+                foreach (var section in new[] { "css", "styles", "images" })
+                    Assert.True(appearance.GetProperty(section).GetArrayLength() > 0);
+            }
+            var pdfReport = report.RootElement.GetProperty("pdf");
+            Assert.True(pdfReport.GetProperty("qualified").GetBoolean());
+            var pdfFiles = pdfReport.GetProperty("files").EnumerateArray().ToArray();
+            Assert.Equal(3, pdfFiles.Length);
+            foreach (var pdfFile in pdfFiles)
+            {
+                var name = pdfFile.GetProperty("file").GetString()!;
+                Assert.True(printedFiles.TryGetValue(name, out var expectedHash));
+                Assert.Equal(expectedHash, pdfFile.GetProperty("sha256").GetString());
+                foreach (var assertion in new[] { "textKeysVerified", "amountVerified", "a4AndClippingVerified" })
+                    Assert.True(pdfFile.GetProperty(assertion).GetBoolean());
+            }
+            if (Environment.GetEnvironmentVariable("PAYPLANNER_TEST_PRINT_ARTIFACT_ROOT") is { } reportArtifacts)
+            {
+                // The isolated Node process exports its own original report.
+                // Bind that report to the very bytes checked and copied above.
+                Assert.Equal(reportBytes, await File.ReadAllBytesAsync(Path.Combine(reportArtifacts, "invoice-print-validation.json")));
+                foreach (var pdfFile in pdfFiles)
+                {
+                    var stem = Path.GetFileNameWithoutExtension(pdfFile.GetProperty("file").GetString()!);
+                    for (var page = 1; page <= pdfFile.GetProperty("pages").GetInt32(); page++)
+                    {
+                        var png = await File.ReadAllBytesAsync(Path.Combine(reportArtifacts, $"{stem}-page-{page}.png"));
+                        Assert.True(png.Length > 1000);
+                        Assert.Equal(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }, png.Take(8).ToArray());
+                    }
                 }
             }
         }
