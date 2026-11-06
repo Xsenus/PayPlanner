@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
@@ -30,10 +31,48 @@ public sealed class PaymentCreateSellerSelectionTests
         await using var db = await SqliteTestContextFactory.CreateAsync();
         var fixture = await SeedAsync(db, false); var seller = await SeedSellerAsync(db);
         var model = PaymentFor(fixture); await SetInvalidAsync(db, model, seller, invalid);
+        await AssertInvalidSelectionAsync(db, fixture, seller, api, model, invalid);
+    }
+
+    internal static async Task AssertInvalidSelectionAsync(PaymentContext db, Fixture fixture, Seller seller, int api, Payment model, string invalid)
+    {
         var expectedError = await new PayPlanner.Api.Services.Companies.DocumentSellerService(db).ValidateSelectionAsync(model.SellerCompanyId, model.SellerBranchId, default);
         Assert.NotNull(expectedError); var before = await PaymentCreateGraphTests.SnapshotAsync(db);
-        var response = Assert.IsType<BadRequestObjectResult>(await PaymentCreateGraphTests.CreateAsync(db, fixture, api, model));
-        Assert.Equal(expectedError, JsonSerializer.SerializeToElement(response.Value).GetProperty("message").GetString());
+        if (invalid == "branch-without-company")
+        {
+            // This tuple cannot be a registered key: the public registration
+            // rejects its shape before the database ownership constraint.
+            // Do not bypass that constraint in fixture setup.
+            Assert.Equal("Для выбора подразделения укажите компанию.", expectedError);
+            var controller = BalanceApplicationPaymentWriterTests.Controller(db, fixture);
+            using var services = new ServiceCollection().BuildServiceProvider();
+            controller.HttpContext.RequestServices = services;
+            var body = JsonSerializer.SerializeToElement(new
+            {
+                operation = "primary",
+                sellerCompanyId = model.SellerCompanyId,
+                sellerBranchId = model.SellerBranchId,
+                primaryPaymentId = (int?)null,
+            });
+            var rejected = Assert.IsType<BadRequestObjectResult>(await controller.RegisterCreateAttempt(body, default));
+            Assert.Equal("Проверьте назначение попытки и выбранную компанию.",
+                JsonSerializer.SerializeToElement(rejected.Value).GetProperty("message").GetString());
+            Assert.Empty(await db.PaymentCreateAttempts.AsNoTracking().ToArrayAsync());
+            Assert.Equal(before, await PaymentCreateGraphTests.SnapshotAsync(db));
+
+            // A legitimate key cannot be reused with the malformed selection.
+            var valid = PaymentFor(fixture); valid.SellerCompanyId = seller.Company; valid.SellerBranchId = seller.Branch;
+            var key = await LegacyPaymentOperationKeyTests.RegisterAsync(db, fixture, valid);
+            var beforeAttempt = JsonSerializer.Serialize(await db.PaymentCreateAttempts.AsNoTracking().SingleAsync());
+            var conflict = Assert.IsType<ConflictObjectResult>(await LegacyPaymentOperationKeyTests.CreateAsync(db, fixture, api, key.ToString("D"), model));
+            Assert.Equal("payment_operation_conflict", JsonSerializer.SerializeToElement(conflict.Value).GetProperty("code").GetString());
+            Assert.Equal(beforeAttempt, JsonSerializer.Serialize(await db.PaymentCreateAttempts.AsNoTracking().SingleAsync()));
+        }
+        else
+        {
+            var response = Assert.IsType<BadRequestObjectResult>(await PaymentCreateGraphTests.CreateAsync(db, fixture, api, model));
+            Assert.Equal(expectedError, JsonSerializer.SerializeToElement(response.Value).GetProperty("message").GetString());
+        }
         Assert.Equal(before, await PaymentCreateGraphTests.SnapshotAsync(db));
         Assert.False(db.ChangeTracker.HasChanges()); Assert.Null(db.Database.CurrentTransaction);
     }
@@ -220,7 +259,7 @@ public sealed class PaymentCreateSellerSelectionPostgresTests(PostgreSqlModelTem
     public static IEnumerable<object[]> InvalidCases()
     {
         foreach (var api in new[] { 0, 1, 2 })
-            foreach (var invalid in new[] { "external", "company-archived", "branch-other" }) yield return [api, invalid];
+            foreach (var invalid in new[] { "external", "company-archived", "branch-other", "branch-without-company" }) yield return [api, invalid];
     }
 
     [Theory]
@@ -230,9 +269,7 @@ public sealed class PaymentCreateSellerSelectionPostgresTests(PostgreSqlModelTem
         await using var database = await template.CreateDatabaseAsync(); await using var db = Open(database.ConnectionString);
         var fixture = await SeedAsync(db, false); var seller = await PaymentCreateSellerSelectionTests.SeedSellerAsync(db);
         var model = PaymentFor(fixture); await PaymentCreateSellerSelectionTests.SetInvalidAsync(db, model, seller, invalid);
-        var before = await PaymentCreateGraphTests.SnapshotAsync(db);
-        Assert.IsType<BadRequestObjectResult>(await PaymentCreateGraphTests.CreateAsync(db, fixture, api, model));
-        Assert.Equal(before, await PaymentCreateGraphTests.SnapshotAsync(db)); Assert.Null(db.Database.CurrentTransaction);
+        await PaymentCreateSellerSelectionTests.AssertInvalidSelectionAsync(db, fixture, seller, api, model, invalid);
     }
 
     [Theory]

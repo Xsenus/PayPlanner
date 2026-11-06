@@ -18,28 +18,58 @@ public class CaseNotificationInventoryTests
         AssertMethodContains(
             source,
             "CreateProceduralDeadline",
-            "ApplyClientCaseVisibility",
+            "WithCurrentCourtWriteAsync",
+            "QueueCourtNotificationAsync",
+            "CompleteCourtWriteAsync",
             "AddProceduralDeadlineUserNotificationsAsync");
         AssertMethodContains(
             source,
             "UpdateProceduralDeadline",
-            "ApplyClientCaseVisibility",
+            "WithCurrentCourtWriteAsync",
+            "QueueCourtNotificationAsync",
+            "CompleteCourtWriteAsync",
             "AddProceduralDeadlineUserNotificationsAsync");
         AssertMethodContains(
             source,
             "CloseProceduralDeadline",
-            "ApplyClientCaseVisibility",
+            "WithCurrentCourtWriteAsync",
+            "QueueCourtNotificationAsync",
+            "CompleteCourtWriteAsync",
             "AddProceduralDeadlineUserNotificationsAsync");
         AssertMethodContains(
             source,
             "CreateCourtEvent",
-            "ApplyClientCaseVisibility",
+            "WithCurrentCourtWriteAsync",
+            "QueueCourtNotificationAsync",
+            "CompleteCourtWriteAsync",
             "AddCourtEventUserNotificationsAsync");
         AssertMethodContains(
             source,
             "UpdateCourtEvent",
-            "ApplyClientCaseVisibility",
+            "WithCurrentCourtWriteAsync",
+            "QueueCourtNotificationAsync",
+            "CompleteCourtWriteAsync",
             "AddCourtEventUserNotificationsAsync");
+
+        var courtWrites = ReadSourceFile("backend", "Controllers", "V2", "CasesV2Controller.CourtWrites.cs");
+        var courtChecks = ReadSourceFile("backend", "Controllers", "V2", "CasesV2Controller.CourtChecks.cs");
+        var caseEdit = ReadSourceFile("backend", "Services", "Cases", "CaseEditTransaction.cs");
+        AssertMethodContains(courtWrites, "WithCurrentCourtWriteAsync", "CaseEditTransaction.RunRelatedAsync", "HasCurrentCourtCheckActorAsync");
+        AssertMethodContains(caseEdit, "RunRelatedAsync", "RunSingleAsync", "related: true");
+        AssertMethodContains(caseEdit, "RunSingleAsync", "BalanceApplicationLease.BeginAsync", "user.IsActive && user.IsApproved",
+            "RolePermissionCatalog.Cases", "requireApprovedUser: true", "CanView: true", "permission.CanEdit",
+            "ApplyClientCaseVisibility(access.Visibility)", "write(clientCase, access)", "lease.CommitAsync(ct)");
+        var writeBody = ExtractMethodBody(caseEdit, "RunSingleAsync");
+        Assert.True(writeBody.IndexOf("ApplyClientCaseVisibility", StringComparison.Ordinal)
+            < writeBody.IndexOf("write(clientCase, access)", StringComparison.Ordinal));
+        Assert.True(writeBody.IndexOf("write(clientCase, access)", StringComparison.Ordinal)
+            < writeBody.IndexOf("lease.CommitAsync(ct)", StringComparison.Ordinal));
+        AssertMethodContains(courtChecks, "HasCurrentCourtCheckActorAsync", "AuthSessionClaims.TryGetTokenVersion",
+            "user.IsActive && user.IsApproved", "user.AuthTokenVersion == tokenVersion");
+        AssertMethodContains(courtWrites, "QueueCourtNotificationAsync", "IDurableCourtNotificationService",
+            "ClientCaseStageClassifier.IsPretrial", "CaseCourtNotificationQueue", "EnqueueBatchAsync");
+        AssertMethodContains(courtWrites, "CompleteCourtWriteAsync", "result is not (OkObjectResult or CreatedResult or NoContentResult)",
+            "IDurableCourtNotificationService", "DispatchAcceptedCaseEditNotificationsAsync", "notifyAfterCommit");
         AssertMethodContains(
             source,
             "UploadDocument",
@@ -82,7 +112,12 @@ public class CaseNotificationInventoryTests
         AssertMethodContains(
             source,
             "RunCourtSync",
-            "NotifyCourtSyncFailedForCaseAsync");
+            "ApplyClientCaseVisibility",
+            "HasCurrentCourtCheckActorAsync",
+            "RecordCourtCheckAsync");
+        AssertMethodContains(courtChecks, "RecordCourtCheckAsync", "WithCurrentCourtCheckAsync",
+            "result is OkObjectResult", "NotifyCourtSyncFailedForCaseAsync");
+        AssertMethodContains(courtChecks, "WithCurrentCourtCheckAsync", "CaseEditTransaction.RunAsync", "HasCurrentCourtCheckActorAsync");
         AssertMethodContains(
             source,
             "NotifyCourtSyncFailedForCaseAsync",

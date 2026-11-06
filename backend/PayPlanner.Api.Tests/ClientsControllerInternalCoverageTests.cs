@@ -106,12 +106,16 @@ public class ClientsControllerInternalCoverageTests
     public async Task Update_FiltersOutEmailAndPhone_FromMissingRequirements()
     {
         await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "admin");
+        var client = new Client { Name = "До изменения", IsActive = true, ResponsibleUserId = admin.Id };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
         var controller = CreateController(
             db,
-            currentUserId: null,
+            currentUserId: admin.Id,
             formRequirementsService: new FixedMissingFieldsService(["Email", "Phone", "Name"]));
 
-        var action = await controller.Update(123, new Client { Name = "Тест" }, CancellationToken.None);
+        var action = await controller.Update(client.Id, new Client { Name = "Тест" }, CancellationToken.None);
         var badRequest = Assert.IsType<BadRequestObjectResult>(action);
 
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(badRequest.Value));
@@ -120,6 +124,26 @@ public class ClientsControllerInternalCoverageTests
             .ToArray();
 
         Assert.Equal(["Name"], missingFields);
+        Assert.Equal("До изменения", (await db.Clients.AsNoTracking().SingleAsync(item => item.Id == client.Id)).Name);
+        Assert.False(db.ChangeTracker.HasChanges());
+        Assert.Null(db.Database.CurrentTransaction);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Update_MissingActorDoesNotRevealMissingRequirements(bool authenticated)
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db, currentUserId: null,
+            formRequirementsService: new FixedMissingFieldsService(["Email", "Phone", "Name"]));
+        if (!authenticated) controller.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity());
+
+        Assert.IsType<UnauthorizedResult>(await controller.Update(123, new Client { Name = "Тест" }, CancellationToken.None));
+        Assert.Empty(await db.Clients.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await db.ObjectAuditEvents.AsNoTracking().ToArrayAsync());
+        Assert.False(db.ChangeTracker.HasChanges());
+        Assert.Null(db.Database.CurrentTransaction);
     }
 
     [Fact]
