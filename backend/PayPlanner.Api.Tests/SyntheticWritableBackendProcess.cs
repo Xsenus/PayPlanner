@@ -515,9 +515,12 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Browser fixture could not start.");
         var stderr = process.StandardError.ReadToEndAsync();
         var latestStage = "starting";
+        var phaseClock = Stopwatch.StartNew();
+        var phaseTrace = new List<string>();
         try
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            using var timeout = new CancellationTokenSource();
+            var phaseBudget = new SyntheticBrowserPhaseBudget(false, timeout.CancelAfter, taskUpload: true);
             var stdout = ReadOutputAsync(timeout.Token);
             await Task.WhenAll(stdout, process.WaitForExitAsync(timeout.Token));
             Assert.True(process.ExitCode == 0, await stderr);
@@ -531,6 +534,18 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
                 {
                     output.AppendLine(line);
                     latestStage = line;
+                    if (Regex.IsMatch(line,
+                        @"\ATASK_UPLOAD_STAGE_(?:MODULES_READY|VITE_STARTING|VITE_CREATED|VITE_LISTENING|VITE_ENTRY_PREPARING|VITE_ENTRY_READY|BROWSER_READY|AUTHENTICATED|QUEUE_COMPLETED|PENDING_CARD|NOTICE_VISIBLE|CREATED_TASK|COMPLETED_TASK|SETTINGS_WAIT_VERIFIED)\z",
+                        RegexOptions.CultureInvariant))
+                    {
+                        phaseBudget.ObserveLine(line);
+                        if (phaseTrace.Count < 32)
+                        {
+                            var observation = "TASK_UPLOAD_FIXTURE_PHASE " + System.Text.Json.JsonSerializer.Serialize(new { Stage = line, ElapsedMs = phaseClock.ElapsedMilliseconds });
+                            phaseTrace.Add(observation);
+                            Console.WriteLine(observation);
+                        }
+                    }
                     if (line != "TASK_UPLOAD_QUEUE_READY") continue;
                     Assert.NotNull(completeQueue);
                     Assert.False(completed, "The owned queue must only be driven once.");
@@ -546,7 +561,8 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
-            throw new TimeoutException("Synthetic browser timed out at: " + latestStage);
+            throw new TimeoutException("Synthetic browser timed out at: " + latestStage
+                + Environment.NewLine + string.Join(Environment.NewLine, phaseTrace));
         }
         finally
         {

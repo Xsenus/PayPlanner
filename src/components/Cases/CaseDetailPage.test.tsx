@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { documentCopyTestSession } from '../../test/documentCopySession';
 import { captureAuthSessionIdentity } from '../../services/authService';
+import { USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 import { StrictMode } from 'react';
 
 function detailViewStateKey(caseId: number) {
@@ -7360,6 +7361,191 @@ describe('CaseDetailPage', () => {
     await waitFor(() => expect(apiService.getLegalEntityDirectoryPage).toHaveBeenCalledTimes(3));
     expect(vi.mocked(apiService.getLegalEntityDirectoryPage).mock.calls.map(([query]) => query?.page)).toEqual([1, 2, 1]);
   });
+
+  it('connection refresh: restores an unsaved editor only after a fresh case read and never saves automatically', async () => {
+    const props = { caseId: 15, onBack: vi.fn(), canEdit: true, caseRefreshKey: 0 };
+    const view = render(<CaseDetailPage {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Retained private draft' } });
+    await waitFor(() => expect(apiService.getCaseDocuments).toHaveBeenCalledOnce());
+    let finish!: (row: ClientCase) => void;
+    vi.mocked(apiService.getCaseV2).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    view.rerender(<CaseDetailPage {...props} caseRefreshKey={1} />);
+    expect(screen.queryByDisplayValue('Retained private draft')).toBeNull();
+    expect(screen.getByText('Загрузка карточки дела...')).toBeTruthy();
+    await act(async () => finish(createCase({ strategy: 'Fresh server strategy' })));
+    expect(await screen.findByDisplayValue('Retained private draft')).toBeTruthy();
+    await waitFor(() => expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(2));
+    expect(apiService.updateCaseV2).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Карточка дела' }));
+    view.rerender(<CaseDetailPage {...props} caseRefreshKey={2} />);
+    expect(await screen.findByRole('button', { name: 'Редактировать дело' })).toBeTruthy();
+    expect(screen.queryByDisplayValue('Retained private draft')).toBeNull();
+  });
+
+  it.each(['user-role-changed', 'role-permissions-changed'])('connection refresh: an explicit %s invalidates the draft before delayed permission props arrive', async reason => {
+    const props = { caseId: 15, onBack: vi.fn(), canEdit: true };
+    render(<CaseDetailPage {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Known revoked scope draft' } });
+    let finish!: (row: ClientCase) => void;
+    vi.mocked(apiService.getCaseV2).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    fireEvent(window, new CustomEvent(USER_NOTIFICATIONS_EVENT, { detail: { source: 'realtime', reason } }));
+    expect(screen.queryByDisplayValue('Known revoked scope draft')).toBeNull();
+    await act(async () => finish(createCase()));
+    expect(await screen.findByRole('button', { name: 'Редактировать дело' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Редактирование дела' })).toBeNull();
+    expect(apiService.updateCaseV2).not.toHaveBeenCalled();
+  });
+
+  it('connection refresh: normal messages and reconnect signals do not declare an explicit access change', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Same scope draft' } });
+    for (const detail of [{ source: 'realtime', reason: 'created' }, { source: 'realtime', reason: 'reconnected' },
+      { source: 'inbox', reason: 'user-role-changed' }]) fireEvent(window, new CustomEvent(USER_NOTIFICATIONS_EVENT, { detail }));
+    expect(screen.getByDisplayValue('Same scope draft')).toBeTruthy();
+    expect(apiService.updateCaseV2).not.toHaveBeenCalled();
+  });
+
+  it('connection refresh: a successful save clears the closed draft before reconnecting', async () => {
+    const props = { caseId: 15, onBack: vi.fn(), canEdit: true };
+    const view = render(<CaseDetailPage {...props} caseRefreshKey={0} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Explicitly saved strategy' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/ })[0]);
+    expect(await screen.findByText('Карточка дела обновлена.')).toBeTruthy();
+    view.rerender(<CaseDetailPage {...props} caseRefreshKey={1} />);
+    expect(await screen.findByRole('button', { name: 'Редактировать дело' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Редактирование дела' })).toBeNull();
+    expect(apiService.updateCaseV2).toHaveBeenCalledOnce();
+  });
+
+  it.each([401, 403])('connection refresh: a server %s during save clears the draft before a later permitted read', async status => {
+    const props = { caseId: 15, onBack: vi.fn(), canEdit: true };
+    const view = render(<CaseDetailPage {...props} caseRefreshKey={0} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Access denied draft' } });
+    vi.mocked(apiService.updateCaseV2).mockRejectedValueOnce(new Error('HTTP ' + status));
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/ })[0]);
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(screen.queryByDisplayValue('Access denied draft')).toBeNull();
+    view.rerender(<CaseDetailPage {...props} caseRefreshKey={1} />);
+    expect(await screen.findByRole('button', { name: 'Редактировать дело' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Редактирование дела' })).toBeNull();
+    expect(apiService.updateCaseV2).toHaveBeenCalledOnce();
+  });
+
+  it('connection refresh: a retained draft keeps its original concurrency source and preserves fields on conflict', async () => {
+    const original = createCase({ strategy: 'Original server strategy', feeAmount: 100 });
+    vi.mocked(apiService.getCaseV2).mockResolvedValueOnce(original);
+    const props = { caseId: 15, onBack: vi.fn(), canEdit: true };
+    const view = render(<CaseDetailPage {...props} caseRefreshKey={0} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'My unsaved strategy' } });
+    vi.mocked(apiService.getCaseV2).mockResolvedValueOnce(createCase({ strategy: 'Other employee strategy', feeAmount: 200 }));
+    view.rerender(<CaseDetailPage {...props} caseRefreshKey={1} />);
+    expect(await screen.findByDisplayValue('My unsaved strategy')).toBeTruthy();
+    vi.mocked(apiService.updateCaseV2).mockRejectedValueOnce(new Error('HTTP 409 - {"message":"Дело изменено другим сотрудником"}'));
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/ })[0]);
+    await waitFor(() => expect(apiService.updateCaseV2).toHaveBeenCalledOnce());
+    expect(vi.mocked(apiService.updateCaseV2).mock.calls[0][2]).toMatchObject({ strategy: original.strategy, feeAmount: 100 });
+    expect(await screen.findByText('Дело изменено другим сотрудником')).toBeTruthy();
+    expect(screen.getByDisplayValue('My unsaved strategy')).toBeTruthy();
+    expect(screen.queryByText('Карточка дела обновлена.')).toBeNull();
+  });
+
+  it.each(['success', 'denial'])('connection refresh: an old save %s response cannot overwrite the retained draft or show a success notice', async response => {
+    const props = { caseId: 15, onBack: vi.fn(), canEdit: true };
+    const view = render(<StrictMode><CaseDetailPage {...props} caseRefreshKey={0} /></StrictMode>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Current unsaved draft' } });
+    let finish!: (row: ClientCase) => void;
+    let fail!: (reason: Error) => void;
+    vi.mocked(apiService.updateCaseV2).mockReturnValueOnce(new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/ })[0]);
+    await waitFor(() => expect(apiService.updateCaseV2).toHaveBeenCalledOnce());
+    view.rerender(<StrictMode><CaseDetailPage {...props} caseRefreshKey={1} /></StrictMode>);
+    expect(await screen.findByDisplayValue('Current unsaved draft')).toBeTruthy();
+    await act(async () => {
+      if (response === 'denial') fail(new Error('HTTP 403'));
+      else finish(createCase({ strategy: 'Stale save response' }));
+    });
+    expect(screen.queryByDisplayValue('Stale save response')).toBeNull();
+    expect(screen.getByDisplayValue('Current unsaved draft')).toBeTruthy();
+    expect(screen.queryByText('Карточка дела обновлена.')).toBeNull();
+    expect(apiService.updateCaseV2).toHaveBeenCalledOnce();
+    view.rerender(<StrictMode><CaseDetailPage {...props} caseRefreshKey={2} /></StrictMode>);
+    expect(await screen.findByDisplayValue('Current unsaved draft')).toBeTruthy();
+  });
+
+  it.each(['Failed to fetch', 'HTTP 503'])('connection refresh: keeps a draft hidden after %s until an explicit successful retry', async failure => {
+    const props = { caseId: 15, onBack: vi.fn(), canEdit: true };
+    const view = render(<CaseDetailPage {...props} caseRefreshKey={0} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Hidden network draft' } });
+    vi.mocked(apiService.getCaseV2).mockRejectedValueOnce(new Error(failure));
+    view.rerender(<CaseDetailPage {...props} caseRefreshKey={1} />);
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(screen.queryByDisplayValue('Hidden network draft')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Редактирование дела' })).toBeNull();
+    expect(apiService.updateCaseV2).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
+    expect(await screen.findByDisplayValue('Hidden network draft')).toBeTruthy();
+    expect(apiService.getCaseV2).toHaveBeenCalledTimes(3);
+    expect(apiService.updateCaseV2).not.toHaveBeenCalled();
+  });
+
+  it('connection refresh: a hidden network draft cannot survive a later access-scope replacement', async () => {
+    const props = { caseId: 15, onBack: vi.fn(), canEdit: true };
+    const view = render(<CaseDetailPage {...props} caseRefreshKey={0} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Former scope hidden draft' } });
+    vi.mocked(apiService.getCaseV2).mockRejectedValueOnce(new Error('Failed to fetch'));
+    view.rerender(<CaseDetailPage {...props} caseRefreshKey={1} />);
+    await screen.findByRole('alert');
+    view.rerender(<CaseDetailPage {...props} caseRefreshKey={2} canEdit={false} />);
+    await act(async () => {});
+    view.rerender(<CaseDetailPage {...props} caseRefreshKey={3} />);
+    expect(await screen.findByRole('button', { name: 'Редактировать дело' })).toBeTruthy();
+    expect(screen.queryByDisplayValue('Former scope hidden draft')).toBeNull();
+    expect(apiService.updateCaseV2).not.toHaveBeenCalled();
+  });
+
+  it.each([401, 403, 404])('connection refresh: a fresh %s discards the draft even if later access succeeds', async status => {
+    const props = { caseId: 15, onBack: vi.fn(), canEdit: true };
+    const view = render(<CaseDetailPage {...props} caseRefreshKey={0} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Denied private draft' } });
+    vi.mocked(apiService.getCaseV2).mockRejectedValueOnce(new Error('HTTP ' + status));
+    view.rerender(<CaseDetailPage {...props} caseRefreshKey={1} />);
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('HTTP ' + status));
+    expect(screen.queryByDisplayValue('Denied private draft')).toBeNull();
+    view.rerender(<CaseDetailPage {...props} caseRefreshKey={2} />);
+    expect(await screen.findByRole('button', { name: 'Редактировать дело' })).toBeTruthy();
+    expect(apiService.updateCaseV2).not.toHaveBeenCalled();
+  });
+
+  it.each(['case', 'case-access', 'task-access', 'rights', 'actor', 'login', 'logout'] as const)(
+    'connection refresh: discards a draft across the %s boundary', async boundary => {
+      const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+      const props = { caseId: 15, onBack: vi.fn(), canEdit: true };
+      const view = render(<CaseDetailPage {...props} caseRefreshKey={0} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Редактировать дело' }));
+      fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Old scope private draft' } });
+      if (boundary === 'actor') session.replace('actor');
+      if (boundary === 'login') session.replace('login');
+      if (boundary === 'logout') session.replace('logout');
+      view.rerender(<CaseDetailPage {...props} caseRefreshKey={1}
+        caseId={boundary === 'case' ? 16 : 15} canEdit={boundary !== 'rights'}
+        caseAccessKey={boundary === 'case-access' ? 'new' : undefined}
+        taskAccessKey={boundary === 'task-access' ? 'new' : undefined} />);
+      await act(async () => {});
+      expect(screen.queryByDisplayValue('Old scope private draft')).toBeNull();
+      expect(screen.queryByRole('heading', { name: 'Редактирование дела' })).toBeNull();
+      expect(apiService.updateCaseV2).not.toHaveBeenCalled();
+    },
+  );
 
   it('participant directory linked page: an excluded first portion still exposes the next available choices', async () => {
     vi.mocked(apiService.getCaseRelatedParties).mockResolvedValue([{ id: 61, clientCaseId: 15, sourceType: 'legalEntity', sourceId: 25, legalEntityId: 25, displayName: 'Связанная организация', role: 'Ответчик', createdAt: '2026-11-04T00:00:00Z' }]);

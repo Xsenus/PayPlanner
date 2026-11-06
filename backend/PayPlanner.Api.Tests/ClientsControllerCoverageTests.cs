@@ -353,6 +353,8 @@ public class ClientsControllerCoverageTests
         var owner = await CreateUserAsync(db, "user", "Владелец");
         var anotherResponsible = await CreateUserAsync(db, "user", "Другой");
         var legalEntityId = await CreateLegalEntityAsync(db, "ООО Бета");
+        await db.LegalEntities.Where(entity => entity.Id == legalEntityId)
+            .ExecuteUpdateAsync(update => update.SetProperty(entity => entity.ResponsibleUserId, owner.Id));
         var clientStatusId = await CreateClientStatusAsync(db, "Активный");
         var controller = CreateController(db, owner.Id);
 
@@ -656,15 +658,6 @@ public class ClientsControllerCoverageTests
         var emptyIds = await controller.ChangeResponsible(new BulkAssignResponsibleRequest(), CancellationToken.None);
         Assert.IsType<BadRequestObjectResult>(emptyIds);
 
-        var missingResponsible = await controller.ChangeResponsible(
-            new BulkAssignResponsibleRequest
-            {
-                Ids = [1],
-                ResponsibleUserId = 999,
-            },
-            CancellationToken.None);
-        Assert.IsType<BadRequestObjectResult>(missingResponsible);
-
         var client = new Client
         {
             Name = "Клиент для смены",
@@ -674,6 +667,26 @@ public class ClientsControllerCoverageTests
 
         db.Clients.Add(client);
         await db.SaveChangesAsync();
+
+        var missingResponsible = await controller.ChangeResponsible(
+            new BulkAssignResponsibleRequest
+            {
+                Ids = [client.Id],
+                ResponsibleUserId = 999,
+            },
+            CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(missingResponsible);
+        Assert.Equal(admin.Id, await db.Clients.AsNoTracking().Where(item => item.Id == client.Id)
+            .Select(item => item.ResponsibleUserId).SingleAsync());
+
+        var bothMissing = await controller.ChangeResponsible(
+            new BulkAssignResponsibleRequest
+            {
+                Ids = [999],
+                ResponsibleUserId = 999,
+            },
+            CancellationToken.None);
+        Assert.IsType<NotFoundObjectResult>(bothMissing);
 
         var notFound = await controller.ChangeResponsible(
             new BulkAssignResponsibleRequest

@@ -36,14 +36,28 @@ export const cacheSteps = Object.freeze({
 });
 const allowedInfrastructure = new Set(['.github/workflows/deploy.yml', 'scripts/qualified-check-reuse.mjs',
   'scripts/qualified-check-reuse.node-tests.mjs', 'scripts/validate-deploy-workflow.mjs', 'scripts/validate-deploy-workflow.test.ts']);
+// These are backend browser drivers, not application inputs in this reviewed
+// consumer revision. Never transfer that assumption to a different producer.
+export const reviewedBrowserFixtureRevision = '84d7664d925db697942db71c779c99fe4fea4d4c';
+const isolatedBrowserFixtures = new Set(['scripts/check-task-upload-live-browser.mjs', 'scripts/check-case-retirement-live-browser.mjs']);
+// Reviewed against that same producer's C# project graph: none of these files
+// is a source, analyzer input or build setting for the six reusable format checks.
+// The changed test project still receives its complete fresh formatting gate.
+export const reviewedFormatOnlyPaths = Object.freeze(['src/App.tsx', 'src/App.calendar-navigation.test.tsx',
+  'src/components/Cases/CaseDetailPage.tsx', 'src/components/Cases/CaseDetailPage.test.tsx',
+  'backend/AppReleases/releases.json', 'scripts/deploy-db-proof.py', 'scripts/deploy-roadmap-candidate-review.json',
+  'scripts/deploy-vps-admission.test.py', 'scripts/deployment-baseline.json', 'scripts/prepare-deployment-plan.mjs',
+  'scripts/prepare-deployment-plan.node-tests.mjs']);
+const formatOnlyPaths = new Set(reviewedFormatOnlyPaths);
 const hash = value => createHash('sha256').update(value).digest('hex');
 
-export function allowedReuseDiff(paths) {
-  return Array.isArray(paths) && paths.length <= 1000 && paths.every(path => typeof path === 'string'
+export function allowedReuseDiff(paths, mode = 'frontend') {
+  return ['frontend', 'format'].includes(mode) && Array.isArray(paths) && paths.length <= 1000 && paths.every(path => typeof path === 'string'
     && path.length <= 400 && !/[\x00-\x1f\x7f\\:]/.test(path)
     && !path.split('/').some(part => !part || part === '.' || part === '..')
     && (path.startsWith('backend/PayPlanner.Api.Tests/') || path === 'README.md' || path === 'AGENTS.md'
-      || path.startsWith('docs/') && path.endsWith('.md') || allowedInfrastructure.has(path)));
+      || path.startsWith('docs/') && path.endsWith('.md') || allowedInfrastructure.has(path) || isolatedBrowserFixtures.has(path)
+      || mode === 'format' && formatOnlyPaths.has(path)));
 }
 
 export function reuseCondition(job, step) {
@@ -217,7 +231,9 @@ export async function previousQualification({ env = process.env, git, getJson, g
     try {
       git(['merge-base', '--is-ancestor', run.head_sha, env.GITHUB_SHA]);
       const paths = git(['diff', '--no-renames', '--no-ext-diff', '--no-textconv', '--name-only', '-z', run.head_sha, env.GITHUB_SHA]).split('\0').filter(Boolean);
-      if (!allowedReuseDiff(paths)) continue;
+      if (!allowedReuseDiff(paths, mode)) continue;
+      if (paths.some(path => isolatedBrowserFixtures.has(path)) && run.head_sha !== reviewedBrowserFixtureRevision) continue;
+      if (paths.some(path => formatOnlyPaths.has(path)) && run.head_sha !== reviewedBrowserFixtureRevision) continue;
       const old = parseWorkflow(git(['show', run.head_sha + ':.github/workflows/deploy.yml']));
       if (!compatibleRecipes(old, current, mode)) continue;
       for (let attempt = run.run_attempt; attempt >= Math.max(1, run.run_attempt - 4); attempt--) {

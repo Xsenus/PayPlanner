@@ -1533,13 +1533,14 @@ function AppContent() {
         return (
           <CaseDetailPage
             caseId={selectedCaseId}
-            caseAccessKey={JSON.stringify([permissions.cases, permissions.clients, permissions.legalEntities, permissions.audit, permissions.yandexDisk, permissions.payments, taskAccessRevision])}
+            caseAccessKey={JSON.stringify([permissions.cases, permissions.clients, permissions.legalEntities, permissions.audit, permissions.yandexDisk, permissions.payments])}
+            caseRefreshKey={taskAccessRevision}
             onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: 'caseDetail' }) : undefined}
             canEdit={permissions.cases.canEdit}
             canDelete={permissions.cases.canDelete}
             canViewFinance={permissions.payments.canView}
             canViewTasks={permissions.tasks.canView}
-            taskAccessKey={JSON.stringify([user?.id, user?.role?.id, user?.departmentId, user?.department, taskAccessRevision, permissions.tasks.canView, permissions.tasks.viewScope, permissions.requests.canView, permissions.requests.viewScope])}
+            taskAccessKey={JSON.stringify([user?.id, user?.role?.id, user?.departmentId, user?.department, permissions.tasks.canView, permissions.tasks.viewScope, permissions.requests.canView, permissions.requests.viewScope])}
             canCreateTasks={permissions.tasks.canView && permissions.tasks.canCreate}
             canEditTasks={permissions.tasks.canEdit}
             canEditTaskBilling={isAdminRole || permissions.tasks.canEdit || permissions.tasks.canEditOthers}

@@ -207,7 +207,7 @@ try {
   await vite.listen();
   console.log('TASK_UPLOAD_STAGE_VITE_LISTENING');
   // Compile the actual entry before starting the browser navigation clock.
-  // The enclosing 90-second scenario budget still includes this preparation.
+  // The fixture bounds cold preparation separately and keeps 90 seconds for browser assertions.
   console.log('TASK_UPLOAD_STAGE_VITE_ENTRY_PREPARING');
   const entry = await vite.transformRequest('/src/main.tsx');
   assert.ok(entry?.code, 'The synthetic task UI entry module must compile successfully.');

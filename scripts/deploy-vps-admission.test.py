@@ -87,8 +87,8 @@ class DeliveryAdmissionTests(unittest.TestCase):
     def test_exact_candidate_is_admitted_before_any_shell_phase(self):
         self.use_current_candidate()
         self.assertEqual(len(self.plan['expectedMigration'].split('+')), 18)
-        self.assertEqual(len(self.plan['expectedReleaseSeeds']), 768)
-        self.assertEqual([seed['version'] for seed in self.plan['expectedReleaseSeeds'][:5]], ['1.14.910', '1.14.909', '1.14.908', '1.14.907', '1.14.906'])
+        self.assertEqual(len(self.plan['expectedReleaseSeeds']), 769)
+        self.assertEqual([seed['version'] for seed in self.plan['expectedReleaseSeeds'][:5]], ['1.14.911', '1.14.910', '1.14.909', '1.14.908', '1.14.907'])
         self.assertTrue(all(seed['isActive'] is True for seed in self.plan['expectedReleaseSeeds'][:5]))
         self.assertTrue(self.admission().stdout.startswith(self.revision+'|'))
 

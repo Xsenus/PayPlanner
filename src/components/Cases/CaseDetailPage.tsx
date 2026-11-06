@@ -64,6 +64,7 @@ import { apiService, type ContactDirectoryItemDto, type LegalEntityDirectoryItem
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentDeliveryOwner, type DocumentDeliveryOperation, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
 import { captureAuthSessionIdentity } from '../../services/authService';
+import { USER_NOTIFICATIONS_EVENT, type UserNotificationsChangedDetail } from '../../utils/userNotifications';
 import { useDialog } from '../../hooks/useDialog';
 import { useNestedCaseOperationOwner, type CaseOperationParent } from '../../hooks/useNestedCaseOperationOwner';
 import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
@@ -122,6 +123,7 @@ interface CaseDetailPageProps {
   canViewTasks?: boolean;
   taskAccessKey?: string;
   caseAccessKey?: string;
+  caseRefreshKey?: number;
   canCreateTasks?: boolean;
   canEditTasks?: boolean;
   canEditTaskBilling?: boolean;
@@ -1490,21 +1492,38 @@ function buildStageTransitionPrompt(previousStage: string | null | undefined, ne
 
 export function CaseDetailPage(props: CaseDetailPageProps) {
   const { user } = useAuth();
+  const [explicitAccessRevision, setExplicitAccessRevision] = useState(0);
+  useEffect(() => {
+    const invalidateAccess = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail as UserNotificationsChangedDetail | null : null;
+      if (detail?.source === 'realtime'
+        && (detail.reason === 'user-role-changed' || detail.reason === 'role-permissions-changed'))
+        setExplicitAccessRevision(value => value + 1);
+    };
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, invalidateAccess);
+    return () => window.removeEventListener(USER_NOTIFICATIONS_EVENT, invalidateAccess);
+  }, []);
   const session = captureAuthSessionIdentity();
   const viewSessionKey = JSON.stringify([session.epoch, session.actor, session.authenticated]);
   const viewed = useRef({ sessionKey: viewSessionKey, marker: { current: null as number | null } });
   if (viewed.current.sessionKey !== viewSessionKey)
     viewed.current = { sessionKey: viewSessionKey, marker: { current: null } };
   const markedViewedCaseIdRef = viewed.current.marker;
-  const owner = useDocumentDeliveryOwner(JSON.stringify([props.caseId, props.caseAccessKey, props.taskAccessKey,
+  const accessScope = JSON.stringify([props.caseId, props.caseAccessKey, props.taskAccessKey,
     user?.id, user?.role?.id, user?.departmentId, user?.department,
     props.canEdit ?? true, props.canDelete ?? true, props.canViewFinance ?? true, props.canViewTasks ?? true,
     props.canCreateTasks ?? true, props.canEditTasks ?? false, props.canEditTaskBilling ?? props.canEditTasks ?? false,
-    props.canExportTasks ?? false, props.canSendMessenger ?? false, props.canSendToYandexDisk ?? false]));
+    props.canExportTasks ?? false, props.canSendMessenger ?? false, props.canSendToYandexDisk ?? false, session, explicitAccessRevision]);
+  // Keep at most one in-memory draft across a connection refresh. A different
+  // case, session, actor or permission scope discards it before the next render.
+  const retainedEditor = useRef({ scope: accessScope, draft: { current: null as CaseEditDraft | null } });
+  if (retainedEditor.current.scope !== accessScope)
+    retainedEditor.current = { scope: accessScope, draft: { current: null } };
+  const owner = useDocumentDeliveryOwner(JSON.stringify([accessScope, props.caseRefreshKey]));
   const guard = <Args extends unknown[],>(callback: ((...args: Args) => void) | undefined) => callback
     ? (...args: Args) => { if (owner.capture()) callback(...args); } : undefined;
   if (!captureAuthSessionIdentity().authenticated) return <p className="p-3 text-sm text-slate-600">Войдите в систему, чтобы открыть дело.</p>;
-  return <CaseDetailScreen key={owner.scope} {...props} screenOwner={owner} markedViewedCaseIdRef={markedViewedCaseIdRef}
+  return <CaseDetailScreen key={owner.scope} {...props} screenOwner={owner} retainedEditorDraft={retainedEditor.current.draft} markedViewedCaseIdRef={markedViewedCaseIdRef}
     onBack={() => { if (owner.capture()) props.onBack(); }}
     onOpenClient={guard(props.onOpenClient)} onOpenLegalEntity={guard(props.onOpenLegalEntity)}
     onOpenFinance={guard(props.onOpenFinance)} onCreateInvoice={guard(props.onCreateInvoice)}
@@ -1513,6 +1532,7 @@ export function CaseDetailPage(props: CaseDetailPageProps) {
 
 function CaseDetailScreen({
   screenOwner,
+  retainedEditorDraft,
   markedViewedCaseIdRef,
   caseId,
   onBack,
@@ -1534,7 +1554,7 @@ function CaseDetailScreen({
   canExportTasks = false,
   canSendMessenger = false,
   canSendToYandexDisk = false,
-}: CaseDetailPageProps & { screenOwner: CaseOperationParent; markedViewedCaseIdRef: { current: number | null } }) {
+}: CaseDetailPageProps & { screenOwner: CaseOperationParent; retainedEditorDraft: { current: CaseEditDraft | null }; markedViewedCaseIdRef: { current: number | null } }) {
   const { confirm, prompt } = useDialog();
   const { capture: captureScreen, begin: beginScreenOperation, busy: pageBusy } = screenOwner;
   const viewStateActor = useMemo(() => captureAuthSessionIdentity().actor, []);
@@ -1696,8 +1716,13 @@ function CaseDetailScreen({
   const [externalApprovalSaving, setExternalApprovalSaving] = useState(false);
   const [externalApprovalDocumentIds, setExternalApprovalDocumentIds] = useState<number[]>([]);
   const [copiedLink, setCopiedLink] = useState(false);
-  const [editPageOpen, setEditPageOpen] = useState(false);
-  const [caseEditDraft, setCaseEditDraft] = useState<CaseEditDraft | null>(null);
+  const [editPageOpen, setEditPageOpen] = useState(() => retainedEditorDraft.current !== null);
+  const [caseEditDraft, setCaseEditDraftState] = useState<CaseEditDraft | null>(() => retainedEditorDraft.current);
+  const setCaseEditDraft = useCallback((draft: CaseEditDraft | null) => {
+    if (!captureScreen()) return;
+    retainedEditorDraft.current = draft;
+    setCaseEditDraftState(draft);
+  }, [captureScreen, retainedEditorDraft]);
   const beginCaseOperation = useCallback((kind: string) => {
     if (!caseReadConfirmed.current || !caseItem || currentCase.current !== caseItem || caseItem.id !== caseId || caseTaskBulkBusy) return null;
     return beginScreenOperation(kind);
@@ -1862,8 +1887,8 @@ function CaseDetailScreen({
     setDocumentSourceId('');
     setDocumentSourceStage('');
     setWorkOrder(null);
-    setEditPageOpen(false);
-    setCaseEditDraft(null);
+    setEditPageOpen(retainedEditorDraft.current !== null);
+    setCaseEditDraftState(retainedEditorDraft.current);
     setCourtEvents([]);
     setEventSearch('');
     setEventTypeFilter('');
@@ -1905,7 +1930,7 @@ function CaseDetailScreen({
     setCourtPartyRoleDraft('');
     setCourtPartyRepresentativeDraft('');
     setCourtPartyNotesDraft('');
-  }, [canViewFinance, canViewTasks, caseId, viewStateActor]);
+  }, [canViewFinance, canViewTasks, caseId, viewStateActor, retainedEditorDraft]);
 
   const visibleDetailTabs = useMemo(
     () => DETAIL_TABS.filter((tab) =>
@@ -2014,6 +2039,11 @@ function CaseDetailScreen({
       })
       .catch((err) => {
         if (!isReadCurrent()) return;
+        if (isHttpErrorStatus(err, 401) || isHttpErrorStatus(err, 403) || isHttpErrorStatus(err, 404)) {
+          retainedEditorDraft.current = null;
+          setCaseEditDraftState(null);
+          setEditPageOpen(false);
+        }
         setCaseItem(null);
         setError(err instanceof Error ? err.message : 'Не удалось загрузить карточку дела.');
       })
@@ -2025,7 +2055,7 @@ function CaseDetailScreen({
       readController.abort();
       if (caseMainRead.current === readController) caseMainRead.current = null;
     };
-  }, [captureScreen, caseId, reloadToken, taskAccessKey]);
+  }, [captureScreen, caseId, reloadToken, taskAccessKey, retainedEditorDraft]);
 
   useEffect(() => {
     if (caseItem?.id !== caseId) return;
@@ -2718,7 +2748,11 @@ function CaseDetailScreen({
   };
 
   const reportCaseError = (error: unknown, fallback: string) => {
+    if (!captureScreen()) return;
     if (isHttpErrorStatus(error, 401) || isHttpErrorStatus(error, 403)) {
+      retainedEditorDraft.current = null;
+      setCaseEditDraftState(null);
+      setEditPageOpen(false);
       caseReadConfirmed.current = false; currentCase.current = null; setCaseItem(null);
     }
     setError(extractDisplayErrorMessage(error, fallback));
@@ -2840,7 +2874,7 @@ function CaseDetailScreen({
       if (!updated || updated.id !== caseItem.id) throw new Error('Не удалось подтвердить сохранение текущего дела.');
       currentCase.current = updated;
       setCaseItem(updated);
-      setCaseEditDraft(buildCaseEditDraft(updated));
+      setCaseEditDraft(null);
       setEditPageOpen(false);
       rememberStageTransition(previousStage, updated);
       setNotice('Карточка дела обновлена.');

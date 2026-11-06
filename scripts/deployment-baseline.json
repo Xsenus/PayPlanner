@@ -1081,8 +1081,23 @@
     }
   ],
   "expectedBaselineMigrationIdsSha256": "ebc0e5a0067a56264043c62d5def45e8513710b8ada9fb6be213f6115b9c8121",
-  "expectedReleaseCatalogSha256": "7d0ca749b5aa9dbd09a8c998e9dae948b202318343d143e94d2a3f0625d32ab9",
+  "expectedReleaseCatalogSha256": "9c1924904c8de341e1147d4ff99a069383137afa43c94d1222e4a3b218253c79",
   "expectedReleaseSeeds": [
+    {
+      "releaseId": "2026-11-06-case-editor-reconnect-draft",
+      "version": "1.14.911",
+      "releasedAt": "2026-11-06T01:15:04Z",
+      "title": "Черновик дела после восстановления соединения",
+      "summary": "Несохранённые поля редактора дела сохраняются при переподключении к серверу.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "После кратковременного разрыва соединения редактор дела возвращает введённые поля, когда доступ к этому делу подтверждён заново. Сохранение выполняется только по вашей команде. При смене пользователя, дела или прав прежний черновик не открывается."
+        }
+      ]
+    },
     {
       "releaseId": "2026-11-06-court-max-source-admission",
       "version": "1.14.910",

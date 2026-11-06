@@ -383,7 +383,7 @@ jobs:
       qualified-artifact-id: ${{ steps.qualified-upload.outputs.shard_0_id }}
     needs: [backend-build, backend-format, frontend]
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
-    timeout-minutes: 150
+    timeout-minutes: 180
     concurrency:
       group: payplanner-xsenus-backend-tests
       queue: max
@@ -504,7 +504,7 @@ jobs:
       qualified-artifact-id: ${{ steps.qualified-upload.outputs.shard_1_id }}
     needs: [backend-build, backend-format, frontend]
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
-    timeout-minutes: 150
+    timeout-minutes: 180
     concurrency:
       group: payplanner-xsenus-backend-tests
       queue: max
@@ -625,7 +625,7 @@ jobs:
       qualified-artifact-id: ${{ steps.qualified-upload.outputs.shard_2_id }}
     needs: [backend-build, backend-format, frontend]
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
-    timeout-minutes: 150
+    timeout-minutes: 180
     concurrency:
       group: payplanner-xsenus-backend-tests
       queue: max
@@ -746,7 +746,7 @@ jobs:
       qualified-artifact-id: ${{ steps.qualified-upload.outputs.shard_3_id }}
     needs: [backend-build, backend-format, frontend]
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
-    timeout-minutes: 150
+    timeout-minutes: 180
     concurrency:
       group: payplanner-xsenus-backend-tests
       queue: max

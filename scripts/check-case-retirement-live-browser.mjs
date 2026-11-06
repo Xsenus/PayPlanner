@@ -182,6 +182,7 @@ try {
     page.on('requestfinished', request => traceRead('finished', request));
     page.on('requestfailed', request => traceRead('failed', request));
     let retirePosts = 0; let filePosts = 0; let caseSaves = 0; let documentReads = 0; let publisherPosts = 0;
+    let caseDetailReads = 0; let caseDetailReadsBeforeRestart = 0;
     let uploadInputState = null;
     const uploadResponseAtPhase = (phase, predicate) => page.waitForResponse(predicate).catch(error => {
       if (error && typeof error.message === 'string') {
@@ -261,6 +262,7 @@ try {
       if ((url.pathname === '/api/v2/cases/' + settings.caseId || url.pathname === '/api/v2/cases')
         && ['POST', 'PUT', 'PATCH'].includes(request.method())) caseSaves++;
       if (url.pathname === '/api/v2/cases/' + settings.caseId + '/documents' && request.method() === 'GET') documentReads++;
+      if (url.pathname === '/api/v2/cases/' + settings.caseId && request.method() === 'GET') caseDetailReads++;
       if (url.pathname.endsWith('/retire') && request.method() === 'POST') {
         retirePosts++; check(retirePosts === (manualRecovery ? 2 : 1), 'Retirement was repeated without a separate confirmation');
         if (revoked) {
@@ -292,6 +294,7 @@ try {
               await new Promise(resolveInitial => { notifyInitialConnection = resolveInitial; });
             });
           } finally { notifyInitialConnection = undefined; }
+          caseDetailReadsBeforeRestart = caseDetailReads;
           restartObserver.beginRestart();
           restarting = true;
           const boundary = await page.request.post(settings.controlUrl);
@@ -368,6 +371,12 @@ try {
     await dialog.getByRole('button', { name: 'Подтвердить', exact: true }).click();
     if (restarted) {
       await restartFinished;
+      if (!restartObserver.hasProof()) await new Promise((resolve, reject) => {
+        // Use the existing reconnect deadline before the next explicit action,
+        // so its access refresh cannot race that action's response.
+        const timer = setTimeout(() => { notifyReconnect = undefined; reject(new Error('Notifications did not reconnect after the owned server restart: ' + JSON.stringify(restartObserver.snapshot()))); }, 40000);
+        notifyReconnect = () => { clearTimeout(timer); notifyReconnect = undefined; resolve(); };
+      });
       const unresolved = panel.getByText('Не удалось подтвердить результат. Обновите загрузки перед следующим действием.', { exact: true });
       const succeeded = panel.getByText('Прежняя попытка прекращена. Новый файл выберите и отправьте отдельно.', { exact: true });
       // The durable row alone can precede the action result. Only its enabled
@@ -406,21 +415,26 @@ try {
     await waitAtPhase(panel.getByText(publishedWinner
       ? 'Прежняя попытка уже добавила документ. Он сохранён. Новый файл выберите и отправьте отдельно.'
       : 'Прежняя попытка прекращена. Новый файл выберите и отправьте отдельно.', { exact: true }), 'retirement-receipt');
+    // Complete the actual access-refresh response bodies before counting reads
+    // or starting a new upload. This is the same pre-upload boundary as below.
+    await caseReads.drain('document-upload');
     if (publishedWinner) {
       await page.waitForFunction(() => Array.from(document.querySelectorAll('button'))
         .some(button => button.textContent === 'Обновить загрузки' && !button.disabled));
       check(documentReads === readsBeforeConfirmation + 1, 'Published winner did not refresh exactly the document list');
       check(publisherPosts === 1, 'The actual racing publisher did not run once');
-    } else check(documentReads === readsBeforeConfirmation, 'Retirement refreshed unrelated document data');
+    } else {
+      const accessRefreshReads = restarted && !modal ? 1 : 0;
+      if (accessRefreshReads) check(caseDetailReads === caseDetailReadsBeforeRestart + 1, 'Reconnect must confirm the current case exactly once');
+      check(documentReads === readsBeforeConfirmation + accessRefreshReads,
+        'Retirement refreshed unrelated document data beyond the single reconnect access refresh');
+    }
     check(retirePosts === (manualRecovery ? 2 : 1) && filePosts === 0, 'Retirement sent a file or repeated automatically');
     if (editing) check(await page.getByRole('textbox', { name: 'Стратегия и план действий', exact: true }).inputValue() === 'Unsaved browser strategy', 'Confirmation lost unsaved strategy');
     const registry = await page.evaluate(() => sessionStorage.getItem('pp.case-document-upload-attempts.v1'));
     check(registry === null, 'Confirmed retirement retained its browser identity');
     if (settings.lostAck) check(reads.some(keys => keys.includes(settings.key)), 'Lost acknowledgement did not read the exact key');
     if (restarted) check(restartApplied, 'The server was never restarted after the committed retirement');
-    // Upload completion changes the status-panel revision. Do not let the
-    // fixture's next write cancel an earlier discovery response under load.
-    await caseReads.drain('document-upload');
     tracePhase = 'document-upload';
     if (versionAttempt) {
       const inputName = modal ? 'Загрузить новую версию base-browser-version.bin' : 'Загрузить новую версию документа base-browser-version.bin';
@@ -442,10 +456,15 @@ try {
       if (editing) check(await page.getByRole('textbox', { name: 'Стратегия и план действий', exact: true }).inputValue() === 'Unsaved browser strategy', 'Version lost unsaved strategy');
     } else if (editing) {
       const writFileName = settings.flow.includes('writ') ? settings.pending.fileName : 'separate-browser-writ.pdf';
+      const input = page.getByLabel('Загрузить скан исполнительного листа', { exact: true });
+      await waitAtPhase(input, 'separate-writ-input', { state: 'attached' });
+      await page.waitForFunction(() => {
+        const input = document.querySelector('input[aria-label="Загрузить скан исполнительного листа"]');
+        return input instanceof HTMLInputElement && !input.disabled;
+      });
       const [writResponse] = await Promise.all([
         uploadResponseAtPhase('separate-writ-response', response => new URL(response.url()).pathname === '/api/v2/cases/' + settings.caseId + '/documents' && response.request().method() === 'POST'),
         (async () => {
-          const input = page.getByLabel('Загрузить скан исполнительного листа', { exact: true });
           await input.setInputFiles({ name: writFileName, mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\nOwned browser writ\n%%EOF') });
           uploadInputState = await input.evaluate(element => ({ connected: element.isConnected, disabled: element.disabled, files: element.files?.length ?? 0 }));
         })(),
@@ -477,11 +496,6 @@ try {
     check(filePosts === 2 && new Set(fileKeys).size === 2 && !fileKeys.includes(settings.key), 'Version identity was reused');
     }
     check(caseSaves === 0, 'Document actions saved unrelated case fields');
-    if (restarted && !restartObserver.hasProof()) await new Promise((resolve, reject) => {
-      // The existing reconnect schedule includes a 30-second delay after a long outage.
-      const timer = setTimeout(() => { notifyReconnect = undefined; reject(new Error('Notifications did not reconnect after the owned server restart: ' + JSON.stringify(restartObserver.snapshot()))); }, 40000);
-      notifyReconnect = () => { clearTimeout(timer); notifyReconnect = undefined; resolve(); };
-    });
     const reconnectProved = restarted && restartObserver.hasProof();
     if (restarted) check(reconnectProved, 'The restarted server did not acknowledge a new notification connection');
     // A visible upload result may precede its refreshed status read. Complete

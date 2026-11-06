@@ -6,6 +6,7 @@ import App from './App';
 import { LAST_TAB_STORAGE_KEY } from './appRouting';
 const userLastTabKey = `${LAST_TAB_STORAGE_KEY}.1`;
 import { apiService } from './services/api';
+import { USER_NOTIFICATIONS_EVENT } from './utils/userNotifications';
 
 const permissionsState = vi.hoisted(() => ({
   paymentsCanView: true,
@@ -187,6 +188,7 @@ vi.mock('./components/Cases/CaseDetailPage', () => ({
   CaseDetailPage: ({
     caseId,
     caseAccessKey,
+    caseRefreshKey,
     canSendToYandexDisk,
     onOpenFinance,
     onBack,
@@ -194,6 +196,7 @@ vi.mock('./components/Cases/CaseDetailPage', () => ({
   }: {
     caseId: number;
     caseAccessKey?: string;
+    caseRefreshKey?: number;
     canSendToYandexDisk?: boolean;
     onOpenFinance?: (caseItem: { id: number; clientId: number | null; legalEntityId: number | null }) => void;
     onBack?: () => void;
@@ -202,6 +205,7 @@ vi.mock('./components/Cases/CaseDetailPage', () => ({
     <section data-testid="case-detail">
       <span>case {caseId}</span>
       <span data-testid="case-access-key">{caseAccessKey}</span>
+      <span data-testid="case-refresh-key">{caseRefreshKey}</span>
       <span data-testid="case-disk-admission">{canSendToYandexDisk ? 'allowed' : 'denied'}</span>
       <span>{window.sessionStorage.getItem(`pp.case-detail.${caseId}.view.v1`)}</span>
       <button type="button" onClick={onBack}>{backLabel ?? 'back from case'}</button>
@@ -810,6 +814,16 @@ describe('App calendar client navigation', () => {
     expect((await screen.findByTestId('case-disk-admission')).textContent).toBe(canExport && canCreate ? 'allowed' : 'denied');
   });
 
+
+  it('case reconnect: requests a fresh case without changing the semantic access identity', async () => {
+    window.history.replaceState({}, '', '/cases/164');
+    render(<App />);
+    const previous = (await screen.findByTestId('case-access-key')).textContent;
+    const refreshBefore = screen.getByTestId('case-refresh-key').textContent;
+    fireEvent(window, new CustomEvent(USER_NOTIFICATIONS_EVENT, { detail: { source: 'realtime', reason: 'reconnected' } }));
+    await waitFor(() => expect(screen.getByTestId('case-refresh-key').textContent).not.toBe(refreshBefore));
+    expect(screen.getByTestId('case-access-key').textContent).toBe(previous);
+  });
 
   it.each(['clients', 'legalEntities', 'audit', 'yandexDisk'] as const)('case source admission baseline: %s changes invalidate the active case context', async section => {
     window.history.replaceState({}, '', '/cases/164');

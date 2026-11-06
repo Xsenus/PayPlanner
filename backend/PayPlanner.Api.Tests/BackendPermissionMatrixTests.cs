@@ -29,6 +29,7 @@ public class BackendPermissionMatrixTests
         [
             new RolePermission { Section = RolePermissionCatalog.Clients, CanView = true, ViewScope = DataVisibilityScope.Own },
         ]);
+        user.IsApproved = true;
         var other = await CreateUserAsync(db, "client-profile-other", roleName: "other-employee");
         var own = new Client { Name = "Own", ResponsibleUserId = user.Id, Notes = "__PP_CLIENT_PROFILE_V2__:{\"passportNumber\":\"111111\"}" };
         var hidden = new Client { Name = "Hidden", ResponsibleUserId = other.Id, Notes = "__PP_CLIENT_PROFILE_V2__:{\"passportNumber\":\"222222\"}" };
@@ -68,6 +69,7 @@ public class BackendPermissionMatrixTests
             CanEdit = true,
             ViewScope = DataVisibilityScope.Own,
         });
+        user.IsApproved = true;
         var other = await CreateUserAsync(db, "passport-other", roleName: "other-employee");
         var own = new Client { Name = "Own", ResponsibleUserId = user.Id };
         var hidden = new Client { Name = "Hidden", ResponsibleUserId = other.Id };
@@ -99,6 +101,7 @@ public class BackendPermissionMatrixTests
             CanView = false,
             ViewScope = DataVisibilityScope.Own,
         });
+        user.IsApproved = true;
         var client = new Client { Name = "Restricted", ResponsibleUserId = user.Id };
         db.Clients.Add(client);
         await db.SaveChangesAsync();
@@ -108,6 +111,10 @@ public class BackendPermissionMatrixTests
         };
         Assert.IsType<ForbidResult>(await controller.Get(client.Id, CancellationToken.None));
         Assert.IsType<ForbidResult>(await controller.Upsert(client.Id, new UpsertClientPassportRequest { Number = "333333" }, CancellationToken.None));
+        Assert.False(await db.ClientPassports.AnyAsync(item => item.ClientId == client.Id));
+        await db.Users.Where(item => item.Id == user.Id).ExecuteUpdateAsync(update => update.SetProperty(item => item.IsApproved, false));
+        Assert.IsType<UnauthorizedResult>(await controller.Get(client.Id, CancellationToken.None));
+        Assert.IsType<UnauthorizedResult>(await controller.Upsert(client.Id, new UpsertClientPassportRequest { Number = "333333" }, CancellationToken.None));
         Assert.False(await db.ClientPassports.AnyAsync(item => item.ClientId == client.Id));
     }
 

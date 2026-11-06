@@ -74,15 +74,15 @@ test('binds qualified needs, exact package maps, current history, source pins an
   assert.equal(plan.rollbackAfterStartup, 'halt-for-manual-review');
 });
 
-test('qualifies exactly the reviewed eighteen-migration candidate and all 768 release insertions', t => {
+test('qualifies exactly the reviewed eighteen-migration candidate and all 769 release insertions', t => {
   const input = fixture(t, true);
   const { plan, qualificationRaw } = createPlan(input);
   const review = reviewedCandidate(input.root);
   assert.equal(plan.expectedMigration, review.migrationIds.join('+'));
-  assert.equal(plan.expectedReleaseSeeds.length, 768);
-  assert.deepEqual(plan.expectedReleaseSeeds.slice(0, 5).map(entry => entry.version), ['1.14.910', '1.14.909', '1.14.908', '1.14.907', '1.14.906']);
+  assert.equal(plan.expectedReleaseSeeds.length, 769);
+  assert.deepEqual(plan.expectedReleaseSeeds.slice(0, 5).map(entry => entry.version), ['1.14.911', '1.14.910', '1.14.909', '1.14.908', '1.14.907']);
   assert.ok(plan.expectedReleaseSeeds.slice(0, 5).every(entry => entry.isActive === true));
-  assert.deepEqual(plan.expectedReleaseSeeds, JSON.parse(readFileSync(join(input.root, 'out/be/AppReleases/releases.json'), 'utf8')).slice(0, 768));
+  assert.deepEqual(plan.expectedReleaseSeeds, JSON.parse(readFileSync(join(input.root, 'out/be/AppReleases/releases.json'), 'utf8')).slice(0, 769));
   assert.equal(plan.expectedReleaseCatalogSha256, review.releaseCatalogSha256);
   assert.deepEqual(JSON.parse(qualificationRaw).expectedReleaseSeeds, plan.expectedReleaseSeeds);
 });

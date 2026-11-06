@@ -22,7 +22,7 @@
     "20261105070010_AddCaseCourtNotificationOutboxPostgreSql"
   ],
   "schemaDeltaSha256": "c3a058180698a2b2aa99626d8a946d5b031b49fa7ccfbd138055e359c76fae05",
-  "releaseCatalogSha256": "7d0ca749b5aa9dbd09a8c998e9dae948b202318343d143e94d2a3f0625d32ab9",
-  "releaseSeedsCount": 768,
-  "releaseSeedsSha256": "82894c7b5f789fef34e30e78bb2c1a8eca68de200dbc2b8f1efefe9f0c022f93"
+  "releaseCatalogSha256": "9c1924904c8de341e1147d4ff99a069383137afa43c94d1222e4a3b218253c79",
+  "releaseSeedsCount": 769,
+  "releaseSeedsSha256": "bd618ff12fae350ea1c8f35f73ea96ba596dbd44cf2c1b9299a52ce012b2431e"
 }

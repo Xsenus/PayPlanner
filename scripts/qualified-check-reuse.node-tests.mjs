@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { allowedReuseDiff, boundedText, cacheSteps, compatibleRecipes, formatChecks, frontendChecks, parsedTools,
-  previousQualification, producerRecipe, qualifiesProducer, reuseCondition, trustedLogRedirect, validateReusePlumbing } from './qualified-check-reuse.mjs';
+  previousQualification, producerRecipe, qualifiesProducer, reuseCondition, reviewedBrowserFixtureRevision, reviewedFormatOnlyPaths, trustedLogRedirect, validateReusePlumbing } from './qualified-check-reuse.mjs';
 import { parseWorkflow } from './validate-deploy-workflow.mjs';
 
 const currentSha = 'a'.repeat(40), oldSha = 'b'.repeat(40);
@@ -72,8 +72,9 @@ test('actual workflow has complete proof plumbing and fresh affected gates', () 
 test('only a bounded test/documentation/infrastructure diff is eligible', () => {
   assert.equal(allowedReuseDiff([]), true);
   assert.equal(allowedReuseDiff(['backend/PayPlanner.Api.Tests/New.cs', 'docs/checkpoint.md', 'AGENTS.md', '.github/workflows/deploy.yml']), true);
+  assert.equal(allowedReuseDiff(['scripts/check-task-upload-live-browser.mjs', 'scripts/check-case-retirement-live-browser.mjs']), true);
   for (const path of ['src/App.tsx', 'backend/Controllers/ClientsController.cs', 'backend/AppReleases/releases.json', 'package-lock.json', 'global.json',
-    '.editorconfig', 'scripts/prepare-deployment-plan.mjs', 'backend/PayPlanner.Api.Tests/../Controllers/Bad.cs', 'docs/a.md\n', 'docs\\a.md', '/docs/a.md']) {
+    '.editorconfig', 'scripts/prepare-deployment-plan.mjs', 'scripts/check-case-court-live-browser.mjs', 'backend/PayPlanner.Api.Tests/../Controllers/Bad.cs', 'docs/a.md\n', 'docs\\a.md', '/docs/a.md']) {
     assert.equal(allowedReuseDiff([path]), false, path);
   }
   assert.equal(allowedReuseDiff(Array(1001).fill('docs/a.md')), false);
@@ -200,7 +201,47 @@ function contextFixture(mode = 'frontend', alter = () => {}) {
   };
   return { env, git, getJson, getLog: async () => fixture.logs, tools, now, bootTime: now - 86_400_000 };
 }
+for (const path of reviewedFormatOnlyPaths) {
+  for (const mode of ['frontend', 'format']) for (const reviewed of [false, true]) {
+    test(mode + ': format-independent path requires its exact reviewed input graph ' + path + ' ' + reviewed, async () => {
+      const fixture = contextFixture(mode, value => {
+        value.paths = [path];
+        if (reviewed) {
+          value.sample.run.head_sha = reviewedBrowserFixtureRevision;
+          value.sample.job.head_sha = reviewedBrowserFixtureRevision;
+        }
+      });
+      assert.equal((await previousQualification(fixture)).reused, mode === 'format' && reviewed);
+    });
+  }
+}
+for (const path of ['backend/PayPlanner.Api.csproj', 'backend/Controllers/CasesV2Controller.cs', 'Directory.Build.props',
+  '.editorconfig', 'src/Other.tsx', 'scripts/Other.mjs']) {
+  test('format: unreviewed input still rejects reuse ' + path, async () => {
+    const fixture = contextFixture('format', value => {
+      value.paths = [path];
+      value.sample.run.head_sha = reviewedBrowserFixtureRevision;
+      value.sample.job.head_sha = reviewedBrowserFixtureRevision;
+    });
+    assert.equal((await previousQualification(fixture)).reused, false);
+  });
+}
+test('an unknown reuse mode never receives a diff admission', () => assert.equal(allowedReuseDiff([], 'other'), false));
 for (const mode of ['frontend', 'format']) {
+  for (const reviewed of [true, false]) {
+    test(mode + ': isolated browser drivers require the reviewed consumer revision ' + reviewed, async () => {
+      const fixture = contextFixture(mode, value => {
+        value.paths = ['scripts/check-task-upload-live-browser.mjs', 'scripts/check-case-retirement-live-browser.mjs'];
+        if (reviewed) {
+          value.sample.run.head_sha = reviewedBrowserFixtureRevision;
+          value.sample.job.head_sha = reviewedBrowserFixtureRevision;
+        }
+      });
+      const result = await previousQualification(fixture);
+      assert.equal(result.reused, reviewed);
+      if (reviewed) assert.equal(result.sourceRevision, reviewedBrowserFixtureRevision);
+    });
+  }
   test(mode + ': official producer and source proof qualify together', async () => {
     const result = await previousQualification(contextFixture(mode));
     assert.equal(result.reused, true);
