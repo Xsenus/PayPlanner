@@ -6,7 +6,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer as createControlServer } from 'node:http';
 import { build, preview } from 'vite';
 import { prepareSyntheticBrowserUi } from './synthetic-browser-ui.mjs';
-import { completeCaseUploadResponse, createCaseReadLifecycle, createCaseRestartObserver, createCaseStartupReadTrace, isCaseBoundaryRead, waitForCaseRestartResolution } from './case-retirement-browser-lifecycle.mjs';
+import { completeCaseUploadResponse, createCaseReadLifecycle, createCaseRetirementProofTrace, createCaseRestartObserver, createCaseStartupReadTrace, isCaseBoundaryRead, observeCaseRetirementOperation, waitForCaseRestartResolution } from './case-retirement-browser-lifecycle.mjs';
 import { openRetirementProductionBundle, retirementBundlePhase, withRetirementBuildEnvironment } from './case-retirement-production-bundle.mjs';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
@@ -203,6 +203,8 @@ try {
     let realtimeInterruptions = 0;
     let proofRefusals = 0;
     let manualRecovery = false;
+    let acknowledgedRestartReceipt = null;
+    let retirementOperationOutcome = null;
     let finishRestart;
     const restartFinished = new Promise(resolve => { finishRestart = resolve; });
     let notifyInitialConnection;
@@ -217,6 +219,7 @@ try {
     };
     const caseReads = (${createCaseReadLifecycle})(page,
       request => (${isCaseBoundaryRead})(request, settings.api, settings.caseId), 20000);
+    const proofTrace = (${createCaseRetirementProofTrace})(page, settings.api, settings.caseId, settings.key);
     page.setDefaultTimeout(20000);
     page.on('pageerror', error => errors.push(error.message));
     const createRestartObserver = (${createCaseRestartObserver});
@@ -358,6 +361,10 @@ try {
     }
     const panel = page.getByRole('region', { name: 'Состояние ваших загрузок', exact: true });
     await waitAtPhase(panel.getByText(settings.pending.fileName, { exact: true }), 'owned-attempt-visible');
+    if (restarted) await page.evaluate(async settings => {
+      const { apiService } = await import(settings.fixtureModule);
+      window.__payplannerOwnedRetirement = (${observeCaseRetirementOperation.toString()})(apiService, settings.caseId, settings.key);
+    }, settings);
     tracePhase = 'retirement-dialog';
     await panel.getByRole('button', { name: 'Подготовить новую загрузку', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Подготовить новую загрузку', exact: true });
@@ -379,14 +386,25 @@ try {
       });
       const unresolved = panel.getByText('Не удалось подтвердить результат. Обновите загрузки перед следующим действием.', { exact: true });
       const succeeded = panel.getByText('Прежняя попытка прекращена. Новый файл выберите и отправьте отдельно.', { exact: true });
-      // The durable row alone can precede the action result. Only its enabled
-      // explicit-confirmation button proves that the UI still retains the identity.
-      const retired = panel.getByRole('listitem').filter({ hasText: 'Прежняя попытка прекращена и больше не добавит документ. Новый файл отправляется отдельным действием.' })
+      // Observe actual settlement, rather than infer it from a notice that a
+      // reconnect access refresh may replace. This uses the existing page timeout.
+      await waitAtPhase({ waitFor: () => page.waitForFunction(() => {
+        const operation = window.__payplannerOwnedRetirement?.snapshot();
+        return operation?.attempt === 1 && ['fulfilled', 'rejected'].includes(operation.phase);
+      }) }, 'restart-operation-settled');
+      const operation = await page.evaluate(() => window.__payplannerOwnedRetirement.snapshot());
+      const retired = panel.getByRole('listitem').filter({ hasText: settings.pending.fileName })
+        .filter({ hasText: 'Прежняя попытка прекращена и больше не добавит документ. Новый файл отправляется отдельным действием.' })
         .getByRole('button', { name: 'Подготовить новую загрузку', exact: true, disabled: false });
-      if (await (${waitForCaseRestartResolution.toString()})(unresolved, succeeded, waitAtPhase, retired)) {
+      if (await (${waitForCaseRestartResolution.toString()})(unresolved, succeeded, waitAtPhase, retired, operation)) {
         check(retirePosts === 1 && filePosts === 0 && caseSaves === 0, 'Unresolved restart triggered an automatic write');
         const retained = await page.evaluate(() => JSON.parse(sessionStorage.getItem('pp.case-document-upload-attempts.v1')));
-        check(retained?.length === 1 && retained[0].key === settings.key, 'Unavailable proof released the identity');
+        check(retained?.length === 1 && retained[0].key === settings.key, 'Unavailable proof released the identity: ' + JSON.stringify({
+          registryCount: Array.isArray(retained) ? Math.min(retained.length, 65) : null,
+          expectedKeyPresent: Array.isArray(retained) && retained.some(row => row?.key === settings.key),
+          proofReads: proofTrace.snapshot(), caseReads: caseReads.snapshot(), startupReads: startupReads.snapshot(),
+          retirePosts, filePosts, caseSaves, caseDetailReads, proofRefusals,
+        }));
         check(await page.getByRole('textbox', { name: 'Стратегия и план действий', exact: true }).inputValue() === 'Unsaved browser strategy', 'Unavailable proof lost unsaved fields');
         await panel.getByRole('button', { name: 'Обновить загрузки', exact: true }).click();
         await waitAtPhase(panel.getByText('Прежняя попытка прекращена и больше не добавит документ. Новый файл отправляется отдельным действием.', { exact: true }), 'restart-receipt');
@@ -395,7 +413,7 @@ try {
         await panel.getByRole('button', { name: 'Подготовить новую загрузку', exact: true }).click();
         manualRecovery = true;
         await dialog.getByRole('button', { name: 'Подтвердить', exact: true }).click();
-      }
+      } else acknowledgedRestartReceipt = retired;
       if (settings.flow.includes('slow')) check(manualRecovery && proofRefusals > 0, 'The forced outage did not exercise explicit unresolved-proof recovery');
       if (proofRefusals > 0) check(manualRecovery, 'A refused proof was silently accepted');
     }
@@ -412,9 +430,11 @@ try {
       await caseReads.drain('browser-close');
       return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ flow: settings.flow, retirePosts, filePosts, rightsApplied, readTrace });
     }
-    await waitAtPhase(panel.getByText(publishedWinner
+    const confirmationReceipt = panel.getByText(publishedWinner
       ? 'Прежняя попытка уже добавила документ. Он сохранён. Новый файл выберите и отправьте отдельно.'
-      : 'Прежняя попытка прекращена. Новый файл выберите и отправьте отдельно.', { exact: true }), 'retirement-receipt');
+      : 'Прежняя попытка прекращена. Новый файл выберите и отправьте отдельно.', { exact: true });
+    await waitAtPhase(acknowledgedRestartReceipt ? confirmationReceipt.or(acknowledgedRestartReceipt).first()
+      : confirmationReceipt, 'retirement-receipt');
     // Complete the actual access-refresh response bodies before counting reads
     // or starting a new upload. This is the same pre-upload boundary as below.
     await caseReads.drain('document-upload');
@@ -433,6 +453,12 @@ try {
     if (editing) check(await page.getByRole('textbox', { name: 'Стратегия и план действий', exact: true }).inputValue() === 'Unsaved browser strategy', 'Confirmation lost unsaved strategy');
     const registry = await page.evaluate(() => sessionStorage.getItem('pp.case-document-upload-attempts.v1'));
     check(registry === null, 'Confirmed retirement retained its browser identity');
+    if (restarted) {
+      const operation = await page.evaluate(() => window.__payplannerOwnedRetirement.snapshot());
+      check(operation.attempt === (manualRecovery ? 2 : 1) && operation.phase === 'fulfilled' && operation.ownedTerminal,
+        'The real retirement operation did not acknowledge the exact owned attempt');
+      retirementOperationOutcome = operation;
+    }
     if (settings.lostAck) check(reads.some(keys => keys.includes(settings.key)), 'Lost acknowledgement did not read the exact key');
     if (restarted) check(restartApplied, 'The server was never restarted after the committed retirement');
     tracePhase = 'document-upload';
@@ -498,13 +524,17 @@ try {
     check(caseSaves === 0, 'Document actions saved unrelated case fields');
     const reconnectProved = restarted && restartObserver.hasProof();
     if (restarted) check(reconnectProved, 'The restarted server did not acknowledge a new notification connection');
+    if (restarted) await page.evaluate(() => {
+      window.__payplannerOwnedRetirement.restore();
+      delete window.__payplannerOwnedRetirement;
+    });
     // A visible upload result may precede its refreshed status read. Complete
     // actual response bodies before this fixture closes the browser connection.
     await caseReads.drain('browser-close');
     tracePhase = 'browser-close';
     check(outside.length === 0, 'Browser attempted an external request');
     check(errors.length === 0, 'Browser page errors: ' + JSON.stringify(errors));
-    return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ flow: settings.flow, retirePosts, filePosts, publisherPosts, lostAck: settings.lostAck, restartApplied, manualRecovery, proofRefusals, realtimeInterruptions, reconnectProved, exactProofRead: reads.some(keys => keys.includes(settings.key)), readTrace });
+    return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ flow: settings.flow, retirePosts, filePosts, publisherPosts, lostAck: settings.lostAck, restartApplied, manualRecovery, proofRefusals, realtimeInterruptions, reconnectProved, retirementOperationOutcome, exactProofRead: reads.some(keys => keys.includes(settings.key)), readTrace });
   }`;
   // Windows limits command lines to 32K characters. Keep the complete scenario
   // and its synthetic credentials in the owned temporary root, not in argv.

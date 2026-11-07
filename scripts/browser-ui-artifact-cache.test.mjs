@@ -172,7 +172,7 @@ describe('per-preview loopback runtime', () => {
     await writeFile(join(root, 'package-lock.json'), '{}');
     await writeFile(join(root, 'index.html'), '<html><head></head><body><script type="module" src="/src/entry.js"></script></body></html>');
     await writeFile(join(root, 'src/entry.js'), "globalThis.readApi = () => fetch(import.meta.env.VITE_API_URL + '/identity').then(r => r.text()); globalThis.production = import.meta.env.PROD; globalThis.development = import.meta.env.DEV;");
-    await writeFile(join(root, 'scripts/case-browser-fixture-entry.mjs'), 'export const beginCaseDocumentUpload = () => {}; export const getAuthToken = () => {};');
+    await writeFile(join(root, 'scripts/case-browser-fixture-entry.mjs'), 'export const beginCaseDocumentUpload = () => {}; export const getAuthToken = () => {}; export const apiService = {};');
     const listen = async server => {
       servers.push(server);
       await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));

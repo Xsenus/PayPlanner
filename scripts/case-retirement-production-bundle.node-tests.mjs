@@ -38,12 +38,21 @@ async function fixture(t) {
       { type: 'chunk', isEntry: true, name: 'index', code: 'compiled-index', fileName: 'index.js', exports: [],
         moduleIds: ['/src/services/realtimeNotifications.ts', '/src/components/Notifications/RealtimeNotificationToasts.tsx'] },
       { type: 'chunk', isEntry: true, name: 'case-retirement-fixture', fileName: 'fixture.js',
-        exports: ['beginCaseDocumentUpload', 'getAuthToken'], moduleIds: [] },
+        exports: ['beginCaseDocumentUpload', 'getAuthToken', 'apiService'], moduleIds: [] },
     ] };
   };
   return { root, owner, repo, api, build, count: () => builds,
     open: overrides => openRetirementProductionBundle({ root, owner, repo, api, build, ...overrides }) };
 }
+
+test('the fixture must expose the real API operation, not only the upload identity helper', async t => {
+  const f = await fixture(t);
+  await assert.rejects(f.open({ build: async config => {
+    const result = await f.build(config);
+    result.output.find(chunk => chunk.name === 'case-retirement-fixture').exports = ['beginCaseDocumentUpload', 'getAuthToken'];
+    return result;
+  } }), /real API operation/);
+});
 
 test('one cold production build serves subsequent verified hits, never scenario outcomes', async t => {
   const f = await fixture(t);

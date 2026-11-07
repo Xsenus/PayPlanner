@@ -75,7 +75,7 @@ export async function prepareSyntheticBrowserUi({ api, port, root = process.cwd(
         assert.ok(chunks.some(chunk => chunk.isEntry && chunk.name === 'index' && chunk.codeLength > 0), 'The real production UI entry must compile.');
         const fixture = chunks.filter(chunk => chunk.isEntry && chunk.name === 'case-retirement-fixture');
         assert.equal(fixture.length, 1, 'The real upload helper must have one compiled fixture entry.');
-        assert.ok(['beginCaseDocumentUpload', 'getAuthToken'].every(name => fixture[0].exports.includes(name)), 'Preserve the real upload and authentication helpers.');
+        assert.ok(['beginCaseDocumentUpload', 'getAuthToken', 'apiService'].every(name => fixture[0].exports.includes(name)), 'Preserve the real upload, authentication and API operation helpers.');
         return { chunks };
       },
     });

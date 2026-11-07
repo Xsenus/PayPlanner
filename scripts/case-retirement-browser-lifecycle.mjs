@@ -1,6 +1,19 @@
 // Serialized into Playwright CLI's minimal VM. Keep all state and dependencies
 // inside the function; this observes actual requests without replacing them.
-export async function waitForCaseRestartResolution(unresolved, succeeded, waitAtPhase, retired) {
+export async function waitForCaseRestartResolution(unresolved, succeeded, waitAtPhase, retired, operation) {
+  if (operation !== undefined) {
+    if (operation?.attempt !== 1 || !['fulfilled', 'rejected'].includes(operation.phase)
+      || (operation.phase === 'fulfilled' && (operation.ownedTerminal !== true
+        || !['retired', 'uploaded'].includes(operation.receiptStatus))))
+      throw new Error('The real owned retirement operation has no settled terminal result.');
+    // Reconnection can replace a notice after the real API promise has already
+    // acknowledged the receipt. A durable row alone cannot choose this branch.
+    const accepted = operation.phase === 'fulfilled';
+    const result = accepted ? (retired && operation.receiptStatus === 'retired' ? succeeded.or(retired).first() : succeeded)
+      : retired ? unresolved.or(retired).first() : unresolved;
+    await waitAtPhase(result, 'restart-resolution');
+    return !accepted;
+  }
   // The restart acknowledgement precedes the browser's fallback proof read.
   // Decide only after the UI has actually resolved that read, under its existing deadline.
   // A reconnect refresh can replace a transient notice with the durable retired
@@ -10,6 +23,72 @@ export async function waitForCaseRestartResolution(unresolved, succeeded, waitAt
   await waitAtPhase(outcome, 'restart-resolution');
   // A successful notice takes precedence over the durable row that may remain.
   return retired ? !await succeeded.isVisible() && (await unresolved.isVisible() || await retired.isVisible()) : unresolved.isVisible();
+}
+
+// Observe the real API promise without changing its receiver, arguments, identity,
+// result or rejection. No request, token, error text or receipt payload is stored.
+export function observeCaseRetirementOperation(service, caseId, uploadKey) {
+  const descriptor = Object.getOwnPropertyDescriptor(service, 'retireCaseDocumentUpload');
+  const original = service.retireCaseDocumentUpload;
+  let current = { attempt: 0, phase: 'idle', ownedTerminal: false, receiptStatus: 'unknown' };
+  const wrapped = function (...args) {
+    const matching = args[0] === caseId && typeof args[1] === 'string' && args[1].toLowerCase() === uploadKey.toLowerCase();
+    const observation = matching ? { attempt: Math.min(current.attempt + 1, 65), phase: 'pending', ownedTerminal: false, receiptStatus: 'unknown' } : null;
+    if (observation) current = observation;
+    let result;
+    try { result = original.apply(this, args); }
+    catch (error) { if (observation) observation.phase = 'rejected'; throw error; }
+    if (observation) void Promise.resolve(result).then(receipt => {
+      observation.phase = 'fulfilled';
+      try {
+        const own = typeof receipt?.uploadKey === 'string' && receipt.uploadKey.toLowerCase() === uploadKey.toLowerCase();
+        observation.receiptStatus = ['retired', 'uploaded'].includes(receipt?.status) ? receipt.status : 'unknown';
+        observation.ownedTerminal = own && (receipt.status === 'retired' || receipt.status === 'uploaded'
+          && Number.isSafeInteger(receipt.documentId) && receipt.documentId > 0
+          && Number.isSafeInteger(receipt.version) && receipt.version > 0
+          && typeof receipt.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(receipt.sha256)
+          && typeof receipt.documentKey === 'string' && receipt.documentKey.length > 0);
+      } catch { observation.ownedTerminal = false; observation.receiptStatus = 'unknown'; }
+    }, () => { observation.phase = 'rejected'; });
+    return result;
+  };
+  Object.defineProperty(service, 'retireCaseDocumentUpload', descriptor
+    ? { ...descriptor, value: wrapped } : { configurable: true, writable: true, enumerable: false, value: wrapped });
+  return { snapshot: () => ({ ...current }), restore: () => {
+    if (service.retireCaseDocumentUpload !== wrapped) return;
+    if (descriptor) Object.defineProperty(service, 'retireCaseDocumentUpload', descriptor);
+    else delete service.retireCaseDocumentUpload;
+  } };
+}
+
+// Observe the real response without replacing transport or retaining its payload.
+// Only bounded metadata for this exact owned key may enter failure diagnostics.
+export function createCaseRetirementProofTrace(page, apiOrigin, caseId, uploadKey) {
+  const records = [];
+  const started = Date.now();
+  const elapsed = () => Math.max(0, Math.min(3_600_000, Date.now() - started));
+  const observe = response => {
+    const request = response.request();
+    const url = new URL(request.url());
+    const keys = url.searchParams.getAll('uploadKeys');
+    if (records.length >= 64 || request.method() !== 'GET' || url.origin !== apiOrigin
+      || url.pathname !== '/api/v2/cases/' + caseId + '/documents/uploads'
+      || keys.length !== 1 || keys[0].toLowerCase() !== uploadKey.toLowerCase()) return;
+    const status = response.status();
+    const record = { status: Number.isInteger(status) && status >= 100 && status <= 599 ? status : 0,
+      responseAtMs: elapsed(), bodyAtMs: null, body: 'pending', count: null, exactRetired: false };
+    records.push(record);
+    void Promise.resolve().then(() => response.json()).then(payload => {
+      record.bodyAtMs = elapsed();
+      record.body = Array.isArray(payload) ? 'array' : 'other';
+      record.count = Array.isArray(payload) ? Math.min(payload.length, 65) : null;
+      record.exactRetired = status === 200 && Array.isArray(payload) && payload.length === 1
+        && typeof payload[0]?.uploadKey === 'string' && payload[0].uploadKey.toLowerCase() === uploadKey.toLowerCase()
+        && payload[0].status === 'retired';
+    }).catch(() => { record.bodyAtMs = elapsed(); record.body = 'unreadable'; });
+  };
+  page.on('response', observe);
+  return { snapshot: () => records.map(record => ({ ...record })), dispose: () => page.off('response', observe) };
 }
 
 // Fetch the real upload once, then finish earlier reads before publishing its

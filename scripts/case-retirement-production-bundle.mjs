@@ -181,7 +181,7 @@ export async function openRetirementProductionBundle({ root, owner, api, repo = 
       await mkdir(join(root, 'env'));
       await writeFile(join(root, 'fixture.mjs'),
         `export { beginCaseDocumentUpload } from ${json(join(repo, 'src/services/caseDocumentUploadAttempts.ts').replaceAll('\\', '/'))};\n`
-        + `export { getAuthToken } from ${json(join(repo, 'src/services/api.ts').replaceAll('\\', '/'))};\n`, { flag: 'wx' });
+        + `export { apiService, getAuthToken } from ${json(join(repo, 'src/services/api.ts').replaceAll('\\', '/'))};\n`, { flag: 'wx' });
       admission = { owner, apiOrigin: api.origin,
         dependencies: await phase('class-dependency-admission', () => captureRetirementDependencyInputs(repo)) };
       await writeFile(join(root, 'class-inputs.json'), json(admission), { flag: 'wx' });
@@ -193,7 +193,8 @@ export async function openRetirementProductionBundle({ root, owner, api, repo = 
       assert.ok(chunks.some(chunk => chunk.isEntry && chunk.name === 'index' && chunk.code.length > 0));
       const entries = chunks.filter(chunk => chunk.isEntry && chunk.name === 'case-retirement-fixture');
       assert.equal(entries.length, 1);
-      assert.ok(['beginCaseDocumentUpload', 'getAuthToken'].every(name => entries[0].exports.includes(name)));
+      assert.ok(['beginCaseDocumentUpload', 'getAuthToken', 'apiService'].every(name => entries[0].exports.includes(name)),
+        'The fixture must preserve the real API operation.');
       const modules = source => chunks.filter(chunk => chunk.moduleIds.some(id => id.replaceAll('\\', '/').endsWith(source))).map(chunk => chunk.fileName);
       descriptor = { owner, apiOrigin: api.origin, inputs, classInputsSha256: sha(json(admission)), fixtureFile: entries[0].fileName,
         disconnectFiles: modules('/src/services/realtimeNotifications.ts'), pollingFiles: modules('/src/components/Notifications/RealtimeNotificationToasts.tsx'),
