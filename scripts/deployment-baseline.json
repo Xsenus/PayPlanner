@@ -1081,8 +1081,23 @@
     }
   ],
   "expectedBaselineMigrationIdsSha256": "ebc0e5a0067a56264043c62d5def45e8513710b8ada9fb6be213f6115b9c8121",
-  "expectedReleaseCatalogSha256": "9c1924904c8de341e1147d4ff99a069383137afa43c94d1222e4a3b218253c79",
+  "expectedReleaseCatalogSha256": "81f7abe2ddf9e8544bebe0aecdbc0cdbef3e6c5b71a71d36369e067b5860590d",
   "expectedReleaseSeeds": [
+    {
+      "releaseId": "2026-11-07-case-section-navigation",
+      "version": "1.14.912",
+      "releasedAt": "2026-11-07T16:00:00Z",
+      "title": "Переход к нужной вкладке дела",
+      "summary": "Ссылки и переходы из других разделов открывают выбранную вкладку карточки дела.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "Прямая ссылка на документы или задачи дела открывает нужную вкладку и после входа в CRM. Переходы из заявки и отчёта, а также открытие судебной сводки из реестра или напоминания сохраняют выбранный раздел. Личные фильтры карточки и ограничения доступа продолжают учитываться."
+        }
+      ]
+    },
     {
       "releaseId": "2026-11-06-case-editor-reconnect-draft",
       "version": "1.14.911",

@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { documentCopyTestSession } from '../../test/documentCopySession';
 import { captureAuthSessionIdentity } from '../../services/authService';
 import { USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
-import { StrictMode } from 'react';
+import { StrictMode, useState } from 'react';
 
 function detailViewStateKey(caseId: number) {
   return `pp.case-detail.${caseId}.view.v2.${encodeURIComponent(captureAuthSessionIdentity().actor!)}`;
@@ -14,7 +14,7 @@ function detailViewStateKey(caseId: number) {
 import { apiService, type ContactDirectoryItemDto } from '../../services/api';
 import type { ClientCase, ClientCaseRelatedParty, ClientCaseCourtEvent, ClientCaseDocument, ClientCaseWorkOrder, ClientCaseCourtComplaint } from '../../types';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
-import { CaseDetailPage, CourtSourceProvenance } from './CaseDetailPage';
+import { CaseDetailPage, CourtSourceProvenance, type CaseDetailNavigation } from './CaseDetailPage';
 const detailAuth = vi.hoisted(() => ({ user: { id: 7, role: { id: 10 } } }));
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => detailAuth }));
 
@@ -4076,6 +4076,93 @@ describe('CaseDetailPage', () => {
       }));
       expect(apiService.createTaskJournalCaseAutomationTask).not.toHaveBeenCalled();
     });
+  });
+
+  it('case navigation: applies and consumes a document target while preserving the current employee filters', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    window.sessionStorage.setItem(detailViewStateKey(15), JSON.stringify({ activeTab: 'overview', taskFilter: 'overdue' }));
+    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'conversation' }));
+    const applied = vi.fn();
+    function NavigationHarness({ accessKey = 'first' }: { accessKey?: string }) {
+      const [navigation, setNavigation] = useState<CaseDetailNavigation | undefined>({ tab: 'documents' });
+      return <CaseDetailPage caseId={15} onBack={vi.fn()} caseAccessKey={accessKey} navigation={navigation}
+        onNavigationApplied={target => { applied(target); setNavigation(undefined); }} />;
+    }
+    const view = render(<NavigationHarness />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    await waitFor(() => expect(JSON.parse(window.sessionStorage.getItem(detailViewStateKey(15))!).activeTab).toBe('documents'));
+    expect(apiService.getCaseDocuments).toHaveBeenCalled();
+    expect(applied).toHaveBeenCalledTimes(1);
+    expect(applied).toHaveBeenCalledWith({ tab: 'documents' });
+    expect(JSON.parse(window.sessionStorage.getItem(detailViewStateKey(15))!).taskFilter).toBe('overdue');
+    expect(window.sessionStorage.getItem('pp.case-detail.15.view.v1')).toBe(JSON.stringify({ activeTab: 'conversation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    await waitFor(() => expect(JSON.parse(window.sessionStorage.getItem(detailViewStateKey(15))!).activeTab).toBe('tasks'));
+    view.rerender(<NavigationHarness accessKey="second" />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    expect(JSON.parse(window.sessionStorage.getItem(detailViewStateKey(15))!).activeTab).toBe('tasks');
+    expect(applied).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['tasks', 'finance'] as const)('case navigation: consumes a forbidden %s target without opening its data', async tab => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    const applied = vi.fn();
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} navigation={{ tab }} onNavigationApplied={applied}
+      canViewTasks={false} canViewFinance={false} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    await waitFor(() => expect(applied).toHaveBeenCalledWith({ tab }));
+    expect(JSON.parse(window.sessionStorage.getItem(detailViewStateKey(15))!).activeTab).toBe('overview');
+    expect(screen.queryByRole('button', { name: tab === 'tasks' ? 'Задачи' : 'Финансы' })).toBeNull();
+    expect(apiService.getTaskJournalItems).not.toHaveBeenCalled();
+    expect(apiService.getCaseFinance).not.toHaveBeenCalled();
+  });
+
+  it('case navigation follow-up: opens a requested court overview on the current case without repeating its main read', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    const applied = vi.fn();
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} navigation={{ tab: 'documents' }} onNavigationApplied={applied} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    await waitFor(() => expect(applied).toHaveBeenCalledTimes(1));
+    view.rerender(<CaseDetailPage caseId={15} onBack={vi.fn()} onNavigationApplied={applied} />);
+    const reads = vi.mocked(apiService.getCaseV2).mock.calls.length;
+    const courtTarget: CaseDetailNavigation = { tab: 'court', courtOverview: true };
+    view.rerender(<CaseDetailPage caseId={15} onBack={vi.fn()} navigation={courtTarget} onNavigationApplied={applied} />);
+    expect(await screen.findByText('Сводка по судебному делу')).toBeTruthy();
+    expect(applied).toHaveBeenLastCalledWith(courtTarget);
+    expect(apiService.getCaseV2).toHaveBeenCalledTimes(reads);
+    expect(apiService.updateCaseV2).not.toHaveBeenCalled();
+  });
+
+  it('case navigation follow-up: a repeated document target reopens the tab after the employee changes tabs', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    const applied = vi.fn();
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} navigation={{ tab: 'documents' }} onNavigationApplied={applied} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    await waitFor(() => expect(applied).toHaveBeenCalledTimes(1));
+    view.rerender(<CaseDetailPage caseId={15} onBack={vi.fn()} onNavigationApplied={applied} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Участники' }));
+    await waitFor(() => expect(JSON.parse(window.sessionStorage.getItem(detailViewStateKey(15))!).activeTab).toBe('participants'));
+    const repeatedTarget: CaseDetailNavigation = { tab: 'documents' };
+    view.rerender(<CaseDetailPage caseId={15} onBack={vi.fn()} navigation={repeatedTarget} onNavigationApplied={applied} />);
+    await waitFor(() => expect(JSON.parse(window.sessionStorage.getItem(detailViewStateKey(15))!).activeTab).toBe('documents'));
+    expect(applied).toHaveBeenLastCalledWith(repeatedTarget);
+    expect(applied).toHaveBeenCalledTimes(2);
+    expect(apiService.updateCaseV2).not.toHaveBeenCalled();
+  });
+
+  it('case navigation court preference: keeps the saved court overview when a document target does not change it', async () => {
+    const session = documentCopyTestSession(); onTestFinished(() => session.restore());
+    window.sessionStorage.setItem(detailViewStateKey(15), JSON.stringify({ activeTab: 'court', courtOverview: true }));
+    const applied = vi.fn();
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} navigation={{ tab: 'documents' }} onNavigationApplied={applied} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    await waitFor(() => expect(applied).toHaveBeenCalledTimes(1));
+    const saved = JSON.parse(window.sessionStorage.getItem(detailViewStateKey(15))!);
+    expect(saved.activeTab).toBe('documents');
+    expect(saved.courtOverview).toBe(true);
+    view.rerender(<CaseDetailPage caseId={15} onBack={vi.fn()} onNavigationApplied={applied} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    expect(await screen.findByText('Сводка по судебному делу')).toBeTruthy();
   });
 
   it('restores the last opened tab and task filter for the case card', async () => {

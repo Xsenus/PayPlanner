@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -7,6 +7,11 @@ import { LAST_TAB_STORAGE_KEY } from './appRouting';
 const userLastTabKey = `${LAST_TAB_STORAGE_KEY}.1`;
 import { apiService } from './services/api';
 import { USER_NOTIFICATIONS_EVENT } from './utils/userNotifications';
+import type { CaseDetailNavigation } from './components/Cases/CaseDetailPage';
+
+const caseNavigationTestState = vi.hoisted(() => ({
+  current: null as { navigation: CaseDetailNavigation; apply: (navigation: CaseDetailNavigation) => void } | null,
+}));
 
 const permissionsState = vi.hoisted(() => ({
   paymentsCanView: true,
@@ -187,6 +192,8 @@ vi.mock('./components/Tasks/TaskJournal', () => ({
 vi.mock('./components/Cases/CaseDetailPage', () => ({
   CaseDetailPage: ({
     caseId,
+    navigation,
+    onNavigationApplied,
     caseAccessKey,
     caseRefreshKey,
     canSendToYandexDisk,
@@ -195,25 +202,31 @@ vi.mock('./components/Cases/CaseDetailPage', () => ({
     backLabel,
   }: {
     caseId: number;
+    navigation?: CaseDetailNavigation;
+    onNavigationApplied?: (navigation: CaseDetailNavigation) => void;
     caseAccessKey?: string;
     caseRefreshKey?: number;
     canSendToYandexDisk?: boolean;
     onOpenFinance?: (caseItem: { id: number; clientId: number | null; legalEntityId: number | null }) => void;
     onBack?: () => void;
     backLabel?: string;
-  }) => (
+  }) => {
+    caseNavigationTestState.current = navigation && onNavigationApplied ? { navigation, apply: onNavigationApplied } : null;
+    return (
     <section data-testid="case-detail">
       <span>case {caseId}</span>
       <span data-testid="case-access-key">{caseAccessKey}</span>
       <span data-testid="case-refresh-key">{caseRefreshKey}</span>
       <span data-testid="case-disk-admission">{canSendToYandexDisk ? 'allowed' : 'denied'}</span>
-      <span>{window.sessionStorage.getItem(`pp.case-detail.${caseId}.view.v1`)}</span>
+      <span data-testid="case-navigation">{navigation ? JSON.stringify({ activeTab: navigation.tab,
+        ...(navigation.courtOverview ? { courtOverview: true } : {}) }) : ''}</span>
       <button type="button" onClick={onBack}>{backLabel ?? 'back from case'}</button>
       <button type="button" onClick={() => onOpenFinance?.({ id: caseId, clientId: null, legalEntityId: 37 })}>
         open legal entity finance
       </button>
     </section>
-  ),
+    );
+  },
 }));
 
 vi.mock('./components/Requests/SalesRequestsPage', () => ({
@@ -305,6 +318,7 @@ vi.mock('./components/Profile/ProfilePage', () => ({
 
 describe('App calendar client navigation', () => {
   beforeEach(() => {
+    caseNavigationTestState.current = null;
     window.history.replaceState({}, '', '/?ppTab=calendar');
     window.localStorage.clear();
     window.sessionStorage.clear();
@@ -565,7 +579,8 @@ describe('App calendar client navigation', () => {
     expect(window.location.pathname).toBe('/cases/91');
     expect(window.location.search).not.toContain('requestId');
     expect(window.location.search).not.toContain('private-sales');
-    expect(window.sessionStorage.getItem('pp.case-detail.91.view.v1')).toBe(JSON.stringify({ activeTab: 'tasks' }));
+    expect(screen.getByTestId('case-navigation').textContent).toBe(JSON.stringify({ activeTab: 'tasks' }));
+    expect(window.sessionStorage.getItem('pp.case-detail.91.view.v1')).toBeNull();
     replaceRoute.mockRestore();
   });
 
@@ -581,6 +596,52 @@ describe('App calendar client navigation', () => {
     expect(screen.queryByTestId('case-detail')).toBeNull();
     expect(window.location.search).toContain('requestId=7');
     expect(window.sessionStorage.getItem('pp.case-detail.91.view.v1')).toBeNull();
+  });
+
+  it.each([false, true])('case navigation: carries the document deep-link through authentication loading=%s', async loading => {
+    window.history.replaceState({}, '', '/cases/15?ppCaseTab=documents');
+    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'conversation' }));
+    authState.loading = loading;
+    const view = render(<App />);
+    if (loading) {
+      expect(screen.queryByTestId('case-detail')).toBeNull();
+      authState.loading = false;
+      view.rerender(<App />);
+    }
+    expect((await screen.findByTestId('case-detail')).textContent).toContain('case 15');
+    expect(screen.getByTestId('case-navigation').textContent).toBe(JSON.stringify({ activeTab: 'documents' }));
+    expect(window.sessionStorage.getItem('pp.case-detail.15.view.v1')).toBe(JSON.stringify({ activeTab: 'conversation' }));
+  });
+
+  it('case navigation: clears an earlier case target when the signed-in employee changes', async () => {
+    window.history.replaceState({}, '', '/cases/15?ppCaseTab=documents');
+    window.localStorage.setItem(`${LAST_TAB_STORAGE_KEY}.2`, 'requests');
+    const view = render(<App />);
+    expect((await screen.findByTestId('case-detail')).textContent).toContain('case 15');
+    authState.userId = 2;
+    view.rerender(<App />);
+    expect(await screen.findByText('request actor 2')).toBeTruthy();
+    expect(screen.queryByTestId('case-detail')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'open existing case tasks' }));
+    expect((await screen.findByTestId('case-detail')).textContent).toContain('case 91');
+    expect(screen.getByTestId('case-navigation').textContent).toBe(JSON.stringify({ activeTab: 'tasks' }));
+  });
+
+  it('case navigation: a late completion keeps a newer request for the same case', async () => {
+    window.history.replaceState({}, '', '/?ppTab=reports');
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'open report document' }));
+    await screen.findByTestId('case-detail');
+    const first = caseNavigationTestState.current!;
+    fireEvent.click(screen.getByRole('button', { name: 'back from case' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'open report document' }));
+    await screen.findByTestId('case-detail');
+    const second = caseNavigationTestState.current!;
+    expect(second.navigation).not.toBe(first.navigation);
+    act(() => first.apply(first.navigation));
+    expect(screen.getByTestId('case-navigation').textContent).toBe(JSON.stringify({ activeTab: 'documents' }));
+    act(() => second.apply(second.navigation));
+    expect(screen.getByTestId('case-navigation').textContent).toBe('');
   });
 
   it('returns to notifications after saving a task opened from notifications', async () => {

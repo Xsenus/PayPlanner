@@ -109,6 +109,8 @@ import type { TaskJournalItem } from '../../utils/taskJournalStore';
 
 interface CaseDetailPageProps {
   caseId: number;
+  navigation?: CaseDetailNavigation;
+  onNavigationApplied?: (navigation: CaseDetailNavigation) => void;
   onBack: () => void;
   backLabel?: string;
   onOpenClient?: (clientId: number, caseId?: number) => void;
@@ -133,6 +135,11 @@ interface CaseDetailPageProps {
 }
 
 type CaseDetailTab = 'overview' | 'participants' | 'tasks' | 'court' | 'events' | 'finance' | 'workOrder' | 'documents' | 'conversation' | 'history';
+
+export interface CaseDetailNavigation {
+  tab: CaseDetailTab;
+  courtOverview?: boolean;
+}
 type SummaryTone = 'slate' | 'emerald' | 'amber' | 'rose' | 'cyan';
 type ParticipantSourceType = 'client' | 'legalEntity' | 'externalContact';
 type DocumentSourceType = 'case' | 'task' | 'courtEvent' | 'workOrder' | 'invoice' | 'stage';
@@ -1535,6 +1542,8 @@ function CaseDetailScreen({
   retainedEditorDraft,
   markedViewedCaseIdRef,
   caseId,
+  navigation,
+  onNavigationApplied,
   onBack,
   backLabel = 'Реестр дел',
   onOpenClient,
@@ -1558,7 +1567,11 @@ function CaseDetailScreen({
   const { confirm, prompt } = useDialog();
   const { capture: captureScreen, begin: beginScreenOperation, busy: pageBusy } = screenOwner;
   const viewStateActor = useMemo(() => captureAuthSessionIdentity().actor, []);
-  const initialViewState = useMemo(() => readCaseDetailViewState(caseId, viewStateActor), [caseId, viewStateActor]);
+  const initialViewState = useMemo(() => {
+    const savedState = readCaseDetailViewState(caseId, viewStateActor);
+    return navigation ? { ...savedState, activeTab: navigation.tab,
+      courtOverview: navigation.courtOverview ?? savedState.courtOverview } : savedState;
+  }, [caseId, viewStateActor, navigation]);
   const canCreateCaseTask = canViewTasks && canCreateTasks;
   const [loadedCaseItem, setCaseItem] = useState<ClientCase | null>(null);
   const [caseItemAccessKey, setCaseItemAccessKey] = useState(taskAccessKey);
@@ -1931,6 +1944,16 @@ function CaseDetailScreen({
     setCourtPartyRepresentativeDraft('');
     setCourtPartyNotesDraft('');
   }, [canViewFinance, canViewTasks, caseId, viewStateActor, retainedEditorDraft]);
+
+  useEffect(() => {
+    if (!navigation || !captureScreen()) return;
+    setActiveTab(
+      (!canViewFinance && navigation.tab === 'finance') || (!canViewTasks && navigation.tab === 'tasks')
+        ? 'overview' : navigation.tab,
+    );
+    if (navigation.courtOverview !== undefined) setCourtOverview(navigation.courtOverview);
+    onNavigationApplied?.(navigation);
+  }, [canViewFinance, canViewTasks, captureScreen, navigation, onNavigationApplied]);
 
   const visibleDetailTabs = useMemo(
     () => DETAIL_TABS.filter((tab) =>

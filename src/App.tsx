@@ -43,6 +43,7 @@ import { isClientPortalPath } from './utils/clientPortalRoute';
 import { PublicMessengerDocumentPage } from './components/Public/PublicMessengerDocumentPage';
 import { isPublicMessengerDocumentPath } from './utils/publicMessengerDocumentRoute';
 import type { InvoiceEditorDraftState } from './utils/invoiceEditorBridge';
+import type { CaseDetailNavigation } from './components/Cases/CaseDetailPage';
 import {
   canAccessTab,
   getInitialActId,
@@ -338,18 +339,15 @@ function AppContent() {
   const [overdueTaskFilterSignal, setOverdueTaskFilterSignal] = useState(0);
   const [taskReturnTab, setTaskReturnTab] = useState<Tab | null>(null);
   const [selectedLegalEntityId, setSelectedLegalEntityId] = useState<number | null>(getInitialLegalEntityId);
-  const [selectedCaseId, setSelectedCaseId] = useState<number | null>(() => {
+  const [caseNavigation, setCaseNavigation] = useState<{ caseId: number; view: CaseDetailNavigation } | null>(() => {
     const caseId = getPathCaseId();
     const caseTab = getInitialCaseDetailTab();
-    if (caseId && caseTab) {
-      try {
-        window.sessionStorage.setItem(`pp.case-detail.${caseId}.view.v1`, JSON.stringify({ activeTab: caseTab }));
-      } catch {
-        /** */
-      }
-    }
-    return caseId;
+    return caseId && caseTab ? { caseId, view: { tab: caseTab } } : null;
   });
+  const [selectedCaseId, setSelectedCaseId] = useState<number | null>(getPathCaseId);
+  const consumeCaseNavigation = useCallback((view: CaseDetailNavigation) => {
+    setCaseNavigation(current => current?.view === view ? null : current);
+  }, []);
   const [caseReturnTab, setCaseReturnTab] = useState<Tab>('cases');
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
   const [initialClientSection, setInitialClientSection] = useState<'payments' | 'accounts' | 'acts' | undefined>(undefined);
@@ -715,12 +713,7 @@ function AppContent() {
         return;
       }
 
-      try {
-        window.sessionStorage.setItem(`pp.case-detail.${caseId}.view.v1`, JSON.stringify({ activeTab: section }));
-      } catch {
-        /** */
-      }
-
+      setCaseNavigation({ caseId, view: { tab: section } });
       setSelectedCaseId(caseId);
       setCaseReturnTab(activeTab === 'caseDetail' ? 'cases' : activeTab);
       setActiveTab('caseDetail');
@@ -943,6 +936,7 @@ function AppContent() {
       setSelectedTaskId(null);
       setSelectedLegalEntityId(null);
       setSelectedCaseId(null);
+      setCaseNavigation(null);
       setSelectedContractId(null);
       setSelectedActId(null);
       paymentTypeByIdRef.current.clear();
@@ -1499,11 +1493,7 @@ function AppContent() {
                   ...(permissions.legalEntities.canView ? ['legalEntity' as const] : []),
                 ]}
                 onOpenCaseCourt={(caseId) => {
-                  try {
-                    window.sessionStorage.setItem(`pp.case-detail.${caseId}.view.v1`, JSON.stringify({ activeTab: 'court', courtOverview: true }));
-                  } catch {
-                    /** */
-                  }
+                  setCaseNavigation({ caseId, view: { tab: 'court', courtOverview: true } });
                   setSelectedCaseId(caseId);
                   setCaseReturnTab('courtCases');
                   setActiveTab('caseDetail');
@@ -1533,6 +1523,8 @@ function AppContent() {
         return (
           <CaseDetailPage
             caseId={selectedCaseId}
+            navigation={caseNavigation?.caseId === selectedCaseId ? caseNavigation.view : undefined}
+            onNavigationApplied={consumeCaseNavigation}
             caseAccessKey={JSON.stringify([permissions.cases, permissions.clients, permissions.legalEntities, permissions.audit, permissions.yandexDisk, permissions.payments])}
             caseRefreshKey={taskAccessRevision}
             onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: 'caseDetail' }) : undefined}
@@ -2161,11 +2153,7 @@ function AppContent() {
           enabled={permissionsLoaded && permissions.cases.canView}
           onDone={finishTomorrowCourtReminder}
           onOpenCase={(caseId) => {
-            try {
-              window.sessionStorage.setItem(`pp.case-detail.${caseId}.view.v1`, JSON.stringify({ activeTab: 'court', courtOverview: true }));
-            } catch {
-              /** */
-            }
+            setCaseNavigation({ caseId, view: { tab: 'court', courtOverview: true } });
             setSelectedCaseId(caseId);
             setCaseReturnTab(activeTab);
             setActiveTab('caseDetail');
