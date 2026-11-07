@@ -2940,7 +2940,10 @@ describe('ClientDetail integration', () => {
       { type: 'actual', isPrimary: false, fullAddress: 'Второй адрес', city: 'г Другой', house: '2' },
     ] }) });
     const props = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const };
-    const view = render(<ClientDetail {...props} />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    let view!: ReturnType<typeof render>;
+    // Finish the resolved client read and its React effects before the first action.
+    await act(async () => { view = render(<ClientDetail {...props} />); });
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     return { props, view };
   }
   function latestAddressProps() {
