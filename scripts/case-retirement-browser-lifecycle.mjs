@@ -163,7 +163,7 @@ export function createCaseReadLifecycle(page, isOwnedRead, timeoutMs) {
     snapshot: () => ({ pending: pending.size, failuresDuringDrain }),
     drain: async (phase, beforeReadDrain) => {
       check(!disposed && !draining, 'Case reads cannot start an overlapping or closed drain');
-      check(['client-navigation', 'server-restart', 'document-tab', 'document-upload', 'browser-close'].includes(phase), 'Unknown case read boundary');
+      check(['client-navigation', 'server-restart', 'editor-open', 'retirement-confirmation', 'document-tab', 'document-upload', 'browser-close'].includes(phase), 'Unknown case read boundary');
       draining = true;
       let active = true;
       let waitingForFrame = false;

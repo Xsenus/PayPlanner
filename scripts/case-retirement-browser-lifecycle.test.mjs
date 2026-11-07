@@ -334,6 +334,39 @@ function fixture(timeoutMs = 20000) {
 }
 
 describe('owned case read boundary', () => {
+  it.each([
+    ['editor-open', '/api/v2/cases/7/court-recoveries'],
+    ['retirement-confirmation', '/api/v2/cases/7/documents/uploads?uploadKeys=owned'],
+  ])('finishes the existing read body before %s', async (phase, path) => {
+    const { page, lifecycle, request } = fixture();
+    const pending = request(path);
+    page.emit('request', pending.value);
+    let complete = false;
+    const drain = lifecycle.drain(phase).then(() => { complete = true; });
+    pending.headers();
+    await Promise.resolve();
+    assert.equal(complete, false);
+    pending.finish();
+    await drain;
+    assert.equal(complete, true);
+    assert.equal(lifecycle.snapshot().pending, 0);
+    lifecycle.dispose();
+  });
+
+  it.each([
+    ['editor-open', '/api/v2/cases/7/court-recoveries'],
+    ['retirement-confirmation', '/api/v2/cases/7/documents/uploads?uploadKeys=owned'],
+  ])('retains the existing read failure before %s', async (phase, path) => {
+    const { page, lifecycle, request } = fixture();
+    const pending = request(path);
+    page.emit('request', pending.value);
+    const drain = lifecycle.drain(phase);
+    pending.headers();
+    pending.failBody();
+    await assert.rejects(drain, /response body failed/);
+    lifecycle.dispose();
+  });
+
   it.each(['document-tab', 'document-upload', 'browser-close'])('finishes a pending upload response before %s', async phase => {
     const { page, lifecycle, request } = fixture();
     const pending = request('/api/v2/cases/7/documents/uploads/pending');

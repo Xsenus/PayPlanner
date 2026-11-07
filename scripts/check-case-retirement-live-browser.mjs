@@ -171,10 +171,13 @@ try {
     const traceStarted = Date.now();
     const traceRead = (event, request) => {
       const url = new URL(request.url());
-      if (url.origin !== settings.api || request.method() !== 'GET'
-        || url.pathname !== '/api/v2/cases/' + settings.caseId + '/documents/uploads/pending') return;
+      if (url.origin !== settings.api || request.method() !== 'GET') return;
+      const kind = url.pathname === '/api/v2/cases/' + settings.caseId + '/documents/uploads/pending' ? 'pending-uploads'
+        : url.pathname === '/api/v2/cases/' + settings.caseId + '/documents/uploads' ? 'upload-receipts'
+          : url.pathname === '/api/v2/cases/' + settings.caseId + '/court-recoveries' ? 'court-recoveries' : null;
+      if (!kind) return;
       if (event === 'start') tracedReads.set(request, ++traceSequence);
-      if (readTrace.length < 64) readTrace.push({ event, read: tracedReads.get(request), phase: tracePhase,
+      if (readTrace.length < 64) readTrace.push({ event, kind, read: tracedReads.get(request), phase: tracePhase,
         elapsedMs: Date.now() - traceStarted,
         aborted: event === 'failed' && request.failure()?.errorText === 'net::ERR_ABORTED' });
     };
@@ -351,6 +354,8 @@ try {
       await waitAtPhase(card.getByText('Загружаем файлы...', { exact: true }), 'modal-files-loaded', { state: 'hidden' });
       await card.getByRole('textbox', { name: 'Стратегия и план действий', exact: true }).fill('Unsaved browser strategy');
     } else if (editing) {
+      // Opening the editor invalidates the overview's child reads.
+      await caseReads.drain('editor-open');
       tracePhase = 'editor-open';
       await page.getByRole('button', { name: 'Редактировать дело', exact: true }).click();
       await page.getByRole('textbox', { name: 'Стратегия и план действий', exact: true }).fill('Unsaved browser strategy');
@@ -374,6 +379,9 @@ try {
     const readsBeforeConfirmation = documentReads;
     const proofReadsBeforeConfirmation = reads.filter(keys => keys.includes(settings.key)).length;
     await panel.getByRole('button', { name: 'Подготовить новую загрузку', exact: true }).click();
+    // Cancelling the first dialog refreshes the upload receipts. Let those
+    // real reads finish before the confirmed operation refreshes them again.
+    await caseReads.drain('retirement-confirmation');
     tracePhase = 'retirement-confirmation';
     await dialog.getByRole('button', { name: 'Подтвердить', exact: true }).click();
     if (restarted) {
