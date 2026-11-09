@@ -3724,18 +3724,59 @@ public class TasksController : ControllerBase
         [FromBody] LinkTaskBillingInvoiceRequest request,
         CancellationToken ct)
     {
+        var result = await LinkTaskBillingInvoiceAsync([id], request.InvoiceId, request.ConfirmedIncludedInInvoice, null, null, ct);
+        return result.Result is { } error ? error : Ok(result.Value![0]);
+    }
+
+    [HttpPut("billing-invoice/bulk")]
+    public async Task<ActionResult<TaskJournalItemDto[]>> BulkLinkTaskBillingInvoice(
+        [FromBody] BulkLinkTaskBillingInvoiceRequest request,
+        CancellationToken ct)
+    {
+        if (request.ExpectedUpdatedAtById is not { Count: > 0 and <= 100 } versions)
+        {
+            return BadRequest(new { message = "Выберите от 1 до 100 задач." });
+        }
+
+        var expected = new Dictionary<int, DateTime?>();
+        foreach (var (id, token) in versions)
+        {
+            if (id <= 0 || !TryReadTaskBillingVersion(token, out var version))
+            {
+                return BadRequest(new { message = "Некорректная версия выбранной задачи. Обновите список." });
+            }
+
+            expected.Add(id, version);
+        }
+
+        try
+        {
+            var result = await LinkTaskBillingInvoiceAsync(expected.Keys.Order().ToArray(), request.InvoiceId,
+                request.ConfirmedIncludedInInvoice, expected, request.ExpectedInvoiceUpdatedAt, ct);
+            return result.Result is { } error ? error : Ok(result.Value);
+        }
+        catch (Exception error) when (IsTaskBillingWriteConflict(error))
+        {
+            return Conflict(new { message = "Данные изменились. Обновите задачи и счёт, затем повторите сверку." });
+        }
+    }
+
+    private async Task<ActionResult<TaskJournalItemDto[]>> LinkTaskBillingInvoiceAsync(
+        int[] ids, int invoiceId, bool confirmed, IReadOnlyDictionary<int, DateTime?>? expected,
+        DateTime? expectedInvoiceUpdatedAt, CancellationToken ct)
+    {
         var access = await GetTaskAccessAsync(ct);
         if (access is null)
         {
             return Unauthorized();
         }
 
-        if (request.InvoiceId <= 0)
+        if (invoiceId <= 0)
         {
             return BadRequest(new { message = "Выберите счёт." });
         }
 
-        if (!request.ConfirmedIncludedInInvoice)
+        if (!confirmed)
         {
             return BadRequest(new { message = "Подтвердите, что работа по задаче уже учтена в выбранном счёте." });
         }
@@ -3752,63 +3793,146 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
+        if (expected != null)
+        {
+            if (!access.IsAdmin && access.Permission?.CanEdit != true && access.Permission?.CanEditOthers != true)
+            {
+                return Forbid();
+            }
+
+            if (await BuildVisibleTaskBaseQuery(access).CountAsync(item => ids.Contains(item.Id), ct) != ids.Length)
+            {
+                return NotFound();
+            }
+
+            if (!await ReconciliationInvoiceQuery(_db.Payments.ApplyPaymentVisibility(visibility))
+                .AnyAsync(item => item.Id == invoiceId, ct))
+            {
+                return BadRequest(new { message = "Действующий доходный счёт не найден или недоступен." });
+            }
+        }
+
         await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
         if (_db.Database.IsNpgsql())
         {
-            await _db.Database.SqlQuery<int>($"SELECT 1 FROM \"Payments\" WHERE \"Id\" = {request.InvoiceId} FOR UPDATE")
+            await _db.Database.SqlQuery<int>($"SELECT 1 FROM \"Payments\" WHERE \"Id\" = {invoiceId} FOR UPDATE")
                 .ToListAsync(ct);
-            await _db.Database.SqlQuery<int>($"SELECT 1 FROM \"TaskJournalItems\" WHERE \"Id\" = {id} FOR UPDATE")
+            await _db.Database.SqlQuery<int>($"SELECT 1 FROM \"TaskJournalItems\" WHERE \"Id\" = ANY({ids}) ORDER BY \"Id\" FOR UPDATE")
                 .ToListAsync(ct);
         }
 
-        var entity = await BuildVisibleTasksQuery(access).FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (entity is null)
+        if (expected != null)
+        {
+            access = await GetTaskAccessAsync(ct);
+            if (access is null) return Unauthorized();
+            if (!await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Accounts, permission => permission.CanEdit, ct))
+            {
+                return Forbid();
+            }
+
+            visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+            if (visibility is null) return Forbid();
+        }
+
+        var entities = await BuildVisibleTasksQuery(access).Where(item => ids.Contains(item.Id)).OrderBy(item => item.Id).ToArrayAsync(ct);
+        if (entities.Length != ids.Length)
         {
             return NotFound();
         }
 
-        if (!CanFullyModifyTask(entity, access,
-                access.Permission?.CanEdit == true,
-                access.Permission?.CanEditOthers == true,
-                await GetTaskJournalSettingsAsync(ct)))
+        var settings = await GetTaskJournalSettingsAsync(ct);
+        if (entities.Any(entity => !CanFullyModifyTask(entity, access,
+                access.Permission?.CanEdit == true, access.Permission?.CanEditOthers == true, settings)))
         {
             return Forbid();
         }
 
-        if (entity.ClientBillingClassification != TaskClientBillingClassification.Billable
-            || entity.BillingModeSnapshot == ContractBillingMode.Fixed)
+        if (entities.Any(entity => entity.ClientBillingClassification != TaskClientBillingClassification.Billable
+            || string.Equals(entity.BillingModeSnapshot, ContractBillingMode.Fixed, StringComparison.OrdinalIgnoreCase)
+            || (expected != null && entity.Status == "cancelled")))
         {
             return BadRequest(new { message = "К счёту можно привязать только платную задачу по факту, не включённую в фиксированный договор." });
         }
 
-        if (entity.BillingInvoiceId == request.InvoiceId)
+        var pending = entities.Where(entity => entity.BillingInvoiceId != invoiceId).ToArray();
+        if (pending.Length == 0)
         {
-            return Ok(Map(entity));
+            return entities.Select(entity => Map(entity)).ToArray();
         }
 
-        if (entity.BillingInvoiceId.HasValue)
+        if (pending.Any(entity => entity.BillingInvoiceId.HasValue))
         {
             return BadRequest(new { message = "Задача уже включена в другой счёт." });
         }
 
-        var invoice = await EligibleTaskBillingInvoices(entity, visibility)
-            .FirstOrDefaultAsync(item => item.Id == request.InvoiceId, ct);
+        if (expected != null && pending.Any(entity => entity.UpdatedAt != expected[entity.Id]))
+        {
+            return Conflict(new { message = "Одна из задач изменилась. Обновите список задач перед привязкой." });
+        }
+
+        var candidates = EligibleTaskBillingInvoices(pending[0], visibility);
+        if (expected != null) candidates = ReconciliationInvoiceQuery(candidates).Include(item => item.Invoice);
+        var invoice = await candidates.Include(item => item.InvoiceClientCases).FirstOrDefaultAsync(item => item.Id == invoiceId, ct);
         if (invoice is null)
         {
             return BadRequest(new { message = "Счёт не найден среди действующих счетов этого контрагента и дела." });
         }
 
-        entity.BillingInvoiceId = invoice.Id;
-        entity.BillingInvoice = invoice;
-        entity.UpdatedAt = DateTime.UtcNow;
-        AddTaskHistory(entity, access,
-            $"Платная задача привязана к ранее выставленному счёту №{invoice.Account}. Сумма и состав счёта не изменены.",
-            new { invoiceId = invoice.Id });
+        if (expected != null)
+        {
+            // Line-item-only edits always advance the aggregate, even if payment header fields did not change.
+            var headerVersion = _db.Entry(invoice).Property<DateTime?>("UpdatedAt").CurrentValue;
+            var aggregateVersion = invoice.Invoice?.UpdatedAt;
+            var version = headerVersion is null || aggregateVersion > headerVersion ? aggregateVersion : headerVersion;
+            if (version != expectedInvoiceUpdatedAt)
+            {
+                return Conflict(new { message = "Счёт изменился. Обновите его и ещё раз сверьте работы." });
+            }
+        }
+
+        var invoiceCaseIds = invoice.InvoiceClientCases.Select(link => link.ClientCaseId).ToHashSet();
+        if (pending.Any(entity => entity.ClientId != invoice.ClientId || entity.LegalEntityId != invoice.LegalEntityId
+            || !entity.ClientCaseId.HasValue || (invoice.ClientCaseId.HasValue || invoiceCaseIds.Count != 0)
+                && entity.ClientCaseId != invoice.ClientCaseId && !invoiceCaseIds.Contains(entity.ClientCaseId.Value)))
+        {
+            return BadRequest(new { message = "Выбранный счёт подходит не всем задачам. Проверьте контрагента и дела." });
+        }
+
+        if (expected != null)
+        {
+            var selectedCaseIds = pending.Select(entity => entity.ClientCaseId!.Value).Distinct().ToArray();
+            if (invoice.ClientId.HasValue == invoice.LegalEntityId.HasValue
+                || await _db.ClientCases.CountAsync(item => selectedCaseIds.Contains(item.Id)
+                    && item.ClientId == invoice.ClientId && item.LegalEntityId == invoice.LegalEntityId, ct) != selectedCaseIds.Length)
+            {
+                return BadRequest(new { message = "Дело одной из задач не относится к контрагенту счёта. Данные не изменены." });
+            }
+        }
+
+        var now = DateTime.UtcNow;
+        foreach (var entity in pending)
+        {
+            entity.BillingInvoiceId = invoice.Id;
+            entity.BillingInvoice = invoice;
+            entity.UpdatedAt = now;
+            AddTaskHistory(entity, access,
+                $"Платная задача привязана к ранее выставленному счёту №{invoice.Account}. Сумма и состав счёта не изменены.",
+                new { invoiceId = invoice.Id });
+        }
+
         await _db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-        return Ok(Map(entity));
+        return entities.Select(entity => Map(entity)).ToArray();
     }
+
+    private IQueryable<Payment> ReconciliationInvoiceQuery(IQueryable<Payment> query) =>
+        query.Where(invoice => invoice.DocumentKind == DocumentKind.Invoice
+            && invoice.Type == PaymentType.Income
+            && invoice.Status != PaymentStatus.Cancelled
+            && invoice.InvoiceWorkflowStatus != InvoiceWorkflowStatus.Cancelled)
+            .ApplyUnambiguousInvoiceLinks()
+            .ApplyInvoiceRepresentativeFilter(_db.Payments);
 
     private IQueryable<Payment> EligibleTaskBillingInvoices(TaskJournalItem task, DataVisibilityAccess visibility)
     {

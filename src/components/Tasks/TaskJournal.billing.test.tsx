@@ -1,4 +1,4 @@
-import { setupTaskJournalTests, apiMock, toastMock, authState, permissionsState, todayAt, createTask, renderJournal, openFirstTaskForEdit, openNewTaskFormAsGlobalInternal } from './TaskJournal.test-support';
+import { setupTaskJournalTests, apiMock, toastMock, dialogMock, authState, permissionsState, todayAt, createTask, renderJournal, openFirstTaskForEdit, openNewTaskFormAsGlobalInternal } from './TaskJournal.test-support';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { TaskJournal } from './TaskJournal';
@@ -331,13 +331,13 @@ describe('TaskJournal', () => {
     const original = JSON.stringify({ quickFilter: 'all', viewMode: 'list', periodMode: 'all', search: 'личный поиск' });
     window.localStorage.setItem(key, original);
     await renderJournal([createTask({ id: 301, billingStatus: 'unbilled' })], { billingAnalysisMode: true });
-    fireEvent.click(within(screen.getByTestId('task-unbilled-reminder')).getByRole('button', { name: 'Платные задачи без счёта: 1' }));
+    fireEvent.click(within(screen.getByTestId('task-unbilled-reminder')).getByRole('button', { name: '1 задача без счёта у 1 клиента' }));
     await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(expect.objectContaining({ billingStatus: 'unbilled' }), expect.anything()));
     expect(window.localStorage.getItem(key)).toBe(original);
     expect(window.localStorage.getItem('pp.task_journal.filters.v1.billing.user:7')).toBeTruthy();
   });
 
-  it('shows how many invoices are needed and distributes active tasks by billing category', async () => {
+  it('shows unbilled work and distinct clients in one filter', async () => {
     await renderJournal([
       createTask({ id: 301, clientId: 10, billingStatus: 'unbilled' }),
       createTask({ id: 302, clientId: 10, billingStatus: 'unbilled' }),
@@ -349,21 +349,59 @@ describe('TaskJournal', () => {
     ], { billingAnalysisMode: true });
 
     const analysis = await screen.findByTestId('task-unbilled-reminder');
-    expect(within(analysis).getByText('Счетов подготовить: 2')).toBeTruthy();
-    expect(within(analysis).getByText('Платные задачи без счёта: 3')).toBeTruthy();
+    expect(within(analysis).getByText('3 задачи без счёта у 2 клиентов')).toBeTruthy();
     expect(within(analysis).getByText('По фиксированному договору: 1')).toBeTruthy();
     expect(within(analysis).getByText('Неоплачиваемые: 1')).toBeTruthy();
     expect(within(analysis).getByText('Уже включены в счёт: 1')).toBeTruthy();
     expect(within(analysis).getByText('Нужно распределить: 1')).toBeTruthy();
-    expect(within(analysis).getByTestId('task-billing-counter-help').textContent).toContain('количество клиентов');
-    expect(within(analysis).getByTestId('task-billing-counter-help').textContent).toContain('количество отдельных работ');
-
-    fireEvent.click(within(analysis).getByRole('button', { name: 'Платные задачи без счёта: 3' }));
+    fireEvent.click(within(analysis).getByRole('button', { name: '3 задачи без счёта у 2 клиентов' }));
     await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(
       expect.objectContaining({ billingStatus: 'unbilled', sortBy: 'counterparty', sortDir: 'asc' }),
       expect.anything(),
     ));
     expect(within(analysis).getByText(/Категория открыта в таблице ниже/i)).toBeTruthy();
+  });
+
+  it('reviews existing invoice lines and links a confirmed group from the selected client', async () => {
+    const first = createTask({ id: 341, title: 'Подготовка заявления', clientCaseTitle: 'Сверяемое дело', billingStatus: 'unbilled',
+      updatedAt: '2026-10-24T01:02:03.1234567Z' });
+    const second = createTask({ ...first, id: 342, title: 'Подача заявления', status: 'done', updatedAt: undefined });
+    const other = createTask({ id: 343, title: 'Работа другого клиента', clientId: 11, billingStatus: 'unbilled' });
+    const tasks = [first, second, other];
+    const invoice = { id: 987, number: 'SYNTHETIC-987', date: '2026-10-30', amount: 1000, type: 'Income', status: 'Pending',
+      clientId: first.clientId, clientCaseId: first.clientCaseId, billingReconciliationUpdatedAt: '2026-11-01T08:00:00Z',
+      lineItems: [{ id: 1, name: 'Подготовка и подача заявления', quantity: 1, unit: 'шт' }] };
+    apiMock.getInvoices.mockResolvedValue({ items: [invoice], total: 1 });
+    apiMock.getInvoice.mockResolvedValue(invoice);
+    apiMock.bulkLinkTaskBillingInvoice.mockImplementation(async () => {
+      tasks[0] = { ...first, billingStatus: 'invoiced', billingInvoiceId: invoice.id };
+      tasks[1] = { ...second, billingStatus: 'invoiced', billingInvoiceId: invoice.id };
+      return tasks.slice(0, 2);
+    });
+    await renderJournal(tasks, { billingAnalysisMode: true });
+    fireEvent.click(screen.getByRole('button', { name: '3 задачи без счёта у 2 клиентов' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Выбрать задачу Подготовка заявления' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Сверка по клиенту' }));
+    const dialog = within(await screen.findByRole('dialog', { name: 'Сверка по клиенту' }));
+    expect(await dialog.findByText('Подача заявления')).toBeTruthy();
+    expect(dialog.queryByText(other.title)).toBeNull();
+    expect(apiMock.getInvoices).toHaveBeenCalledWith(expect.objectContaining({ type: 'Income', clientRole: 'counterparty', clientId: first.clientId }), expect.anything());
+    fireEvent.click(dialog.getByRole('button', { name: 'Выбрать все задачи: Сверяемое дело на странице' }));
+    fireEvent.click(dialog.getByRole('combobox', { name: /^Счёт для сверки/ }));
+    fireEvent.click(await screen.findByRole('option', { name: /SYNTHETIC-987/ }));
+    expect(await dialog.findByText(/Подготовка и подача заявления/)).toBeTruthy();
+
+    const linkButton = dialog.getByRole('button', { name: 'Привязать к счёту' });
+    dialogMock.confirm.mockResolvedValueOnce(false);
+    fireEvent.click(linkButton);
+    await waitFor(() => expect((linkButton as HTMLButtonElement).disabled).toBe(false));
+    expect(apiMock.bulkLinkTaskBillingInvoice).not.toHaveBeenCalled();
+    fireEvent.click(linkButton);
+    expect(await dialog.findByText('К счёту №SYNTHETIC-987 привязано задач: 2.')).toBeTruthy();
+    expect(apiMock.bulkLinkTaskBillingInvoice).toHaveBeenCalledExactlyOnceWith(987, invoice.billingReconciliationUpdatedAt, {
+      341: first.updatedAt, 342: null,
+    });
+    await waitFor(() => expect(dialog.queryByText(first.title)).toBeNull());
   });
 
   it('prepares one invoice draft from selected unbilled client tasks', async () => {
@@ -391,8 +429,8 @@ describe('TaskJournal', () => {
       },
     });
 
-    expect(screen.getByTestId('task-unbilled-reminder').textContent).toContain('Платные задачи без счёта: 1');
-    fireEvent.click(within(screen.getByTestId('task-unbilled-reminder')).getByRole('button', { name: 'Платные задачи без счёта: 1' }));
+    expect(screen.getByTestId('task-unbilled-reminder').textContent).toContain('1 задача без счёта у 1 клиента');
+    fireEvent.click(within(screen.getByTestId('task-unbilled-reminder')).getByRole('button', { name: '1 задача без счёта у 1 клиента' }));
     expect(await screen.findByText('Подготовить иск')).toBeTruthy();
     const unbilledBadge = screen.getByText('БЕЗ СЧЁТА').closest('[data-testid="task-billing-badge-321"]');
     expect(unbilledBadge).toBeTruthy();
@@ -418,7 +456,7 @@ describe('TaskJournal', () => {
   it('refreshes the accounting queue after the selected task is invoiced', async () => {
     const tasks = [createTask({ id: 321, title: 'Работа для счёта', clientBillingClassification: 'billable', billingStatus: 'unbilled' })];
     await renderJournal(tasks, { billingAnalysisMode: true, onCreateInvoiceDraft: vi.fn() });
-    fireEvent.click(within(screen.getByTestId('task-unbilled-reminder')).getByRole('button', { name: 'Платные задачи без счёта: 1' }));
+    fireEvent.click(within(screen.getByTestId('task-unbilled-reminder')).getByRole('button', { name: '1 задача без счёта у 1 клиента' }));
     const checkbox = await screen.findByRole('checkbox', { name: 'Выбрать задачу Работа для счёта' });
     fireEvent.click(checkbox);
     expect(screen.getByRole('button', { name: 'Подготовить счёт (1)' })).toBeTruthy();
@@ -449,10 +487,10 @@ describe('TaskJournal', () => {
     await renderJournal([activeTask, completedTask], { billingAnalysisMode: true, onCreateInvoiceDraft: vi.fn() });
 
     const analysis = await screen.findByTestId('task-unbilled-reminder');
-    expect(within(analysis).getByText('Платные задачи без счёта: 2')).toBeTruthy();
+    expect(within(analysis).getByText('2 задачи без счёта у 1 клиента')).toBeTruthy();
     expect(screen.queryByText('Выполненная платная работа')).toBeNull();
 
-    fireEvent.click(within(analysis).getByRole('button', { name: 'Платные задачи без счёта: 2' }));
+    fireEvent.click(within(analysis).getByRole('button', { name: '2 задачи без счёта у 1 клиента' }));
 
     expect(await screen.findByText('Выполненная платная работа')).toBeTruthy();
     expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(
@@ -480,7 +518,7 @@ describe('TaskJournal', () => {
     await renderJournal([task], { billingAnalysisMode: true, onCreateInvoiceDraft });
 
     const analysis = await screen.findByTestId('task-unbilled-reminder');
-    fireEvent.click(within(analysis).getByRole('button', { name: 'Платные задачи без счёта: 1' }));
+    fireEvent.click(within(analysis).getByRole('button', { name: '1 задача без счёта у 1 клиента' }));
 
     const checkbox = await screen.findByRole('checkbox', { name: 'Выбрать задачу Платная задача Анны' }) as HTMLInputElement;
     await waitFor(() => expect(checkbox.disabled).toBe(false));

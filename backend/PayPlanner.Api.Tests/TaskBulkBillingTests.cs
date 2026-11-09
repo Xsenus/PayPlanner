@@ -21,6 +21,89 @@ namespace PayPlanner.Api.Tests;
 public sealed class TaskBulkBillingTests
 {
     [Theory]
+    [InlineData("wrongCase")]
+    [InlineData("staleTask")]
+    [InlineData("staleInvoice")]
+    [InlineData("noAccountPermission")]
+    [InlineData("noTaskPermission")]
+    [InlineData("success")]
+    public async Task ReconciliationLinksTheWholeSelectionOrLeavesItUntouched(string scenario)
+    {
+        await using var fixture = await Fixture.CreateAsync(admin: scenario is not ("noAccountPermission" or "noTaskPermission"),
+            canEditOthers: scenario != "noTaskPermission", canEditAccounts: scenario == "noTaskPermission");
+        var first = fixture.AddTask();
+        var second = fixture.AddTask("done");
+        var invoice = new Payment
+        {
+            ClientId = first.ClientId,
+            ClientCaseId = first.ClientCaseId,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Account = "SYNTHETIC-RECONCILIATION",
+            Amount = 500m,
+            Description = "Existing invoice content",
+        };
+        fixture.Db.Payments.Add(invoice);
+        if (scenario == "staleInvoice")
+        {
+            invoice.Invoice = new Invoice { Number = "SYNTHETIC-RECONCILIATION", Date = DateTime.UtcNow.Date };
+        }
+        if (scenario == "wrongCase") second.ClientCase = new ClientCase { ClientId = first.ClientId, Title = "Other case" };
+        if (scenario == "noTaskPermission") second.AuthorUserId = second.AssigneeUserId = fixture.OtherUserId;
+        await fixture.SaveAsync();
+
+        var billingRequest = await fixture.RequestAsync([first.Id, second.Id]);
+        var invoiceVersion = await fixture.Db.Payments.AsNoTracking().Where(item => item.Id == invoice.Id)
+            .Select(item => EF.Property<DateTime?>(item, "UpdatedAt")).SingleAsync();
+        if (scenario == "staleInvoice")
+        {
+            // An invoice composition change can advance only the aggregate, leaving the payment header untouched.
+            await fixture.Db.Invoices.Where(item => item.Id == invoice.InvoiceId)
+                .ExecuteUpdateAsync(update => update.SetProperty(item => item.UpdatedAt, DateTime.UtcNow.AddMinutes(1)));
+        }
+        var link = new BulkLinkTaskBillingInvoiceRequest
+        {
+            InvoiceId = invoice.Id,
+            ConfirmedIncludedInInvoice = true,
+            ExpectedUpdatedAtById = billingRequest.ExpectedUpdatedAtById,
+            ExpectedInvoiceUpdatedAt = invoiceVersion,
+        };
+        if (scenario == "staleTask") link.ExpectedUpdatedAtById![second.Id] = Token(DateTime.UtcNow.AddDays(-30));
+        var response = await fixture.Controller().BulkLinkTaskBillingInvoice(link, CancellationToken.None);
+        switch (scenario)
+        {
+            case "success":
+                var result = Assert.IsType<TaskJournalItemDto[]>(Assert.IsType<OkObjectResult>(response.Result).Value);
+                Assert.Equal(new[] { first.Id, second.Id }, result.Select(item => item.Id));
+                Assert.All(result, item => Assert.Equal(invoice.Id, item.BillingInvoiceId));
+                fixture.Db.ChangeTracker.Clear();
+                Assert.IsType<OkObjectResult>((await fixture.Controller().BulkLinkTaskBillingInvoice(link, CancellationToken.None)).Result);
+                Assert.Equal(2, await fixture.Db.TaskJournalComments.CountAsync());
+                Assert.All(await fixture.Db.TaskJournalItems.AsNoTracking().ToArrayAsync(), task => Assert.Equal(invoice.Id, task.BillingInvoiceId));
+                Assert.Equal("done", (await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync(task => task.Id == second.Id)).Status);
+                break;
+            case "wrongCase":
+                Assert.IsType<BadRequestObjectResult>(response.Result);
+                break;
+            case "noAccountPermission":
+            case "noTaskPermission":
+                Assert.IsType<ForbidResult>(response.Result);
+                break;
+            default:
+                Assert.IsType<ConflictObjectResult>(response.Result);
+                break;
+        }
+        if (scenario != "success")
+        {
+            Assert.Empty(await fixture.Db.TaskJournalComments.ToArrayAsync());
+            Assert.All(await fixture.Db.TaskJournalItems.AsNoTracking().ToArrayAsync(), task => Assert.Null(task.BillingInvoiceId));
+        }
+        var savedInvoice = await fixture.Db.Payments.AsNoTracking().SingleAsync(item => item.Id == invoice.Id);
+        Assert.Equal(500m, savedInvoice.Amount);
+        Assert.Equal("Existing invoice content", savedInvoice.Description);
+    }
+
+    [Theory]
     [InlineData(false, 8, 1)]
     [InlineData(true, 9, 0)]
     public async Task CompletionScopeUsesCurrentStatusesAndNeverChangesCancelledOrUnknown(bool includeCompleted, int changed, int excluded)
@@ -1176,11 +1259,15 @@ public sealed class TaskBulkBillingTests
         public RecordingRealtime Realtime { get; } = new();
 
         public static async Task<Fixture> CreateAsync(bool admin = true, bool canEdit = true, bool canEditOthers = true,
-            string viewScope = DataVisibilityScope.All, IInterceptor? interceptor = null)
+            string viewScope = DataVisibilityScope.All, IInterceptor? interceptor = null, bool canEditAccounts = false)
         {
             var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
             var role = new Role { Name = admin ? "admin" : "bulk-billing-editor" };
             role.Permissions.Add(new RolePermission { Section = RolePermissionCatalog.Tasks, CanView = true, CanEdit = canEdit, CanEditOthers = canEditOthers, CanCompleteOthers = true, ViewScope = viewScope });
+            if (canEditAccounts)
+            {
+                role.Permissions.Add(new RolePermission { Section = RolePermissionCatalog.Accounts, CanView = true, CanEdit = true, ViewScope = DataVisibilityScope.All });
+            }
             var actor = new User { Role = role, Email = "bulk-billing@example.test", FullName = "Synthetic actor", PasswordHash = "unused", IsActive = true, IsApproved = true };
             var other = new User { Role = role, Email = "bulk-other@example.test", FullName = "Other actor", PasswordHash = "unused", IsActive = true, IsApproved = true };
             var client = new Client { Name = "Synthetic client" };

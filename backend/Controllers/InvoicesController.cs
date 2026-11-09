@@ -4627,6 +4627,7 @@ public class InvoicesController : ControllerBase
         AuditCreatedByUserId = EF.Property<int?>(x.Payment, "CreatedByUserId"),
         AuditCreatedByUserName = EF.Property<string?>(x.Payment, "CreatedByUserName"),
         AuditUpdatedAt = EF.Property<DateTime?>(x.Payment, "UpdatedAt"),
+        InvoiceUpdatedAt = x.Payment.Invoice != null ? x.Payment.Invoice.UpdatedAt : null,
         AuditUpdatedByUserId = EF.Property<int?>(x.Payment, "UpdatedByUserId"),
         AuditUpdatedByUserName = EF.Property<string?>(x.Payment, "UpdatedByUserName"),
         AuditIsDeleted = EF.Property<bool>(x.Payment, "IsDeleted"),
@@ -4701,6 +4702,8 @@ public class InvoicesController : ControllerBase
             AuditCreatedByUserId = raw.AuditCreatedByUserId,
             AuditCreatedByUserName = raw.AuditCreatedByUserName,
             AuditUpdatedAt = PaymentDomainService.NormalizeUtcInstant(raw.AuditUpdatedAt),
+            BillingReconciliationUpdatedAt = PaymentDomainService.NormalizeUtcInstant(
+                raw.AuditUpdatedAt is null || raw.InvoiceUpdatedAt > raw.AuditUpdatedAt ? raw.InvoiceUpdatedAt : raw.AuditUpdatedAt),
             AuditUpdatedByUserId = raw.AuditUpdatedByUserId,
             AuditUpdatedByUserName = raw.AuditUpdatedByUserName,
             AuditIsDeleted = raw.AuditIsDeleted,
@@ -7636,6 +7639,7 @@ public class InvoicesController : ControllerBase
         public int? AuditCreatedByUserId { get; init; }
         public string? AuditCreatedByUserName { get; init; }
         public DateTime? AuditUpdatedAt { get; init; }
+        public DateTime? InvoiceUpdatedAt { get; init; }
         public int? AuditUpdatedByUserId { get; init; }
         public string? AuditUpdatedByUserName { get; init; }
         public bool AuditIsDeleted { get; init; }

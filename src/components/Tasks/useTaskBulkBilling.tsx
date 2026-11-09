@@ -13,6 +13,7 @@ type Params = {
   identityKey: string;
   canEdit: boolean;
   loading?: boolean;
+  resetOnClose?: boolean;
   onApplied: (result: TaskBillingBulkResult) => void;
 };
 
@@ -103,6 +104,8 @@ export function useTaskBulkBilling(params: Params) {
     try {
       setSnapshot({ ...freezeBillingSelection(params.tasks, params.scopeKey, params.scopeLabel), identityKey: params.identityKey, operationId: ++operationId.current });
       setAllowContracts(false);
+      setTarget('internal'); setIncludeCompleted(false); setOutcomes([]); setAttempted(false);
+      setRefreshRequired(false); setFreshRetryIds(null); setReadErrors({});
       setOpen(true); setError('');
     } catch (reason) { setError(extractDisplayErrorMessage(reason, 'Не удалось зафиксировать выбор.')); }
   };
@@ -216,7 +219,11 @@ export function useTaskBulkBilling(params: Params) {
       scopeCurrent={currentScope()} refreshRequired={refreshRequired} remaining={remaining.length} readyCount={candidates.length} readErrors={readErrors}
       canReplace={params.canEdit && !params.loading && params.tasks.length > 0}
       onTarget={setTarget} onIncludeCompleted={setIncludeCompleted} onApply={() => void apply()} onRefresh={() => void refresh()}
-      onReplace={() => void replace()} onClose={() => { if (!saving.current) { policyRequest.current += 1; setPolicy(null); setOpen(false); } }} /> : null,
+      onReplace={() => void replace()} onClose={() => {
+        if (saving.current) return;
+        policyRequest.current += 1; setPolicy(null); setOpen(false);
+        if (params.resetOnClose) setSnapshot(null);
+      }} /> : null,
     error: !snapshot ? error : '',
   };
 }

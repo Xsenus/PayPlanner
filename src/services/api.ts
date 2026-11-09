@@ -5582,6 +5582,13 @@ export class ApiService {
     });
   }
 
+  async bulkLinkTaskBillingInvoice(invoiceId: number, expectedInvoiceUpdatedAt: string | null, expectedUpdatedAtById: Record<number, string | null>) {
+    return this.request<TaskJournalItem[]>('/tasks/billing-invoice/bulk', {
+      method: 'PUT',
+      body: JSON.stringify({ invoiceId, expectedInvoiceUpdatedAt, expectedUpdatedAtById, confirmedIncludedInInvoice: true }),
+    });
+  }
+
   async updateTaskJournalControl(id: number, isUnderControl: boolean) {
     return this.request<TaskJournalItem>(`/tasks/${id}/control`, {
       method: 'PATCH',

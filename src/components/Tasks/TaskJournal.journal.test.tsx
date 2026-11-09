@@ -619,7 +619,7 @@ describe('TaskJournal', () => {
     }));
     await renderJournal(tasks, { billingAnalysisMode: true, waitForTitle: 'Обычная задача 1' });
 
-    expect(screen.getByText('Платные задачи без счёта: 30')).toBeTruthy();
+    expect(screen.getByText('30 задач без счёта у 1 клиента')).toBeTruthy();
     apiMock.getTaskJournalItems.mockClear();
     fireEvent.change(screen.getByRole('textbox', {
       name: 'Поиск по контрагенту, делу или наименованию задачи',

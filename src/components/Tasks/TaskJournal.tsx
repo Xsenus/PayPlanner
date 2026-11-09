@@ -1,4 +1,5 @@
 import { TaskBillingAnalysisPanel } from './TaskBillingAnalysisPanel';
+import { TaskBillingReconciliation } from './TaskBillingReconciliation';
 import { loadAllTaskJournalItems } from './loadAllTaskJournalItems';
 import { subscribeOnPermissionsChange } from '../../services/permissionsService';
 import { taskStatusClass as statusClass } from '../../utils/taskStatusClass';
@@ -2738,6 +2739,7 @@ export function TaskJournal({
   const [calendarMovingTaskId, setCalendarMovingTaskId] = useState<number | null>(null);
   const [calendarResizingTaskId, setCalendarResizingTaskId] = useState<number | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<number>>(() => new Set());
+  const [billingReconciliation, setBillingReconciliation] = useState<{ anchor: TaskJournalItem; initialIds: number[]; scope: string } | null>(null);
   const [bulkAssigneeUserId, setBulkAssigneeUserId] = useState('');
   const [bulkPriority, setBulkPriority] = useState<TaskJournalPriority | ''>('');
   const [bulkStatus, setBulkStatus] = useState<TaskJournalStatus | ''>('');
@@ -4871,6 +4873,12 @@ export function TaskJournal({
     [selectedTasks],
   );
   const hasInvoiceOnlySelection = selectedTasksForInvoice.some((task) => !editableTaskIds.has(task.id));
+  const onTaskBillingChanged = (ids: number[]) => {
+    const changed = new Set(ids);
+    setSelectedTaskIds((previous) => new Set([...previous].filter((id) => !changed.has(id))));
+    emitTaskChange(ids);
+    void refreshTasks();
+  };
   const bulkBilling = useTaskBulkBilling({
     tasks: selectedTasksForBulk,
     scopeKey: `${currentUserId}:${listFilterKey}:${taskPage}:${viewMode}:${isRouteTaskPage}`,
@@ -4880,9 +4888,7 @@ export function TaskJournal({
     loading: loading || !taskSettingsReady || bulkSaving || bulkDeleting,
     onApplied: (result) => {
       const ids = result.items.filter((item) => item.outcome === 'updated' || item.outcome === 'unchanged').map((item) => item.id);
-      setSelectedTaskIds((previous) => new Set([...previous].filter((id) => !ids.includes(id))));
-      emitTaskChange(ids);
-      void refreshTasks();
+      onTaskBillingChanged(ids);
     },
   });
 
@@ -4891,6 +4897,18 @@ export function TaskJournal({
     contextFilter?.clientId ?? null, contextFilter?.legalEntityId ?? null,
     permissions.tasks, isAdminUser, Boolean(offlineCalendarSnapshot), taskSettings.taskCardWindowMode,
   ]);
+  const reconciliationScope = JSON.stringify([modalBillingReadScope, permissions.accounts, billingAnalysisMode, isApprovalsMode]);
+  useEffect(() => {
+    setBillingReconciliation(previous => previous?.scope === reconciliationScope ? previous : null);
+  }, [reconciliationScope]);
+  const reconciliationAnchor = selectedTasksForInvoice[0];
+  const canReadReconciliation = Boolean(currentUserId && !offlineCalendarSnapshot && billingAnalysisMode && !isApprovalsMode
+    && (isAdminUser || (permissions.tasks.canView && permissions.accounts.canView)));
+  const canReconcile = canReadReconciliation && Boolean(reconciliationAnchor
+    && Boolean(reconciliationAnchor.clientId) !== Boolean(reconciliationAnchor.legalEntityId)
+    && selectedTasks.every(task => task.billingStatus === 'unbilled'
+      && (task.clientId ?? null) === (reconciliationAnchor.clientId ?? null)
+      && (task.legalEntityId ?? null) === (reconciliationAnchor.legalEntityId ?? null)));
   const modalBillingReadScopeRef = useRef(modalBillingReadScope);
   modalBillingReadScopeRef.current = modalBillingReadScope;
   const canReadModalBilling = Boolean(currentUserId && (isAdminUser || permissions.tasks.canView) && !offlineCalendarSnapshot);
@@ -5149,27 +5167,27 @@ export function TaskJournal({
     setSelectedTaskIds(new Set());
   };
 
-  const handleCreateInvoiceFromSelectedTasks = () => {
+  const createInvoiceFromTasks = (selection: TaskJournalItem[]) => {
     if (!onCreateInvoiceDraft) {
       toast.error('У роли нет права на создание доходного счёта.', 'Платные задачи');
-      return;
+      return false;
     }
 
-    if (selectedTasks.length === 0 || selectedTasks.some((task) => task.billingStatus !== 'unbilled')) {
+    if (selection.length === 0 || selection.some((task) => task.billingStatus !== 'unbilled')) {
       toast.error('Выберите только платные задачи с меткой «Не выставлен счёт».', 'Платные задачи');
-      return;
+      return false;
     }
 
-    const first = selectedTasksForInvoice[0];
-    if (selectedTasksForInvoice.some((task) => task.clientId !== first.clientId || task.legalEntityId !== first.legalEntityId)) {
+    const first = selection[0];
+    if (selection.some((task) => (task.clientId ?? null) !== (first.clientId ?? null) || (task.legalEntityId ?? null) !== (first.legalEntityId ?? null))) {
       toast.error('В один счёт можно собрать задачи только одного клиента.', 'Платные задачи');
-      return;
+      return false;
     }
 
-    const contractIds = unique(selectedTasksForInvoice
+    const contractIds = unique(selection
       .map((task) => task.billingContractId ? String(task.billingContractId) : '')
       .filter(Boolean));
-    const caseIds = Array.from(new Set(selectedTasksForInvoice
+    const caseIds = Array.from(new Set(selection
       .map((task) => task.clientCaseId)
       .filter((id): id is number => typeof id === 'number' && id > 0)));
     const today = toLocalDateKey(new Date());
@@ -5192,7 +5210,7 @@ export function TaskJournal({
         expenseLegalEntityId: '',
         contractId: contractIds.length === 1 ? contractIds[0] : '',
         clientCaseReference: caseIds.length === 1 ? `Дело: ${first.clientCaseTitle || first.objectName}` : `${caseIds.length} дел(а) по платным задачам`,
-        description: buildPaidTasksInvoiceDescription(selectedTasksForInvoice),
+        description: buildPaidTasksInvoiceDescription(selection),
         isNotForAccounting: false,
         actReference: '',
         paidDate: '',
@@ -5200,7 +5218,7 @@ export function TaskJournal({
           ? [String(taskSettings.financialDocumentsResponsibleUserId)]
           : [],
       },
-      lineItems: selectedTasksForInvoice.map((task) => ({
+      lineItems: selection.map((task) => ({
         id: `billing-task-${task.id}`,
         name: `${task.title} (задача №${task.id} от ${new Date(task.createdAt).toLocaleDateString('ru-RU')})`,
         quantity: '1',
@@ -5211,9 +5229,10 @@ export function TaskJournal({
       })),
       selectedActs: [],
       selectedClientCaseIds: caseIds,
-      billingTaskIds: selectedTasksForInvoice.map((task) => task.id),
+      billingTaskIds: selection.map((task) => task.id),
       installmentPlan: null,
     });
+    return true;
   };
 
   const resetBulkFields = () => {
@@ -7035,8 +7054,29 @@ export function TaskJournal({
             responsibleName={taskSettings.financialDocumentsResponsibleUserName}
             selectedCount={selectedTasksForInvoice.length}
             canCreateInvoice={Boolean(onCreateInvoiceDraft)}
+            canReconcile={canReconcile}
+            showReconciliation={canReadReconciliation}
             onBillingFilterClick={handleBillingFilterClick}
-            onCreateInvoice={handleCreateInvoiceFromSelectedTasks}
+            onCreateInvoice={() => createInvoiceFromTasks(selectedTasks)}
+            onReconcile={() => {
+              if (canReconcile && reconciliationAnchor) setBillingReconciliation({
+                anchor: reconciliationAnchor, initialIds: selectedTasksForInvoice.map(task => task.id), scope: reconciliationScope,
+              });
+            }}
+          />
+        ) : null}
+        {canReadReconciliation && billingReconciliation?.scope === reconciliationScope ? (
+          <TaskBillingReconciliation
+            anchor={billingReconciliation.anchor}
+            initialIds={billingReconciliation.initialIds}
+            identityKey={reconciliationScope}
+            canLink={isAdminUser || permissions.accounts.canEdit}
+            canCreate={Boolean(onCreateInvoiceDraft)}
+            canEdit={isAdminUser || permissions.tasks.canEdit || permissions.tasks.canEditOthers}
+            canEditTask={task => !isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, permissions.tasks)}
+            onChanged={onTaskBillingChanged}
+            onCreate={selection => { if (createInvoiceFromTasks(selection)) setBillingReconciliation(null); }}
+            onClose={() => setBillingReconciliation(null)}
           />
         ) : null}
         {billingAnalysisMode && !isApprovalsMode && !loading && !taskListLoadError && categorizedBillingTaskCount === 0 ? (

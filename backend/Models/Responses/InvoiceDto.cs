@@ -72,6 +72,7 @@ public class InvoiceDto
     public int? AuditCreatedByUserId { get; set; }
     public string? AuditCreatedByUserName { get; set; }
     public DateTime? AuditUpdatedAt { get; set; }
+    public DateTime? BillingReconciliationUpdatedAt { get; set; }
     public int? AuditUpdatedByUserId { get; set; }
     public string? AuditUpdatedByUserName { get; set; }
     public bool AuditIsDeleted { get; set; }

@@ -98,6 +98,20 @@ public sealed class TaskBulkBillingConcurrencyTests(PostgreSqlMigratedTemplate t
     }
 
     [Fact]
+    public async Task ClientReconciliationRejectsTheWholeBatchAfterWaitingForAnEditedTask()
+    {
+        await using var fixture = await CreateAsync(taskCount: 2);
+        if (fixture is null) return;
+        var (edit, link) = await fixture.RaceAsync("edit", "reconcile");
+        Assert.IsType<OkObjectResult>(edit);
+        Assert.IsType<ConflictObjectResult>(link);
+        await using var db = fixture.Open();
+        Assert.All(await db.TaskJournalItems.AsNoTracking().ToArrayAsync(), task => Assert.Null(task.BillingInvoiceId));
+        Assert.DoesNotContain(await db.TaskJournalComments.AsNoTracking().ToArrayAsync(),
+            item => item.Text.Contains("привязана к ранее выставленному", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task OppositeIdOrdersTakeOrderedLocksAndReturnPersistedMicrosecondTokens()
     {
         await using var fixture = await CreateAsync(TaskClientBillingClassification.Legacy, taskCount: 2);
@@ -369,6 +383,8 @@ public sealed class TaskBulkBillingConcurrencyTests(PostgreSqlMigratedTemplate t
             fixture.ClientId = client.Id;
             fixture.CaseId = clientCase.Id;
             fixture.InvoiceId = invoice.Id;
+            fixture.InvoiceVersion = await db.Payments.Where(item => item.Id == invoice.Id)
+                .Select(item => EF.Property<DateTime?>(item, "UpdatedAt")).SingleAsync();
             fixture.TaskIds = tasks.Select(task => task.Id).OrderBy(id => id).ToArray();
             fixture.Versions = await db.TaskJournalItems.AsNoTracking().ToDictionaryAsync(task => task.Id, task => task.UpdatedAt);
             return fixture;
@@ -385,6 +401,7 @@ public sealed class TaskBulkBillingConcurrencyTests(PostgreSqlMigratedTemplate t
         public int ClientId { get; set; }
         public int CaseId { get; set; }
         public int InvoiceId { get; set; }
+        public DateTime? InvoiceVersion { get; set; }
         public int PermissionId { get; set; }
         public int[] TaskIds { get; set; } = [];
         public Dictionary<int, DateTime?> Versions { get; set; } = [];
@@ -460,6 +477,13 @@ public sealed class TaskBulkBillingConcurrencyTests(PostgreSqlMigratedTemplate t
                 "bulkReverse" => (await controller.BulkUpdateTasks(Request(TaskClientBillingClassification.Billable, reverse: true), CancellationToken.None)).Result!,
                 "single" => (await controller.UpdateTaskBillingClassification(TaskIds[0], new UpdateTaskBillingClassificationRequest { Classification = TaskClientBillingClassification.Billable }, CancellationToken.None)).Result!,
                 "link" => (await controller.LinkTaskBillingInvoice(TaskIds[0], new LinkTaskBillingInvoiceRequest { InvoiceId = InvoiceId, ConfirmedIncludedInInvoice = true }, CancellationToken.None)).Result!,
+                "reconcile" => (await controller.BulkLinkTaskBillingInvoice(new BulkLinkTaskBillingInvoiceRequest
+                {
+                    InvoiceId = InvoiceId,
+                    ConfirmedIncludedInInvoice = true,
+                    ExpectedInvoiceUpdatedAt = InvoiceVersion,
+                    ExpectedUpdatedAtById = Versions.ToDictionary(pair => pair.Key, pair => Token(pair.Value)),
+                }, CancellationToken.None)).Result!,
                 "create" => (await new InvoicesController(db, null!, new NoRequiredFields()) { ControllerContext = Context() }.Create(new UpsertInvoiceRequest
                 {
                     Number = "SYNTHETIC-CREATED",

@@ -4217,6 +4217,7 @@ export interface Invoice {
   auditCreatedByUserId?: number | null;
   auditCreatedByUserName?: string | null;
   auditUpdatedAt?: string | null;
+  billingReconciliationUpdatedAt?: string | null;
   auditUpdatedByUserId?: number | null;
   auditUpdatedByUserName?: string | null;
   auditIsDeleted?: boolean;

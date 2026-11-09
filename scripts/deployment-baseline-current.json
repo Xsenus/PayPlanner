@@ -1171,8 +1171,27 @@
     }
   ],
   "expectedBaselineMigrationIdsSha256": "44af6928621887a0099c8eb13e35734a6c415e7a6461f26d875332707da3b6be",
-  "expectedReleaseCatalogSha256": "c014d78ba6f122db1e7ed8260127dfc6a8c0cb841c99d8881dcc04301a682eb3",
+  "expectedReleaseCatalogSha256": "fc4e8a3db3c326ab35e4bd4df127ff04532d5aec0503a7724646bd7646b46e6c",
   "expectedReleaseSeeds": [
+    {
+      "releaseId": "2026-11-09-task-billing-client-reconciliation",
+      "version": "1.14.914",
+      "releasedAt": "2026-11-09T11:59:07Z",
+      "title": "Сверка платных задач по клиенту",
+      "summary": "Задачи без счёта и позиции счетов клиента доступны в одном окне.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "new",
+          "text": "В анализе оплаты задач откройте очередь без счёта, отметьте задачу и нажмите «Сверка по клиенту». В окне можно выбрать работы целым делом на странице, сравнить их с позициями существующего счёта, привязать подтверждённые работы, подготовить новый счёт или отметить задачи как внутренние."
+        },
+        {
+          "type": "improved",
+          "text": "Один счётчик показывает общее число задач без счёта и число клиентов. Сумма и состав существующего счёта при привязке задач не меняются."
+        }
+      ]
+    },
     {
       "releaseId": "2026-11-09-actual-contract-task-classification",
       "version": "1.14.913",

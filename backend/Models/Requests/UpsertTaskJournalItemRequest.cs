@@ -92,3 +92,13 @@ public sealed class LinkTaskBillingInvoiceRequest
     public int InvoiceId { get; set; }
     public bool ConfirmedIncludedInInvoice { get; set; }
 }
+
+public sealed class BulkLinkTaskBillingInvoiceRequest
+{
+    public int InvoiceId { get; set; }
+    public bool ConfirmedIncludedInInvoice { get; set; }
+    public Dictionary<int, string?>? ExpectedUpdatedAtById { get; set; }
+
+    [System.Text.Json.Serialization.JsonRequired]
+    public DateTime? ExpectedInvoiceUpdatedAt { get; set; }
+}
