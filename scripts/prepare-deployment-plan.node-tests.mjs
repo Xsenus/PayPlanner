@@ -30,12 +30,16 @@ function fixture(t, candidate = false) {
   const baseline = JSON.parse(readFileSync(resolve('scripts/deployment-baseline.json'), 'utf8'));
   let releases = Buffer.from('[{"releaseId":"published"}]');
   if (candidate) {
-    releases = readFileSync(resolve('backend/AppReleases/releases.json'));
+    const current = readFileSync(resolve('backend/AppReleases/releases.json'), 'utf8');
+    const firstReviewedEntry = '  {\n    "releaseId": ' + JSON.stringify(baseline.expectedReleaseSeeds[0].releaseId) + ',\n';
+    const firstReviewedOffset = current.indexOf(firstReviewedEntry);
+    assert.ok(firstReviewedOffset >= 0, 'Historic release catalog is missing');
+    releases = Buffer.from('[\n' + current.slice(firstReviewedOffset));
     assert.equal(sha256(releases), reviewedCandidate(root).releaseCatalogSha256);
   }
   if (!candidate) { baseline.expectedMigration = null; baseline.expectedReleaseSeeds = []; }
   baseline.expectedReleaseCatalogSha256 = sha256(releases);
-  writeFileSync(join(root, 'scripts/deployment-baseline.json'), JSON.stringify(baseline));
+  writeFileSync(join(root, 'scripts/deployment-baseline-current.json'), JSON.stringify(baseline));
   for (const name of ['PayPlanner.Api.dll', 'PayPlanner.Api.Migrations.dll']) writeFileSync(join(root, 'out/be', name), name);
   writeFileSync(join(root, 'out/be/AppReleases/releases.json'), releases);
   for (const name of ['index.html', 'payplanner-app-cache.js', 'payplanner-worker.js', 'payplanner-push-worker.js']) writeFileSync(join(root, 'out/fe', name), name);
@@ -89,7 +93,7 @@ test('qualifies exactly the reviewed eighteen-migration candidate and all 770 re
 
 test('new catalog additions do not inherit the historical candidate admission', t => {
   const input = fixture(t, true);
-  const path = join(input.root, 'scripts/deployment-baseline.json');
+  const path = join(input.root, 'scripts/deployment-baseline-current.json');
   const baseline = JSON.parse(readFileSync(path, 'utf8'));
   baseline.expectedReleaseCatalogSha256 = sha256(Buffer.concat([readFileSync(resolve('backend/AppReleases/releases.json')), Buffer.from('\n')]));
   assert.notEqual(baseline.expectedReleaseCatalogSha256, reviewedCandidate(input.root).releaseCatalogSha256);
@@ -99,7 +103,7 @@ test('new catalog additions do not inherit the historical candidate admission', 
 
 test('candidate admission rejects partial/reordered migrations, catalog or seed substitutions', t => {
   const input = fixture(t, true);
-  const original = JSON.parse(readFileSync(join(input.root, 'scripts/deployment-baseline.json'), 'utf8'));
+  const original = JSON.parse(readFileSync(join(input.root, 'scripts/deployment-baseline-current.json'), 'utf8'));
   const ids = reviewedCandidate(input.root).migrationIds;
   for (const mutate of [
     value => { value.expectedMigration = ids.slice(0, -1).join('+'); },
@@ -119,7 +123,7 @@ test('candidate admission rejects partial/reordered migrations, catalog or seed 
 
 test('review and schema fixtures are immutable while LF and CRLF preserve approval', t => {
   const input = fixture(t, true);
-  const baseline = JSON.parse(readFileSync(join(input.root, 'scripts/deployment-baseline.json'), 'utf8'));
+  const baseline = JSON.parse(readFileSync(join(input.root, 'scripts/deployment-baseline-current.json'), 'utf8'));
   const reviewPath = join(input.root, 'scripts/deploy-roadmap-candidate-review.json');
   const raw = readFileSync(reviewPath, 'utf8');
   writeFileSync(reviewPath, raw.replaceAll('\n', '\r\n'));
@@ -136,7 +140,7 @@ test('review and schema fixtures are immutable while LF and CRLF preserve approv
 
 test('schema int64 boundaries are checked without JavaScript precision loss', t => {
   const input = fixture(t, true);
-  const baseline = JSON.parse(readFileSync(join(input.root, 'scripts/deployment-baseline.json'), 'utf8'));
+  const baseline = JSON.parse(readFileSync(join(input.root, 'scripts/deployment-baseline-current.json'), 'utf8'));
   const path = join(input.root, 'scripts/deploy-roadmap-candidate-delta.json');
   const original = readFileSync(path, 'utf8');
   assert.ok(original.includes('9223372036854775807'));
@@ -147,7 +151,7 @@ test('schema int64 boundaries are checked without JavaScript precision loss', t 
 
 test('admits only the specifically reviewed additive payment attempt migration', t => {
   const input = fixture(t);
-  const path = join(input.root, 'scripts/deployment-baseline.json');
+  const path = join(input.root, 'scripts/deployment-baseline-current.json');
   const baseline = JSON.parse(readFileSync(path, 'utf8'));
   baseline.expectedMigration = '20261027005432_AddPaymentCreateAttempts';
   writeFileSync(path, JSON.stringify(baseline));

@@ -81,7 +81,7 @@ export function qualifiedContext(env, revision, platform = process.platform) {
 export function createPlan({ root, archive, revision, operator, env = process.env, now = new Date(), platform = process.platform }) {
   const context = qualifiedContext(env, revision, platform);
   assert.equal(operator.authoriseAutomaticMainDelivery, true, 'Private operator authorisation is required');
-  const baseline = JSON.parse(readFileSync(join(root, 'scripts/deployment-baseline.json'), 'utf8'));
+  const baseline = JSON.parse(readFileSync(join(root, 'scripts/deployment-baseline-current.json'), 'utf8'));
   assert.equal(baseline.expectedProtectedTables.length, 16);
   assert.equal(baseline.expectedAddedProtectedTables.length, 0);
   validateReviewedBaseline(baseline, root);

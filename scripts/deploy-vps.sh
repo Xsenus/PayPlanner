@@ -120,7 +120,7 @@ revision_is() {
 space_at_least() { [[ "$(df --output=avail -B1 "$APP" | tail -n 1)" -ge "$1" ]]; }
 file_sha() { sha256sum -- "$1" | cut -d ' ' -f 1; }
 db_proof() {
-  if [[ "$1" == "$BACKUP/database-before.json" ]]; then
+  if [[ "$1" == "$BACKUP/database-before.json" || "$1" == "$BACKUP/database-active.json" ]]; then
     python3 "$DB_PROOF" "$1" > "$1.summary.private.json" || return "$?"
   else
     python3 "$DB_PROOF" "$1" "$BACKUP/database-before.json" > "$1.summary.private.json" || return "$?"
@@ -133,7 +133,7 @@ if p['baselineSha256'] is None:
  import hashlib
  assert p['controls']['migrations']==c['expectedBaselineMigrations'],'Installed migration history differs; no rebaseline/startup permitted'
  assert hashlib.sha256(json.dumps(p['controls']['migrations'],sort_keys=True,separators=(',',':')).encode()).hexdigest()==c['expectedBaselineMigrationIdsSha256']
- assert len(p['migrationRows'])==209 and p['migrationRows']==c['expectedBaselineMigrationRows'],'Installed209 full history rows/ProductVersion differ; no rebaseline/startup permitted'
+ assert p['migrationRows']==c['expectedBaselineMigrationRows'],'Full installed migration rows/ProductVersion differ; no rebaseline/startup permitted'
  assert all(type(v) is int and v>=0 for v in p['newPolicyNonNullCounts'].values()),'Expected installed nullable policy columns required'
 assert all(p['controls'][n]==0 for n in ['legacyActive','pendingContractor','invalidIndexes','invalidConstraints'])
 PY
@@ -326,6 +326,7 @@ assert all(n.startswith('/etc/systemd/system/payplanner.service.d/') for n in s[
 assert '/opt/payplanner/shared/payplanner.env' in s['EnvironmentFiles'],'Review the effective production env-file path'
 PY
   history_check "$BACKUP/history-active.private.json"
+  db_proof "$BACKUP/database-active.json"
   systemctl stop "$SERVICE"
   STOPPED=true
   service_inactive

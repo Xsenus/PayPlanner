@@ -12,7 +12,7 @@ export const linuxFiles = Object.freeze([
   'prune-deploy-backups.sh', 'prune-deploy-backups.test.sh',
   'preserve-data-protection-keys.sh', 'preserve-data-protection-keys.test.sh',
   'deploy-history-archive.py', 'deploy-history-archive.test.py',
-  'deploy-db-proof.py', 'deploy-db-proof.test.py', 'deploy-payment-attempt-delta.json', 'deploy-payment-history-delta.json', 'deployment-baseline.json',
+  'deploy-db-proof.py', 'deploy-db-proof.test.py', 'deploy-payment-attempt-delta.json', 'deploy-payment-history-delta.json', 'deployment-baseline-current.json',
   'deploy-roadmap-candidate-review.json', 'deploy-roadmap-candidate-delta.json',
   'deploy-stopped-archive.py', 'deploy-stopped-archive.test.py',
   'deploy-history-source-proof.py', 'deploy-stopped-source-proof.py',

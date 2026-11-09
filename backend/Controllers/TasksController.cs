@@ -5091,6 +5091,22 @@ public class TasksController : ControllerBase
         DataVisibilityAccess? contractVisibility, CancellationToken ct)
     {
         if (contractVisibility is null || taskIds.Length == 0 || lockedContractIds.Length == 0) return [];
+        // A current invoice with explicit task links can be protected at task level.
+        // Unassigned documents and legacy links still protect the whole contract.
+        var taskLinkedInvoiceIds = _db.Payments.IgnoreQueryFilters().ApplyUnambiguousInvoiceLinks()
+            .Where(invoice => invoice.ContractId.HasValue && lockedContractIds.Contains(invoice.ContractId.Value)
+                && invoice.Contract != null && invoice.Contract.BillingMode == ContractBillingMode.Actual
+                && invoice.DocumentKind == DocumentKind.Invoice && invoice.Type == PaymentType.Income
+                && invoice.InvoiceId.HasValue && !EF.Property<bool>(invoice, "IsDeleted")
+                && invoice.Status != PaymentStatus.Cancelled && invoice.InvoiceWorkflowStatus != InvoiceWorkflowStatus.Cancelled
+                && _db.TaskJournalItems.Any(linkedTask => linkedTask.BillingInvoiceId == invoice.Id
+                    && linkedTask.BillingContractId == invoice.ContractId
+                    && linkedTask.BillingModeSnapshot == ContractBillingMode.Actual
+                    && linkedTask.ClientBillingClassification == TaskClientBillingClassification.Billable
+                    && linkedTask.ClientId == invoice.ClientId && linkedTask.LegalEntityId == invoice.LegalEntityId
+                    && !EF.Property<bool>(linkedTask, "IsDeleted")))
+            .Select(invoice => invoice.Id);
+
         // Raw historical existence is a separate query: IgnoreQueryFilters is query-wide metadata.
         // Each source is bounded by the at-most-500 selected contract roots and returns only their IDs.
         var protectedContractIds = await _db.ContractInvoices.IgnoreQueryFilters()
@@ -5100,7 +5116,8 @@ public class TasksController : ControllerBase
             .Union(_db.ContractActs.IgnoreQueryFilters()
                 .Where(link => lockedContractIds.Contains(link.ContractId)).Select(link => link.ContractId))
             .Union(_db.Payments.IgnoreQueryFilters()
-                .Where(payment => payment.ContractId.HasValue && lockedContractIds.Contains(payment.ContractId.Value))
+                .Where(payment => payment.ContractId.HasValue && lockedContractIds.Contains(payment.ContractId.Value)
+                    && !taskLinkedInvoiceIds.Contains(payment.Id))
                 .Select(payment => payment.ContractId!.Value))
             .ToArrayAsync(ct);
         var today = DateTime.UtcNow.Date;

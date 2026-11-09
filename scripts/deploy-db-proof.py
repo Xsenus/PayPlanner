@@ -98,12 +98,15 @@ def candidate_row_controls(schema_columns,schema_objects,query):
  counts={table:query('SELECT to_json(count(*)) FROM "'+table+'";')[0] if table in relations else None for table in CANDIDATE_NEW_TABLES}
  return defaults,counts
 
-def compare_candidate_rows(a,b,migrated):
+def compare_financial_rows(a,b):
  for key,tables in [('projectionColumns',a['projectionColumns']),('supplementalProjectionColumns',SUPPLEMENTAL_TABLES)]:
   need(set(a[key])==set(tables) and a[key]==b[key],'Candidate all-column projection changed')
   for table in tables:
    need(a[key][table]==[c['name'] for c in a['schemaColumns'] if c['table']==table],'Candidate projection must include every baseline column: '+table)
  need(len(a['supplementalFingerprints'])==len(SUPPLEMENTAL_TABLES) and {r['table'] for r in a['supplementalFingerprints']}==set(SUPPLEMENTAL_TABLES) and a['supplementalFingerprints']==b['supplementalFingerprints'],'Existing cash and request rows changed')
+
+def compare_candidate_rows(a,b,migrated):
+ compare_financial_rows(a,b)
  for key,expected in [('candidateDefaultCounts',CANDIDATE_DEFAULTS),('candidateNewTableCounts',CANDIDATE_NEW_TABLES)]:
   need(set(a[key])==set(expected) and set(b[key])==set(expected),'Candidate row-control scope changed')
   need(all(value is None for value in a[key].values()),'Candidate baseline is not the installed pre-migration state')
@@ -164,22 +167,27 @@ def compare(plan_path,a_path,b_path,phase):
  need(a['fingerprints']==b['fingerprints'],'Protected rows/counts/all-column contents changed')
  need(a['projectionColumns']==b['projectionColumns'],'Pinned all-column projection changed')
  migrated=phase=='startup' and bool(admitted_ids)
- history=plan['expectedMigration']==PAYMENT_AND_HISTORY_MIGRATIONS or candidate
+ post_candidate=not admitted_ids and len(a['controls']['migrations'])==227
+ history=plan['expectedMigration']==PAYMENT_AND_HISTORY_MIGRATIONS or candidate or post_candidate
  if candidate:compare_candidate_rows(a,b,migrated)
+ if post_candidate:compare_financial_rows(a,b)
  if history:
   need(set(a['chatProjectionColumns'])==set(CHAT_TABLES) and a['chatProjectionColumns']==b['chatProjectionColumns'],'Chat projection scope changed')
   for table in CHAT_TABLES:
    need(a['chatProjectionColumns'][table]==[c['name'] for c in a['schemaColumns'] if c['table']==table],'Chat baseline projection must include every existing column')
   need(len(a['chatFingerprints'])==len(CHAT_TABLES) and {row['table'] for row in a['chatFingerprints']}==set(CHAT_TABLES) and a['chatFingerprints']==b['chatFingerprints'],'Existing chat rows or read states changed')
-  need(a['chatHistoryNonDefaults'] is None,'Unexpected pre-existing history columns')
-  need(b['chatHistoryNonDefaults']==(0 if migrated else None),'Existing personal history state changed')
+  if post_candidate:
+   need(type(a['chatHistoryNonDefaults']) is int and a['chatHistoryNonDefaults']==b['chatHistoryNonDefaults'],'Installed personal history state changed')
+  else:
+   need(a['chatHistoryNonDefaults'] is None,'Unexpected pre-existing history columns')
+   need(b['chatHistoryNonDefaults']==(0 if migrated else None),'Existing personal history state changed')
  if migrated:compare_payment_attempt_schema(a,b,reviewed_candidate()['schemaDeltaSha256'] if candidate else PAYMENT_AND_HISTORY_DELTA_SHA256 if history else PAYMENT_ATTEMPT_DELTA_SHA256)
  else:need(a['schemaColumns']==b['schemaColumns'] and a['schemaObjects']==b['schemaObjects'],'Unexpected schema mutation')
  need({k:v for k,v in a['controls'].items() if k!='migrations'}=={k:v for k,v in b['controls'].items() if k!='migrations'},'Protected financial/integrity controls changed')
  am=a['controls']['migrations']
- need(len(am)==209 and am==plan['expectedBaselineMigrations'],'Baseline is not the accepted installed142 migration catalog')
+ need(len(am)==(227 if post_candidate else 209) and am==plan['expectedBaselineMigrations'],'Baseline is not the accepted installed migration catalog')
  need(hashlib.sha256(json.dumps(am,sort_keys=True,separators=(',',':')).encode()).hexdigest()==plan['expectedBaselineMigrationIdsSha256'],'Baseline migration catalog pin differs')
- need(len(a['migrationRows'])==209 and a['migrationRows']==plan['expectedBaselineMigrationRows'],'All209 full baseline migration rows/ProductVersion must remain exact')
+ need(len(a['migrationRows'])==len(am) and a['migrationRows']==plan['expectedBaselineMigrationRows'],'Full baseline migration rows/ProductVersion must remain exact')
  if migrated:need(b['controls']['migrations']==sorted(am+admitted_ids),'Unexpected migration IDs after startup')
  else:need(a['controls']==b['controls'] and a['migrationRows']==b['migrationRows'],'Migration history or ProductVersion changed before authorised startup')
  need(all(a['controls'][n]==0 for n in ['legacyActive','pendingContractor','invalidIndexes','invalidConstraints']),'Unsafe baseline control')
@@ -193,7 +201,7 @@ def compare(plan_path,a_path,b_path,phase):
   need(c['type']=='character varying(32)' and c['nullable'] is True and c['default'] is None and c['identity']=='' and c['generated']=='' and c['collation'] in ['pg_catalog.default','pg_catalog."default"'],'Installed Seller policy shape changed')
  need(a['newPolicyNonNullCounts']==b['newPolicyNonNullCounts'] and set(a['newPolicyNonNullCounts'])==set(POLICY_TABLES) and all(type(v) is int and v>=0 for v in a['newPolicyNonNullCounts'].values()),'Existing policy values/counts changed')
  compare_releases(a,b,plan,'unchanged' if phase=='unchanged' or not plan['expectedReleaseSeeds'] else 'startup')
- print(json.dumps({'status':'passed','phase':phase,'protectedTables':16,'protectedChatTables':len(CHAT_TABLES) if history else 0,'protectedSupplementalTables':len(SUPPLEMENTAL_TABLES) if candidate else 0,'allColumnsAndRowsExact':True,'migrationHistory209Exact':True,'releaseCatalogUnchanged':a['releaseRows']==b['releaseRows'] and a['releaseItems']==b['releaseItems'],'reviewedReleaseSeeds':len(plan['expectedReleaseSeeds']) if phase=='startup' else 0,'baselineSha256':digest(a_path)}))
+ print(json.dumps({'status':'passed','phase':phase,'protectedTables':16,'protectedChatTables':len(CHAT_TABLES) if history else 0,'protectedSupplementalTables':len(SUPPLEMENTAL_TABLES) if candidate or post_candidate else 0,'allColumnsAndRowsExact':True,'migrationHistory209Exact':len(am)==209,'migrationBaselineCount':len(am),'releaseCatalogUnchanged':a['releaseRows']==b['releaseRows'] and a['releaseItems']==b['releaseItems'],'reviewedReleaseSeeds':len(plan['expectedReleaseSeeds']) if phase=='startup' else 0,'baselineSha256':digest(a_path)}))
 
 def main():
  if len(sys.argv)>1 and sys.argv[1]=='--compare':

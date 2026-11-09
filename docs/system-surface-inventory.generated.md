@@ -1257,9 +1257,9 @@
 | PATCH | api/tasks/{id:int}/status | TasksController | UpdateStatus | backend/Controllers/TasksController.cs:4192 | [Authorize] | да | docs/payplanner-task-workflow-roadmap-2026-10-14.md, docs/task-result-approval-current-state-2026-07-09.md |
 | PATCH | api/tasks/{id:int}/control | TasksController | UpdateControl | backend/Controllers/TasksController.cs:4416 | [Authorize] | да | нет |
 | POST | api/tasks/bulk | TasksController | BulkUpdateTasks | backend/Controllers/TasksController.cs:4482 | [Authorize] | да | docs/payplanner-task-billing-bulk-plan-2026-10-23.md |
-| POST | api/tasks/bulk/delete | TasksController | BulkDeleteTasks | backend/Controllers/TasksController.cs:5160 | [Authorize] | да | нет |
-| PATCH | api/tasks/{id:int}/approval | TasksController | UpdateApproval | backend/Controllers/TasksController.cs:5258 | [Authorize] | да | нет |
-| DELETE | api/tasks/{id:int} | TasksController | DeleteTask | backend/Controllers/TasksController.cs:5456 | [Authorize] | да | docs/payplanner-task-workflow-roadmap-2026-10-14.md, docs/storage-resilience-runbook.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
+| POST | api/tasks/bulk/delete | TasksController | BulkDeleteTasks | backend/Controllers/TasksController.cs:5177 | [Authorize] | да | нет |
+| PATCH | api/tasks/{id:int}/approval | TasksController | UpdateApproval | backend/Controllers/TasksController.cs:5275 | [Authorize] | да | нет |
+| DELETE | api/tasks/{id:int} | TasksController | DeleteTask | backend/Controllers/TasksController.cs:5473 | [Authorize] | да | docs/payplanner-task-workflow-roadmap-2026-10-14.md, docs/storage-resilience-runbook.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
 | GET | api/task-time/current | TaskTimeController | Current | backend/Controllers/TaskTimeController.cs:28 | [Authorize] | да | нет |
 | GET | api/task-time/task/{taskId:int}/history | TaskTimeController | History | backend/Controllers/TaskTimeController.cs:41 | [Authorize] | да | нет |
 | GET | api/task-time/task/{taskId:int}/{id:guid}/corrections | TaskTimeController | Corrections | backend/Controllers/TaskTimeController.cs:61 | [Authorize] | да | нет |

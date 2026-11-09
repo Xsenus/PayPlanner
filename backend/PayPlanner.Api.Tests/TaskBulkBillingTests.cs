@@ -680,6 +680,66 @@ public sealed class TaskBulkBillingTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ActualContractInvoiceOnlyProtectsTasksIncludedInIt(bool singleEditor)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var task = fixture.AddTask("done");
+        var contract = await fixture.AttachContractAsync(task, ContractBillingMode.Actual);
+        await fixture.SetContractPolicyAsync("allowFutureClassification");
+        var billedTask = fixture.AddTask("done");
+        var invoice = new Payment
+        {
+            ContractId = contract.Id,
+            ClientId = task.ClientId,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Account = "SYNTHETIC-BILLED",
+            Amount = 500m,
+            Invoice = new Invoice { Number = "SYNTHETIC-BILLED", Date = DateTime.UtcNow.Date }
+        };
+        fixture.Db.Payments.Add(invoice);
+        billedTask.BillingContractId = contract.Id;
+        billedTask.BillingModeSnapshot = ContractBillingMode.Actual;
+        billedTask.BillingInvoice = invoice;
+        await fixture.SaveAsync();
+        var before = await ReadContractBillingStateAsync(fixture.Db, includeTaskChanges: false);
+        var request = await fixture.RequestAsync([task.Id, billedTask.Id]);
+        request.AllowContractClassification = true;
+        request.IncludeCompleted = true;
+
+        if (singleEditor)
+        {
+            var result = await fixture.Controller().UpdateTaskBillingClassification(task.Id,
+                new UpdateTaskBillingClassificationRequest
+                {
+                    Classification = TaskClientBillingClassification.Internal,
+                    BillingContractId = contract.Id,
+                    HasExpectedUpdatedAt = true,
+                    ExpectedUpdatedAt = request.ExpectedUpdatedAtById![task.Id],
+                    AllowContractClassification = true
+                }, CancellationToken.None);
+            Assert.IsType<OkObjectResult>(result.Result);
+        }
+        else
+        {
+            var result = await fixture.ApplyAsync(request);
+            Assert.Equal(1, result.Updated);
+            Assert.Equal("invoiced", result.Items.Single(row => row.Id == billedTask.Id).Reason);
+        }
+
+        var tasks = await fixture.Db.TaskJournalItems.AsNoTracking().ToDictionaryAsync(row => row.Id);
+        Assert.Equal(TaskClientBillingClassification.Internal, tasks[task.Id].ClientBillingClassification);
+        Assert.Equal(contract.Id, tasks[task.Id].BillingContractId);
+        Assert.Null(tasks[task.Id].BillingInvoiceId);
+        Assert.Equal("done", tasks[task.Id].Status);
+        Assert.Equal(invoice.Id, tasks[billedTask.Id].BillingInvoiceId);
+        Assert.Equal(TaskClientBillingClassification.Billable, tasks[billedTask.Id].ClientBillingClassification);
+        Assert.Equal(before, await ReadContractBillingStateAsync(fixture.Db, includeTaskChanges: false));
+    }
+
+    [Theory]
     [InlineData("missing-mode")]
     [InlineData("unknown-mode")]
     [InlineData("wrong-case")]
@@ -1067,24 +1127,25 @@ public sealed class TaskBulkBillingTests
         Assert.Empty(await fixture.Db.Payments.ToArrayAsync());
     }
 
-    private static async Task<byte[]> ReadContractBillingStateAsync(PaymentContext db)
+    private static async Task<byte[]> ReadContractBillingStateAsync(PaymentContext db, bool includeTaskChanges = true)
     {
         db.ChangeTracker.Clear();
         try
         {
             return JsonSerializer.SerializeToUtf8Bytes(new Dictionary<string, byte[][]>
             {
-                ["tasks"] = await ReadScalarsAsync<TaskJournalItem>(),
+                ["tasks"] = includeTaskChanges ? await ReadScalarsAsync<TaskJournalItem>() : [],
                 ["clients"] = await ReadScalarsAsync<Client>(),
                 ["clientCases"] = await ReadScalarsAsync<ClientCase>(),
                 ["clientContracts"] = await ReadScalarsAsync<ClientContract>(),
                 ["contracts"] = await ReadScalarsAsync<Contract>(),
                 ["payments"] = await ReadScalarsAsync<Payment>(),
+                ["invoices"] = await ReadScalarsAsync<Invoice>(),
                 ["acts"] = await ReadScalarsAsync<Act>(),
                 ["contractInvoices"] = await ReadScalarsAsync<ContractInvoice>(),
                 ["contractPayments"] = await ReadScalarsAsync<ContractPayment>(),
                 ["contractActs"] = await ReadScalarsAsync<ContractAct>(),
-                ["history"] = await ReadScalarsAsync<TaskJournalComment>(),
+                ["history"] = includeTaskChanges ? await ReadScalarsAsync<TaskJournalComment>() : [],
             });
         }
         finally { db.ChangeTracker.Clear(); }

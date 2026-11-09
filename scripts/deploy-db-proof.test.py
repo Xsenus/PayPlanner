@@ -72,6 +72,34 @@ class DatabaseProofTests(unittest.TestCase):
         self.assertEqual(result['protectedTables'], 16)
         self.assertTrue(result['releaseCatalogUnchanged'])
 
+    def test_installed_227_release_preserves_migration_chat_and_cash_state(self):
+        current = json.loads(Path(__file__).with_name('deployment-baseline-current.json').read_text(encoding='utf-8'))
+        for key in ['expectedBaselineMigrations', 'expectedBaselineMigrationRows', 'expectedBaselineMigrationIdsSha256']:
+            self.plan[key] = current[key]
+        self.before['controls']['migrations'] = self.plan['expectedBaselineMigrations']
+        self.before['migrationRows'] = self.plan['expectedBaselineMigrationRows']
+        self.before['chatHistoryNonDefaults'] = 2
+        for prefix, tables in [('chat', proof.CHAT_TABLES), ('supplemental', proof.SUPPLEMENTAL_TABLES)]:
+            self.before[prefix + 'ProjectionColumns'] = {table: ['Id'] for table in tables}
+            self.before[prefix + 'Fingerprints'] = [dict(table=table, count=1, hash='b'*32) for table in tables]
+            self.before['schemaColumns'].extend(dict(table=table, name='Id') for table in tables)
+        policy_tables = set(proof.POLICY_TABLES)
+        self.before['schemaColumns'].extend(dict(table=table, name='Id')
+                                            for table in self.before['projectionColumns'] if table not in policy_tables)
+        self.a_path.write_text(json.dumps(self.before))
+        self.after = copy.deepcopy(self.before)
+        self.after['utc'] = '2026-10-26T00:01:00+00:00'
+        self.after['baselineSha256'] = proof.digest(self.a_path)
+        self.add_seed()
+
+        result = self.compare('startup')
+        self.assertEqual(result['migrationBaselineCount'], 227)
+        self.assertEqual(result['protectedChatTables'], len(proof.CHAT_TABLES))
+        self.assertEqual(result['protectedSupplementalTables'], len(proof.SUPPLEMENTAL_TABLES))
+        self.after['supplementalFingerprints'][0]['hash'] = 'changed'
+        with self.assertRaisesRegex(AssertionError, 'cash and request rows'):
+            self.compare('startup')
+
     def test_reviewed_insert_only_at_startup_and_receipt_is_truthful(self):
         self.add_seed()
         with self.assertRaisesRegex(AssertionError, 'before startup'):
