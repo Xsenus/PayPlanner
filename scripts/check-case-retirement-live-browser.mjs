@@ -414,11 +414,15 @@ try {
           retirePosts, filePosts, caseSaves, caseDetailReads, proofRefusals,
         }));
         check(await page.getByRole('textbox', { name: 'Стратегия и план действий', exact: true }).inputValue() === 'Unsaved browser strategy', 'Unavailable proof lost unsaved fields');
+        // Reconnect can start a pending-uploads read after the first attempt settles.
+        // The explicit refresh supersedes that read, so let its real response finish first.
+        await caseReads.drain('retirement-confirmation');
         await panel.getByRole('button', { name: 'Обновить загрузки', exact: true }).click();
         await waitAtPhase(panel.getByText('Прежняя попытка прекращена и больше не добавит документ. Новый файл отправляется отдельным действием.', { exact: true }), 'restart-receipt');
         const afterRead = await page.evaluate(() => JSON.parse(sessionStorage.getItem('pp.case-document-upload-attempts.v1')));
         check(afterRead?.length === 1 && afterRead[0].key === settings.key, 'Ordinary polling released a retired identity');
         await panel.getByRole('button', { name: 'Подготовить новую загрузку', exact: true }).click();
+        await caseReads.drain('retirement-confirmation');
         manualRecovery = true;
         await dialog.getByRole('button', { name: 'Подтвердить', exact: true }).click();
       } else acknowledgedRestartReceipt = retired;

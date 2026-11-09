@@ -46,10 +46,10 @@
 - `backend/Controllers/TaskTimeController.cs:206`
 - `backend/Controllers/TaskTimeController.cs:94`
 - `backend/Controllers/TasksController.cs:3280`
-- `backend/Controllers/TasksController.cs:4882`
-- `backend/Controllers/TasksController.cs:5087`
-- `backend/Controllers/TasksController.cs:5190`
-- `backend/Controllers/TasksController.cs:5475`
+- `backend/Controllers/TasksController.cs:5006`
+- `backend/Controllers/TasksController.cs:5211`
+- `backend/Controllers/TasksController.cs:5331`
+- `backend/Controllers/TasksController.cs:5616`
 - `backend/Controllers/UserActivityController.cs:418`
 - `backend/Controllers/UserActivityController.cs:540`
 - `backend/Controllers/V2/CasesV2Controller.cs:5592`
