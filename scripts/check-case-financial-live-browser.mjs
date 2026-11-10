@@ -187,7 +187,16 @@ try {
     let card = page;
     if (modal) {
       await reads.drain('client-navigation');
-      await page.goto(settings.ui + '/clients/' + settings.clientId, { waitUntil: 'domcontentloaded' });
+      // Opening the cases tab unmounts the client profile and cancels its form-rule request.
+      const [requirements] = await Promise.all([
+        page.waitForResponse(response => {
+          const url = new URL(response.url());
+          return url.origin === settings.api && url.pathname === '/api/form-requirements'
+            && url.searchParams.get('section') === 'clients' && response.request().method() === 'GET';
+        }),
+        page.goto(settings.ui + '/clients/' + settings.clientId, { waitUntil: 'domcontentloaded' }),
+      ]);
+      check(requirements.ok() && await requirements.finished() === null, 'Client profile form rules must finish before opening cases');
       await page.locator('main').getByRole('button', { name: 'Дела', exact: true }).click();
       await page.getByRole('button', { name: 'Редактировать дело Synthetic financial browser case', exact: true }).click();
       card = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Дело', exact: true }) });

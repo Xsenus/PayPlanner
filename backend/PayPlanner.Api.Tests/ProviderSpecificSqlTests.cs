@@ -258,15 +258,16 @@ public partial class ProviderSpecificSqlTests
         Approve("backend/Controllers/TasksController.cs", taskSource, "UpdateTaskBillingClassification", classificationStart, classificationEnd,
             ["""await _db.Database.SqlQuery<int>($"SELECT 1 FROM \"TaskJournalItems\" WHERE \"Id\" = {id} FOR UPDATE")"""]);
 
-        var linkStart = taskSource.IndexOf("public async Task<ActionResult<TaskJournalItemDto>> LinkTaskBillingInvoice", StringComparison.Ordinal);
-        var linkEnd = taskSource.IndexOf("private IQueryable<Payment> EligibleTaskBillingInvoices", linkStart, StringComparison.Ordinal);
+        var linkStart = taskSource.IndexOf("private async Task<ActionResult<TaskJournalItemDto[]>> LinkTaskBillingInvoiceAsync(", StringComparison.Ordinal);
+        var linkEnd = taskSource.IndexOf("private IQueryable<Payment> ReconciliationInvoiceQuery", linkStart, StringComparison.Ordinal);
         Assert.True(linkStart >= 0 && linkEnd > linkStart);
         var linkMethod = taskSource[linkStart..linkEnd];
-        Assert.Contains("if (_db.Database.IsNpgsql())", linkMethod, StringComparison.Ordinal);
+        AssertOrdered(linkMethod, "BeginTransactionAsync(IsolationLevel.ReadCommitted, ct)", "if (_db.Database.IsNpgsql())",
+            "{invoiceId} FOR UPDATE", "ANY({ids}) ORDER BY \\\"Id\\\" FOR UPDATE", "var entities = await BuildVisibleTasksQuery(access)");
         Assert.Equal(2, linkMethod.Split("FOR UPDATE", StringSplitOptions.None).Length - 1);
-        Approve("backend/Controllers/TasksController.cs", taskSource, "LinkTaskBillingInvoice", linkStart, linkEnd,
-            ["""await _db.Database.SqlQuery<int>($"SELECT 1 FROM \"Payments\" WHERE \"Id\" = {request.InvoiceId} FOR UPDATE")""",
-             """await _db.Database.SqlQuery<int>($"SELECT 1 FROM \"TaskJournalItems\" WHERE \"Id\" = {id} FOR UPDATE")"""]);
+        Approve("backend/Controllers/TasksController.cs", taskSource, "LinkTaskBillingInvoiceAsync", linkStart, linkEnd,
+            ["""await _db.Database.SqlQuery<int>($"SELECT 1 FROM \"Payments\" WHERE \"Id\" = {invoiceId} FOR UPDATE")""",
+             """await _db.Database.SqlQuery<int>($"SELECT 1 FROM \"TaskJournalItems\" WHERE \"Id\" = ANY({ids}) ORDER BY \"Id\" FOR UPDATE")"""]);
 
         var updateStart = taskSource.IndexOf("public async Task<ActionResult<TaskJournalItemDto>> UpdateTask(", StringComparison.Ordinal);
         var updateEnd = taskSource.IndexOf("[HttpPatch(\"{id:int}/status\")]", updateStart, StringComparison.Ordinal);
