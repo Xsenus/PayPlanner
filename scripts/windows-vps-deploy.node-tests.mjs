@@ -125,6 +125,12 @@ test('schedules both Linux scripts and exact transferred-byte checks before pack
   }
   assert.ok(preflight > 0 && upload > preflight && installation > upload);
   const script = state.calls[preflight].options.input;
+  const preflightTransfer = state.calls.find(call => call.tool === 'scp.exe' && call.args.at(-1).includes('/tmp/payplanner-preflight-'));
+  assert.ok(preflightTransfer, 'Linux checks must receive their files before they run');
+  for (const name of ['deployment-baseline.json', 'deployment-baseline-current.json']) {
+    assert.ok(preflightTransfer.args.some(arg => basename(arg) === name), name + ' is required by the Linux database proof tests');
+    assert.ok(script.includes('  ' + name + '\n'), name + ' must be verified after transfer');
+  }
   assert.match(script, /bash prune-deploy-backups\.test\.sh\nbash preserve-data-protection-keys\.test\.sh/);
   assert.match(script, /python3 -B deploy-history-archive\.test\.py\n/);
   assert.match(script, /export TMPDIR="\$PWD\/fixtures"/);
