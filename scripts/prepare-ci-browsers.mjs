@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { chromium } from 'playwright';
+import { chromium, errors } from 'playwright';
 import { requireTrustedHost } from './verify-xsenus-runner.mjs';
 
 const require = createRequire(import.meta.url);
@@ -37,7 +37,14 @@ export async function prepareCiBrowsers(env = process.env, platform = process.pl
   // even when a working installation already exists. Verify that installation
   // with the same channel used by the real tests before deciding to install it.
   await install('chromium');
-  const chromiumVersion = await probe();
+  let chromiumVersion;
+  try {
+    chromiumVersion = await probe();
+  } catch (error) {
+    if (!(error instanceof errors.TimeoutError)) throw error;
+    console.warn('Pinned Chromium preflight timed out. Repeating the full browser probe once.');
+    chromiumVersion = await probe();
+  }
   let chromeVersion;
   let chromeSource = 'verified-existing';
   try {

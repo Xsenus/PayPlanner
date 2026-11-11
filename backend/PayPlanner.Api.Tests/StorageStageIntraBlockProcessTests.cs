@@ -36,7 +36,12 @@ public sealed partial class StorageStageCapacityServiceTests
             WorkingDirectory = f.Root
         };
         start.Environment.Clear();
-        foreach (var key in new[] { "PATH", "WINDIR", "SystemRoot", "TEMP", "TMP", "LOCALAPPDATA", "DOTNET_ROOT", "DOTNET_ROOT_X64" })
+        // Apply the test lane's runtime limits to its owned writer as well.
+        foreach (var key in new[]
+        {
+            "PATH", "WINDIR", "SystemRoot", "TEMP", "TMP", "LOCALAPPDATA", "DOTNET_ROOT", "DOTNET_ROOT_X64",
+            "DOTNET_PROCESSOR_COUNT", "DOTNET_GCHeapHardLimit", "DOTNET_gcServer", "DOTNET_GCConserveMemory"
+        })
             if (Environment.GetEnvironmentVariable(key) is { } value) start.Environment[key] = value;
         start.Environment["Email__Enabled"] = "false";
         start.Environment["BackgroundServices__Enabled"] = "false";
@@ -49,12 +54,31 @@ public sealed partial class StorageStageCapacityServiceTests
         var processIdentity = OwnedProcessIdentity.Capture(writer);
         var output = writer.StandardOutput.ReadToEndAsync();
         var errors = writer.StandardError.ReadToEndAsync();
+        var readiness = Stopwatch.StartNew();
         try
         {
             var readyPath = Path.Combine(f.Root, "writer-ready.json");
-            var deadline = DateTime.UtcNow.AddSeconds(20);
-            while (!File.Exists(readyPath) && !writer.HasExited && DateTime.UtcNow < deadline) await Task.Delay(50);
-            Assert.True(File.Exists(readyPath), writer.HasExited ? await errors : "Checkpoint writer readiness timed out.");
+            while (!File.Exists(readyPath) && !writer.HasExited && readiness.Elapsed < TimeSpan.FromSeconds(20))
+                await Task.Delay(50);
+            if (!File.Exists(readyPath))
+            {
+                var exited = writer.HasExited;
+                var resources = "unavailable";
+                if (!exited)
+                {
+                    try
+                    {
+                        resources = $"cpuMs={writer.TotalProcessorTime.TotalMilliseconds:F0}, workingSetBytes={writer.WorkingSet64}";
+                    }
+                    catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+                }
+
+                await StopOwnedAsync();
+                var trace = (await output).Split('\n', StringSplitOptions.TrimEntries)
+                    .Where(line => line.StartsWith("PP_CHECKPOINT_PROBE ", StringComparison.Ordinal)).Take(10);
+                var diagnostic = $"{phase}, postgres={postgres}, elapsedMs={readiness.ElapsedMilliseconds}, {resources}; {string.Join("; ", trace)}";
+                Assert.Fail(exited ? $"Checkpoint writer exited. {diagnostic}\n{await errors}" : $"Checkpoint writer readiness timed out. {diagnostic}");
+            }
             using var ready = JsonDocument.Parse(await File.ReadAllTextAsync(readyPath));
             Assert.Equal(writer.Id, ready.RootElement.GetProperty("ProcessId").GetInt32());
             Assert.Equal(processIdentity, ready.RootElement.GetProperty("ProcessIdentity").GetString());
@@ -85,6 +109,8 @@ public sealed partial class StorageStageCapacityServiceTests
                 Assert.Equal(StorageCapacityReservationStatuses.Pending, await f.StatusAsync(ticket.Key));
             }
             await StopOwnedAsync();
+            Console.WriteLine(string.Join('\n', (await output).Split('\n', StringSplitOptions.TrimEntries)
+                .Where(line => line.StartsWith("PP_CHECKPOINT_PROBE ", StringComparison.Ordinal)).Take(10)));
             var marker = Path.Combine(f.Root, "objects", ".stage-writer-fences-v1", ticket.ObjectId.ToString("N") + ".lock");
             var quiescentDeadline = DateTime.UtcNow.AddSeconds(5);
             while (true)

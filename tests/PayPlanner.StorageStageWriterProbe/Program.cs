@@ -37,6 +37,9 @@ internal static class StageWriterProbe
         var root = ValidateRoot(args[1]);
         var name = Path.GetFileName(root);
         RequireMailIsolation();
+        var partialBlock = args[2] is "checkpoint-partial-first" or "checkpoint-partial-next";
+        var checkpointClock = Stopwatch.StartNew();
+        ReportCheckpoint("startup");
         var pause = new CheckpointPause();
         var queries = new CheckpointQueryCounts();
         await using PaymentContext db = args[0] == "sqlite"
@@ -45,6 +48,7 @@ internal static class StageWriterProbe
             : CreatePostgres(name, pause, queries);
         if (!await db.SystemSettings.AnyAsync(row => row.Key == "notifications.email.enabled" && row.Value == "false"))
             throw new InvalidOperationException("Owned fixture must disable database email.");
+        ReportCheckpoint("database-ready");
         var storageRoot = Path.Combine(root, "objects");
         var stageDirectory = Path.Combine(storageRoot, ".process-stage");
         Directory.CreateDirectory(stageDirectory);
@@ -476,20 +480,22 @@ internal static class StageWriterProbe
             throw new InvalidOperationException("Original producer unexpectedly passed its pause boundary.");
         }
         var path = Path.Combine(stageDirectory, "original.tmp");
-        var partialBlock = args[2] is "checkpoint-partial-first" or "checkpoint-partial-next";
         var upper = partialBlock ? StorageStageFileReceipt.MaximumBlockBytes * (args[2] == "checkpoint-partial-next" ? 2L : 1L) : 4;
         var admission = await stages.ReserveAsync("process-probe:" + name, path, upper, default);
         var ticket = admission.Ticket ?? throw new InvalidOperationException(admission.Error);
+        ReportCheckpoint("reservation-committed");
         try
         {
             if (args[2].StartsWith("checkpoint-", StringComparison.Ordinal))
             {
                 await using var checkpoint = await stages.OpenCheckpointWriterAsync(ticket, default);
+                ReportCheckpoint("writer-open");
                 if (partialBlock)
                 {
                     var first = new byte[StorageStageFileReceipt.MaximumBlockBytes];
                     Array.Fill(first, (byte)0x31);
                     if (args[2] == "checkpoint-partial-next") await checkpoint.WriteBlockAsync(first, default);
+                    if (args[2] == "checkpoint-partial-next") ReportCheckpoint("first-block-written");
                     var block = args[2] == "checkpoint-partial-next" ? new byte[first.Length] : first;
                     if (args[2] == "checkpoint-partial-next") Array.Fill(block, (byte)0x52);
                     // Controlled I/O fault in this owned test process only. Use
@@ -500,6 +506,7 @@ internal static class StageWriterProbe
                         ?? throw new InvalidOperationException("Owned checkpoint descriptor is unavailable.");
                     pause.AfterCommitted = async () =>
                     {
+                        ReportCheckpoint("plan-committed");
                         await using PaymentContext observer = args[0] == "sqlite"
                             ? new PaymentContext(new DbContextOptionsBuilder<PaymentContext>()
                                 .UseSqlite($"Data Source={Path.Combine(root, "fixture.sqlite")};Pooling=False").Options)
@@ -509,9 +516,11 @@ internal static class StageWriterProbe
                             || planned!.PlannedBytes != upper || planned.FileIdentity != StorageStageFileIdentity.Observe(descriptor.SafeFileHandle)
                             || descriptor.Length != planned.PreviousBytes || descriptor.Position != planned.PreviousBytes)
                             throw new InvalidOperationException("Partial fault requires the original committed boundary.");
+                        ReportCheckpoint("plan-observed");
                         await descriptor.WriteAsync(block.AsMemory(0, block.Length / 2));
                         await descriptor.FlushAsync();
                         descriptor.Flush(flushToDisk: true);
+                        ReportCheckpoint("partial-bytes-flushed");
                         await WriteCheckpointReadyAsync(root, ticket);
                         await Task.Delay(Timeout.Infinite);
                     };
@@ -549,6 +558,10 @@ internal static class StageWriterProbe
             await Task.Delay(Timeout.Infinite);
         }
         finally { await ticket.CloseWriterAsync(); }
+        void ReportCheckpoint(string phase)
+        {
+            if (partialBlock) Console.WriteLine($"PP_CHECKPOINT_PROBE {phase} {checkpointClock.ElapsedMilliseconds}");
+        }
     }
 
     private static async Task WriteCheckpointReadyAsync(string root, StorageStageCapacityTicket ticket, object? metrics = null)

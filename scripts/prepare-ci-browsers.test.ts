@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
+import { errors } from 'playwright';
 import { prepareCiBrowsers, verifyBrowser } from './prepare-ci-browsers.mjs';
 
 const trusted = {
@@ -50,6 +51,28 @@ describe('required CI browsers', () => {
     const install = vi.fn().mockRejectedValue(new Error('chromium failed')); const probe = vi.fn();
     await expect(prepareCiBrowsers(trusted, 'win32', install, probe)).rejects.toThrow('chromium failed');
     expect(install.mock.calls).toEqual([['chromium']]); expect(probe).not.toHaveBeenCalled();
+  });
+
+  it('retries a timed-out Chromium probe and still verifies Chrome', async () => {
+    const install = vi.fn();
+    const probe = vi.fn().mockRejectedValueOnce(new errors.TimeoutError('launch timed out'))
+      .mockResolvedValueOnce('145.0.1.2').mockResolvedValueOnce('145.0.2.3');
+    await expect(prepareCiBrowsers(trusted, 'win32', install, probe)).resolves.toEqual({
+      chromiumVersion: '145.0.1.2', chromeVersion: '145.0.2.3', chromeSource: 'verified-existing',
+    });
+    expect(install.mock.calls).toEqual([['chromium']]);
+    expect(probe.mock.calls).toEqual([[], [], ['chrome']]);
+  });
+
+  it('requires Chromium proof after one retry and fails immediately on other errors', async () => {
+    const timeout = new errors.TimeoutError('launch timed out');
+    const probe = vi.fn().mockRejectedValue(timeout);
+    await expect(prepareCiBrowsers(trusted, 'win32', vi.fn(), probe)).rejects.toBe(timeout);
+    expect(probe.mock.calls).toEqual([[], []]);
+    const invalid = new Error('Browser page preflight failed');
+    probe.mockReset().mockRejectedValue(invalid);
+    await expect(prepareCiBrowsers(trusted, 'win32', vi.fn(), probe)).rejects.toBe(invalid);
+    expect(probe.mock.calls).toEqual([[]]);
   });
 
   it.each(['chromium', 'chrome'])('verifies real page execution and closes %s', async channel => {
