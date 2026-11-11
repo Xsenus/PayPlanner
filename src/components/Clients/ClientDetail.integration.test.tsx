@@ -15,6 +15,14 @@ import { refreshClientInvoiceModalData } from '../../utils/clientInvoiceModalDat
 import { documentCopyTestSession } from '../../test/documentCopySession';
 
 const CLIENT_PROFILE_NOTES_PREFIX = '__PP_CLIENT_PROFILE_V2__:';
+
+async function renderLoadedClientProfile(profile: Parameters<typeof render>[0]) {
+  let view!: ReturnType<typeof render>;
+  // Finish the mocked client read and profile hydration before interacting with the form.
+  await act(async () => { view = render(profile); });
+  return view;
+}
+
 type LegalModalOwnerProps = { initial?: LegalEntityDetail | null; onClose: () => void; onSubmit: (payload: LegalEntityInput) => Promise<LegalEntityDetail> };
 const contractModalPropsSpy = vi.hoisted(() => vi.fn());
 const legalModalOwnerSpy = vi.hoisted(() => vi.fn());
@@ -1458,7 +1466,7 @@ describe('ClientDetail integration', () => {
     let finish!: (client: Client) => void;
     vi.mocked(apiService.updateClient).mockReturnValueOnce(new Promise<Client>(resolve => { finish = resolve; }));
     const changed = vi.fn(); const p = { clientId: 1, onBack: vi.fn(), onClientUpdated: changed, initialSection: 'profile' as const };
-    const view = render(<ClientDetail {...p} />); await screen.findAllByText('Иванов Иван Иванович');
+    const view = await renderLoadedClientProfile(<ClientDetail {...p} />); await screen.findAllByText('Иванов Иван Иванович');
     fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
     await waitFor(() => expect(apiService.updateClient).toHaveBeenCalledTimes(1));
@@ -1470,7 +1478,7 @@ describe('ClientDetail integration', () => {
     const session = documentCopyTestSession();
     try {
       const p = { clientId: 1, onBack: vi.fn(), onClientUpdated: vi.fn(), initialSection: 'profile' as const };
-      const view = render(<ClientDetail {...p} />); await screen.findAllByText('Иванов Иван Иванович'); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+      const view = await renderLoadedClientProfile(<ClientDetail {...p} />); await screen.findAllByText('Иванов Иван Иванович'); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
       fireEvent.change(screen.getByDisplayValue('Иванов'), { target: { value: 'Черновик' } });
       session.refresh(); view.rerender(<ClientDetail {...p} />); expect(screen.getByDisplayValue('Черновик')).toBeTruthy(); expect(apiService.getClient).toHaveBeenCalledTimes(1);
       let finish!: (client: Client) => void; vi.mocked(apiService.updateClient).mockReturnValueOnce(new Promise<Client>(resolve => { finish = resolve; }));
@@ -1483,7 +1491,7 @@ describe('ClientDetail integration', () => {
   });
   it('profile owner failure: a failed save preserves the draft and allows one explicit retry', async () => {
     vi.mocked(apiService.updateClient).mockReset().mockRejectedValueOnce(new Error('Временная ошибка профиля')).mockResolvedValueOnce(createClient({ lastName: 'Черновик' }));
-    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); await screen.findAllByText('Иванов Иван Иванович'); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    await renderLoadedClientProfile(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); await screen.findAllByText('Иванов Иван Иванович'); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     fireEvent.change(screen.getByDisplayValue('Иванов'), { target: { value: 'Черновик' } }); fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
     await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith('Временная ошибка профиля', 'Ошибка сохранения'));
     expect(screen.getByDisplayValue('Черновик')).toHaveProperty('disabled', false); expect(toastSuccessMock).not.toHaveBeenCalled();
@@ -1493,7 +1501,7 @@ describe('ClientDetail integration', () => {
   it('profile owner session: replaced login blocks a mounted submit before another render', async () => {
     const session = documentCopyTestSession();
     try {
-      render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); await screen.findAllByText('Иванов Иван Иванович'); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+      await renderLoadedClientProfile(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); await screen.findAllByText('Иванов Иван Иванович'); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
       session.replace('login'); fireEvent.submit(screen.getByRole('button', { name: 'Сохранить' }).closest('form')!);
       expect(apiService.updateClient).not.toHaveBeenCalled();
     } finally { session.restore(); }
@@ -1521,21 +1529,21 @@ describe('ClientDetail integration', () => {
   });
   it('profile owner delete: revoking the view cancels confirmation and never dispatches a delete', async () => {
     permissionsResult.clients.canDelete = true; let approve!: (value: boolean) => void; confirmMock.mockReturnValueOnce(new Promise<boolean>(resolve => { approve = resolve; }));
-    const p = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const }; const view = render(<ClientDetail {...p} />); await screen.findAllByText('Иванов Иван Иванович');
+    const p = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const }; const view = await renderLoadedClientProfile(<ClientDetail {...p} />); await screen.findAllByText('Иванов Иван Иванович');
     fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' })); fireEvent.click(screen.getByRole('button', { name: 'Удалить' }));
     const signal = confirmMock.mock.calls[0][0].signal; permissionsResult.clients.canView = false; view.rerender(<ClientDetail {...p} />);
     expect(signal.aborted).toBe(true); await act(async () => approve(true)); expect(apiService.deleteClient).not.toHaveBeenCalled(); expect(p.onBack).not.toHaveBeenCalled();
   });
   it('profile owner delete result: a late delete cannot navigate away from a different client', async () => {
     permissionsResult.clients.canDelete = true; let finish!: () => void; vi.mocked(apiService.deleteClient).mockReset().mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve; }));
-    const p = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const }; const view = render(<ClientDetail {...p} />); await screen.findAllByText('Иванов Иван Иванович');
+    const p = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const }; const view = await renderLoadedClientProfile(<ClientDetail {...p} />); await screen.findAllByText('Иванов Иван Иванович');
     fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' })); fireEvent.click(screen.getByRole('button', { name: 'Удалить' })); await waitFor(() => expect(apiService.deleteClient).toHaveBeenCalledTimes(1));
     view.rerender(<ClientDetail {...p} clientId={2} />); await act(async () => finish()); expect(p.onBack).not.toHaveBeenCalled();
   });
   it('profile owner delete current: cancelled confirmation preserves the editor and a current retry deletes once', async () => {
     permissionsResult.clients.canDelete = true; confirmMock.mockResolvedValueOnce(false).mockResolvedValue(true);
     let finish!: () => void; vi.mocked(apiService.deleteClient).mockReset().mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve; }));
-    const back = vi.fn(); render(<ClientDetail clientId={1} onBack={back} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    const back = vi.fn(); await renderLoadedClientProfile(<ClientDetail clientId={1} onBack={back} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     fireEvent.change(screen.getByDisplayValue('Иванов'), { target: { value: 'Черновик' } });
     fireEvent.click(screen.getByRole('button', { name: 'Удалить' })); await waitFor(() => expect(screen.getByRole('button', { name: 'Удалить' })).toHaveProperty('disabled', false));
     expect(apiService.deleteClient).not.toHaveBeenCalled(); expect(screen.getByDisplayValue('Черновик')).toHaveProperty('disabled', false);
@@ -1546,7 +1554,7 @@ describe('ClientDetail integration', () => {
   });
   it('profile owner wrong save: another returned client ID cannot replace the draft or notify its parent', async () => {
     vi.mocked(apiService.updateClient).mockResolvedValueOnce({ ...createClient(), id: 77 });
-    const updated = vi.fn(); render(<ClientDetail clientId={1} onBack={vi.fn()} onClientUpdated={updated} initialSection="profile" />);
+    const updated = vi.fn(); await renderLoadedClientProfile(<ClientDetail clientId={1} onBack={vi.fn()} onClientUpdated={updated} initialSection="profile" />);
     fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' })); fireEvent.change(screen.getByDisplayValue('Иванов'), { target: { value: 'Черновик' } });
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' })); await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith('Сервер вернул другую карточку клиента. Повторите сохранение.', 'Ошибка сохранения'));
     expect(updated).not.toHaveBeenCalled(); expect(toastSuccessMock).not.toHaveBeenCalled(); expect(screen.getByDisplayValue('Черновик')).toHaveProperty('disabled', false);
@@ -1554,7 +1562,7 @@ describe('ClientDetail integration', () => {
   it('profile owner local confirmation: changing role cancels deletion of an unsaved phone and its old toast', async () => {
     vi.mocked(apiService.getClient).mockResolvedValue({ ...createClient({ phones: ['+70000000001', '+70000000002'] }) });
     let approve!: (value: boolean) => void; confirmMock.mockReturnValueOnce(new Promise<boolean>(resolve => { approve = resolve; }));
-    const props = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const }; const view = render(<ClientDetail {...props} />);
+    const props = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const }; const view = await renderLoadedClientProfile(<ClientDetail {...props} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' })); fireEvent.click(screen.getAllByRole('button', { name: 'Удалить телефон' })[0]);
     const signal = confirmMock.mock.calls[0][0].signal; authState.roleId = 2; view.rerender(<ClientDetail {...props} />);
     expect(signal.aborted).toBe(true); await act(async () => approve(true)); expect(toastSuccessMock).not.toHaveBeenCalled(); expect(apiService.updateClient).not.toHaveBeenCalled();
@@ -1751,7 +1759,7 @@ describe('ClientDetail integration', () => {
   it('shared lookup baseline: an admin responsible denial waits for an explicit retry instead of looping', async () => {
     authState.isAdmin = true;
     vi.mocked(apiService.getActResponsibles).mockReset().mockRejectedValueOnce(new Error('HTTP 403 - Доступ закрыт')).mockReturnValue(new Promise(() => {}));
-    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    await renderLoadedClientProfile(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
     await screen.findByRole('button', { name: 'Редактировать' });
     await act(async () => {});
     expect(apiService.getActResponsibles).toHaveBeenCalledTimes(1);
@@ -1762,7 +1770,7 @@ describe('ClientDetail integration', () => {
     vi.mocked(apiService.getClient).mockResolvedValue({ ...createClient(), clientStatusId: 24, clientStatus: { id: 24, name: 'Сохранённый статус', description: '', colorHex: '#64748b', createdAt: '2026-11-01T00:00:00Z', isActive: true } });
     vi.mocked(useClientStatuses).mockReturnValueOnce({ statuses: [], loading: true, error: null, refresh: vi.fn() } as ReturnType<typeof useClientStatuses>);
     vi.mocked(useClientStatuses).mockReturnValue({ statuses: [], loading: true, error: null, refresh: vi.fn() } as ReturnType<typeof useClientStatuses>);
-    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    await renderLoadedClientProfile(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
     await screen.findByRole('button', { name: 'Редактировать' });
     const select = document.querySelector<HTMLSelectElement>('select[name="clientStatusId"]')!;
     expect(select.value).toBe('24');
@@ -1774,7 +1782,7 @@ describe('ClientDetail integration', () => {
     vi.mocked(apiService.getClient).mockResolvedValue({ ...createClient(), responsibleUserId: 5, responsibleUserName: 'Сохранённый ответственный' });
     let finish!: (rows: Awaited<ReturnType<typeof apiService.getActResponsibles>>) => void;
     vi.mocked(apiService.getActResponsibles).mockRejectedValueOnce(new Error('HTTP 403 - Доступ закрыт')).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
-    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    await renderLoadedClientProfile(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
     fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     fireEvent.change(screen.getByDisplayValue('Иванов'), { target: { value: 'Сохраняемый черновик' } });
     const retry = await screen.findByRole('button', { name: 'Повторить загрузку ответственных' });
@@ -1794,7 +1802,9 @@ describe('ClientDetail integration', () => {
     vi.mocked(apiService.getActResponsibles).mockReturnValueOnce(new Promise(resolve => { finish = resolve; })).mockResolvedValueOnce([{ id: 8, fullName: 'Текущий сотрудник' }]);
     const props = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const }; const view = render(<ClientDetail {...props} />);
     await waitFor(() => expect(apiService.getActResponsibles).toHaveBeenCalledOnce()); const signal = vi.mocked(apiService.getActResponsibles).mock.calls[0][0]?.signal;
-    authState.roleId = 2; view.rerender(<ClientDetail {...props} />); await waitFor(() => expect(apiService.getActResponsibles).toHaveBeenCalledTimes(2));
+    authState.roleId = 2;
+    await act(async () => { view.rerender(<ClientDetail {...props} />); });
+    await waitFor(() => expect(apiService.getActResponsibles).toHaveBeenCalledTimes(2));
     expect(signal?.aborted).toBe(true); await act(async () => finish([{ id: 7, fullName: 'Прежний сотрудник' }]));
     fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     const picker = screen.getByRole('combobox', { name: 'Ответственный' }); expect(within(picker).getByRole('option', { name: 'Текущий сотрудник' })).toBeTruthy(); expect(within(picker).queryByRole('option', { name: 'Прежний сотрудник' })).toBeNull();
@@ -1853,7 +1863,7 @@ describe('ClientDetail integration', () => {
     let finish!: () => void; const refresh = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
     vi.mocked(useClientStatuses).mockReturnValue({ statuses: [], loading: false, error: 'HTTP 403 - Статусы закрыты', refresh } as ReturnType<typeof useClientStatuses>);
     vi.mocked(apiService.getClient).mockResolvedValue({ ...createClient(), clientStatusId: 24 });
-    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    await renderLoadedClientProfile(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     fireEvent.change(screen.getByDisplayValue('Иванов'), { target: { value: 'Статусы не стирают ввод' } });
     const select = document.querySelector<HTMLSelectElement>('select[name="clientStatusId"]')!; expect(select.value).toBe('24'); expect(select.disabled).toBe(true);
     const retry = screen.getByRole('button', { name: 'Повторить загрузку статусов' }); fireEvent.click(retry); fireEvent.click(retry); expect(refresh).toHaveBeenCalledOnce();
@@ -1873,7 +1883,7 @@ describe('ClientDetail integration', () => {
     const status = { id: 24, name: 'Текущий статус', description: '', colorHex: '#64748b', createdAt: '2026-11-01T00:00:00Z', isActive: true };
     vi.mocked(useClientStatuses).mockReturnValue({ statuses: [status], loading: false, error: null, refresh: vi.fn() } as ReturnType<typeof useClientStatuses>);
     vi.mocked(apiService.getClient).mockResolvedValue({ ...createClient(), clientStatusId: 24, clientStatus: status });
-    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    await renderLoadedClientProfile(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     const select = document.querySelector<HTMLSelectElement>('select[name="clientStatusId"]')!;
     const option = document.createElement('option'); option.value = '99'; select.append(option); fireEvent.change(select, { target: { value: '99' } });
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' })); await waitFor(() => expect(apiService.updateClient).toHaveBeenCalledOnce());
@@ -2379,7 +2389,8 @@ describe('ClientDetail integration', () => {
   async function editLinkedLookup() {
     vi.mocked(apiService.getClient).mockResolvedValue(linkedLookupClient());
     const props = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const };
-    const view = render(<ClientDetail {...props} />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    const view = await renderLoadedClientProfile(<ClientDetail {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     return { view, props };
   }
   it('company lookup baseline: a role without legal view keeps the linked ID without querying the catalogue', async () => {
@@ -2394,7 +2405,7 @@ describe('ClientDetail integration', () => {
     vi.mocked(apiService.getClient).mockResolvedValue(client);
     vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
     vi.mocked(apiService.updateClient).mockResolvedValue(client);
-    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    await renderLoadedClientProfile(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
     fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     await waitFor(() => expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledOnce());
     await waitFor(() => expect(document.querySelector<HTMLSelectElement>('select[name="legalEntityId"]')?.selectedOptions[0]?.textContent).toContain('Доступная организация'));
@@ -2411,7 +2422,7 @@ describe('ClientDetail integration', () => {
     vi.mocked(apiService.getClient).mockResolvedValue(client);
     vi.mocked(apiService.getLegalEntitiesPaged).mockRejectedValue(new Error('HTTP 403 - Доступ закрыт'));
     vi.mocked(apiService.updateClient).mockResolvedValue(client);
-    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    await renderLoadedClientProfile(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
     fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     if (access === 'denied-page') await screen.findByText('Недостаточно прав для выполнения действия.');
     return client;
@@ -2432,7 +2443,7 @@ describe('ClientDetail integration', () => {
     vi.mocked(apiService.getLegalEntitiesPaged)
       .mockResolvedValueOnce({ items: [{ ...linkedLookupEntity, id: 99 }], total: 1, page: 1, pageSize: 20 })
       .mockRejectedValueOnce(new Error('HTTP 403 - Доступ закрыт'));
-    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    await renderLoadedClientProfile(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
     fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     await waitFor(() => expect(document.querySelector('select[name="legalEntityId"] option[value="99"]')).not.toBeNull());
     const select = document.querySelector<HTMLSelectElement>('select[name="legalEntityId"]')!;
@@ -2552,12 +2563,12 @@ describe('ClientDetail integration', () => {
   it.each([false, true])('company caller own profile: profile edit=%s controls the own-company form independently of legal edit', async canEdit => {
     Object.assign(permissionsResult.companyProfile, { canView: true, canEdit }); permissionsResult.legalEntities.canEdit = !canEdit;
     const own = { ...linkedLookupEntity, isOwnCompany: true }; vi.mocked(apiService.getClient).mockResolvedValue({ ...linkedLookupClient(), legalEntity: own }); vi.mocked(apiService.getLegalEntity).mockResolvedValue(own);
-    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' })); fireEvent.click(screen.getByRole('button', { name: 'Реквизиты' }));
+    await renderLoadedClientProfile(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' })); fireEvent.click(screen.getByRole('button', { name: 'Реквизиты' }));
     await waitFor(() => expect(legalModalOwnerSpy).toHaveBeenCalled()); expect(legalModalOwnerSpy.mock.lastCall![0].allowEdit).toBe(canEdit);
   });
   it('company caller own view: legal view alone does not open a known own-company profile', async () => {
     const own = { ...linkedLookupEntity, isOwnCompany: true }; vi.mocked(apiService.getClient).mockResolvedValue({ ...linkedLookupClient(), legalEntity: own });
-    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    await renderLoadedClientProfile(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     expect(screen.getByRole('button', { name: 'Реквизиты' })).toHaveProperty('disabled', true); expect(apiService.getLegalEntity).not.toHaveBeenCalled();
   });
   it('company caller save: a current edited company overrides its older page row and stays single-flight', async () => {
@@ -2585,7 +2596,8 @@ describe('ClientDetail integration', () => {
     const { entity, modal } = await openOwnerLegalModal(true); const saved = { ...entity, id: 22, shortName: 'Уже сохранённая компания' }; vi.mocked(apiService.createLegalEntity).mockResolvedValue(saved);
     await act(async () => { await modal.onSubmit({ shortName: saved.shortName, clientIds: [] }); });
     vi.mocked(apiService.getClient).mockResolvedValue({ ...createClient({ kind: 'legal' }), legalEntityId: 22, legalEntity: saved });
-    fireEvent.click(screen.getByRole('button', { name: 'Отмена' })); await screen.findByRole('button', { name: 'Редактировать' });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Отмена' })); });
+    await screen.findByRole('button', { name: 'Редактировать' });
     expect(document.querySelector<HTMLSelectElement>('select[name="legalEntityId"]')?.value).toBe('22'); expect(apiService.getClient).toHaveBeenCalledTimes(2); expect(apiService.updateClient).not.toHaveBeenCalled();
   });
   it('company caller persisted failure: failed reconciliation shows retry instead of the obsolete local link', async () => {
@@ -2603,7 +2615,7 @@ describe('ClientDetail integration', () => {
     vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [entity], total: 1, page: 1, pageSize: 20 });
     vi.mocked(apiService.getLegalEntity).mockReturnValue(load ?? Promise.resolve(entity));
     const props = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const };
-    const view = render(<ClientDetail {...props} />);
+    const view = await renderLoadedClientProfile(<ClientDetail {...props} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     const open = await screen.findByRole('button', { name: create ? 'Создать юрлицо' : 'Реквизиты' });
     await waitFor(() => expect(open).toHaveProperty('disabled', false));
@@ -2940,9 +2952,7 @@ describe('ClientDetail integration', () => {
       { type: 'actual', isPrimary: false, fullAddress: 'Второй адрес', city: 'г Другой', house: '2' },
     ] }) });
     const props = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const };
-    let view!: ReturnType<typeof render>;
-    // Finish the resolved client read and its React effects before the first action.
-    await act(async () => { view = render(<ClientDetail {...props} />); });
+    const view = await renderLoadedClientProfile(<ClientDetail {...props} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     return { props, view };
   }
@@ -3070,7 +3080,7 @@ describe('ClientDetail integration', () => {
     poaPromptPropsSpy.mockClear();
     vi.mocked(apiService.getClientPowersOfAttorney).mockResolvedValue([createPowerOfAttorney()]);
     const props = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const };
-    const view = render(<ClientDetail {...props} />);
+    const view = await renderLoadedClientProfile(<ClientDetail {...props} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     fireEvent.click(screen.getByRole('button', { name: 'Дополнительная информация' }));
     fireEvent.click(screen.getByRole('button', { name: 'Доверенности' }));
@@ -3218,7 +3228,8 @@ describe('ClientDetail integration', () => {
     vi.mocked(apiService.createClientPowerOfAttorney).mockReturnValueOnce(new Promise((_, reject) => { failOld = reject; }))
       .mockReturnValueOnce(new Promise(resolve => { finishNew = resolve; }));
     const { props, view } = await openNewPoaDraft(); act(() => { void latestPoaPrompt().onConfirm(); });
-    authState.roleId = 2; view.rerender(<ClientDetail {...props} />);
+    authState.roleId = 2;
+    await act(async () => { view.rerender(<ClientDetail {...props} />); });
     fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     fireEvent.click(screen.getByRole('button', { name: 'Дополнительная информация' })); fireEvent.click(screen.getByRole('button', { name: 'Доверенности' }));
     await screen.findByText('Кем выдана: Старый нотариус'); fireEvent.click(screen.getByRole('button', { name: '+ Добавить доверенность' }));
@@ -3249,7 +3260,7 @@ describe('ClientDetail integration', () => {
   });
   async function openPoaReadProfile() {
     const props = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const };
-    const view = render(<ClientDetail {...props} />);
+    const view = await renderLoadedClientProfile(<ClientDetail {...props} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     fireEvent.click(screen.getByRole('button', { name: 'Дополнительная информация' }));
     fireEvent.click(screen.getByRole('button', { name: 'Доверенности' }));
@@ -3295,7 +3306,8 @@ describe('ClientDetail integration', () => {
       .mockResolvedValueOnce([createPowerOfAttorney({ number: 'Доверенность новой роли' })]);
     const { props, view } = await openPoaReadProfile();
     const signal = vi.mocked(apiService.getClientPowersOfAttorney).mock.calls[0][1]?.signal;
-    authState.roleId = 2; view.rerender(<ClientDetail {...props} />);
+    authState.roleId = 2;
+    await act(async () => { view.rerender(<ClientDetail {...props} />); });
     expect(signal?.aborted).toBe(true);
     fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
     fireEvent.click(screen.getByRole('button', { name: 'Дополнительная информация' }));
@@ -3433,7 +3445,7 @@ describe('ClientDetail integration', () => {
       }),
     );
 
-    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    await renderLoadedClientProfile(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
 
     await screen.findByRole('heading', { level: 1, name: 'Иванов Иван Иванович' });
     await user.click(await screen.findByRole('button', { name: 'Редактировать' }));
