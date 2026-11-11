@@ -272,7 +272,8 @@ jobs:
       DOTNET_GCHeapHardLimit: "240000000"
       CompilerResponseFile: ${{ github.workspace }}/scripts/compiler-serial.rsp
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
-    timeout-minutes: 30
+    # Allow the serial analyzer build and artifact packaging to finish on a cold runner.
+    timeout-minutes: 60
     outputs:
       manifest-sha: ${{ steps.plan.outputs.manifest-sha }}
       sdk-version: ${{ steps.plan.outputs.sdk-version }}

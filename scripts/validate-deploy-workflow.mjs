@@ -172,7 +172,7 @@ export function validateDeployWorkflow(source) {
   // The complete serial catalog has a conservative diagnostic estimate below
   // 265 case-minutes. Reserve 30 minutes for cold preparation/process cleanup,
   // round to 300, and retain all four exclusive parts and mandatory gates.
-  const timeouts = { frontend: 45, 'backend-format': 45, 'backend-build': 30, ...Object.fromEntries(shardJobs.map(id => [id, 300])), 'backend-test': 5, 'backend-browser': 15, backend: 10, deploy: 30 };
+  const timeouts = { frontend: 45, 'backend-format': 45, 'backend-build': 60, ...Object.fromEntries(shardJobs.map(id => [id, 300])), 'backend-test': 5, 'backend-browser': 15, backend: 10, deploy: 30 };
   for (const [id, job] of Object.entries(jobs)) {
     requireValue(String(job['timeout-minutes']) === String(timeouts[id]), `${id}: keep the explicit runner time budget`);
     const deployCondition = "${{ success() && github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.release_to_vps == true)) }}";
