@@ -46,7 +46,16 @@ need(re.fullmatch('[a-f0-9]{64}',c['historyProofSha256'] or '') and sha(history_
 need(sha(pathlib.Path(p).parent/'deploy-stopped-source-proof.py')==c['stoppedProofSha256'],'Stopped source proof changed')
 rev,old=c['releaseSha'],c['previousRevision']
 need(isinstance(rev,str) and re.fullmatch('[a-f0-9]{40}',rev) and rev!=old,'Exact new 40-hex commit required')
-need(old=='e85d1f22d795b78ca8c3543eb3b14410c3a75747','Reassess changed production baseline')
+current_baseline=old!='e85d1f22d795b78ca8c3543eb3b14410c3a75747'
+if current_baseline:
+    # Match the reviewed deployment-baseline-current.json, including the release seeds.
+    baseline_keys=('expectedProtectedTables','minimumRemainingBytes','policy','previousRevision',
+        'expectedPreviousApiSha256','expectedPreviousMigrationsSha256','expectedMigration',
+        'expectedAddedProtectedTables','expectedBaselineMigrations','expectedBaselineMigrationRows',
+        'expectedBaselineMigrationIdsSha256','expectedReleaseCatalogSha256','expectedReleaseSeeds')
+    baseline_bytes=json.dumps({key:c[key] for key in baseline_keys},sort_keys=True,separators=(',',':')).encode('ascii')
+    need(hashlib.sha256(baseline_bytes).hexdigest()=='1497466a62d6825dc1f3484e44c5e57501314170a5a8d7e861b023c042465fa6',
+        'Reassess changed production baseline')
 need(re.fullmatch('[0-9]{8}T[0-9]{6}Z',c['backupUtc'] or ''),'Explicit backup identity required')
 for v in [c['archive']['sha256'],c['expectedApiSha256'],c['expectedPreviousApiSha256'],c['expectedMigrationsSha256'],c['expectedPreviousMigrationsSha256']]:
     need(isinstance(v,str) and re.fullmatch('[a-f0-9]{64}',v),'Actual artifact/archive SHA missing')
@@ -82,7 +91,7 @@ need(q['backendPackageFiles'] and len(q['frontendRawFiles'])==c['expectedFronten
 need('deploy-revision.txt' not in q['frontendRawFiles'],'Revision is bound separately')
 need(admitted_ids==proof.reviewed_migration_ids(c['expectedMigration']) and c['expectedAddedProtectedTables']==[],'Unreviewed database migration or protected table rejected')
 need(q['expectedReleaseSeeds']==c['expectedReleaseSeeds'],'Only the reviewed new release entries may be inserted')
-if len(admitted_ids)==18:
+if len(admitted_ids)==18 or current_baseline:
     need(q.get('activeReleaseJsonSha256')==c['expectedReleaseCatalogSha256'] and q['backendPackageFiles'].get('AppReleases/releases.json')==c['expectedReleaseCatalogSha256'],'Qualified candidate catalog binding differs')
 if phase=='install':pin(c['offsiteReceipt'])
 print('|'.join([rev,old,c['backupUtc'],c['archive']['sha256'],str(c['archive']['bytes']),c['expectedApiSha256'],c['expectedPreviousApiSha256'],c['expectedMigrationsSha256'],str(c['minimumRemainingBytes']),c['expectedPreviousMigrationsSha256']]))

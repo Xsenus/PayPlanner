@@ -76,6 +76,31 @@ class DeliveryAdmissionTests(unittest.TestCase):
     def test_actual_admission_body_accepts_a_complete_synthetic_ci_delivery(self):
         self.assertTrue(self.admission().stdout.startswith(self.revision+'|'))
 
+    def use_payment_reconciliation_baseline(self):
+        baseline = json.loads((self.scripts/'deployment-baseline-current.json').read_text(encoding='utf-8'))
+        self.plan.update(baseline)
+        self.q['expectedReleaseSeeds'] = copy.deepcopy(baseline['expectedReleaseSeeds'])
+        self.q['activeReleaseJsonSha256'] = baseline['expectedReleaseCatalogSha256']
+        self.q['backendPackageFiles']['AppReleases/releases.json'] = baseline['expectedReleaseCatalogSha256']
+
+    def test_admits_the_reviewed_current_baseline_with_exact_release_catalog(self):
+        self.use_payment_reconciliation_baseline()
+        self.assertEqual([seed['version'] for seed in self.plan['expectedReleaseSeeds']], ['1.14.914', '1.14.913'])
+        self.assertTrue(self.admission().stdout.startswith(self.revision+'|'+self.plan['previousRevision']+'|'))
+        self.q['backendPackageFiles']['AppReleases/releases.json'] = 'c'*64
+        self.assertIn('Qualified candidate catalog binding differs', self.admission(1).stderr)
+
+    def test_rejects_changes_to_the_reviewed_current_baseline(self):
+        self.use_payment_reconciliation_baseline()
+        original = copy.deepcopy(self.plan)
+        for key, value in [('previousRevision', 'b'*40), ('expectedPreviousApiSha256', 'c'*64),
+                           ('expectedPreviousMigrationsSha256', 'd'*64), ('expectedMigration', 'unreviewed'),
+                           ('expectedBaselineMigrationRows', []), ('expectedReleaseSeeds', [])]:
+            with self.subTest(key=key):
+                self.plan = copy.deepcopy(original)
+                self.plan[key] = value
+                self.assertIn('Reassess changed production baseline', self.admission(1).stderr)
+
     def use_current_candidate(self):
         baseline = json.loads((self.scripts/'deployment-baseline.json').read_text(encoding='utf-8'))
         for key in ['expectedMigration', 'expectedReleaseSeeds', 'expectedReleaseCatalogSha256']:
