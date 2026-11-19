@@ -282,6 +282,33 @@ public static class InvoicePaymentStateService
     public static decimal ResolveOutstandingAmount(Payment payment)
         => ResolveOutstandingAmount(payment.Amount, payment.PaidAmount, payment.Status);
 
+    public static decimal ResolveEffectiveOutstandingAmount(
+        decimal invoiceAmount,
+        decimal paidAmount,
+        PaymentStatus status,
+        decimal sourceOutstandingAmount,
+        bool hasCancelledRelatedPayments)
+    {
+        if (status is PaymentStatus.Completed or PaymentStatus.Cancelled)
+        {
+            return 0m;
+        }
+
+        if (hasCancelledRelatedPayments && sourceOutstandingAmount <= 0m)
+        {
+            return 0m;
+        }
+
+        if (sourceOutstandingAmount > 0m)
+        {
+            return NormalizeMoneyAmount(sourceOutstandingAmount);
+        }
+
+        return NormalizeMoneyAmount(Math.Max(
+            NormalizeMoneyAmount(invoiceAmount) - NormalizeMoneyAmount(paidAmount),
+            0m));
+    }
+
     public static DateTime EffectivePlannedDate(Payment payment)
         => payment.PlannedDate == default ? payment.Date.Date : payment.PlannedDate.Date;
 

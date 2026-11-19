@@ -2303,15 +2303,21 @@ public class InvoicesController : ControllerBase
 
         var startNumber = ParseStartNumber(settings.FirstOrDefault(x => x.Key == InvoiceNumberStartSettingKey)?.Value);
         var allocationStrategy = ParseAllocationStrategy(settings.FirstOrDefault(x => x.Key == InvoiceNumberStrategySettingKey)?.Value);
-        var nextNumber = await GetNextInvoiceNumberAsync(targetDate, startNumber, allocationStrategy, ct);
-
-        return Ok(new
+        try
         {
-            year = targetDate.Year,
-            nextNumber = nextNumber.ToString(),
-            startNumber,
-            allocationStrategy,
-        });
+            var nextNumber = await GetNextInvoiceNumberAsync(targetDate, startNumber, allocationStrategy, ct);
+            return Ok(new
+            {
+                year = targetDate.Year,
+                nextNumber = nextNumber.ToString(),
+                startNumber,
+                allocationStrategy,
+            });
+        }
+        catch (InvoiceNumberExhaustedException failure)
+        {
+            return UnprocessableEntity(new { message = failure.Message });
+        }
     }
 
     [HttpGet("rules-settings")]
@@ -2602,13 +2608,21 @@ public class InvoicesController : ControllerBase
 
             if (!reusedExistingInvoice)
             {
-                var resolvedNumber = await ResolveMigrationInvoiceNumberAsync(
-                    first.Number,
-                    first.InvoiceDate,
-                    numberingSettings.StartNumber,
-                    numberingSettings.AllocationStrategy,
-                    reservedInvoiceNumbers,
-                    ct);
+                string resolvedNumber;
+                try
+                {
+                    resolvedNumber = await ResolveMigrationInvoiceNumberAsync(
+                        first.Number,
+                        first.InvoiceDate,
+                        numberingSettings.StartNumber,
+                        numberingSettings.AllocationStrategy,
+                        reservedInvoiceNumbers,
+                        ct);
+                }
+                catch (InvoiceNumberExhaustedException failure)
+                {
+                    return UnprocessableEntity(new { message = failure.Message });
+                }
 
                 targetInvoice = new Invoice
                 {
@@ -5058,7 +5072,7 @@ public class InvoicesController : ControllerBase
             item.IsPaid = item.Status == PaymentStatus.Completed;
             if (statusSourcePayments.Count > 0)
             {
-                item.OutstandingAmount = ResolveEffectiveInvoiceOutstandingAmount(
+                item.OutstandingAmount = InvoicePaymentStateService.ResolveEffectiveOutstandingAmount(
                     item.Amount,
                     item.PaidAmount,
                     item.Status,
@@ -5066,33 +5080,6 @@ public class InvoicesController : ControllerBase
                     relatedPayments.Any(payment => payment.Status == PaymentStatus.Cancelled));
             }
         }
-    }
-
-    private static decimal ResolveEffectiveInvoiceOutstandingAmount(
-        decimal invoiceAmount,
-        decimal paidAmount,
-        PaymentStatus status,
-        decimal sourceOutstandingAmount,
-        bool hasCancelledRelatedPayments)
-    {
-        if (status is PaymentStatus.Completed or PaymentStatus.Cancelled)
-        {
-            return 0m;
-        }
-
-        if (hasCancelledRelatedPayments && sourceOutstandingAmount <= 0m)
-        {
-            return 0m;
-        }
-
-        if (sourceOutstandingAmount > 0m)
-        {
-            return NormalizeMoneyAmount(sourceOutstandingAmount);
-        }
-
-        return NormalizeMoneyAmount(Math.Max(
-            NormalizeMoneyAmount(invoiceAmount) - NormalizeMoneyAmount(paidAmount),
-            0m));
     }
 
     private async Task<List<InvoiceLineItemDto>> LoadInvoiceLineItemsAsync(int paymentId, string? systemNotes, CancellationToken ct)
@@ -6468,11 +6455,7 @@ public class InvoicesController : ControllerBase
 
     private async Task<int> GetNextInvoiceNumberAsync(DateTime targetDate, int startNumber, string allocationStrategy, CancellationToken ct)
     {
-        var yearStart = new DateTime(targetDate.Year, 1, 1);
-        var yearEnd = yearStart.AddYears(1);
-
-        var numbers = await BuildActiveInvoiceEntitiesQuery()
-            .Where(x => x.Date >= yearStart && x.Date < yearEnd)
+        var numbers = await BuildActiveInvoiceYearQuery(targetDate)
             .Select(x => x.Number)
             .ToListAsync(ct);
 
@@ -6482,7 +6465,6 @@ public class InvoicesController : ControllerBase
             .Select(value => value!.Value)
             .Where(value => value >= startNumber)
             .Distinct()
-            .OrderBy(value => value)
             .ToList();
 
         if (allocationStrategy == "first-free")
@@ -6491,14 +6473,14 @@ public class InvoicesController : ControllerBase
             var usedSet = usedNumbers.ToHashSet();
             while (usedSet.Contains(candidate))
             {
-                candidate++;
+                candidate = IncrementInvoiceNumber(candidate, targetDate.Year);
             }
 
             return candidate;
         }
 
         var max = usedNumbers.Count > 0 ? usedNumbers.Max() : startNumber - 1;
-        return Math.Max(startNumber, max + 1);
+        return Math.Max(startNumber, IncrementInvoiceNumber(max, targetDate.Year));
     }
 
     private async Task<string?> ResolveInvoiceNumberForSaveAsync(string number, DateTime accountDate, int? excludeId, bool allowDuplicateOnImport, CancellationToken ct)
@@ -6539,11 +6521,7 @@ public class InvoicesController : ControllerBase
 
     private async Task<HashSet<string>> LoadReservedInvoiceNumberLookupAsync(DateTime accountDate, int? excludeId, CancellationToken ct)
     {
-        var yearStart = new DateTime(accountDate.Year, 1, 1);
-        var yearEnd = yearStart.AddYears(1);
-
-        var numbers = await BuildActiveInvoiceEntitiesQuery()
-            .Where(x => x.Date >= yearStart && x.Date < yearEnd)
+        var numbers = await BuildActiveInvoiceYearQuery(accountDate)
             .Where(x => excludeId == null || !x.Payments.Any(p => p.Id == excludeId.Value))
             .Select(x => x.Number)
             .ToListAsync(ct);
@@ -6561,12 +6539,9 @@ public class InvoicesController : ControllerBase
 
     private async Task<ActionResult?> EnsureInvoiceNumberIsUniqueAsync(string number, DateTime accountDate, int? excludeId, CancellationToken ct)
     {
-        var yearStart = new DateTime(accountDate.Year, 1, 1);
-        var yearEnd = yearStart.AddYears(1);
         var normalized = number.Trim();
 
-        var duplicateExists = await BuildActiveInvoiceEntitiesQuery()
-            .Where(x => x.Date >= yearStart && x.Date < yearEnd)
+        var duplicateExists = await BuildActiveInvoiceYearQuery(accountDate)
             .Where(x => excludeId == null || !x.Payments.Any(p => p.Id == excludeId.Value))
             .AnyAsync(x => x.Number.Trim().ToLower() == normalized.ToLower(), ct);
 
@@ -6583,6 +6558,37 @@ public class InvoicesController : ControllerBase
         return _db.Invoices
             .AsNoTracking()
             .Where(invoice => invoice.Payments.Any());
+    }
+
+    private IQueryable<Invoice> BuildActiveInvoiceYearQuery(DateTime date)
+    {
+        var yearStart = new DateTime(date.Year, 1, 1);
+        var query = BuildActiveInvoiceEntitiesQuery().Where(invoice => invoice.Date >= yearStart);
+        if (date.Year < DateTime.MaxValue.Year)
+        {
+            var yearEnd = yearStart.AddYears(1);
+            query = query.Where(invoice => invoice.Date < yearEnd);
+        }
+
+        return query;
+    }
+
+    private static int IncrementInvoiceNumber(int number, int year)
+    {
+        if (number == int.MaxValue)
+        {
+            throw new InvoiceNumberExhaustedException(year);
+        }
+
+        return number + 1;
+    }
+
+    private sealed class InvoiceNumberExhaustedException : InvalidOperationException
+    {
+        public InvoiceNumberExhaustedException(int year)
+            : base($"Годовая последовательность номеров счетов за {year} год исчерпана.")
+        {
+        }
     }
 
     private async Task<InvoiceRulesSettingsDto> GetInvoiceRulesSettingsAsync(CancellationToken ct)
@@ -6694,7 +6700,7 @@ public class InvoicesController : ControllerBase
         var next = await GetNextInvoiceNumberAsync(invoiceDate, startNumber, allocationStrategy, ct);
         while (reservedInvoiceNumbers.Contains(BuildReservedInvoiceNumberKey(next.ToString(), invoiceDate)))
         {
-            next++;
+            next = IncrementInvoiceNumber(next, invoiceDate.Year);
         }
 
         return next.ToString();

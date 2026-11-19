@@ -2107,6 +2107,21 @@ public class PaymentContext : DbContext
                 .HasDatabaseName("IX_CaseDeadlines_CourtSourceIdentity");
         });
 
+        modelBuilder.Entity<ActAnnualNumberCounter>(entity =>
+        {
+            entity.HasKey(counter => counter.Year);
+            entity.Property(counter => counter.Year).ValueGeneratedNever();
+            entity.ToTable(table => table.HasCheckConstraint("CK_ActAnnualNumberCounters_Value", "\"Year\" BETWEEN 1 AND 9999 AND \"LastNumber\" >= 0"));
+        });
+        modelBuilder.Entity<ActCreateReceipt>(entity =>
+        {
+            entity.HasKey(receipt => new { receipt.ActorUserId, receipt.UploadKey });
+            entity.Property(receipt => receipt.CommandSha256).HasMaxLength(64).IsRequired();
+            entity.Property(receipt => receipt.Operation).HasMaxLength(16).IsRequired();
+            entity.ToTable(table => table.HasCheckConstraint("CK_ActCreateReceipts_Identity",
+                "\"ActorUserId\" > 0 AND \"ActId\" > 0 AND length(\"CommandSha256\") = 64 AND (\"PublishedDocumentId\" IS NULL OR \"PublishedDocumentId\" > 0) AND ((\"Operation\" = 'ordinary' AND \"CaseId\" IS NULL AND \"WorkOrderId\" IS NULL) OR (\"Operation\" = 'work-order' AND \"CaseId\" IS NOT NULL AND \"WorkOrderId\" IS NOT NULL AND \"CaseId\" > 0 AND \"WorkOrderId\" > 0))"));
+        });
+
         modelBuilder.Entity<GeneratedFinancialNumberScope>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -5409,6 +5424,8 @@ public class PaymentContext : DbContext
     /// Акты оказанных услуг.
     /// </summary>
     public DbSet<Act> Acts { get; set; }
+    public DbSet<ActAnnualNumberCounter> ActAnnualNumberCounters => Set<ActAnnualNumberCounter>();
+    public DbSet<ActCreateReceipt> ActCreateReceipts => Set<ActCreateReceipt>();
 
     /// <summary>
     /// Договоры с клиентами.

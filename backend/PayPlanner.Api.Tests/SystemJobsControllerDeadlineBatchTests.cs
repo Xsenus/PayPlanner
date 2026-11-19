@@ -20,6 +20,46 @@ public partial class SystemJobsControllerTests : IClassFixture<PostgreSqlModelTe
         => this.deadlineBatchTemplate = deadlineBatchTemplate;
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DeadlineBatch_DeploymentValidationDefersSynchronizationAndResumesWithoutRestart(bool postgres)
+    {
+        await using var database = postgres ? await deadlineBatchTemplate.CreateDatabaseAsync() : null;
+        await using var sqlite = postgres ? null : await CreateDbScopeAsync();
+        PaymentContext Open() => OpenDeadlineBatchContext(database?.ConnectionString, sqlite?.Options, []);
+        await using var seedDb = Open();
+        var seed = await SeedDeadlineBatchAsync(seedDb);
+        var casesBefore = await DeadlineBatchCasesSnapshotAsync(seedDb);
+        var notifications = new RecordingTaskReminderNotificationService();
+        var runs = new DeadlineBatchRuns();
+        var realtime = new DeadlineBatchRealtime(Open);
+        await using var provider = BuildDeadlineBatchProvider(Open, notifications, realtime);
+        var marker = Path.Combine(Path.GetTempPath(), "payplanner-validation-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await File.WriteAllTextAsync(marker, "synthetic release");
+            using var service = CreateDeadlineBatchService(provider, runs, 3, marker);
+            Assert.Equal(1, await service.RunOnceAsync());
+            Assert.Empty(await DeadlineBatchTaskCaseIdsAsync(seedDb));
+            Assert.Empty(realtime.CommittedTaskCounts);
+            Assert.Equal((seed.ReminderId, "before15m"), Assert.Single(notifications.Reminders));
+            await seedDb.TaskJournalItems.Where(row => row.Id == seed.ReminderId)
+                .ExecuteUpdateAsync(set => set.SetProperty(row => row.ChannelsJson, "[]"));
+
+            File.Delete(marker);
+            Assert.Equal(0, await service.RunOnceAsync());
+            Assert.Equal(seed.CaseIds.Order(), await DeadlineBatchTaskCaseIdsAsync(seedDb));
+            Assert.Equal(3, Assert.Single(realtime.CommittedTaskCounts));
+            Assert.Equal(casesBefore, await DeadlineBatchCasesSnapshotAsync(seedDb));
+            Assert.Equal("success", runs.Status);
+        }
+        finally
+        {
+            File.Delete(marker);
+        }
+    }
+
+    [Theory]
     [InlineData(1, 0)]
     [InlineData(1, 1)]
     [InlineData(3, 0)]
@@ -203,9 +243,10 @@ public partial class SystemJobsControllerTests : IClassFixture<PostgreSqlModelTe
         return services.BuildServiceProvider();
     }
 
-    private static TaskJournalReminderNotificationService CreateDeadlineBatchService(ServiceProvider provider, ISystemJobRunStateService runs, int batchSize)
+    private static TaskJournalReminderNotificationService CreateDeadlineBatchService(ServiceProvider provider, ISystemJobRunStateService runs, int batchSize, string? validationMarker = null)
         => new(provider.GetRequiredService<IServiceScopeFactory>(), new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
+            ["Deployment:ValidationMarkerPath"] = validationMarker,
             ["Notifications:TaskReminders:DeadlineSyncLookAheadDays"] = "14",
             ["Notifications:TaskReminders:DeadlineSyncBatchSize"] = batchSize.ToString(System.Globalization.CultureInfo.InvariantCulture)
         }).Build(), NullLogger<TaskJournalReminderNotificationService>.Instance, runs);

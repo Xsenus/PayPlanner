@@ -34,13 +34,16 @@ import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { VatRateSelect } from '../Documents/VatRateSelect';
 import { DocumentSellerPicker } from '../Documents/DocumentSellerPicker';
+import { useActCreateRecovery, type ActSubmit } from './ActCreateRecovery';
+import { ActNumberPreview } from './ActNumberPreview';
+import { useDocumentDeliveryOwner } from '../../hooks/useDocumentDeliveryOwner';
 
 interface ActModalProps {
   open: boolean;
   mode: 'create' | 'edit';
   act: Act | null;
   onClose: () => void;
-  onSubmit: (payload: ActInput) => Promise<void>;
+  onSubmit: ActSubmit;
   submitting: boolean;
   errorMessage?: string | null;
   clients: Client[];
@@ -256,7 +259,7 @@ function normalizeManualActLineItems(lineItems?: ActLineItem[] | null): ManualAc
   return (lineItems ?? []).map((item, index) => createManualActLineItemRow(item, index));
 }
 
-function sumLineItemQuantities(lineItems?: ActLineItem[] | null): Map<string, number> {
+function sumLineItemQuantities(lineItems?: ReadonlyArray<Pick<ActLineItem, 'sourceKey' | 'quantity'>> | null): Map<string, number> {
   const quantities = new Map<string, number>();
   (lineItems ?? []).forEach((item) => {
     const sourceKey = item.sourceKey?.trim();
@@ -518,7 +521,8 @@ export function ActModal({
   const { t } = useTranslation();
   const { user } = useAuth();
   const actorScope = JSON.stringify([user?.id, user?.role?.id]);
-  const editorScope = JSON.stringify([open, mode, act?.id, actorScope, accessScopeKey]);
+  const editorScope = JSON.stringify([open, mode, act?.id, actorScope, accessScopeKey,
+    defaultClientId, initialValues?.clientId, initialValues?.legalEntityId, initialValues?.invoiceId, invoiceSeed?.id]);
   const editorScopeRef = useRef(editorScope);
   editorScopeRef.current = editorScope;
   const verifiedActorScopeRef = useRef(actorScope);
@@ -557,12 +561,23 @@ export function ActModal({
   const [selectedLineQuantities, setSelectedLineQuantities] = useState<Record<string, string>>({});
   const selectionSeedRef = useRef<string | null>(null);
   const [manualLineItems, setManualLineItems] = useState<ManualActLineItemRow[]>([]);
+  const [restoredCreateCommand, setRestoredCreateCommand] = useState<ActInput | null>(null);
   const roundManualLineAmounts = useMemo(() => manualLineItems.some((item) => Boolean(item.vatRate)), [manualLineItems]);
   const manualLineItemsSeedRef = useRef<string | null>(null);
   const [lineItemPickerOpen, setLineItemPickerOpen] = useState(false);
   const [counterpartyPickerOpen, setCounterpartyPickerOpen] = useState(false);
 
   const isEdit = mode === 'edit';
+  const createOwner = useDocumentDeliveryOwner(JSON.stringify([editorScope, !isEdit && user?.role, !isEdit && user?.departmentId]));
+  const restoreCreateDraft = (command: ActInput) => {
+    setForm({ ...normalizeActToForm(null, defaultClientId, defaultResponsibleId, command, profileTimeZoneId),
+      creationMode: command.creationMode === 'Manual' ? 'Manual' : 'Partial' });
+    setSellerSelection({ companyId: command.sellerCompanyId ?? null, branchId: command.sellerBranchId ?? null });
+    setManualLineItems((command.lineItems ?? []).map((item, index) => createManualActLineItemRow(item, index)));
+    setRestoredCreateCommand(command);
+    setLocalError(null);
+  };
+  const creation = useActCreateRecovery(open && !isEdit, createOwner.scope, onSubmit, restoreCreateDraft);
   const isPageMode = presentation === 'page';
   const actUnavailable = actReadState.scope === editorScope && actReadState.kind === 'unavailable';
   const actReadBlocked = isEdit && (actReadState.scope !== editorScope || actReadState.kind !== 'ready');
@@ -581,6 +596,7 @@ export function ActModal({
       setSelectedLineQuantities({});
       selectionSeedRef.current = null;
       setManualLineItems([]);
+      setRestoredCreateCommand(null);
       manualLineItemsSeedRef.current = null;
       setLineItemPickerOpen(false);
       setCounterpartyPickerOpen(false);
@@ -884,11 +900,6 @@ export function ActModal({
         changed = true;
       }
 
-      if (!previous.number.trim() && effectiveInvoiceDetails.number?.trim()) {
-        next = { ...next, number: effectiveInvoiceDetails.number };
-        changed = true;
-      }
-
       if (!previous.title.trim() && effectiveInvoiceDetails.description?.trim()) {
         next = { ...next, title: effectiveInvoiceDetails.description.trim() };
         changed = true;
@@ -949,7 +960,9 @@ export function ActModal({
       .sort((left, right) => left.sortOrder - right.sortOrder);
   }, [currentAct?.id, effectiveInvoiceDetails]);
 
-  const currentActLineQuantities = useMemo(() => sumLineItemQuantities(currentAct?.lineItems), [currentAct?.lineItems]);
+  const hasRestoredSelection = !isEdit && Boolean(restoredCreateCommand?.invoiceId && restoredCreateCommand.invoiceId === linkedInvoiceId);
+  const currentActLineQuantities = useMemo(() => sumLineItemQuantities(hasRestoredSelection ? restoredCreateCommand?.lineItems : currentAct?.lineItems),
+    [currentAct?.lineItems, hasRestoredSelection, restoredCreateCommand]);
   const hasInvoiceLineItems = invoiceLineAvailability.length > 0;
   const availabilityBySourceKey = useMemo(
     () => new Map(invoiceLineAvailability.map((item) => [item.sourceKey, item])),
@@ -995,8 +1008,8 @@ export function ActModal({
       .map(([sourceKey, quantity]) => `${sourceKey}:${quantity}`)
       .join('|');
 
-    return `${open ? 1 : 0}:${linkedInvoiceId ?? 0}:${currentAct?.id ?? 0}:${availabilityKey}:${currentActKey}`;
-  }, [currentAct?.id, currentActLineQuantities, invoiceLineAvailability, linkedInvoiceId, open]);
+    return `${open ? 1 : 0}:${linkedInvoiceId ?? 0}:${currentAct?.id ?? 0}:${availabilityKey}:${currentActKey}:${hasRestoredSelection}`;
+  }, [currentAct?.id, currentActLineQuantities, hasRestoredSelection, invoiceLineAvailability, linkedInvoiceId, open]);
 
   useEffect(() => {
     if (!open) {
@@ -1016,7 +1029,7 @@ export function ActModal({
 
     selectionSeedRef.current = selectionSeedKey;
 
-    if (currentActLineQuantities.size > 0) {
+    if (currentActLineQuantities.size > 0 || hasRestoredSelection) {
       const next: Record<string, string> = {};
       invoiceLineAvailability.forEach((item) => {
         const quantity = Math.min(item.availableQuantity, currentActLineQuantities.get(item.sourceKey) ?? 0);
@@ -1035,7 +1048,7 @@ export function ActModal({
       }
     });
     setSelectedLineQuantities(next);
-  }, [currentActLineQuantities, hasInvoiceLineItems, invoiceLineAvailability, open, selectionSeedKey]);
+  }, [currentActLineQuantities, hasInvoiceLineItems, hasRestoredSelection, invoiceLineAvailability, open, selectionSeedKey]);
 
   const manualLineItemsSeedKey = useMemo(() => {
     const currentManualItemsKey = (currentAct?.lineItems ?? [])
@@ -1413,13 +1426,13 @@ export function ActModal({
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (editorScopeRef.current !== editorScope || submitting || (isEdit && (
+    if (editorScopeRef.current !== editorScope || submitting || creation.busy || (!isEdit && creation.blocked) || (isEdit && (
       actReadStateRef.current.scope !== editorScope || actReadStateRef.current.kind !== 'ready'
     ))) return;
     const revision = actReadRevisionRef.current;
     setLocalError(null);
 
-    if (!form.number.trim()) {
+    if (isEdit && !form.number.trim()) {
       setLocalError('Номер акта обязателен');
       return;
     }
@@ -1543,7 +1556,7 @@ export function ActModal({
 
     const payload: ActInput = {
       ...(!isEdit ? { sellerCompanyId: sellerSelection.companyId, sellerBranchId: sellerSelection.branchId } : {}),
-      number: form.number.trim(),
+      number: isEdit ? form.number.trim() : '',
       title: form.title.trim() ? form.title.trim() : undefined,
       date: fromInputToApiDate(form.date) ?? form.date,
       amount,
@@ -1561,7 +1574,8 @@ export function ActModal({
     };
 
     try {
-      await onSubmit(payload);
+      if (isEdit) await onSubmit(payload);
+      else await creation.submit(payload);
     } catch (error) {
       if (error instanceof StaleUiOperationError) return;
       if (editorScopeRef.current === editorScope && actReadRevisionRef.current === revision && error instanceof Error && !errorMessage) {
@@ -1634,6 +1648,7 @@ export function ActModal({
       </div>
 
       <form id="act-edit-form" onSubmit={handleSubmit} className={`${isPageMode ? 'px-6 py-5' : 'max-h-[82vh] overflow-y-auto px-6 py-5'} space-y-6`}>
+        {creation.panel}
         {!isEdit ? (
           <div className="text-sm">
             <DocumentSellerPicker kind="act" documentId={0} draft canEdit={!submitting}
@@ -1649,9 +1664,9 @@ export function ActModal({
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="font-medium text-slate-700">
-                    {t('actNumber') ?? 'Номер акта'} {isRequired('Number') ? '*' : ''}
+                    {t('actNumber') ?? 'Номер акта'} {isEdit && isRequired('Number') ? '*' : ''}
                   </span>
-                  <input
+                  {isEdit ? <input
                     type="text"
                     value={form.number}
                     onChange={handleChange('number')}
@@ -1661,7 +1676,7 @@ export function ActModal({
                         : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-200'
                     }`}
                     required
-                  />
+                  /> : <ActNumberPreview date={form.date} ownerScope={createOwner.scope} enabled={open} />}
                 </label>
 
                 <label className="flex flex-col gap-1 text-sm">
@@ -2396,7 +2411,7 @@ export function ActModal({
           </button>
           <button
             type="submit"
-            disabled={submitting || invoiceLoading || actDetailsLoading || actReadBlocked}
+            disabled={submitting || creation.busy || (!isEdit && creation.blocked) || invoiceLoading || actDetailsLoading || actReadBlocked}
             className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300"
           >
             {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

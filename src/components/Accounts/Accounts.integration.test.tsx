@@ -1208,7 +1208,6 @@ describe('Accounts integration', () => {
       creationMode: 'Full',
       invoiceId: 528,
       invoiceNumber: '24',
-      number: '24',
       amount: 15000,
       clientId: 55,
       status: 'Created',
@@ -1216,6 +1215,7 @@ describe('Accounts integration', () => {
       invoiceId: null,
       invoiceSeed: expect.objectContaining({ id: 528, number: '24' }),
     }));
+    expect(onCreateActPage.mock.calls[0][0]).not.toHaveProperty('number');
   });
 
   it('hides act creation in the accounts registry without act rights', async () => {

@@ -5,7 +5,7 @@ import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer as createControlServer } from 'node:http';
 import { prepareSyntheticBrowserUi } from './synthetic-browser-ui.mjs';
-import { createCaseReadLifecycle, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
+import { closeCaseBrowserSession, createCaseReadLifecycle, createCaseStartupReadTrace, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
 import { redactChatBrowserDiagnostic } from './chat-browser-read-lifecycle.mjs';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
@@ -48,9 +48,11 @@ assert.ok(['msedge', 'chrome'].includes(browser), 'Use an installed Edge or Chro
 const session = `case-retire-${basename(root).slice(-12)}`;
 const scenarioPath = join(root, 'financial-browser-scenario.js');
 const execute = promisify(execFile);
+const sessionDirectory = join(root, 'financial-browser-sessions');
 async function cli(...args) {
   const result = await execute(process.execPath, [cliPath, `-s=${session}`, ...args], {
     timeout: 110_000, maxBuffer: 1024 * 1024, windowsHide: true,
+    env: { ...process.env, PWTEST_DAEMON_SESSION_DIR: sessionDirectory },
   });
   assert.ok(!result.stdout.includes('### Error'), result.stdout + result.stderr);
   return result.stdout;
@@ -59,7 +61,13 @@ process.env.VITE_RESTORED_RUNTIME_ISOLATION = 'false';
 process.env.VITE_API_URL = new URL('/api', api).href;
 const ui = `http://127.0.0.1:${port}`;
 let vite;
-let opened = false;
+let openAttempted = false;
+let daemonPid;
+async function closeFinancialBrowser() {
+  if (daemonPid !== undefined) await closeCaseBrowserSession(daemonPid, () => cli('close'));
+  else await cli('close');
+  openAttempted = false;
+}
 let control;
 let controlUrl;
 const phase = name => console.log('PP_FINANCIAL_BROWSER_PHASE ' + name);
@@ -102,10 +110,12 @@ try {
   assert.equal(vite.config.isProduction, true, 'The financial browser must qualify production React behavior.');
   assert.equal(vite.config.env.DEV, false, 'The release browser must not use development-only mount effects.');
   phase('cli-open');
+  openAttempted = true;
   const openResult = await cli('open', 'about:blank', '--browser', browser);
-  assert.ok(openResult.includes(`Browser \`${session}\` opened with pid `),
-    'Financial browser did not confirm an owned session: ' + openResult);
-  opened = true;
+  const opened = new RegExp(`^### Browser \`${session}\` opened with pid ([1-9]\\d*)\\.\\r?$`, 'm').exec(openResult);
+  assert.ok(opened, 'Financial browser did not confirm an owned session: ' + openResult);
+  daemonPid = Number(opened[1]);
+  assert.ok(Number.isSafeInteger(daemonPid));
   phase('cli-goto');
   await cli('goto', ui + '/cases/' + caseId);
   phase('cli-snapshot');
@@ -123,6 +133,9 @@ try {
     // five-second budget. Periodic inbox refreshes need no artificial quiet gap.
     const reads = (${createCaseReadLifecycle})(page,
       request => (${isCaseBoundaryRead})(request, settings.api, settings.caseId), 5000);
+    const initialReads = (${createCaseReadLifecycle})(page,
+      request => (${isCaseBoundaryRead})(request, settings.api, settings.caseId), 45000);
+    const startupTrace = (${createCaseStartupReadTrace})(page, settings.api, settings.caseId);
     const kind = settings.flow.split('-')[1]; const modal = settings.flow.split('-')[2] === 'modal'; const lost = settings.flow.endsWith('-lost');
     const editor = settings.flow.split('-')[2] === 'editor';
     let firstHandled; const first = new Promise(resolve => { firstHandled = resolve; });
@@ -175,6 +188,17 @@ try {
     await page.getByRole('button', { name: 'Войти', exact: true }).click();
     await page.locator('input[type="email"]').waitFor({ state: 'hidden' });
     await checkpoint('authenticated');
+    await page.getByRole('button', { name: 'Заказ-наряд', exact: true }).waitFor();
+    try {
+      await initialReads.drain('document-tab');
+    } catch (error) {
+      if (error && typeof error.message === 'string')
+        error.message += '\nFINANCIAL_STARTUP_READS ' + JSON.stringify(startupTrace.snapshot());
+      throw error;
+    } finally {
+      initialReads.dispose();
+      startupTrace.dispose();
+    }
     await page.getByRole('button', { name: 'Заказ-наряд', exact: true }).click();
     const buttonName = kind === 'invoice' ? 'Создать счет' : kind === 'act' ? 'Создать акт' : 'Создать договор';
     const createButton = page.getByRole('button', { name: buttonName, exact: true });
@@ -377,6 +401,7 @@ try {
       }
       check(invoicePrintWrites === 2, 'Invoice print did not use exactly two explicit preparation requests');
     }
+    await reads.drain('browser-close');
     check(otherWrites === 0, 'Financial generation caused another business write: ' + otherWrites + ' ' + unexpectedWrites.join(', '));
     check(tablePreferenceWrites <= 1, 'Invoice table preferences were written repeatedly');
     check(outside.length === 0, 'Browser called an external host');
@@ -387,6 +412,8 @@ try {
   }`, { mode: 0o600 });
   const result = await cli('run-code', '--filename', scenarioPath);
   assert.ok(result.includes('CASE_RETIREMENT_BROWSER_OK'), result);
+  phase('browser-close');
+  await closeFinancialBrowser();
   if (flow === 'financial-invoice-editor-lost') {
     const lines = result.split(/\r?\n/);
     const resultIndex = lines.indexOf('### Result');
@@ -427,9 +454,9 @@ try {
   const diagnostic = safe(JSON.stringify({ message: error.message, code: error.code,
     signal: error.signal, killed: error.killed, stdout: error.stdout, stderr: error.stderr }));
   console.error(diagnostic);
-  if (opened) {
+  if (openAttempted && daemonPid !== undefined) {
     try {
-      console.error(safe(await cli('run-code', 'async page => ({ phase: await page.evaluate(() => globalThis.__ppFinancialGatePhase ?? "not-started") })')));
+      console.error(safe(await cli('run-code', 'async page => page.evaluate(() => ({ phase: globalThis.__ppFinancialGatePhase ?? "not-started", visibility: document.visibilityState, focused: document.hasFocus() }))')));
       console.error(safe(await cli('snapshot')));
       console.error(safe(await cli('console', 'error')));
     } catch (inspectionError) {
@@ -439,7 +466,7 @@ try {
   throw new Error(diagnostic);
 } finally {
   phase('browser-close');
-  try { if (opened) await cli('close'); }
+  try { if (openAttempted) await closeFinancialBrowser(); }
   finally {
     phase('vite-close');
     try { if (vite) await vite.close(); }

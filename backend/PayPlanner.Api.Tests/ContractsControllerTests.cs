@@ -1463,6 +1463,210 @@ public class ContractsControllerTests
         Assert.Contains("неоплаченные счета", Assert.IsType<string>(badRequest.Value));
     }
 
+    [Theory]
+    [InlineData(false, 600, 0, false)]
+    [InlineData(true, 600, 0, false)]
+    [InlineData(false, 200, 400, false)]
+    [InlineData(true, 200, 400, false)]
+    [InlineData(false, 600, 0, true)]
+    [InlineData(true, 200, 400, true)]
+    public async Task GetTerminationCheck_AfterUnpaidInstallmentCancellation_PreservesReceivedMoneyAndUsesRemainingDebt(
+        bool canonicalContractLink,
+        int receivedAmount,
+        int expectedDebt,
+        bool legacyMissingInstallmentOwner)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateContractUserAsync(db, "termination-installments", true, true, true);
+        user.Role!.Name = "admin";
+        var client = await CreateClientAsync(db);
+        var invoice = await CreateInvoicePaymentAsync(db, "INV-TERMINATION-INSTALLMENTS", new DateTime(2026, 6, 1), 1_000m);
+        invoice.ClientId = client.Id;
+        var contract = new Contract
+        {
+            Number = "CT-TERMINATION-INSTALLMENTS",
+            Date = invoice.Date,
+            Status = ContractStatus.Concluded,
+            BillingMode = ContractBillingMode.Fixed,
+            Amount = invoice.Amount,
+            ClientContracts = [new ClientContract { ClientId = client.Id }],
+        };
+        db.Contracts.Add(contract);
+        var receivedInstallment = new Payment
+        {
+            InvoiceId = invoice.InvoiceId,
+            ClientId = legacyMissingInstallmentOwner ? null : client.Id,
+            DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income,
+            Amount = 600m,
+            PaidAmount = receivedAmount,
+            Status = receivedAmount == 600 ? PaymentStatus.Completed : PaymentStatus.Processing,
+            IsPaid = receivedAmount == 600,
+            Date = invoice.Date,
+            PaidDate = invoice.Date,
+            LastPaymentDate = invoice.Date,
+            SystemNotes = InvoiceManagedPaymentRules.InstallmentPaymentMarker,
+        };
+        var unpaidInstallment = new Payment
+        {
+            InvoiceId = invoice.InvoiceId,
+            ClientId = legacyMissingInstallmentOwner ? null : client.Id,
+            DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income,
+            Amount = 400m,
+            Status = PaymentStatus.Pending,
+            Date = invoice.Date.AddMonths(1),
+            SystemNotes = InvoiceManagedPaymentRules.InstallmentPaymentMarker,
+        };
+        db.Payments.AddRange(receivedInstallment, unpaidInstallment);
+        await db.SaveChangesAsync();
+        if (canonicalContractLink)
+        {
+            invoice.ContractId = contract.Id;
+        }
+        else
+        {
+            db.ContractInvoices.Add(new ContractInvoice { ContractId = contract.Id, InvoiceId = invoice.Id });
+        }
+        await db.SaveChangesAsync();
+        var controller = CreateAdminController(db, actorUserId: user.Id);
+        var invoicesController = new InvoicesController(db, new CapturingEmailService(), new NoopFormRequirementsService())
+        {
+            ControllerContext = controller.ControllerContext,
+        };
+
+        var cancellation = await invoicesController.Cancel(invoice.Id, new CancelInvoiceRequest
+        {
+            Reason = "Сохранить полученную оплату и отменить неоплаченные взносы",
+            CancellationScope = InvoiceCancellationScope.UnpaidInstallmentsOnly,
+        }, CancellationToken.None);
+        var cancelledInvoice = Assert.IsType<InvoiceDto>(Assert.IsType<OkObjectResult>(cancellation.Result).Value);
+        Assert.Equal((decimal)expectedDebt, cancelledInvoice.OutstandingAmount);
+        db.ChangeTracker.Clear();
+
+        var checkAction = await controller.GetTerminationCheck(contract.Id, CancellationToken.None);
+        var check = Assert.IsType<ContractTerminationCheckDto>(Assert.IsType<OkObjectResult>(checkAction.Result).Value);
+        Assert.Equal(expectedDebt > 0, check.HasUnpaidInvoices);
+        Assert.Equal(expectedDebt > 0 ? 1 : 0, check.UnpaidInvoiceCount);
+        Assert.Equal((decimal)expectedDebt, check.UnpaidInvoiceAmount);
+
+        var termination = await controller.Terminate(contract.Id, new TerminateContractRequest
+        {
+            TerminationDate = new DateTime(2026, 7, 1),
+            Terms = "Стороны прекращают обязательства",
+            Reason = "Соглашение сторон",
+        }, CancellationToken.None);
+        if (expectedDebt == 0)
+        {
+            Assert.IsType<OkObjectResult>(termination.Result);
+        }
+        else
+        {
+            Assert.IsType<BadRequestObjectResult>(termination.Result);
+        }
+
+        var storedReceived = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == receivedInstallment.Id);
+        Assert.Equal((decimal)receivedAmount, storedReceived.PaidAmount);
+        Assert.Equal(600m, storedReceived.Amount);
+        Assert.Equal(receivedInstallment.PaidDate, storedReceived.PaidDate);
+        Assert.Equal(PaymentStatus.Cancelled,
+            (await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == unpaidInstallment.Id)).Status);
+        Assert.Empty(await db.ClientBalanceTransactions.ToListAsync());
+    }
+
+    [Fact]
+    public async Task GetTerminationCheck_WithActivePartiallyPaidInstallments_PreservesTheirOutstandingDebt()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = await CreateInvoicePaymentAsync(db, "INV-TERMINATION-ACTIVE", new DateTime(2026, 6, 1), 1_000m);
+        invoice.PaidAmount = 200m;
+        invoice.Status = PaymentStatus.Processing;
+        var contract = new Contract
+        {
+            Number = "CT-TERMINATION-ACTIVE",
+            Date = invoice.Date,
+            BillingMode = ContractBillingMode.Fixed,
+            Amount = invoice.Amount,
+            ContractInvoices = [new ContractInvoice { InvoiceId = invoice.Id }],
+        };
+        db.Contracts.Add(contract);
+        db.Payments.AddRange(new Payment
+        {
+            InvoiceId = invoice.InvoiceId,
+            DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income,
+            Amount = 600m,
+            PaidAmount = 200m,
+            Status = PaymentStatus.Processing,
+            Date = invoice.Date,
+            SystemNotes = InvoiceManagedPaymentRules.InstallmentPaymentMarker,
+        }, new Payment
+        {
+            InvoiceId = invoice.InvoiceId,
+            DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income,
+            Amount = 400m,
+            Status = PaymentStatus.Pending,
+            Date = invoice.Date.AddMonths(1),
+            SystemNotes = InvoiceManagedPaymentRules.InstallmentPaymentMarker,
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var action = await CreateAdminController(db).GetTerminationCheck(contract.Id, CancellationToken.None);
+        var check = Assert.IsType<ContractTerminationCheckDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.True(check.HasUnpaidInvoices);
+        Assert.Equal(1, check.UnpaidInvoiceCount);
+        Assert.Equal(800m, check.UnpaidInvoiceAmount);
+    }
+
+    [Fact]
+    public async Task GetTerminationCheck_WithConflictingInvoiceOwner_DoesNotUseForeignPaymentAmounts()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = await CreateInvoicePaymentAsync(db, "INV-TERMINATION-CONFLICT", new DateTime(2026, 6, 1), 1_000m);
+        invoice.PaidAmount = 600m;
+        invoice.Status = PaymentStatus.Processing;
+        var foreignClient = await CreateClientAsync(db);
+        var contract = new Contract
+        {
+            Number = "CT-TERMINATION-CONFLICT",
+            Date = invoice.Date,
+            BillingMode = ContractBillingMode.Fixed,
+            Amount = invoice.Amount,
+            ContractInvoices = [new ContractInvoice { InvoiceId = invoice.Id }],
+        };
+        db.Contracts.Add(contract);
+        db.Payments.AddRange(new Payment
+        {
+            InvoiceId = invoice.InvoiceId,
+            DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income,
+            Amount = 600m,
+            PaidAmount = 600m,
+            Status = PaymentStatus.Completed,
+            Date = invoice.Date,
+            SystemNotes = InvoiceManagedPaymentRules.InstallmentPaymentMarker,
+        }, new Payment
+        {
+            InvoiceId = invoice.InvoiceId,
+            DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income,
+            Amount = 100_000m,
+            ClientId = foreignClient.Id,
+            Status = PaymentStatus.Pending,
+            Date = invoice.Date,
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var action = await CreateAdminController(db).GetTerminationCheck(contract.Id, CancellationToken.None);
+        var check = Assert.IsType<ContractTerminationCheckDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.True(check.HasUnpaidInvoices);
+        Assert.Equal(1, check.UnpaidInvoiceCount);
+        Assert.Equal(400m, check.UnpaidInvoiceAmount);
+    }
+
     [Fact]
     public async Task UpdateStatus_Terminated_RejectsUnpaidInvoicesAndKeepsContractActive()
     {

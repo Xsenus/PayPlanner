@@ -116,10 +116,12 @@ public class NotificationInboxController : ControllerBase
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct);
+        var completionOrigins = await LoadCompletionOriginsAsync(items, userId.Value, ct);
 
         return Ok(new PagedResponse<UserNotificationDto>
         {
-            Items = items.Select(item => Map(item, preferences, quietHours, timeZone)).ToList(),
+            Items = items.Select(item => Map(item, preferences, quietHours, timeZone,
+                completionOrigins.GetValueOrDefault((item.EventKey, item.TaskJournalItemId ?? 0)))).ToList(),
             Total = total,
             Page = page,
             PageSize = pageSize
@@ -261,42 +263,45 @@ public class NotificationInboxController : ControllerBase
     [HttpPatch("{id:int}/read")]
     public async Task<ActionResult<UserNotificationDto>> MarkRead(int id, CancellationToken ct)
     {
-        var item = await FindOwnedNotificationAsync(id, ct);
-        if (item is null)
+        var owned = await FindOwnedNotificationAsync(id, ct);
+        if (owned is null)
         {
             return NotFound();
         }
 
+        var item = owned.Notification;
         MarkAsRead(item);
         await _context.SaveChangesAsync(ct);
-        return Ok(Map(item));
+        return Ok(await MapOwnedNotificationAsync(owned, ct));
     }
 
     [HttpPatch("{id:int}/unread")]
     public async Task<ActionResult<UserNotificationDto>> MarkUnread(int id, CancellationToken ct)
     {
-        var item = await FindOwnedNotificationAsync(id, ct);
-        if (item is null)
+        var owned = await FindOwnedNotificationAsync(id, ct);
+        if (owned is null)
         {
             return NotFound();
         }
 
+        var item = owned.Notification;
         item.IsRead = false;
         item.ReadAt = null;
         item.SnoozedUntil = null;
         await _context.SaveChangesAsync(ct);
-        return Ok(Map(item));
+        return Ok(await MapOwnedNotificationAsync(owned, ct));
     }
 
     [HttpPatch("{id:int}/archive")]
     public async Task<ActionResult<UserNotificationDto>> Archive(int id, CancellationToken ct)
     {
-        var item = await FindOwnedNotificationAsync(id, ct);
-        if (item is null)
+        var owned = await FindOwnedNotificationAsync(id, ct);
+        if (owned is null)
         {
             return NotFound();
         }
 
+        var item = owned.Notification;
         MarkAsRead(item);
         if (!item.IsArchived)
         {
@@ -305,22 +310,23 @@ public class NotificationInboxController : ControllerBase
         }
 
         await _context.SaveChangesAsync(ct);
-        return Ok(Map(item));
+        return Ok(await MapOwnedNotificationAsync(owned, ct));
     }
 
     [HttpPatch("{id:int}/unarchive")]
     public async Task<ActionResult<UserNotificationDto>> Unarchive(int id, CancellationToken ct)
     {
-        var item = await FindOwnedNotificationAsync(id, ct);
-        if (item is null)
+        var owned = await FindOwnedNotificationAsync(id, ct);
+        if (owned is null)
         {
             return NotFound();
         }
 
+        var item = owned.Notification;
         item.IsArchived = false;
         item.ArchivedAt = null;
         await _context.SaveChangesAsync(ct);
-        return Ok(Map(item));
+        return Ok(await MapOwnedNotificationAsync(owned, ct));
     }
 
     [HttpPatch("{id:int}/snooze")]
@@ -329,35 +335,37 @@ public class NotificationInboxController : ControllerBase
         [FromBody] SnoozeUserNotificationRequest? request,
         CancellationToken ct)
     {
-        var item = await FindOwnedNotificationAsync(id, ct);
-        if (item is null)
+        var owned = await FindOwnedNotificationAsync(id, ct);
+        if (owned is null)
         {
             return NotFound();
         }
 
+        var item = owned.Notification;
         var minutes = Math.Clamp(request?.Minutes ?? 30, 5, 1440);
         item.SnoozedUntil = DateTime.UtcNow.AddMinutes(minutes);
         item.IsRead = false;
         item.ReadAt = null;
         await _context.SaveChangesAsync(ct);
-        return Ok(Map(item));
+        return Ok(await MapOwnedNotificationAsync(owned, ct));
     }
 
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        var item = await FindOwnedNotificationAsync(id, ct);
-        if (item is null)
+        var owned = await FindOwnedNotificationAsync(id, ct);
+        if (owned is null)
         {
             return NotFound();
         }
 
+        var item = owned.Notification;
         item.DeletedAt ??= DateTime.UtcNow;
         await _context.SaveChangesAsync(ct);
         return NoContent();
     }
 
-    private async Task<UserNotification?> FindOwnedNotificationAsync(int id, CancellationToken ct)
+    private async Task<OwnedNotification?> FindOwnedNotificationAsync(int id, CancellationToken ct)
     {
         var userId = User.GetUserId();
         if (!userId.HasValue)
@@ -374,8 +382,39 @@ public class NotificationInboxController : ControllerBase
         var preferences = await LoadNotificationPreferencesAsync(userId.Value, ct);
         query = ApplyDisabledTypeFilter(query, preferences.DisabledTypes);
         query = WhereNotificationTargetVisible(query, _context, visibility);
-        return await query
-            .FirstOrDefaultAsync(ct);
+        var item = await query.FirstOrDefaultAsync(ct);
+        return item is null ? null : new OwnedNotification(item, preferences);
+    }
+
+    private sealed record OwnedNotification(UserNotification Notification, UserNotificationPreferenceSnapshot Preferences);
+
+    private async Task<UserNotificationDto> MapOwnedNotificationAsync(OwnedNotification owned, CancellationToken ct)
+    {
+        var item = owned.Notification;
+        var quietHours = await LoadNotificationDoNotDisturbAsync(item.RecipientUserId, ct);
+        var timeZone = quietHours.Enabled
+            ? await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_context, item.RecipientUserId, ct)
+            : TimeZoneInfo.Utc;
+        var origins = await LoadCompletionOriginsAsync([item], item.RecipientUserId, ct);
+        return Map(item, owned.Preferences, quietHours, timeZone, origins.GetValueOrDefault((item.EventKey, item.TaskJournalItemId ?? 0)));
+    }
+
+    private async Task<Dictionary<(string EventKey, int TaskId), string>> LoadCompletionOriginsAsync(
+        IReadOnlyCollection<UserNotification> notifications, int recipientUserId, CancellationToken ct)
+    {
+        var eventKeys = notifications.Where(item => item.Type == UserNotificationTypes.TaskCompleted && item.TaskJournalItemId.HasValue)
+            .Select(item => item.EventKey).Distinct().ToArray();
+        if (eventKeys.Length == 0) return [];
+        var origins = await _context.TaskStatusNotificationOutboxes.AsNoTracking()
+            .Where(entry => eventKeys.Contains(entry.EventKey) && TaskCompletionNotificationPolicy.OrdinaryEventTypes.Contains(entry.EventType))
+            .Select(entry => new
+            {
+                entry.EventKey,
+                entry.TaskJournalItemId,
+                EventType = entry.EventType == TaskCompletionNotificationPolicy.CoalescedEventType && entry.ActorUserId == recipientUserId
+                    ? TaskCompletionNotificationPolicy.OrdinaryEventType : entry.EventType
+            }).ToArrayAsync(ct);
+        return origins.ToDictionary(entry => (entry.EventKey, entry.TaskJournalItemId), entry => entry.EventType);
     }
 
     private async Task<List<UserNotification>?> FindOwnedNotificationsAsync(IEnumerable<int>? ids, CancellationToken ct)
@@ -628,6 +667,10 @@ public class NotificationInboxController : ControllerBase
         var requiresActionTypes = UserNotificationTypes.RequiresActionTypes;
         return query.Where(item =>
             requiresActionTypes.Contains(item.Type)
+            && (item.Type != UserNotificationTypes.TaskCompleted
+                || context.TaskStatusNotificationOutboxes.Any(entry => entry.EventKey == item.EventKey
+                    && entry.TaskJournalItemId == item.TaskJournalItemId
+                    && TaskCompletionNotificationPolicy.OrdinaryEventTypes.Contains(entry.EventType)))
             && (item.Type != UserNotificationTypes.TaskApprovalRequested
                 || (item.TaskJournalItemId.HasValue
                     && context.TaskJournalParticipants.Any(participant =>
@@ -744,7 +787,7 @@ public class NotificationInboxController : ControllerBase
             : null;
     }
 
-    private static IQueryable<UserNotification> ApplyDisabledTypeFilter(
+    private IQueryable<UserNotification> ApplyDisabledTypeFilter(
         IQueryable<UserNotification> query,
         IReadOnlyCollection<string> disabledTypes)
     {
@@ -753,7 +796,14 @@ public class NotificationInboxController : ControllerBase
             return query;
         }
 
-        return query.Where(item => !disabledTypes.Contains(item.Type));
+        var allowsChangedFallback = disabledTypes.Contains(UserNotificationTypes.TaskCompleted, StringComparer.OrdinalIgnoreCase)
+            && !disabledTypes.Contains(UserNotificationTypes.TaskChanged, StringComparer.OrdinalIgnoreCase);
+        return query.Where(item => !disabledTypes.Contains(item.Type)
+            || (allowsChangedFallback && item.Type == UserNotificationTypes.TaskCompleted
+                && _context.TaskStatusNotificationOutboxes.Any(entry => entry.EventKey == item.EventKey
+                    && entry.TaskJournalItemId == item.TaskJournalItemId
+                    && entry.EventType == TaskCompletionNotificationPolicy.CoalescedEventType
+                    && entry.ActorUserId != item.RecipientUserId)));
     }
 
     private static IQueryable<UserNotification> WhereNotificationTargetVisible(
@@ -865,12 +915,35 @@ public class NotificationInboxController : ControllerBase
         UserNotification item,
         UserNotificationPreferenceSnapshot? preferences = null,
         UserNotificationDoNotDisturbSnapshot? quietHours = null,
-        TimeZoneInfo? timeZone = null)
+        TimeZoneInfo? timeZone = null,
+        string? completionEventType = null)
     {
         var type = UserNotificationTypes.Find(item.Type);
         var effectivePreferences = preferences ?? UserNotificationPreferenceSettings.Empty;
         var effectiveQuietHours = quietHours ?? UserNotificationDoNotDisturbSettings.Disabled;
         var effectiveTimeZone = timeZone ?? TimeZoneInfo.Utc;
+        var ordinaryCompletion = completionEventType is TaskCompletionNotificationPolicy.OrdinaryEventType or TaskCompletionNotificationPolicy.CoalescedEventType;
+        var coalescedCompletion = completionEventType == TaskCompletionNotificationPolicy.CoalescedEventType;
+        var nowUtc = DateTime.UtcNow;
+        var presentation = item.Type == UserNotificationTypes.TaskCompleted
+            ? TaskCompletionNotificationPolicy.ResolvePresentation(
+                item.Type,
+                ordinaryCompletion,
+                TaskCompletionNotificationPolicy.ResolveEnabledChannels(effectivePreferences, item.Type, effectiveQuietHours, effectiveTimeZone, nowUtc),
+                coalescedCompletion,
+                coalescedCompletion
+                    ? TaskCompletionNotificationPolicy.ResolveEnabledChannels(effectivePreferences, UserNotificationTypes.TaskChanged, effectiveQuietHours, effectiveTimeZone, nowUtc)
+                    : null)
+            : TaskCompletionNotificationPolicy.ResolvePresentation(
+            item.Type,
+            ordinaryCompletion,
+            UserNotificationPreferenceSettings.IsChannelEnabled(effectivePreferences, item.Type, NotificationChannels.InApp),
+            type?.PreferenceChannels.Contains(NotificationChannels.ForcedModal, StringComparer.OrdinalIgnoreCase) == true
+                && UserNotificationPreferenceSettings.IsChannelEnabled(effectivePreferences, item.Type, NotificationChannels.ForcedModal),
+            type?.EffectiveChannels.Contains(NotificationChannels.Toast, StringComparer.OrdinalIgnoreCase) != false
+                && UserNotificationPreferenceSettings.IsChannelEnabled(effectivePreferences, item.Type, NotificationChannels.Toast)
+                && !UserNotificationDoNotDisturbSettings.IsChannelMuted(
+                    effectiveQuietHours, type, NotificationChannels.Toast, nowUtc, effectiveTimeZone));
         return new UserNotificationDto
         {
             Id = item.Id,
@@ -880,22 +953,8 @@ public class NotificationInboxController : ControllerBase
             Title = item.Title,
             BodyPreview = item.BodyPreview,
             Tone = item.Tone,
-            ToastEnabled = type?.EffectiveChannels.Contains(NotificationChannels.Toast, StringComparer.OrdinalIgnoreCase) != false
-                && UserNotificationPreferenceSettings.IsChannelEnabled(
-                effectivePreferences,
-                item.Type,
-                NotificationChannels.Toast)
-                && !UserNotificationDoNotDisturbSettings.IsChannelMuted(
-                    effectiveQuietHours,
-                    type,
-                    NotificationChannels.Toast,
-                    DateTime.UtcNow,
-                    effectiveTimeZone),
-            ForcedModalEnabled = type?.PreferenceChannels.Contains(NotificationChannels.ForcedModal, StringComparer.OrdinalIgnoreCase) == true
-                && UserNotificationPreferenceSettings.IsChannelEnabled(
-                    effectivePreferences,
-                    item.Type,
-                    NotificationChannels.ForcedModal),
+            ToastEnabled = presentation.ToastEnabled,
+            ForcedModalEnabled = presentation.ForcedModalEnabled,
             ObjectType = item.ObjectType,
             ObjectId = item.ObjectId,
             TaskId = item.TaskJournalItemId,

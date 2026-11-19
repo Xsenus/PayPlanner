@@ -1,4 +1,7 @@
 import { PaymentCreateAdoptedError } from '../../services/paymentCreateAttempts';
+import { acknowledgeCreatedAct, actCreateSuccessMessage, type ActCreateOptions } from '../../services/actCreateAttempts';
+import { useDocumentDeliveryOwner } from '../../hooks/useDocumentDeliveryOwner';
+import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { SystemSelect } from '../ui/SystemSelect';
 import {
   AlertTriangle,
@@ -623,7 +626,6 @@ export function Accounts({
   const [paymentModalType, setPaymentModalType] = useState<PaymentKind>('Income');
   const [paymentModalInvoiceContext, setPaymentModalInvoiceContext] = useState<PaymentModalInvoiceContext | null>(null);
   const [actModalOpen, setActModalOpen] = useState(false);
-  const [actModalSubmitting, setActModalSubmitting] = useState(false);
   const [actModalError, setActModalError] = useState<string | null>(null);
   const [actModalInvoice, setActModalInvoice] = useState<AccountRow | null>(null);
   const [actModalMode, setActModalMode] = useState<'create' | 'edit'>('create');
@@ -2333,7 +2335,6 @@ export function Accounts({
       creationMode: 'Full',
       invoiceId: row.invoice?.id ?? null,
       invoiceNumber: row.accountNumber,
-      number: row.invoice?.actNumber ?? row.accountNumber,
       amount: row.totalAmount,
       title: row.invoice?.description ?? row.invoice?.actTitle ?? '',
       date: normalizedDate,
@@ -2399,32 +2400,43 @@ export function Accounts({
     setActModalError(null);
   };
 
-  const handleSubmitAct = async (payload: ActInput) => {
+  const actWriteOwner = useDocumentDeliveryOwner(JSON.stringify([user?.id, user?.role, user?.departmentId, permissions.acts,
+    actModalOpen, actModalMode, activeAct?.id, actModalInvoice?.invoice?.id]));
+  const actModalSubmitting = actWriteOwner.busy;
+  const handleSubmitAct = async (payload: ActInput, options?: ActCreateOptions) => {
     if ((actModalMode === 'edit' && !canEditAct) || (actModalMode !== 'edit' && !canCreateAct)) {
-      return;
+      throw new StaleUiOperationError();
     }
-    setActModalSubmitting(true);
+    const operation = actWriteOwner.begin('save');
+    if (!operation) throw new StaleUiOperationError();
     setActModalError(null);
     try {
-      if (actModalMode === 'edit' && activeAct) {
-        await apiService.updateAct(activeAct.id, {
+      const saved = actModalMode === 'edit' && activeAct
+        ? await apiService.updateAct(activeAct.id, {
           ...payload,
           invoiceId: payload.invoiceId ?? actModalInvoice?.invoice?.id,
           invoiceNumber: payload.invoiceNumber || actModalInvoice?.accountNumber || payload.number,
-        });
-      } else {
-        await apiService.createAct({
+        })
+        : await apiService.createAct({
           ...payload,
           invoiceId: payload.invoiceId ?? actModalInvoice?.invoice?.id,
           invoiceNumber: payload.invoiceNumber || actModalInvoice?.accountNumber || payload.number,
-        });
-      }
+        }, options);
+      if (!operation.isCurrent()) throw new StaleUiOperationError();
       await refreshAccounts();
+      if (!operation.isCurrent()) throw new StaleUiOperationError();
+      if (actModalMode !== 'edit') {
+        toast.success(actCreateSuccessMessage(saved));
+        acknowledgeCreatedAct(saved);
+      }
       closeActModal();
+      return saved;
     } catch (err) {
+      if (!operation.isCurrent()) throw new StaleUiOperationError();
       setActModalError(err instanceof Error ? err.message : 'Не удалось создать акт');
+      throw err;
     } finally {
-      setActModalSubmitting(false);
+      operation.finish();
     }
   };
 
@@ -3859,6 +3871,7 @@ export function Accounts({
           act={activeAct}
           onClose={closeActModal}
           onSubmit={handleSubmitAct}
+          accessScopeKey={actWriteOwner.scope}
           submitting={actModalSubmitting}
           errorMessage={actModalError}
           clients={actClients.length ? actClients : clients}

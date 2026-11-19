@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "previousRevision": "9dc737ed3ae1b586789bbfcee34036db6e8bb728",
+  "migrationIds": [
+    "20261111140010_AddActAnnualNumberingPostgreSql"
+  ],
+  "baselineMigrationIdsSha256": "44af6928621887a0099c8eb13e35734a6c415e7a6461f26d875332707da3b6be",
+  "baselineCanonicalSha256": "743b88d6ca93e8c96254874aa94deb181cbddb49be8e592902dbfe8be596ce8a",
+  "baselineUtf8CanonicalSha256": "37b7a3a367ad3662f18d954a637dab0f437f11862209936f07b95cf5c7fef613",
+  "schemaDeltaSha256": "a32038f9a28d858c042ddde2f8e73ba19a5def989ad17543fb1e4145396beddd",
+  "schemaDeltaFileSha256": "5974686d68b8f3291d528de15bcca584356245aa109b00a1748d28aeff5e2240",
+  "releaseCatalogSha256": "030fdf23009ba7d2a17c65e1bacbce043efb0d8a6175606f7f4d712ba30a6bb5",
+  "releaseSeedsCount": 29,
+  "releaseSeedsSha256": "d50b35f1e76fb5e414092489d380e23f59d122b019d44eef279f90976567967a",
+  "migrationSourceFiles": {
+    "backend/PayPlanner.Api.Migrations/Migrations/20261111140000_AddActAnnualNumbering.cs": "7528c6dccb12bbb230734e20c4705ebdfb59c9d17a7a7cfd6faf36650cb9a1ba",
+    "backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/20261111140010_AddActAnnualNumberingPostgreSql.cs": "756b7366729426bb06f9036ff4749cec53d68a54a14663df740e55b0dacc1b86"
+  },
+  "schemaEngine": "PostgreSQL 18"
+}

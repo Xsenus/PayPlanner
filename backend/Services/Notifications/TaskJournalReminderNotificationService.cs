@@ -220,6 +220,14 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
         DateTime nowUtc,
         CancellationToken cancellationToken)
     {
+        // Keep the installer's exact startup data check ahead of automatic task updates.
+        var validationMarker = _configuration["Deployment:ValidationMarkerPath"]
+            ?? Path.Combine(AppContext.BaseDirectory, "..", ".deploy-validation-pending");
+        if (File.Exists(validationMarker))
+        {
+            return false;
+        }
+
         var lookAheadDays = Math.Clamp(
             _configuration.GetValue("Notifications:TaskReminders:DeadlineSyncLookAheadDays", DefaultDeadlineSyncLookAheadDays),
             1,

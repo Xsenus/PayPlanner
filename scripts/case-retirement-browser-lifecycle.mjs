@@ -1,3 +1,24 @@
+import { setTimeout as delay } from 'node:timers/promises';
+
+function processExists(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch (error) { if (error.code === 'ESRCH') return false; throw error; }
+}
+
+// The CLI may report that a session is closed before its detached daemon exits.
+// Verify the PID reported by open and retry only the same named session.
+export async function closeCaseBrowserSession(pid, close, { exists = processExists, wait = delay } = {}) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Expected the owned browser daemon PID.');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await close();
+    for (const interval of [0, 100, 250, 500, 1000, 1500]) {
+      if (interval) await wait(interval);
+      if (!exists(pid)) return;
+    }
+  }
+  throw new Error('The owned browser daemon did not exit after closing its session.');
+}
+
 // Serialized into Playwright CLI's minimal VM. Keep all state and dependencies
 // inside the function; this observes actual requests without replacing them.
 export async function waitForCaseRestartResolution(unresolved, succeeded, waitAtPhase, retired, operation) {
@@ -182,6 +203,8 @@ export function createCaseReadLifecycle(page, isOwnedRead, timeoutMs) {
                   check(response.status() === 200, 'The owned case activity write must succeed before ' + phase);
                 check(await response.finished() === null, 'An existing case response body failed before ' + phase);
               }));
+              if (!active) return;
+              await page.bringToFront();
               if (!active) return;
               waitingForFrame = true;
               await page.evaluate(() => new Promise(resolveFrame => requestAnimationFrame(() => resolveFrame())));

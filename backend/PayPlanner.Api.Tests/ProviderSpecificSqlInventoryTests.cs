@@ -47,6 +47,7 @@ public partial class ProviderSpecificSqlTests
     public void SupplementarySqlOwnersRejectProviderWaitAndOwnerTampering(string relativePath, string mode)
     {
         var root = FindRepositoryRoot();
+        AssertRepositoryForUpdateSql(root);
         var original = File.ReadAllText(Path.Combine(root, relativePath));
         var changed = mode switch
         {

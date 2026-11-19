@@ -169,12 +169,18 @@ try {
     let tracePhase = 'login';
     let traceSequence = 0;
     const traceStarted = Date.now();
+    const isClientFormRequirements = request => {
+      const url = new URL(request.url());
+      return request.method() === 'GET' && url.origin === settings.api
+        && url.pathname === '/api/form-requirements' && url.searchParams.get('section') === 'clients';
+    };
     const traceRead = (event, request) => {
       const url = new URL(request.url());
       if (url.origin !== settings.api || request.method() !== 'GET') return;
       const kind = url.pathname === '/api/v2/cases/' + settings.caseId + '/documents/uploads/pending' ? 'pending-uploads'
         : url.pathname === '/api/v2/cases/' + settings.caseId + '/documents/uploads' ? 'upload-receipts'
-          : url.pathname === '/api/v2/cases/' + settings.caseId + '/court-recoveries' ? 'court-recoveries' : null;
+          : url.pathname === '/api/v2/cases/' + settings.caseId + '/court-recoveries' ? 'court-recoveries'
+        : isClientFormRequirements(request) ? 'client-form-requirements' : null;
       if (!kind) return;
       if (event === 'start') tracedReads.set(request, ++traceSequence);
       if (readTrace.length < 64) readTrace.push({ event, kind, read: tracedReads.get(request), phase: tracePhase,
@@ -212,6 +218,7 @@ try {
     const restartFinished = new Promise(resolve => { finishRestart = resolve; });
     let notifyInitialConnection;
     let notifyReconnect;
+    let restartReadBoundary;
     let rightsApplied = false;
     const modal = settings.flow.includes('modal');
     const openDocumentActions = async fileName => {
@@ -265,6 +272,22 @@ try {
     await page.context().route('**/*', async route => {
       const request = route.request(); const url = new URL(request.url());
       if (![settings.api, settings.ui].includes(url.origin)) { outside.push(url.origin); return route.abort(); }
+      if (restarted && !settings.flow.includes('slow') && restartObserver.snapshot().begun
+        && request.method() === 'POST' && url.origin === settings.api && url.pathname === '/hubs/notifications/negotiate') {
+        if (!restartReadBoundary) restartReadBoundary = (async () => {
+          try {
+            tracePhase = 'restart-operation-before-reconnect';
+            await waitAtPhase({ waitFor: () => page.waitForFunction(() => {
+              const operation = window.__payplannerOwnedRetirement?.snapshot();
+              return operation?.attempt === 1 && ['fulfilled', 'rejected'].includes(operation.phase);
+            }) }, 'restart-operation-before-reconnect');
+            tracePhase = 'restart-reads-before-reconnect';
+            await caseReads.drain('server-restart');
+          } finally { tracePhase = 'retirement-confirmation'; }
+        })();
+        await restartReadBoundary;
+        return route.continue();
+      }
       if ((url.pathname === '/api/v2/cases/' + settings.caseId || url.pathname === '/api/v2/cases')
         && ['POST', 'PUT', 'PATCH'].includes(request.method())) caseSaves++;
       if (url.pathname === '/api/v2/cases/' + settings.caseId + '/documents' && request.method() === 'GET') documentReads++;
@@ -346,7 +369,12 @@ try {
       // delivering close events for every old socket. Observe the new document
       // before goto so its initial handshake and every restart socket are retained.
       restartObserver = createRestartObserver(settings.api, () => notifyReconnect?.());
-      await page.goto(settings.ui + '/clients/' + settings.clientId, { waitUntil: 'domcontentloaded' });
+      // Wait for the profile's real form rules to finish before leaving its section.
+      const [formRequirements] = await Promise.all([
+        page.waitForEvent('requestfinished', isClientFormRequirements),
+        page.goto(settings.ui + '/clients/' + settings.clientId, { waitUntil: 'domcontentloaded' }),
+      ]);
+      check((await formRequirements.response())?.ok(), 'Client profile form requirements could not be loaded');
       await page.locator('main').getByRole('button', { name: 'Дела', exact: true }).click();
       await page.getByRole('button', { name: 'Редактировать дело Synthetic retirement browser case', exact: true }).click();
       const card = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Дело', exact: true }) });
@@ -373,6 +401,7 @@ try {
     tracePhase = 'retirement-dialog';
     await panel.getByRole('button', { name: 'Подготовить новую загрузку', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Подготовить новую загрузку', exact: true });
+    await caseReads.drain('retirement-confirmation');
     await dialog.getByRole('button', { name: 'Отмена', exact: true }).click();
     check(retirePosts === 0 && filePosts === 0, 'Cancel mutated the server');
     if (editing) check(await page.getByRole('textbox', { name: 'Стратегия и план действий', exact: true }).inputValue() === 'Unsaved browser strategy', 'Cancel lost unsaved strategy');

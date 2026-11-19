@@ -10,9 +10,8 @@ public class UpsertActRequest
     [Range(1, int.MaxValue)]
     public int? SellerBranchId { get; set; }
 
-    [Required]
     [MaxLength(100)]
-    public string Number { get; set; } = string.Empty;
+    public string? Number { get; set; }
 
     [MaxLength(200)]
     public string? Title { get; set; }

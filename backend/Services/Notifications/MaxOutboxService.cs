@@ -37,7 +37,8 @@ public static class MaxMessageTemplateCatalog
 
     internal static string CreateNotificationPayload(string notificationType, string? sourceKey = null)
         => PayloadPrefix + notificationType + (sourceKey is { Length: > 64 }
-            && (CaseCourtNotificationDeliveryGuard.IsManaged(sourceKey) || CaseCourtLegacyKey.IsCandidate(sourceKey)) ? "\n" + sourceKey : "");
+            && (CaseCourtNotificationDeliveryGuard.IsManaged(sourceKey) || CaseCourtLegacyKey.IsCandidate(sourceKey)
+                || notificationType == UserNotificationTypes.TaskCompleted) ? "\n" + sourceKey : "");
 
     internal static bool RequiresCourtSource(string type) => type is UserNotificationTypes.CaseCourtEvent or UserNotificationTypes.CourtHearing
         or UserNotificationTypes.CourtStatusChanged or UserNotificationTypes.CourtDecisionRecorded
@@ -96,6 +97,36 @@ public static class MaxMessageTemplateCatalog
 
 internal static class MaxNotificationRecipientPolicy
 {
+    public static Task<bool> HasCoalescedCompletionAsync(PaymentContext db, int userId, string eventKey, CancellationToken ct)
+        => db.UserNotifications.AsNoTracking().AnyAsync(notification => notification.RecipientUserId == userId
+            && notification.EventKey == eventKey && notification.Type == UserNotificationTypes.TaskCompleted
+            && notification.TaskJournalItemId.HasValue
+            && db.TaskStatusNotificationOutboxes.Any(entry => entry.EventKey == notification.EventKey
+                && entry.TaskJournalItemId == notification.TaskJournalItemId
+                && entry.EventType == TaskCompletionNotificationPolicy.CoalescedEventType
+                && entry.ActorUserId != notification.RecipientUserId), ct);
+
+    public static async Task<bool> IsMaxEnabledAsync(PaymentContext db, UserNotificationPreferenceSnapshot preferences,
+        int userId, string notificationType, bool coalesced, CancellationToken ct)
+    {
+        var preferenceType = TaskCompletionNotificationPolicy.ResolveChannelPreferenceType(preferences, notificationType, NotificationChannels.Max, coalesced);
+        if (preferenceType is null) return false;
+        if (!coalesced) return true;
+        var rawQuietHours = await db.UserSettings.AsNoTracking()
+            .Where(setting => setting.UserId == userId && setting.Key == UserNotificationDoNotDisturbSettings.SettingKey)
+            .Select(setting => setting.Value).FirstOrDefaultAsync(ct);
+        var quietHours = UserNotificationDoNotDisturbSettings.Parse(rawQuietHours);
+        var timeZone = quietHours.Enabled
+            ? await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(db, userId, ct)
+            : TimeZoneInfo.Utc;
+        var now = DateTime.UtcNow;
+        var primary = TaskCompletionNotificationPolicy.ResolveEnabledChannels(
+            preferences, notificationType, quietHours, timeZone, now, requireInAppForDelivery: true);
+        var fallback = TaskCompletionNotificationPolicy.ResolveEnabledChannels(
+            preferences, UserNotificationTypes.TaskChanged, quietHours, timeZone, now, requireInAppForDelivery: true);
+        return primary.Contains(NotificationChannels.Max) || fallback.Contains(NotificationChannels.Max);
+    }
+
     public static async Task<IReadOnlyDictionary<int, UserNotificationPreferenceSnapshot>> LoadAsync(
         PaymentContext db, IReadOnlyCollection<int> userIds, CancellationToken ct)
     {
@@ -139,6 +170,7 @@ public sealed class MaxOutboxService(
 {
     internal const string ProtectorPurpose = "PayPlanner.Notifications.Max.Outbox.v1";
     private readonly IDataProtector _protector = dataProtectionProvider.CreateProtector(ProtectorPurpose);
+    private readonly ContractExpirationNotificationPolicy _contractExpiration = new(db, timeProvider);
 
     public async Task<MaxOutboxMessage> QueueAsync(MaxQueueRequest request, CancellationToken ct)
     {
@@ -157,8 +189,10 @@ public sealed class MaxOutboxService(
             if (notificationType is null
                 || NotificationPriorities.IsSilent(UserNotificationTypes.Find(notificationType)?.Priority))
                 throw new InvalidOperationException("Событие пока не разрешено для MAX.");
-            if (!await IsNotificationAllowedForRecipientAsync(request.RecipientUserId.Value, notificationType!, ct))
+            if (!await IsNotificationAllowedForRecipientAsync(request.RecipientUserId.Value, notificationType!, request.EventKey, ct))
                 throw new InvalidOperationException("Получатель отключил это уведомление MAX.");
+            if (!await _contractExpiration.CanSendAsync(request.EventKey, request.RecipientUserId, ct))
+                throw new InvalidOperationException("Уведомление об окончании договора устарело или больше не разрешено получателю.");
         }
         var text = notificationType is null
             ? request.Text?.Trim() ?? string.Empty
@@ -330,11 +364,13 @@ public sealed class MaxOutboxService(
             : TimeZoneInfo.ConvertTimeToUtc(nextDay, timeZone);
     }
 
-    private async Task<bool> IsNotificationAllowedForRecipientAsync(int userId, string notificationType, CancellationToken ct)
+    private async Task<bool> IsNotificationAllowedForRecipientAsync(int userId, string notificationType, string eventKey, CancellationToken ct)
     {
         var preferences = await MaxNotificationRecipientPolicy.LoadAsync(db, [userId], ct);
         return preferences.TryGetValue(userId, out var recipientPreferences)
-            && UserNotificationPreferenceSettings.IsChannelEnabled(recipientPreferences, notificationType, NotificationChannels.Max);
+            && await MaxNotificationRecipientPolicy.IsMaxEnabledAsync(db, recipientPreferences, userId, notificationType,
+                notificationType == UserNotificationTypes.TaskCompleted
+                    && await MaxNotificationRecipientPolicy.HasCoalescedCompletionAsync(db, userId, eventKey, ct), ct);
     }
 }
 
@@ -359,6 +395,7 @@ public sealed class MaxOutboxProcessor(
 {
     private const string UnknownDeliveryError = "delivery-outcome-unknown";
     private readonly IDataProtector _protector = dataProtectionProvider.CreateProtector(MaxOutboxService.ProtectorPurpose);
+    private readonly ContractExpirationNotificationPolicy _contractExpiration = new(db, timeProvider);
 
     public async Task<int> ProcessBatchAsync(CancellationToken ct)
     {
@@ -375,7 +412,8 @@ public sealed class MaxOutboxProcessor(
             : now;
         List<MaxOutboxMessage> messages;
         var lastSendByRecipient = new Dictionary<long, DateTime>();
-        var processableMessages = new List<(MaxOutboxMessage Message, long RecipientId, string? NotificationType, string SourceKey)>();
+        var processableMessages = new List<(MaxOutboxMessage Message, long RecipientId, string? NotificationType, string SourceKey, bool Coalesced)>();
+        var taskNotificationMetadata = new Dictionary<(int RecipientUserId, string EventKey), (int? TaskId, string Json)>();
         try
         {
             await using var leaseTransaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
@@ -399,15 +437,37 @@ public sealed class MaxOutboxProcessor(
                 .ToArray();
             var recipientPreferences = await MaxNotificationRecipientPolicy.LoadAsync(db, notificationRecipientIds, ct);
             var eventKeys = notificationMessages.Select(message => message.EventKey).Distinct().ToArray();
-            var notificationTypes = eventKeys.Length == 0
-                ? new Dictionary<(int RecipientUserId, string EventKey), string>()
-                : (await db.UserNotifications.AsNoTracking()
+            var notificationTypes = new Dictionary<(int RecipientUserId, string EventKey), string>();
+            var coalescedKeys = new HashSet<(int RecipientUserId, string EventKey)>();
+            if (eventKeys.Length > 0)
+            {
+                var notificationRows = await db.UserNotifications.AsNoTracking()
                     .Where(notification => notificationRecipientIds.Contains(notification.RecipientUserId)
                         && eventKeys.Contains(notification.EventKey))
-                    .Select(notification => new { notification.RecipientUserId, notification.EventKey, notification.Type })
-                    .ToListAsync(ct))
-                    .GroupBy(notification => (notification.RecipientUserId, notification.EventKey))
-                    .ToDictionary(group => group.Key, group => group.First().Type);
+                    .Select(notification => new
+                    {
+                        notification.RecipientUserId,
+                        notification.EventKey,
+                        notification.Type,
+                        TaskId = notification.TaskJournalItemId ?? (notification.ObjectType == "task" ? notification.ObjectId : null),
+                        MetadataJson = notification.Type == UserNotificationTypes.TaskChanged
+                            && notification.MetadataJson.Length <= MaxTaskNotificationPresentation.MaximumMetadataCharacters
+                                ? notification.MetadataJson : string.Empty,
+                        Coalesced = notification.Type == UserNotificationTypes.TaskCompleted && notification.TaskJournalItemId.HasValue
+                            && db.TaskStatusNotificationOutboxes.Any(entry => entry.EventKey == notification.EventKey
+                                && entry.TaskJournalItemId == notification.TaskJournalItemId
+                                && entry.EventType == TaskCompletionNotificationPolicy.CoalescedEventType
+                                && entry.ActorUserId != notification.RecipientUserId)
+                    }).ToListAsync(ct);
+                foreach (var notification in notificationRows)
+                {
+                    var key = (notification.RecipientUserId, notification.EventKey);
+                    if (notificationTypes.TryAdd(key, notification.Type) && notification.TaskId.HasValue
+                        && notification.Type == UserNotificationTypes.TaskChanged)
+                        taskNotificationMetadata.TryAdd(key, (notification.TaskId, notification.MetadataJson));
+                    if (notification.Coalesced) coalescedKeys.Add(key);
+                }
+            }
             var localDayStart = DateTime.SpecifyKind(localNow.Date, DateTimeKind.Unspecified);
             var dayStartUtc = TimeZoneInfo.ConvertTimeToUtc(localDayStart, timeZone);
             var dayEndUtc = TimeZoneInfo.ConvertTimeToUtc(localDayStart.AddDays(1), timeZone);
@@ -450,6 +510,7 @@ public sealed class MaxOutboxProcessor(
 
                 string? resolvedNotificationType = null;
                 var sourceEventKey = message.EventKey;
+                var coalesced = false;
                 if (message.Scenario == MaxMessengerScenarios.Notifications)
                 {
                     if (message.RecipientUserId is not int userId
@@ -466,8 +527,30 @@ public sealed class MaxOutboxProcessor(
                         var payload = _protector.Unprotect(message.ProtectedText);
                         notificationTypes.TryGetValue((userId, message.EventKey), out var sourceType);
                         var notificationType = MaxMessageTemplateCatalog.ResolveNotificationType(payload, sourceType);
+                        var originalSourceKey = MaxMessageTemplateCatalog.SourceKey(payload, message.EventKey);
+                        sourceEventKey = originalSourceKey ?? message.EventKey;
+                        var linkedCoalesced = coalescedKeys.Contains((userId, message.EventKey));
+                        if (notificationType == UserNotificationTypes.TaskCompleted && originalSourceKey is not null && originalSourceKey != message.EventKey)
+                        {
+                            var source = await db.UserNotifications.AsNoTracking()
+                                .Where(notification => notification.RecipientUserId == userId && notification.EventKey == originalSourceKey)
+                                .Select(notification => new
+                                {
+                                    notification.Type,
+                                    Coalesced = notification.Type == UserNotificationTypes.TaskCompleted && notification.TaskJournalItemId.HasValue
+                                        && db.TaskStatusNotificationOutboxes.Any(entry => entry.EventKey == notification.EventKey
+                                            && entry.TaskJournalItemId == notification.TaskJournalItemId
+                                            && entry.EventType == TaskCompletionNotificationPolicy.CoalescedEventType
+                                            && entry.ActorUserId != notification.RecipientUserId)
+                                }).FirstOrDefaultAsync(ct);
+                            sourceType = source?.Type ?? sourceType;
+                            notificationType = MaxMessageTemplateCatalog.ResolveNotificationType(payload, sourceType);
+                            linkedCoalesced |= source?.Coalesced == true;
+                        }
+                        coalesced = notificationType == UserNotificationTypes.TaskCompleted
+                            && linkedCoalesced;
                         if (notificationType is null
-                            || !UserNotificationPreferenceSettings.IsChannelEnabled(preferences, notificationType, NotificationChannels.Max))
+                            || TaskCompletionNotificationPolicy.ResolveChannelPreferenceType(preferences, notificationType, NotificationChannels.Max, coalesced) is null)
                         {
                             message.Status = MaxOutboxStatuses.Cancelled;
                             message.LastErrorCode = notificationType is null ? "notification-type-unresolved" : "recipient-preference-disabled";
@@ -475,7 +558,6 @@ public sealed class MaxOutboxProcessor(
                             continue;
                         }
                         resolvedNotificationType = notificationType;
-                        var originalSourceKey = MaxMessageTemplateCatalog.SourceKey(payload, message.EventKey);
                         if (originalSourceKey is null && MaxMessageTemplateCatalog.RequiresCourtSource(notificationType))
                         {
                             message.Status = MaxOutboxStatuses.Cancelled;
@@ -483,7 +565,6 @@ public sealed class MaxOutboxProcessor(
                             message.UpdatedAt = now;
                             continue;
                         }
-                        sourceEventKey = originalSourceKey ?? message.EventKey;
                         if (CaseCourtLegacyKey.IsCandidate(sourceEventKey) && (message.Status == MaxOutboxStatuses.Processing
                             || message.LastErrorCode is UnknownDeliveryError or "provider-timeout"))
                         {
@@ -532,7 +613,7 @@ public sealed class MaxOutboxProcessor(
                 message.Status = MaxOutboxStatuses.Processing;
                 message.AttemptCount++;
                 message.UpdatedAt = now;
-                processableMessages.Add((message, recipientId, resolvedNotificationType, sourceEventKey));
+                processableMessages.Add((message, recipientId, resolvedNotificationType, sourceEventKey, coalesced));
             }
 
             if (messages.Count > 0)
@@ -549,7 +630,10 @@ public sealed class MaxOutboxProcessor(
             return 0;
         }
 
-        foreach (var (message, recipientId, notificationType, sourceEventKey) in processableMessages)
+        var taskRecipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(db,
+            processableMessages.Where(item => UserNotificationDomains.Resolve(item.NotificationType) == UserNotificationDomains.Task)
+                .Select(item => item.Message.RecipientUserId!.Value), ct);
+        foreach (var (message, recipientId, notificationType, sourceEventKey, coalesced) in processableMessages)
         {
             try
             {
@@ -576,8 +660,11 @@ public sealed class MaxOutboxProcessor(
                 if (notificationType is not null)
                 {
                     var current = await MaxNotificationRecipientPolicy.LoadAsync(db, [message.RecipientUserId!.Value], ct);
+                    var currentCoalesced = coalesced && await MaxNotificationRecipientPolicy.HasCoalescedCompletionAsync(
+                        db, message.RecipientUserId.Value, sourceEventKey, ct);
                     if (!current.TryGetValue(message.RecipientUserId.Value, out var preference)
-                        || !UserNotificationPreferenceSettings.IsChannelEnabled(preference, notificationType, NotificationChannels.Max))
+                        || !await MaxNotificationRecipientPolicy.IsMaxEnabledAsync(db, preference, message.RecipientUserId.Value,
+                            notificationType, currentCoalesced, ct))
                     {
                         await CancelAsync(message, "recipient-preference-disabled", ct);
                         continue;
@@ -595,21 +682,35 @@ public sealed class MaxOutboxProcessor(
                             var principal = new ClaimsPrincipal(new ClaimsIdentity(
                                 [new Claim(ClaimTypes.NameIdentifier, message.RecipientUserId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture))], "MAX"));
                             var access = await db.ResolveSectionAccessAsync(principal, RolePermissionCatalog.Tasks, ct, requireApprovedUser: true);
-                            var title = access?.Permission?.CanView == true
+                            var currentTask = access?.Permission?.CanView == true
                                 ? await db.TaskJournalItems.AsNoTracking().Where(task => task.Id == taskId)
-                                    .ApplyTaskVisibility(access.Visibility, db).Select(task => task.Title).SingleOrDefaultAsync(ct) : null;
-                            if (title is null)
+                                    .ApplyTaskVisibility(access.Visibility, db)
+                                    .Select(task => new MaxTaskNotificationPresentation.TaskData(task.Id, task.Title, task.DueAt,
+                                        task.Status, task.Priority, task.AssigneeName)).SingleOrDefaultAsync(ct) : null;
+                            if (currentTask is null)
                             {
                                 await CancelAsync(message, "task-access-revoked", ct);
                                 continue;
                             }
-                            text = MaxTaskNotificationPresentation.Render(title, notificationType, actionUrl!);
+                            var taskStatus = currentTask.Status.Trim();
+                            if (notificationType == UserNotificationTypes.TaskReminder
+                                && (string.Equals(taskStatus, "done", StringComparison.OrdinalIgnoreCase)
+                                    || string.Equals(taskStatus, "cancelled", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                await CancelAsync(message, "task-no-longer-active", ct);
+                                continue;
+                            }
+                            var metadata = taskNotificationMetadata.GetValueOrDefault((message.RecipientUserId.Value, message.EventKey));
+                            text = MaxTaskNotificationPresentation.Render(currentTask, notificationType, actionUrl!,
+                                taskRecipientTimeZones[message.RecipientUserId.Value], metadata.TaskId == taskId ? metadata.Json : null,
+                                message.ActionText);
                         }
-                        else if (frontend is not null)
+                        else
                         {
-                            // Старые записи не содержат ID задачи. Оставляем нейтральный
-                            // шаблон и доверенный вход в CRM без поиска по всей истории.
-                            actionUrl = frontend;
+                            // Короткий контекст даёт нейтральное сообщение и прежний
+                            // разрешённый вход в CRM без поиска по всей истории.
+                            if (frontend is not null) actionUrl = frontend;
+                            text = MaxTaskNotificationPresentation.RenderNeutral(notificationType, actionUrl, message.ActionText);
                         }
                     }
                 }
@@ -625,6 +726,11 @@ public sealed class MaxOutboxProcessor(
                     NotificationChannels.Max, ct))
                 {
                     await CancelAsync(message, "court-event-no-longer-deliverable", ct);
+                    continue;
+                }
+                if (!await _contractExpiration.CanSendAsync(sourceEventKey, message.RecipientUserId, ct))
+                {
+                    await CancelAsync(message, "contract-expiration-no-longer-deliverable", ct);
                     continue;
                 }
                 if (text.Length > MaxApiClient.MaxTextLength)

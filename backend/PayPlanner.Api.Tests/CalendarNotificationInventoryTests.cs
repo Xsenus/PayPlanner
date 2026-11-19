@@ -54,16 +54,24 @@ public class CalendarNotificationInventoryTests
                 "new TaskStatusNotificationOutbox", "_db.TaskStatusNotificationOutboxes.Add(statusNotification)",
                 "StatusTransitionToken = entity.StatusTransitionToken", "\"approval\"",
                 "new TaskStatusNotificationDispatchProcessor", "processor.ProcessAsync(");
-            if (method != "CreateTask")
-            {
-                AssertMethodContains(controllerSource, method, "\"completion\"");
-            }
         }
+
+        foreach (var method in new[] { "UpdateTask", "UpdateStatus", "BulkUpdateTasks" })
+        {
+            AssertMethodContains(controllerSource, method,
+                "TaskCompletionNotificationPolicy.CoalescedEventType",
+                "TaskCompletionNotificationPolicy.OrdinaryEventType");
+        }
+        AssertMethodContains(controllerSource, "UpdateApproval",
+            "EventType = notifyNextApprover ? \"approval\" : TaskCompletionNotificationPolicy.ApprovalEventType");
 
         var dispatcherSource = ReadSourceFile("backend", "Services", "Notifications", "TaskStatusNotificationDispatchProcessor.cs");
         AssertMethodContains(dispatcherSource, "ProcessAsync",
             "item.EventType == \"approval\"", "notifications.NotifyApprovalForEventAsync",
-            "notifications.NotifyCompletionForEventAsync", "item.EventKey", "task.StatusTransitionToken");
+            "notifications.NotifyCompletionForEventAsync", "item.EventKey", "task.StatusTransitionToken",
+            "TaskCompletionNotificationPolicy.OrdinaryEventType", "TaskCompletionNotificationPolicy.CoalescedEventType",
+            "TaskCompletionNotificationPolicy.ApprovalEventType", "notifications.NotifyApprovalCompletionForEventAsync",
+            "TaskCompletionNotificationPolicy.OriginForEventType(item.EventType)");
 
         AssertMethodContains(
             controllerSource,

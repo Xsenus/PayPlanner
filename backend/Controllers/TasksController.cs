@@ -32,6 +32,7 @@ public class TasksController : ControllerBase
 {
     private const long MaxTaskFileBytes = 25L * 1024L * 1024L;
     private const int PlanningReportTaskLimit = 5000;
+    private const int CalendarExportTaskLimit = 1000;
     private const string InternalTaskObjectName = "Внутренняя задача";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> AllowedStatuses = new(StringComparer.OrdinalIgnoreCase)
@@ -249,7 +250,8 @@ public class TasksController : ControllerBase
             metric,
             todayFrom,
             todayTo,
-            billingStatus);
+            billingStatus,
+            calendarView);
 
         query = ApplyTaskUntriagedFilter(query, untriaged);
 
@@ -405,6 +407,8 @@ public class TasksController : ControllerBase
                 IsExternalContractor = user.IsExternalContractor,
                 DepartmentId = user.DepartmentId,
                 Department = user.Department,
+                RoleId = user.RoleId,
+                RoleName = user.Role == null ? null : user.Role.Name,
             })
             .ToListAsync(ct);
 
@@ -1144,7 +1148,23 @@ public class TasksController : ControllerBase
         [FromQuery] int? clientId,
         [FromQuery] int? legalEntityId,
         [FromQuery] string? reminderMinutes,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] int[]? assigneeUserIds = null,
+        [FromQuery] string? search = null,
+        [FromQuery] string? status = null,
+        [FromQuery] string? type = null,
+        [FromQuery] int? assigneeUserId = null,
+        [FromQuery] string? priority = null,
+        [FromQuery] bool? underControl = null,
+        [FromQuery] int? authorUserId = null,
+        [FromQuery] string? participantRole = null,
+        [FromQuery] bool approvalScope = false,
+        [FromQuery] string? metric = null,
+        [FromQuery] DateTime? todayFrom = null,
+        [FromQuery] DateTime? todayTo = null,
+        [FromQuery] string? billingStatus = null,
+        [FromQuery] bool untriaged = false,
+        [FromQuery] bool calendarView = false)
     {
         var access = await GetTaskAccessAsync(ct);
         if (access is null)
@@ -1162,46 +1182,45 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
-        var query = BuildVisibleTasksQuery(access)
-            .AsNoTracking();
-
-        if (from.HasValue)
+        if (!AreValidCalendarAssigneeUserIds(assigneeUserIds))
         {
-            query = query.Where(task => task.DueAt >= from.Value);
+            return BadRequest(new { message = "Выберите не более 500 сотрудников с корректными идентификаторами." });
         }
 
-        if (to.HasValue)
+        var query = BuildTaskJournalListQuery(
+            access, search, status, type, assigneeUserId, from, to, clientCaseId, clientId,
+            legalEntityId, priority, underControl, authorUserId, participantRole, approvalScope,
+            metric, todayFrom, todayTo, billingStatus, calendarView);
+        query = ApplyTaskUntriagedFilter(query, untriaged);
+        query = ApplyCalendarAssigneeFilter(query, assigneeUserIds);
+        if (calendarView)
         {
-            query = query.Where(task => task.DueAt <= to.Value);
-        }
+            var calendarAccess = await GetTaskAccessAsync(ct, RolePermissionCatalog.Calendar);
+            if (calendarAccess is null || (!calendarAccess.IsAdmin && calendarAccess.Permission?.CanView != true))
+            {
+                return Forbid();
+            }
 
-        if (clientCaseId.HasValue)
-        {
-            query = query.Where(task => task.ClientCaseId == clientCaseId.Value);
-        }
-
-        if (clientId.HasValue)
-        {
-            query = query.Where(task => task.ClientId == clientId.Value);
-        }
-
-        if (legalEntityId.HasValue)
-        {
-            query = query.Where(task => task.LegalEntityId == legalEntityId.Value);
+            query = query.ApplyTaskVisibility(calendarAccess.Visibility, _db);
         }
 
         var calendarSyncSettings = await LoadCalendarSyncSettingsAsync(ct);
-        if (string.Equals(calendarSyncSettings.CompletedTaskCalendarAction, "hide", StringComparison.Ordinal))
-        {
-            query = query.Where(task => task.Status == null ||
-                (task.Status.Trim().ToLower() != "done" && task.Status.Trim().ToLower() != "cancelled"));
-        }
+        query = ApplyCompletedTaskCalendarPolicy(query, calendarSyncSettings);
 
         var tasks = await query
+            .Include(task => task.Client)
+            .Include(task => task.LegalEntity)
+            .Include(task => task.ClientCase)
+            .Include(task => task.Participants)
             .OrderBy(task => task.DueAt)
             .ThenBy(task => task.Id)
-            .Take(1000)
+            .Take(CalendarExportTaskLimit + 1)
             .ToListAsync(ct);
+
+        if (tasks.Count > CalendarExportTaskLimit)
+        {
+            return BadRequest($"В календарь можно выгрузить не более {CalendarExportTaskLimit} задач за один раз. Сузьте отбор по датам, клиенту или другим фильтрам и повторите выгрузку.");
+        }
 
         var reminders = IcsReminderOptions.Normalize(reminderMinutes);
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
@@ -1217,6 +1236,24 @@ public class TasksController : ControllerBase
                 from,
                 to,
                 clientCaseId,
+                clientId,
+                legalEntityId,
+                search,
+                status,
+                type,
+                assigneeUserId,
+                assigneeUserIds = assigneeUserIds?.Distinct().OrderBy(id => id).ToArray(),
+                priority,
+                underControl,
+                authorUserId,
+                participantRole,
+                approvalScope,
+                metric,
+                todayFrom,
+                todayTo,
+                billingStatus,
+                untriaged,
+                calendarView,
             }));
         await _db.SaveChangesAsync(ct);
 
@@ -1224,6 +1261,41 @@ public class TasksController : ControllerBase
             Encoding.UTF8.GetBytes(calendar),
             "text/calendar; charset=utf-8",
             "task-calendar.ics");
+    }
+
+    private static bool AreValidCalendarAssigneeUserIds(int[]? assigneeUserIds)
+        => assigneeUserIds is null || (assigneeUserIds.Length <= 500 && assigneeUserIds.All(id => id > 0));
+
+    private static IQueryable<TaskJournalItem> ApplyCompletedTaskCalendarPolicy(IQueryable<TaskJournalItem> query, CalendarSyncSettingsDto settings)
+        => string.Equals(settings.CompletedTaskCalendarAction, "hide", StringComparison.Ordinal)
+            ? query.Where(task => task.Status == null ||
+                (task.Status.Trim().ToLower() != "done" && task.Status.Trim().ToLower() != "cancelled"))
+            : query;
+
+    private async Task<TimeZoneInfo?> ResolveTaskExportTimeZoneAsync(string? timeZoneId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(timeZoneId))
+        {
+            return await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        }
+
+        return timeZoneId.Length <= 128 && CalendarTimeZoneHelper.TryResolveTimeZone(timeZoneId, out var timeZone)
+            ? timeZone
+            : null;
+    }
+
+    private static IQueryable<TaskJournalItem> ApplyCalendarAssigneeFilter(IQueryable<TaskJournalItem> query, int[]? assigneeUserIds)
+    {
+        if (assigneeUserIds is not { Length: > 0 })
+        {
+            return query;
+        }
+
+        var selectedUserIds = assigneeUserIds.Distinct().ToArray();
+        return query.Where(task =>
+            (task.AssigneeUserId.HasValue && selectedUserIds.Contains(task.AssigneeUserId.Value)) ||
+            task.Participants.Any(participant => participant.Role == "assignee"
+                && participant.UserId.HasValue && selectedUserIds.Contains(participant.UserId.Value)));
     }
 
     [HttpGet("planning-report.{format}")]
@@ -1248,7 +1320,10 @@ public class TasksController : ControllerBase
         [FromQuery] DateTime? todayFrom = null,
         [FromQuery] DateTime? todayTo = null,
         [FromQuery] string? billingStatus = null,
-        [FromQuery] bool untriaged = false)
+        [FromQuery] bool untriaged = false,
+        [FromQuery] int[]? assigneeUserIds = null,
+        [FromQuery] bool calendarView = false,
+        [FromQuery] string? timeZoneId = null)
     {
         var access = await GetTaskAccessAsync(ct);
         if (access is null)
@@ -1272,11 +1347,34 @@ public class TasksController : ControllerBase
             return BadRequest("Поддерживаются форматы html, word и pdf.");
         }
 
+        if (!AreValidCalendarAssigneeUserIds(assigneeUserIds))
+        {
+            return BadRequest(new { message = "Выберите не более 500 сотрудников с корректными идентификаторами." });
+        }
+
+        var timeZone = await ResolveTaskExportTimeZoneAsync(timeZoneId, ct);
+        if (timeZone is null)
+        {
+            return BadRequest(new { message = "Укажите корректный часовой пояс календаря." });
+        }
+
         var query = BuildTaskJournalListQuery(
             access, search, status, type, assigneeUserId, from, to, clientCaseId, clientId,
             legalEntityId, priority, underControl, authorUserId, participantRole, approvalScope,
-            metric, todayFrom, todayTo, billingStatus);
+            metric, todayFrom, todayTo, billingStatus, calendarView);
         query = ApplyTaskUntriagedFilter(query, untriaged);
+        query = ApplyCalendarAssigneeFilter(query, assigneeUserIds);
+        if (calendarView)
+        {
+            var calendarAccess = await GetTaskAccessAsync(ct, RolePermissionCatalog.Calendar);
+            if (calendarAccess is null || (!calendarAccess.IsAdmin && calendarAccess.Permission?.CanView != true))
+            {
+                return Forbid();
+            }
+
+            query = query.ApplyTaskVisibility(calendarAccess.Visibility, _db);
+            query = ApplyCompletedTaskCalendarPolicy(query, await LoadCalendarSyncSettingsAsync(ct));
+        }
         var tasks = await query
             .Include(task => task.Client)
             .Include(task => task.LegalEntity)
@@ -1294,12 +1392,15 @@ public class TasksController : ControllerBase
             return BadRequest($"В планинг можно выгрузить не более {PlanningReportTaskLimit} задач за один раз. Сузьте отбор по датам, клиенту или другим фильтрам и повторите выгрузку.");
         }
 
-        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
         var generatedAtUtc = NormalizeUtcInstant(DateTime.UtcNow);
         var generatedAtLocal = CalendarTimeZoneHelper.ToUserLocal(generatedAtUtc, timeZone);
         var effectiveStatus = string.Equals(billingStatus?.Trim(), "unbilled", StringComparison.OrdinalIgnoreCase) ? null : status;
         var filterText = BuildTaskPlanningReportFilterText(effectiveStatus, type, priority, from, to, search, assigneeUserId, clientCaseId, clientId, legalEntityId, timeZone,
             underControl, authorUserId, participantRole, approvalScope, metric, billingStatus, untriaged);
+        if (assigneeUserIds is { Length: > 0 })
+        {
+            filterText += $" · Выбранные календари сотрудников: {assigneeUserIds.Distinct().Count()}";
+        }
         var fileStamp = generatedAtLocal.ToString("yyyyMMdd-HHmm", CultureInfo.InvariantCulture);
 
         if (normalizedFormat == "pdf")
@@ -4249,7 +4350,10 @@ public class TasksController : ControllerBase
             {
                 TaskJournalItemId = entity.Id,
                 EventKey = $"task:{entity.Id}:status:{Guid.NewGuid():N}",
-                EventType = approvalRequested ? "approval" : "completion",
+                EventType = approvalRequested ? "approval"
+                    : becameDone && entity.AuthorUserId.HasValue && entity.AuthorUserId != access.UserId
+                        && !assigneeChanged && formerAuthorRecipientIds is null && IsPureTaskCompletionChange(changeLabels, changeComment)
+                        ? TaskCompletionNotificationPolicy.CoalescedEventType : TaskCompletionNotificationPolicy.OrdinaryEventType,
                 ApprovalParticipant = approvalRequested ? GetPendingTaskApprover(entity) : null,
                 StatusTransitionToken = entity.StatusTransitionToken,
                 ActorUserId = access.UserId,
@@ -4276,7 +4380,10 @@ public class TasksController : ControllerBase
             }
             else
             {
-                await _notificationService.NotifyTaskChangedAsync(entity, changeLabels, access.DisplayName, access.UserId, changeComment, ct, formerAuthorRecipientIds);
+                if (statusNotification?.EventType == TaskCompletionNotificationPolicy.CoalescedEventType)
+                    await _notificationService.NotifyTaskChangedForCompletionEventAsync(entity, changeLabels, access.DisplayName, access.UserId, statusNotification.EventKey, ct);
+                else
+                    await _notificationService.NotifyTaskChangedAsync(entity, changeLabels, access.DisplayName, access.UserId, changeComment, ct, formerAuthorRecipientIds);
             }
         }
         else if (userComment is not null)
@@ -4474,7 +4581,9 @@ public class TasksController : ControllerBase
             {
                 TaskJournalItemId = entity.Id,
                 EventKey = $"task:{entity.Id}:status:{Guid.NewGuid():N}",
-                EventType = approvalRequested ? "approval" : "completion",
+                EventType = approvalRequested ? "approval"
+                    : becameDone && entity.AuthorUserId.HasValue && entity.AuthorUserId != access.UserId && !dueAtChanged
+                        ? TaskCompletionNotificationPolicy.CoalescedEventType : TaskCompletionNotificationPolicy.OrdinaryEventType,
                 ApprovalParticipant = approvalRequested ? GetPendingTaskApprover(entity) : null,
                 StatusTransitionToken = entity.StatusTransitionToken,
                 ActorUserId = access.UserId,
@@ -4515,7 +4624,10 @@ public class TasksController : ControllerBase
                 }
                 else
                 {
-                    await _notificationService.NotifyTaskChangedAsync(entity, changeLabels, access.DisplayName, access.UserId, null, ct);
+                    if (statusNotification?.EventType == TaskCompletionNotificationPolicy.CoalescedEventType)
+                        await _notificationService.NotifyTaskChangedForCompletionEventAsync(entity, changeLabels, access.DisplayName, access.UserId, statusNotification.EventKey, ct);
+                    else
+                        await _notificationService.NotifyTaskChangedAsync(entity, changeLabels, access.DisplayName, access.UserId, null, ct);
                 }
             }
         }
@@ -4804,7 +4916,10 @@ public class TasksController : ControllerBase
                 {
                     TaskJournalItemId = entity.Id,
                     EventKey = $"task:{entity.Id}:status:{Guid.NewGuid():N}",
-                    EventType = approvalRequested ? "approval" : "completion",
+                    EventType = approvalRequested ? "approval"
+                        : becameDone && entity.AuthorUserId.HasValue && entity.AuthorUserId != access.UserId
+                            && !assigneeChanged && IsPureTaskCompletionChange(changes, null)
+                            ? TaskCompletionNotificationPolicy.CoalescedEventType : TaskCompletionNotificationPolicy.OrdinaryEventType,
                     ApprovalParticipant = approvalRequested ? GetPendingTaskApprover(entity) : null,
                     StatusTransitionToken = entity.StatusTransitionToken,
                     ActorUserId = access.UserId,
@@ -4848,13 +4963,12 @@ public class TasksController : ControllerBase
             }
             else
             {
-                await _notificationService.NotifyTaskChangedAsync(
-                    notification.Task,
-                    notification.ChangeLabels,
-                    access.DisplayName,
-                    access.UserId,
-                    null,
-                    ct);
+                if (notification.StatusNotification?.EventType == TaskCompletionNotificationPolicy.CoalescedEventType)
+                    await _notificationService.NotifyTaskChangedForCompletionEventAsync(notification.Task, notification.ChangeLabels,
+                        access.DisplayName, access.UserId, notification.StatusNotification.EventKey, ct);
+                else
+                    await _notificationService.NotifyTaskChangedAsync(notification.Task, notification.ChangeLabels,
+                        access.DisplayName, access.UserId, null, ct);
             }
 
             if (notification.StatusNotification is not null && _notificationService is IDurableTaskStatusNotificationService durableNotifications)
@@ -5519,6 +5633,7 @@ public class TasksController : ControllerBase
         }
 
         entity.UpdatedAt = DateTime.UtcNow;
+        var statusNotificationEventKey = $"task:{entity.Id}:status:{Guid.NewGuid():N}";
         AddTaskHistory(
             entity,
             access,
@@ -5526,6 +5641,7 @@ public class TasksController : ControllerBase
             new
             {
                 kind = "approvalDecision",
+                notificationEventKey = statusNotificationEventKey,
                 actorUserId = access.UserId,
                 actorName = access.DisplayName,
                 participantId = participant.Id,
@@ -5553,9 +5669,9 @@ public class TasksController : ControllerBase
             statusNotification = new TaskStatusNotificationOutbox
             {
                 TaskJournalItemId = entity.Id,
-                EventKey = $"task:{entity.Id}:status:{Guid.NewGuid():N}",
-                EventType = notifyNextApprover ? "approval" : "completion",
-                ApprovalParticipant = notifyNextApprover ? GetPendingTaskApprover(entity) : null,
+                EventKey = statusNotificationEventKey,
+                EventType = notifyNextApprover ? "approval" : TaskCompletionNotificationPolicy.ApprovalEventType,
+                ApprovalParticipant = notifyNextApprover ? GetPendingTaskApprover(entity) : participant,
                 StatusTransitionToken = entity.StatusTransitionToken,
                 ActorUserId = access.UserId,
                 ActorName = access.DisplayName,
@@ -5566,7 +5682,8 @@ public class TasksController : ControllerBase
         await _db.SaveChangesAsync(ct);
         await approvalLease.CommitAsync(ct);
         await NotifyRecurringTaskCreatedAsync(nextRecurringTask, access, ct);
-        if (!notifyNextApprover)
+        if (!notifyNextApprover && !(statusNotification?.EventType == TaskCompletionNotificationPolicy.ApprovalEventType
+            && _notificationService is IDurableTaskStatusNotificationService))
         {
             await _notificationService.NotifyTaskApprovalDecisionAsync(
                 entity,
@@ -5858,7 +5975,8 @@ public class TasksController : ControllerBase
         string? metric,
         DateTime? todayFrom,
         DateTime? todayTo,
-        string? billingStatus = null)
+        string? billingStatus = null,
+        bool calendarView = false)
     {
         var normalizedBillingStatus = billingStatus?.Trim().ToLowerInvariant();
         var effectiveStatus = normalizedBillingStatus == "unbilled" ? null : status;
@@ -5877,7 +5995,8 @@ public class TasksController : ControllerBase
             underControl,
             authorUserId,
             participantRole,
-            access.UserId);
+            access.UserId,
+            calendarView);
 
         query = ApplyTaskApprovalScope(query, access, approvalScope);
         query = ApplyTaskMetricFilter(query, metric, todayFrom, todayTo);
@@ -6036,7 +6155,8 @@ public class TasksController : ControllerBase
         bool? underControl = null,
         int? authorUserId = null,
         string? participantRole = null,
-        int? participantUserId = null)
+        int? participantUserId = null,
+        bool calendarView = false)
     {
         if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status, "all", StringComparison.OrdinalIgnoreCase))
         {
@@ -6140,6 +6260,26 @@ public class TasksController : ControllerBase
         {
             var rawTerm = search.Trim();
             var term = rawTerm.ToLower();
+            if (calendarView)
+            {
+                return query.Where(task =>
+                    task.ObjectName.ToLower().Contains(term) || task.ObjectName.Contains(rawTerm) ||
+                    (task.Client != null && (task.Client.Name.ToLower().Contains(term) || task.Client.Name.Contains(rawTerm))) ||
+                    (task.ClientCase != null && (task.ClientCase.Title.ToLower().Contains(term) || task.ClientCase.Title.Contains(rawTerm))) ||
+                    task.Title.ToLower().Contains(term) || task.Title.Contains(rawTerm) ||
+                    (task.LegalEntity != null &&
+                        ((!string.IsNullOrWhiteSpace(task.LegalEntity.ShortName)
+                            ? task.LegalEntity.ShortName.Trim()
+                            : !string.IsNullOrWhiteSpace(task.LegalEntity.FullName)
+                                ? task.LegalEntity.FullName.Trim()
+                                : "Юрлицо #" + task.LegalEntity.Id).ToLower().Contains(term) ||
+                        (!string.IsNullOrWhiteSpace(task.LegalEntity.ShortName)
+                            ? task.LegalEntity.ShortName.Trim()
+                            : !string.IsNullOrWhiteSpace(task.LegalEntity.FullName)
+                                ? task.LegalEntity.FullName.Trim()
+                                : "Юрлицо #" + task.LegalEntity.Id).Contains(rawTerm))));
+            }
+
             query = query.Where(task =>
                 task.ObjectName.ToLower().Contains(term) ||
                 task.ObjectName.Contains(rawTerm) ||
@@ -9798,6 +9938,11 @@ public class TasksController : ControllerBase
             changes.Add($"{label}: {FormatChangeValue(current)} -> {FormatChangeValue(next)}");
         }
     }
+
+    private static bool IsPureTaskCompletionChange(IReadOnlyList<string> changes, string? comment)
+        => string.IsNullOrWhiteSpace(comment) && changes.Count > 0
+            && changes.All(change => change.StartsWith("Статус:", StringComparison.OrdinalIgnoreCase)
+                || change.StartsWith("Результат:", StringComparison.OrdinalIgnoreCase));
 
     private static bool HasTaskAssigneeChange(IEnumerable<string> changes)
         => changes.Any(change =>

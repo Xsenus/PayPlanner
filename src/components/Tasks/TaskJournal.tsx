@@ -1,3 +1,6 @@
+import { calendarVisibleRange } from './calendarVisibleRange';
+import { TaskCalendarSelection } from './TaskCalendarSelection';
+import { normalizeCalendarSelection, resolveCalendarSelection, type CalendarSelection } from './taskCalendarSelectionPreferences';
 import { TaskBillingAnalysisPanel } from './TaskBillingAnalysisPanel';
 import { TaskBillingReconciliation } from './TaskBillingReconciliation';
 import { loadAllTaskJournalItems } from './loadAllTaskJournalItems';
@@ -109,6 +112,7 @@ import type { MenuSectionPermissions, TaskSectionPermissions } from '../../types
 import { extractDisplayErrorMessage, isHttpErrorStatus } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import {
+  parseInstant,
   formatDateHeadingInTimeZone,
   formatDateTimeInTimeZone,
   fromTimeZoneDateTimeInput,
@@ -263,6 +267,7 @@ type TaskJournalFilterPreferences = {
   counterpartyFilter: string;
   caseFilter: string;
   assigneeFilter: string;
+  calendarSelection: CalendarSelection;
   typeFilter: TaskJournalType | 'all';
   priorityFilter: TaskJournalPriority | 'all';
   periodMode: PeriodMode;
@@ -547,6 +552,7 @@ function createDefaultFilterPreferences(userId: number | null, mode: TaskJournal
     counterpartyFilter: 'all',
     caseFilter: 'all',
     assigneeFilter: 'all',
+    calendarSelection: normalizeCalendarSelection(),
     typeFilter: 'all',
     priorityFilter: 'all',
     periodMode: mode === 'untriaged' ? 'all' : 'day',
@@ -630,7 +636,7 @@ function getNextDateFilterKey(value: string) {
   ].join('-');
 }
 
-function parseDateFilterValue(value: string, boundary: 'start' | 'end') {
+function parseDateFilterValue(value: string, boundary: 'start' | 'end', timeZoneId = activeTaskJournalTimeZoneId) {
   if (!isDateFilterValue(value) || !value) {
     return null;
   }
@@ -642,20 +648,20 @@ function parseDateFilterValue(value: string, boundary: 'start' | 'end') {
   }
 
   if (boundary === 'start') {
-    return new Date(fromTimeZoneDateTimeInput(`${value}T00:00`, activeTaskJournalTimeZoneId));
+    return new Date(fromTimeZoneDateTimeInput(`${value}T00:00`, timeZoneId));
   }
 
-  return new Date(new Date(fromTimeZoneDateTimeInput(`${getNextDateFilterKey(value)}T00:00`, activeTaskJournalTimeZoneId)).getTime() - 1);
+  return new Date(new Date(fromTimeZoneDateTimeInput(`${getNextDateFilterKey(value)}T00:00`, timeZoneId)).getTime() - 1);
 }
 
-function getTaskDateRangeBounds(dateFrom: string, dateTo: string) {
-  const from = parseDateFilterValue(dateFrom, 'start');
-  const to = parseDateFilterValue(dateTo, 'end');
+function getTaskDateRangeBounds(dateFrom: string, dateTo: string, timeZoneId = activeTaskJournalTimeZoneId) {
+  const from = parseDateFilterValue(dateFrom, 'start', timeZoneId);
+  const to = parseDateFilterValue(dateTo, 'end', timeZoneId);
 
   if (from && to && from.getTime() > to.getTime()) {
     return {
-      from: parseDateFilterValue(dateTo, 'start'),
-      to: parseDateFilterValue(dateFrom, 'end'),
+      from: parseDateFilterValue(dateTo, 'start', timeZoneId),
+      to: parseDateFilterValue(dateFrom, 'end', timeZoneId),
     };
   }
 
@@ -686,6 +692,7 @@ function normalizeTaskJournalFilterPreferences(
       ? parsed.caseFilter
       : defaults.caseFilter,
     assigneeFilter: typeof parsed?.assigneeFilter === 'string' && parsed.assigneeFilter ? parsed.assigneeFilter : defaults.assigneeFilter,
+    calendarSelection: normalizeCalendarSelection(parsed?.calendarSelection),
     typeFilter: isTypeFilter(parsed?.typeFilter) ? parsed.typeFilter : defaults.typeFilter,
     priorityFilter: isPriorityFilter(parsed?.priorityFilter) ? parsed.priorityFilter : defaults.priorityFilter,
     periodMode: isPeriodMode(parsed?.periodMode) ? parsed.periodMode : defaults.periodMode,
@@ -1169,8 +1176,8 @@ function getTaskDateKey(value: string | Date, timeZoneId = activeTaskJournalTime
   return toTimeZoneDateKey(value, timeZoneId);
 }
 
-function getCurrentCalendarDate(now = new Date()) {
-  const key = getTaskDateKey(now);
+function getCurrentCalendarDate(now = new Date(), timeZoneId = activeTaskJournalTimeZoneId) {
+  const key = getTaskDateKey(now, timeZoneId);
   return key ? dateKeyToCalendarDate(key) : new Date(now);
 }
 
@@ -1341,7 +1348,7 @@ function isTaskOverdue(task: Pick<TaskJournalItem, 'status' | 'dueAt'>, nowDate 
     return false;
   }
 
-  const dueTime = new Date(task.dueAt).getTime();
+  const dueTime = parseInstant(task.dueAt).getTime();
   return Number.isFinite(dueTime) && dueTime < nowDate.getTime();
 }
 
@@ -1805,7 +1812,7 @@ function matchesMetricFilter(task: TaskJournalItem, metricFilter: MetricFilter, 
     case 'active':
       return active;
     case 'overdue':
-      return isTaskOverdue(task, nowDate);
+      return isTaskOverdue(task);
     case 'today':
       return active && isSameTaskDay(task.dueAt, nowDate);
     case 'highPriority':
@@ -2583,6 +2590,8 @@ export function TaskJournal({
   const [taskListSummary, setTaskListSummary] = useState<TaskJournalListSummary | null>(null);
   const [caseCalendarEvents, setCaseCalendarEvents] = useState<CaseCalendarEvent[]>([]);
   const [caseCalendarSummary, setCaseCalendarSummary] = useState<CaseCalendarSummary | null>(null);
+  const [caseCalendarResultScope, setCaseCalendarResultScope] = useState('');
+  const caseCalendarRequestRef = useRef(0);
   const [caseCalendarLoading, setCaseCalendarLoading] = useState(false);
   const [caseCalendarExporting, setCaseCalendarExporting] = useState(false);
   const [taskSettings, setTaskSettings] = useState<TaskJournalSettingsDto>(DEFAULT_TASK_JOURNAL_SETTINGS);
@@ -2644,12 +2653,11 @@ export function TaskJournal({
   const [dateToFilter, setDateToFilter] = useState(initialPreferences.dateTo);
   const [viewMode, setViewMode] = useState<ViewMode>(initialPreferences.viewMode);
   const [boardGroupMode, setBoardGroupMode] = useState<'due' | 'status'>('due');
-  const shouldUseCalendarVisibility = viewMode === 'calendar' || initialView === 'calendar';
+  const isTaskCalendarView = viewMode === 'calendar' || viewMode === 'timeline';
+  const shouldUseCalendarVisibility = isTaskCalendarView || initialView === 'calendar' || initialView === 'timeline';
   const keepsCompletedInCalendar = completedTaskCalendarAction === 'color'
     && (viewMode === 'calendar' || viewMode === 'timeline');
-  const shouldUseOfflineCalendar = shouldUseCalendarVisibility
-    || viewMode === 'timeline'
-    || initialView === 'timeline';
+  const shouldUseOfflineCalendar = shouldUseCalendarVisibility;
   const shouldUseOfflineCalendarRef = useRef(shouldUseOfflineCalendar);
   shouldUseOfflineCalendarRef.current = shouldUseOfflineCalendar;
   const [calendarColorMode, setCalendarColorMode] = useState<TaskCalendarColorMode>(initialPreferences.calendarColorMode);
@@ -2677,6 +2685,16 @@ export function TaskJournal({
     filterCasesOwner,
   );
   const [assigneeFilter, setAssigneeFilter] = useState(initialPreferences.assigneeFilter);
+  const calendarSelectionOwnerKey = JSON.stringify([currentUserId, user?.role?.id, isAdminUser]);
+  const [calendarSelectionState, setCalendarSelectionState] = useState({
+    owner: calendarSelectionOwnerKey, value: initialPreferences.calendarSelection,
+  });
+  const calendarSelection = calendarSelectionState.owner === calendarSelectionOwnerKey
+    ? calendarSelectionState.value
+    : readTaskJournalFilterPreferences(currentUserId, preferenceMode, initialView).calendarSelection;
+  const setCalendarSelection = (value: CalendarSelection) => {
+    setCalendarSelectionState({ owner: calendarSelectionOwnerKey, value });
+  };
   const [typeFilter, setTypeFilter] = useState<TaskJournalType | 'all'>(initialPreferences.typeFilter);
   const [priorityFilter, setPriorityFilter] = useState<TaskJournalPriority | 'all'>(initialPreferences.priorityFilter);
   const [billingFilter, setBillingFilter] = useState<TaskJournalListParams['billingStatus']>();
@@ -2734,8 +2752,8 @@ export function TaskJournal({
     values: readForcedTaskSnoozes(currentUserId),
   }), [currentUserId, forcedDecisionSnoozeRevision]);
   const [highlightedTaskId, setHighlightedTaskId] = useState<number | null>(routeTaskId);
-  const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => getCurrentCalendarDate());
-  const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => getCurrentCalendarDate());
+  const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => getCurrentCalendarDate(new Date(), currentTimeZoneId));
+  const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => getCurrentCalendarDate(new Date(), currentTimeZoneId));
   const [calendarMovingTaskId, setCalendarMovingTaskId] = useState<number | null>(null);
   const [calendarResizingTaskId, setCalendarResizingTaskId] = useState<number | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<number>>(() => new Set());
@@ -2854,7 +2872,7 @@ export function TaskJournal({
 
   useLayoutEffect(() => {
     const nextOwnerKey = getTaskJournalFilterStorageKey(currentUserId, preferenceMode);
-    if (nextOwnerKey === filterOwnerKey) {
+    if (nextOwnerKey === filterOwnerKey && calendarSelectionState.owner === calendarSelectionOwnerKey) {
       return;
     }
 
@@ -2884,12 +2902,13 @@ export function TaskJournal({
     setCounterpartyFilter(nextPreferences.counterpartyFilter);
     setCaseFilter(nextPreferences.caseFilter);
     setAssigneeFilter(nextPreferences.assigneeFilter);
+    setCalendarSelectionState({ owner: calendarSelectionOwnerKey, value: nextPreferences.calendarSelection });
     setTypeFilter(nextPreferences.typeFilter);
     setPriorityFilter(nextPreferences.priorityFilter);
     setPeriodMode(nextPreferences.periodMode);
     setSortBy(nextPreferences.sortBy);
     setSortDir(nextPreferences.sortDir);
-  }, [currentUserId, filterOwnerKey, initialView, isRouteTaskPage, preferenceMode]);
+  }, [calendarSelectionOwnerKey, calendarSelectionState.owner, currentUserId, filterOwnerKey, initialView, isRouteTaskPage, preferenceMode]);
 
   useEffect(() => {
     const nextOwnerKey = getTaskJournalSavedViewsStorageKey(currentUserId, preferenceMode);
@@ -2923,13 +2942,14 @@ export function TaskJournal({
       counterpartyFilter,
       caseFilter,
       assigneeFilter,
+      calendarSelection,
       typeFilter,
       priorityFilter,
       periodMode,
       sortBy,
       sortDir,
     }, preferenceMode);
-  }, [assigneeFilter, calendarColorMode, calendarConflictPolicy, calendarLoadWarningMode, caseFilter, counterpartyFilter, currentUserId, dateFromFilter, dateToFilter, icsReminderPreset, metricFilter, preferenceMode, periodMode, priorityFilter, quickFilter, search, sortBy, sortDir, statusFilter, typeFilter, viewMode]);
+  }, [assigneeFilter, calendarSelection, calendarColorMode, calendarConflictPolicy, calendarLoadWarningMode, caseFilter, counterpartyFilter, currentUserId, dateFromFilter, dateToFilter, icsReminderPreset, metricFilter, preferenceMode, periodMode, priorityFilter, quickFilter, search, sortBy, sortDir, statusFilter, typeFilter, viewMode]);
 
   const captureSavedViewFilters = (): TaskJournalFilterPreferences => ({
     viewMode,
@@ -2946,6 +2966,7 @@ export function TaskJournal({
     counterpartyFilter,
     caseFilter,
     assigneeFilter,
+    calendarSelection,
     typeFilter,
     priorityFilter,
     periodMode,
@@ -2968,6 +2989,7 @@ export function TaskJournal({
     setCounterpartyFilter(filters.counterpartyFilter);
     setCaseFilter(filters.caseFilter);
     setAssigneeFilter(filters.assigneeFilter);
+    setCalendarSelection(filters.calendarSelection);
     setTypeFilter(filters.typeFilter);
     setPriorityFilter(filters.priorityFilter);
     setPeriodMode(filters.periodMode);
@@ -4188,18 +4210,34 @@ export function TaskJournal({
     return visibleUserIds;
   }, [assigneeOptions, calendarVisibleUserIds, currentUserId, isAdminUser, taskCalendarViewScope, user?.department, user?.departmentId]);
 
-  const selectedAssigneeTimeZoneId = useMemo(() => {
-    if (!canViewEmployeeTaskCalendars || assigneeFilter === 'all' || !/^\d+$/.test(assigneeFilter)) {
-      return null;
-    }
+  const calendarSelectionNeedsDirectory = isAdminUser && !offlineCalendarSnapshot
+    && !calendarSelection.all && (viewMode === 'calendar' || viewMode === 'timeline');
+  const calendarSelectionUnavailable = calendarSelectionNeedsDirectory
+    && (assigneeSnapshot.loading || Boolean(assigneeSnapshot.error));
+  const selectedCalendarUserIds = useMemo(() => {
+    if (!calendarSelectionNeedsDirectory) return null;
+    if (calendarSelectionUnavailable) return [];
+    const selected = resolveCalendarSelection(calendarSelection, assigneeOptions);
+    return assigneeFilter !== 'all' && /^\d+$/.test(assigneeFilter)
+      ? selected.filter((id) => id === Number(assigneeFilter))
+      : selected;
+  }, [assigneeFilter, assigneeOptions, calendarSelection, calendarSelectionNeedsDirectory, calendarSelectionUnavailable]);
+  const selectedCalendarUserSet = useMemo(() => selectedCalendarUserIds === null ? null : new Set(selectedCalendarUserIds), [selectedCalendarUserIds]);
+  const calendarSelectionEmpty = selectedCalendarUserIds !== null && selectedCalendarUserIds.length === 0;
 
-    const assigneeId = Number(assigneeFilter);
+  const selectedAssigneeTimeZoneId = useMemo(() => {
+    const selectedUserId = assigneeFilter !== 'all' && /^\d+$/.test(assigneeFilter)
+      ? Number(assigneeFilter)
+      : selectedCalendarUserIds?.length === 1 ? selectedCalendarUserIds[0] : null;
+    if (!canViewEmployeeTaskCalendars || !selectedUserId) return null;
+
+    const assigneeId = selectedUserId;
     if (visibleTaskCalendarUserIds && !visibleTaskCalendarUserIds.has(assigneeId)) {
       return null;
     }
 
     return assigneeById.get(assigneeId)?.timeZoneId ?? null;
-  }, [assigneeById, assigneeFilter, canViewEmployeeTaskCalendars, visibleTaskCalendarUserIds]);
+  }, [assigneeById, assigneeFilter, canViewEmployeeTaskCalendars, selectedCalendarUserIds, visibleTaskCalendarUserIds]);
   const effectiveTaskJournalTimeZoneId = normalizeUserTimeZoneId(selectedAssigneeTimeZoneId ?? currentTimeZoneId);
   setActiveTaskJournalTimeZoneId(effectiveTaskJournalTimeZoneId);
 
@@ -4235,12 +4273,75 @@ export function TaskJournal({
     previousCalendarTimeZoneRef.current = effectiveTaskJournalTimeZoneId;
   }, [effectiveTaskJournalTimeZoneId]);
 
+  const visibleCalendarRange = useMemo(() => isTaskCalendarView
+    ? calendarVisibleRange(calendarAnchorDate, viewMode === 'timeline' ? 'timeline' : periodMode, effectiveTaskJournalTimeZoneId)
+    : null, [calendarAnchorDate, effectiveTaskJournalTimeZoneId, isTaskCalendarView, periodMode, viewMode]);
+  const calendarTodayKey = toTimeZoneDateKey(new Date(), effectiveTaskJournalTimeZoneId);
+  const calendarExportDates = useMemo(() => {
+    if (!visibleCalendarRange) return null;
+    const manual = getTaskDateRangeBounds(dateFromFilter, dateToFilter, effectiveTaskJournalTimeZoneId);
+    const from = Math.max(Date.parse(visibleCalendarRange.from), manual.from?.getTime() ?? -Infinity);
+    const to = Math.min(Date.parse(visibleCalendarRange.to), manual.to?.getTime() ?? Infinity);
+    const today = calendarVisibleRange(dateKeyToCalendarDate(calendarTodayKey), 'day', effectiveTaskJournalTimeZoneId);
+    return {
+      from: new Date(from).toISOString(),
+      to: new Date(to).toISOString(),
+      todayFrom: today.from,
+      todayTo: new Date(Date.parse(today.to) + 1).toISOString(),
+      empty: from > to,
+    };
+  }, [calendarTodayKey, dateFromFilter, dateToFilter, effectiveTaskJournalTimeZoneId, visibleCalendarRange]);
+  const taskExportParams = {
+    search: isTaskCalendarView ? search.trim() || undefined : listFilterParams.search,
+    status: listFilterParams.status,
+    type: listFilterParams.type,
+    priority: listFilterParams.priority,
+    underControl: listFilterParams.underControl,
+    assigneeUserId: listFilterParams.assigneeUserId,
+    assigneeUserIds: selectedCalendarUserIds ?? undefined,
+    authorUserId: listFilterParams.authorUserId,
+    participantRole: listFilterParams.participantRole,
+    approvalScope: listFilterParams.approvalScope,
+    metric: listFilterParams.metric,
+    billingStatus: listFilterParams.billingStatus,
+    untriaged: listFilterParams.untriaged,
+    clientCaseId: listFilterParams.clientCaseId,
+    clientId: listFilterParams.clientId,
+    legalEntityId: listFilterParams.legalEntityId,
+    from: calendarExportDates?.from ?? listFilterParams.from,
+    to: calendarExportDates?.to ?? listFilterParams.to,
+    todayFrom: calendarExportDates?.todayFrom ?? listFilterParams.todayFrom,
+    todayTo: calendarExportDates?.todayTo ?? listFilterParams.todayTo,
+    calendarView: shouldUseCalendarVisibility || undefined,
+  };
+
+  const { capture: captureCaseCalendar, scope: caseCalendarScope } = useDocumentDeliveryOwner(JSON.stringify([
+    caseReferenceScope, permissions.calendar, calendarSelectionOwnerKey, selectedCalendarUserIds,
+    calendarResponsibleUserId, calendarAnchorDate, effectiveTaskJournalTimeZoneId, caseFilter, periodMode, viewMode,
+  ]));
+  const { capture: captureTaskCalendarExport } = useDocumentDeliveryOwner(JSON.stringify([
+    caseReferenceScope, permissions.tasks, permissions.calendar, canExportTasks,
+    calendarSelectionOwnerKey, selectedCalendarUserIds, assigneeFilter,
+    contextFilter?.clientId, contextFilter?.legalEntityId, caseFilter, viewMode, icsReminderPreset,
+    taskExportParams, effectiveTaskJournalTimeZoneId,
+  ]));
+  const { capture: captureCaseCalendarExport, scope: caseCalendarExportScope } = useDocumentDeliveryOwner(JSON.stringify([
+    caseCalendarScope, canExportCases, icsReminderPreset,
+  ]));
+  useEffect(() => { setCaseCalendarExporting(false); }, [caseCalendarExportScope]);
+  const visibleCaseCalendarEvents = caseCalendarResultScope === caseCalendarScope ? caseCalendarEvents : [];
+  const visibleCaseCalendarSummary = caseCalendarResultScope === caseCalendarScope ? caseCalendarSummary : null;
+
   const refreshCaseCalendarEvents = useCallback(async () => {
+    const owner = captureCaseCalendar();
+    if (!owner) return;
+    const requestId = ++caseCalendarRequestRef.current;
+    const isCurrent = () => owner.isCurrent() && requestId === caseCalendarRequestRef.current;
     if (viewMode !== 'calendar' && viewMode !== 'timeline') {
       return;
     }
 
-    if (!canViewCases) {
+    if (!canViewCases || calendarSelectionEmpty) {
       setCaseCalendarEvents([]);
       setCaseCalendarSummary(null);
       setCaseCalendarLoading(false);
@@ -4250,10 +4351,12 @@ export function TaskJournal({
     const range = getCaseCalendarRange(calendarAnchorDate, viewMode === 'timeline' ? 'week' : periodMode);
     const responsibleUserId = calendarResponsibleUserId ?? undefined;
     const params = {
-      from: toLocalDateKey(range.from),
-      to: toLocalDateKey(range.to),
+      from: visibleCalendarRange ? toTimeZoneDateKey(visibleCalendarRange.from, effectiveTaskJournalTimeZoneId) : toLocalDateKey(range.from),
+      to: visibleCalendarRange ? toTimeZoneDateKey(visibleCalendarRange.to, effectiveTaskJournalTimeZoneId) : toLocalDateKey(range.to),
       clientCaseId: caseFilter !== 'all' ? Number(caseFilter) : undefined,
       responsibleUserId,
+      responsibleUserIds: selectedCalendarUserIds ?? undefined,
+      timeZoneId: effectiveTaskJournalTimeZoneId,
       includeTasks: false,
     };
     setCaseCalendarLoading(true);
@@ -4262,29 +4365,35 @@ export function TaskJournal({
         apiService.getCaseCalendarEvents(params),
         apiService.getCaseCalendarSummary(params),
       ]);
+      if (!isCurrent()) return;
+      setCaseCalendarResultScope(caseCalendarScope);
       setCaseCalendarEvents(events.filter((event) => event.kind !== 'task'));
       setCaseCalendarSummary(summary);
     } catch {
+      if (!isCurrent()) return;
+      setCaseCalendarResultScope(caseCalendarScope);
       setCaseCalendarEvents([]);
       setCaseCalendarSummary(null);
       toast.error('Не удалось загрузить сроки и судебные события.', 'Календарь дел');
     } finally {
-      setCaseCalendarLoading(false);
+      if (isCurrent()) setCaseCalendarLoading(false);
     }
-  }, [calendarAnchorDate, calendarResponsibleUserId, canViewCases, caseFilter, periodMode, toast, viewMode]);
+  }, [calendarAnchorDate, calendarResponsibleUserId, calendarSelectionEmpty, canViewCases, captureCaseCalendar, caseCalendarScope, caseFilter, effectiveTaskJournalTimeZoneId, periodMode, selectedCalendarUserIds, toast, viewMode, visibleCalendarRange]);
 
   const buildCaseCalendarParams = useCallback(() => {
     const range = getCaseCalendarRange(calendarAnchorDate, viewMode === 'timeline' ? 'week' : periodMode);
     const responsibleUserId = calendarResponsibleUserId ?? undefined;
 
     return {
-      from: toLocalDateKey(range.from),
-      to: toLocalDateKey(range.to),
+      from: visibleCalendarRange ? toTimeZoneDateKey(visibleCalendarRange.from, effectiveTaskJournalTimeZoneId) : toLocalDateKey(range.from),
+      to: visibleCalendarRange ? toTimeZoneDateKey(visibleCalendarRange.to, effectiveTaskJournalTimeZoneId) : toLocalDateKey(range.to),
       clientCaseId: caseFilter !== 'all' ? Number(caseFilter) : undefined,
       responsibleUserId,
+      responsibleUserIds: selectedCalendarUserIds ?? undefined,
+      timeZoneId: effectiveTaskJournalTimeZoneId,
       includeTasks: false,
     };
-  }, [calendarAnchorDate, calendarResponsibleUserId, caseFilter, periodMode, viewMode]);
+  }, [calendarAnchorDate, calendarResponsibleUserId, caseFilter, effectiveTaskJournalTimeZoneId, periodMode, selectedCalendarUserIds, viewMode, visibleCalendarRange]);
 
   useEffect(() => {
     void refreshCaseCalendarEvents();
@@ -4537,13 +4646,13 @@ export function TaskJournal({
     [clients, legalEntities],
   );
 
-  const dateRangeBounds = useMemo(() => getTaskDateRangeBounds(dateFromFilter, dateToFilter), [dateFromFilter, dateToFilter]);
+  const dateRangeBounds = useMemo(() => getTaskDateRangeBounds(dateFromFilter, dateToFilter, effectiveTaskJournalTimeZoneId), [dateFromFilter, dateToFilter, effectiveTaskJournalTimeZoneId]);
 
   const scopeFilteredTasks = useMemo(() => {
     const q = search.trim().toLowerCase();
 
     return tasks.filter((task) => {
-      const due = new Date(task.dueAt);
+      const due = parseInstant(task.dueAt);
       const approvalScopeOk = !isApprovalsMode || isTaskInApprovalsScope(task, currentUserId, isAdminUser);
       const quickOk = matchesQuickFilter(task, activeQuickFilter, currentUserId, currentUserName);
       const assigneeOk =
@@ -4571,9 +4680,12 @@ export function TaskJournal({
         task.title,
       ].some((value) => value.toLowerCase().includes(q));
 
-      return approvalScopeOk && quickOk && assigneeOk && counterpartyOk && caseOk && typeOk && priorityOk && dateOk && searchOk;
+      const calendarSelectionOk = !selectedCalendarUserSet
+        || (task.assigneeUserId != null && selectedCalendarUserSet.has(task.assigneeUserId))
+        || getTaskParticipants(task, 'assignee').some((participant) => participant.userId != null && selectedCalendarUserSet.has(participant.userId));
+      return approvalScopeOk && quickOk && assigneeOk && counterpartyOk && caseOk && typeOk && priorityOk && dateOk && searchOk && calendarSelectionOk;
     });
-  }, [activeQuickFilter, assigneeFilter, caseFilter, counterpartyFilter, currentUserId, currentUserName, dateRangeBounds, isAdminUser, isApprovalsMode, priorityFilter, search, tasks, typeFilter]);
+  }, [activeQuickFilter, assigneeFilter, caseFilter, counterpartyFilter, currentUserId, currentUserName, dateRangeBounds, isAdminUser, isApprovalsMode, priorityFilter, search, selectedCalendarUserSet, tasks, typeFilter]);
 
   const statusAndPeriodFilteredTasks = useMemo(() => {
     const nowDate = getCurrentCalendarDate();
@@ -4583,7 +4695,7 @@ export function TaskJournal({
 
     const nextTasks = scopeFilteredTasks
       .filter((task) => {
-        const due = new Date(task.dueAt);
+        const due = parseInstant(task.dueAt);
         const statusOk = keepsCompletedInCalendar && statusFilter === 'active'
           ? true
           : matchesStatusFilter(task, statusFilter);
@@ -4604,9 +4716,9 @@ export function TaskJournal({
   }, [dateFromFilter, dateToFilter, keepsCompletedInCalendar, metricFilter, periodMode, scopeFilteredTasks, statusFilter, viewMode]);
 
   const filteredTasks = useMemo(() => {
-    const nowDate = getCurrentCalendarDate();
+    const nowDate = dateKeyToCalendarDate(calendarTodayKey);
     return statusAndPeriodFilteredTasks.filter((task) => matchesMetricFilter(task, metricFilter, nowDate));
-  }, [metricFilter, statusAndPeriodFilteredTasks]);
+  }, [calendarTodayKey, metricFilter, statusAndPeriodFilteredTasks]);
 
   const pendingDeadlineChangeDecision = useMemo<Exclude<DeadlineChangeDecisionPromptState, null> | null>(() => {
     if (!isApprovalsMode) {
@@ -6110,8 +6222,20 @@ export function TaskJournal({
       return;
     }
 
+    if (calendarSelectionUnavailable) {
+      toast.info('Дождитесь загрузки списка сотрудников или повторите загрузку календарей.', 'Журнал задач');
+      return;
+    }
     const header = ['Контрагент', 'Дело', 'Наименование задачи', 'Исполнитель', 'Поручил', 'Срок', 'Длительность', 'Тип', 'Приоритет', 'Статус', 'Результат'];
-    const rows = filteredTasks.map((task) => [
+    const exportFrom = calendarExportDates ? Date.parse(calendarExportDates.from) : -Infinity;
+    const exportTo = calendarExportDates ? Date.parse(calendarExportDates.to) : Infinity;
+    const exportTasks = isTaskCalendarView
+      ? calendarTasks.filter((task) => {
+          const due = parseInstant(task.dueAt).getTime();
+          return due >= exportFrom && due <= exportTo;
+        })
+      : filteredTasks;
+    const rows = exportTasks.map((task) => [
       getTaskClientName(task),
       getTaskCaseTitle(task),
       task.title,
@@ -6141,16 +6265,32 @@ export function TaskJournal({
       return;
     }
 
+    if (calendarSelectionEmpty) {
+      toast.info(calendarSelectionUnavailable ? 'Дождитесь загрузки списка сотрудников или повторите загрузку календарей.' : 'Выберите хотя бы один календарь сотрудника.', 'Календарь задач');
+      return;
+    }
+    if (calendarExportDates?.empty) {
+      toast.info('Выбранные даты не пересекаются с периодом календаря.', 'Календарь задач');
+      return;
+    }
+    const owner = captureTaskCalendarExport();
+    if (!owner) return;
     try {
       const response = await apiService.downloadTaskJournalCalendar({
-        clientCaseId: caseFilter !== 'all' ? Number(caseFilter) : undefined,
-        clientId: contextFilter?.clientId ?? selectedFilterClientId,
-        legalEntityId: contextFilter?.legalEntityId ?? selectedFilterLegalEntityId,
+        ...(isTaskCalendarView ? taskExportParams : {
+          assigneeUserIds: assigneeFilter !== 'all' && /^\d+$/.test(assigneeFilter) ? [Number(assigneeFilter)] : undefined,
+          clientCaseId: caseFilter !== 'all' ? Number(caseFilter) : undefined,
+          clientId: contextFilter?.clientId ?? selectedFilterClientId,
+          legalEntityId: contextFilter?.legalEntityId ?? selectedFilterLegalEntityId,
+          calendarView: shouldUseCalendarVisibility || undefined,
+        }),
         reminderMinutes: icsReminderMinutes,
       });
+      if (!owner.isCurrent()) return;
       downloadBlob(response.fileName, response.blob);
       toast.success('Календарь задач выгружен в ICS.', 'Календарь задач');
     } catch (error) {
+      if (!owner.isCurrent()) return;
       toast.error(extractDisplayErrorMessage(error, 'Не удалось выгрузить календарь задач.'), 'Календарь задач');
     }
   };
@@ -6166,42 +6306,33 @@ export function TaskJournal({
       return;
     }
 
+    if (calendarSelectionEmpty) {
+      toast.info(calendarSelectionUnavailable ? 'Дождитесь загрузки списка сотрудников или повторите загрузку календарей.' : 'Выберите хотя бы один календарь сотрудника.', 'Календарь дел');
+      return;
+    }
+    const owner = captureCaseCalendarExport();
+    if (!owner) return;
     setCaseCalendarExporting(true);
     try {
       const response = await apiService.downloadCaseCalendarIcs({
         ...buildCaseCalendarParams(),
         reminderMinutes: icsReminderMinutes,
       });
+      if (!owner.isCurrent()) return;
       downloadBlob(response.fileName, response.blob);
       toast.success('Календарь дел выгружен в ICS.', 'Календарь дел');
     } catch (error) {
+      if (!owner.isCurrent()) return;
       toast.error(extractDisplayErrorMessage(error, 'Не удалось выгрузить календарь дел.'), 'Календарь дел');
     } finally {
-      setCaseCalendarExporting(false);
+      if (owner.isCurrent()) setCaseCalendarExporting(false);
     }
   };
 
   const buildPlanningReportParams = (format: TaskPlanningReportFormat) => ({
+    ...taskExportParams,
     format,
-    search: listFilterParams.search,
-    status: listFilterParams.status,
-    type: listFilterParams.type,
-    priority: listFilterParams.priority,
-    underControl: listFilterParams.underControl,
-    assigneeUserId: listFilterParams.assigneeUserId,
-    authorUserId: listFilterParams.authorUserId,
-    participantRole: listFilterParams.participantRole,
-    approvalScope: listFilterParams.approvalScope,
-    metric: listFilterParams.metric,
-    billingStatus: listFilterParams.billingStatus,
-    untriaged: listFilterParams.untriaged,
-    clientCaseId: listFilterParams.clientCaseId,
-    clientId: listFilterParams.clientId,
-    legalEntityId: listFilterParams.legalEntityId,
-    from: listFilterParams.from,
-    to: listFilterParams.to,
-    todayFrom: listFilterParams.todayFrom,
-    todayTo: listFilterParams.todayTo,
+    timeZoneId: isTaskCalendarView ? effectiveTaskJournalTimeZoneId : undefined,
   });
 
   const handlePlanningReportExport = async (format: TaskPlanningReportFormat) => {
@@ -6210,12 +6341,24 @@ export function TaskJournal({
       return;
     }
 
+    if (calendarSelectionEmpty) {
+      toast.info(calendarSelectionUnavailable ? 'Дождитесь загрузки списка сотрудников или повторите загрузку календарей.' : 'Выберите хотя бы один календарь сотрудника.', 'Отчет по задачам');
+      return;
+    }
+    if (calendarExportDates?.empty) {
+      toast.info('Выбранные даты не пересекаются с периодом календаря.', 'Календарь задач');
+      return;
+    }
+    const owner = captureTaskCalendarExport();
+    if (!owner) return;
     const label = format === 'word' ? 'Word' : format.toUpperCase();
     try {
       const response = await apiService.downloadTaskPlanningReport(buildPlanningReportParams(format));
+      if (!owner.isCurrent()) return;
       downloadBlob(response.fileName, response.blob);
       toast.success(`Отчет по задачам выгружен в ${label}.`, 'Отчет по задачам');
     } catch (error) {
+      if (!owner.isCurrent()) return;
       toast.error(extractDisplayErrorMessage(error, 'Не удалось выгрузить отчет по задачам.'), 'Отчет по задачам');
     }
   };
@@ -6580,7 +6723,7 @@ export function TaskJournal({
           />
         ) : null}
 
-        <section className="mb-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {!calendarSelectionUnavailable ? <section className="mb-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <MetricCard
             label="Активные"
             value={stats.active}
@@ -6613,8 +6756,18 @@ export function TaskJournal({
             active={metricFilter === 'highPriority'}
             onClick={() => handleMetricFilterClick('highPriority')}
           />
-        </section>
+        </section> : null}
 
+        {isAdminUser && !offlineCalendarSnapshot && (viewMode === 'calendar' || viewMode === 'timeline') ? (
+          <TaskCalendarSelection
+            selection={calendarSelection}
+            assignees={assigneeOptions}
+            loading={assigneeSnapshot.loading}
+            error={assigneeSnapshot.error}
+            onRetry={() => void assigneeSnapshot.refresh()}
+            onChange={(selection) => { setAssigneeFilter('all'); setCalendarSelection(selection); }}
+          />
+        ) : null}
         <div className="mb-3 min-w-0 max-w-full rounded-xl border border-slate-200 bg-white p-3" data-testid="task-filters-and-views">
           <button
             type="button"
@@ -7252,12 +7405,16 @@ export function TaskJournal({
             )}
           />
           </div>
+        ) : calendarSelectionUnavailable ? (
+          <section role="status" className="rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-600" data-testid="task-calendar-selection-unavailable">
+            {assigneeSnapshot.loading ? 'Загружаем выбранные календари сотрудников…' : 'Выбранные календари появятся после повторной загрузки списка сотрудников.'}
+          </section>
         ) : viewMode === 'calendar' ? (
           <>
             {!embedded ? (
             <CaseCalendarEventsPanel
-              events={caseCalendarEvents}
-              summary={caseCalendarSummary}
+              events={visibleCaseCalendarEvents}
+              summary={visibleCaseCalendarSummary}
               timeZoneId={effectiveTaskJournalTimeZoneId}
               loading={caseCalendarLoading}
               canExport={canExportCases}
@@ -7301,8 +7458,8 @@ export function TaskJournal({
           <>
             {!embedded ? (
             <CaseCalendarEventsPanel
-              events={caseCalendarEvents}
-              summary={caseCalendarSummary}
+              events={visibleCaseCalendarEvents}
+              summary={visibleCaseCalendarSummary}
               timeZoneId={effectiveTaskJournalTimeZoneId}
               loading={caseCalendarLoading}
               canExport={canExportCases}

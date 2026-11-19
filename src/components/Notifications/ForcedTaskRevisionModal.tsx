@@ -1,8 +1,11 @@
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, Download, ExternalLink, FileText, Loader2, TimerReset, XCircle } from 'lucide-react';
-import { apiService, type PagedResult, type UserNotificationDto } from '../../services/api';
+import { AUTH_SESSION_EXPIRED_EVENT, apiService, type PagedResult, type UserNotificationDto } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
+import { captureAuthSessionIdentity, isAuthSessionIdentityCurrent } from '../../services/authService';
 import { isExpectedRealtimeStartupError, TASK_JOURNAL_REALTIME_EVENT } from '../../services/realtimeNotifications';
 import { emitUserNotificationsChanged, isTaskJournalRealtimeChange, USER_NOTIFICATIONS_EVENT, type UserNotificationsChangedDetail } from '../../utils/userNotifications';
 import { parseUserNotificationMetadata } from '../../utils/userNotificationMetadata';
@@ -31,7 +34,7 @@ type ForcedTaskRevisionModalProps = {
   onOpenCaseTasks?: (caseId: number) => void;
 };
 
-type ForcedTaskDecisionKind = 'revision' | 'completedApproval' | 'deadlineChangeRequest' | 'approvalRequest' | 'courtHearing';
+type ForcedTaskDecisionKind = 'revision' | 'completed' | 'completedApproval' | 'deadlineChangeRequest' | 'approvalRequest' | 'courtHearing';
 type ForcedTaskQueueAction = 'acknowledge' | 'deadlineChangeDecision' | 'approvalDecision';
 
 type ForcedTaskNotificationRule = {
@@ -46,9 +49,34 @@ type ForcedTaskQueueItem = {
   decisionKind: ForcedTaskDecisionKind;
 };
 
+const FORCED_TASK_ACKNOWLEDGEMENT_CONTENT = {
+  completed: {
+    title: 'Задача завершена', description: '', detailsTitle: 'Сообщение', info: '',
+    primaryButton: 'Понятно', eyebrow: '',
+  },
+  completedApproval: {
+    title: 'Задача согласована и завершена',
+    description: 'Задача согласована, работа принята и задача закрыта. Ознакомьтесь с решением.',
+    detailsTitle: 'Решение',
+    info: 'Дополнительных действий по задаче не требуется. Сообщение закроется после подтверждения.',
+    primaryButton: 'Ознакомлен', eyebrow: 'Согласование завершено',
+  },
+  revision: {
+    title: 'Задача вернулась на доработку',
+    description: 'Прочитайте рецензию. После исправления можно повторно направить задачу на согласование.',
+    detailsTitle: 'Что исправить',
+    info: 'Уже согласовавшие участники повторно в маршруте не участвуют. Исправьте замечания и отправьте задачу на согласование еще раз.',
+    primaryButton: 'Информация прочитана', eyebrow: 'Задача на доработку',
+  },
+};
+
 const FORCED_TASK_QUEUE_PAGE_SIZE = 25;
 const FORCED_TASK_POLL_INTERVAL_MS = 30_000;
 const FORCED_TASK_OPEN_SNOOZE_MINUTES = 10;
+
+function captureNotificationSession() {
+  try { return captureAuthSessionIdentity(); } catch { return null; }
+}
 
 function formatFileSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 Б';
@@ -170,6 +198,13 @@ function getDecisionKind(notification: UserNotificationDto): ForcedTaskDecisionK
     return 'revision';
   }
 
+  if (notification.type === 'taskCompleted') {
+    // The inbox combines durable ordinary-completion proof with current recipient channel preferences.
+    return notification.taskId && notification.forcedModalEnabled === true
+      ? 'completed'
+      : null;
+  }
+
   if (notification.type !== 'taskApproved') {
     return null;
   }
@@ -207,6 +242,11 @@ const FORCED_TASK_NOTIFICATION_RULES: ForcedTaskNotificationRule[] = [
   },
   {
     type: 'taskApproved',
+    action: 'acknowledge',
+    resolveDecisionKind: getDecisionKind,
+  },
+  {
+    type: 'taskCompleted',
     action: 'acknowledge',
     resolveDecisionKind: getDecisionKind,
   },
@@ -262,6 +302,10 @@ function getRevisionText(notification: UserNotificationDto): string {
 }
 
 function getDecisionText(notification: UserNotificationDto, kind: ForcedTaskDecisionKind): string {
+  if (kind === 'completed') {
+    return notification.bodyPreview || 'Задача завершена.';
+  }
+
   if (kind === 'completedApproval') {
     return notification.bodyPreview || 'Задача согласована и завершена. Работа принята, задача закрыта.';
   }
@@ -272,7 +316,7 @@ function getDecisionText(notification: UserNotificationDto, kind: ForcedTaskDeci
 function getTaskTitle(notification: UserNotificationDto): string {
   const title = notification.title?.trim();
   if (!title) {
-    return 'Задача вернулась на доработку';
+    return notification.type === 'taskCompleted' ? 'Завершённая задача' : 'Задача вернулась на доработку';
   }
 
   return title
@@ -280,6 +324,7 @@ function getTaskTitle(notification: UserNotificationDto): string {
     .replace(/^Задача возвращена на доработку:\s*/i, '')
     .replace(/^Задача согласована и завершена:\s*/i, '')
     .replace(/^Задача согласована:\s*/i, '')
+    .replace(/^Задача (?:завершена|выполнена):\s*/i, '')
     .trim() || title;
 }
 
@@ -338,14 +383,50 @@ function sortQueueItems(left: ForcedTaskQueueItem, right: ForcedTaskQueueItem): 
 
 export function ForcedTaskRevisionModal(props: ForcedTaskRevisionModalProps) {
   const { user } = useAuth();
-  return user ? <UserForcedTaskRevisionModal key={user.id} userId={user.id} {...props} /> : null;
+  const permissions = useRolePermissions(user?.role?.id);
+  const [authSignalEpoch, setAuthSignalEpoch] = useState(0);
+  const lastSessionRef = useRef<ReturnType<typeof captureNotificationSession>>(null);
+  const session = captureNotificationSession();
+  if (session) lastSessionRef.current = session;
+  useEffect(() => {
+    const invalidateSession = () => {
+      lastSessionRef.current = null;
+      setAuthSignalEpoch(epoch => epoch + 1);
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== null && !['pp_token', 'auth_token', 'pp.jwt', 'pp.auth-session-epoch.v1'].includes(event.key)) return;
+      if (lastSessionRef.current && isAuthSessionIdentityCurrent(lastSessionRef.current)) return;
+      invalidateSession();
+    };
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, invalidateSession);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, invalidateSession);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
+  const ownerKey = JSON.stringify([
+    user?.id, user?.role?.id, user?.departmentId, user?.department, permissions.tasks, permissions.cases,
+    Boolean(props.onOpenTask), Boolean(props.onOpenCaseTasks), authSignalEpoch, session ?? lastSessionRef.current,
+  ]);
+  return user ? <UserForcedTaskRevisionModal key={ownerKey} userId={user.id} {...props} /> : null;
 }
 
 function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: ForcedTaskRevisionModalProps & { userId: number }) {
   const [items, setItems] = useState<ForcedTaskQueueItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [acknowledgingId, setAcknowledgingId] = useState<number | null>(null);
+  const [acknowledgeError, setAcknowledgeError] = useState<string | null>(null);
+  const notificationActionScope = JSON.stringify([userId, Boolean(onOpenTask), Boolean(onOpenCaseTasks)]);
+  const { capture: captureActionEpoch, isCurrent: isActionEpochCurrent } = useAsyncOperationOwner(notificationActionScope);
+  const captureNotificationAction = useCallback(() => {
+    const session = captureNotificationSession();
+    if (!session) return null;
+    const epoch = captureActionEpoch();
+    return { isCurrent: () => isActionEpochCurrent(epoch) && isAuthSessionIdentityCurrent(session) };
+  }, [captureActionEpoch, isActionEpochCurrent]);
   const [snoozeError, setSnoozeError] = useState<string | null>(null);
+  useEffect(() => { setAcknowledgingId(null); setAcknowledgeError(null); }, [notificationActionScope]);
   const [timeZoneId, setTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [deadlineChangeDueAt, setDeadlineChangeDueAt] = useState('');
   const [deadlineChangeComment, setDeadlineChangeComment] = useState('');
@@ -371,7 +452,9 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
 
   const loadItems = useCallback(async (refreshIfRunning = true) => {
     const state = loadStateRef.current;
-    if (!state.mounted) return;
+    const session = captureNotificationSession();
+    const isCurrent = () => state.mounted && Boolean(session && isAuthSessionIdentityCurrent(session));
+    if (!isCurrent()) return;
     if (state.running) {
       state.refreshRequested ||= refreshIfRunning;
       return;
@@ -386,7 +469,7 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
           // Leave room for other startup reads, including recovery of stored toasts.
           // Each rule keeps its own page and filters; queue ordering is unchanged.
           for (let offset = 0; offset < FORCED_TASK_NOTIFICATION_RULES.length; offset += 2) {
-            if (!state.mounted) return;
+            if (!isCurrent()) return;
             const batch = await Promise.allSettled(FORCED_TASK_NOTIFICATION_RULES.slice(offset, offset + 2).map((rule) =>
               apiService.getUserNotifications({
                 status: 'unread',
@@ -395,7 +478,7 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
                 page: 1,
                 pageSize: FORCED_TASK_QUEUE_PAGE_SIZE,
               })));
-            if (!state.mounted) return;
+            if (!isCurrent()) return;
             // Finish the whole batch before retrying, even if one read failed early.
             const failure = batch.find(result => result.status === 'rejected');
             if (failure?.status === 'rejected') throw failure.reason;
@@ -433,17 +516,17 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
 
           setItems([...nextItems.values()].sort(sortQueueItems));
         } catch (error) {
-          if (!state.mounted) return;
+          if (!isCurrent()) return;
           if (isExpectedRealtimeStartupError(error)) {
             console.debug('Mandatory task messages are unavailable; polling will retry.', error);
           } else {
             console.error('Failed to load forced task action messages.', error);
           }
         }
-      } while (state.mounted && state.refreshRequested);
+      } while (isCurrent() && state.refreshRequested);
     } finally {
       state.running = false;
-      if (state.mounted) setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [userId]);
 
@@ -485,7 +568,9 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
 
   const currentItem = items[0] ?? null;
   const current = currentItem?.notification ?? null;
-  useEffect(() => { setSnoozeError(null); }, [current?.id]);
+  const currentNotificationIdRef = useRef<number | null>(null);
+  currentNotificationIdRef.current = current?.id ?? null;
+  useEffect(() => { setSnoozeError(null); setAcknowledgeError(null); }, [current?.id]);
   const decisionKind = currentItem?.decisionKind ?? null;
   const decisionText = useMemo(() => current && decisionKind ? getDecisionText(current, decisionKind) : '', [current, decisionKind]);
   const approvalLatestFiles = useMemo(() => getLatestTaskFiles(approvalFiles), [approvalFiles]);
@@ -497,7 +582,10 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
   const notificationRequestedDueAt = readString(currentMetadata.requestedDueAt);
 
   const finishNotificationById = useCallback(async (notificationId: number, reason: string) => {
+    const owner = captureNotificationAction();
+    if (!owner || currentNotificationIdRef.current !== notificationId) return false;
     await apiService.markUserNotificationRead(notificationId);
+    if (!owner.isCurrent() || currentNotificationIdRef.current !== notificationId) return false;
     acknowledgedIdsRef.current.add(notificationId);
     setItems((previous) => previous.filter((item) => item.notification.id !== notificationId));
     emitUserNotificationsChanged({
@@ -506,7 +594,8 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
       unreadDelta: -1,
       notificationId,
     });
-  }, []);
+    return true;
+  }, [captureNotificationAction]);
 
   useEffect(() => {
     if (decisionKind !== 'deadlineChangeRequest') {
@@ -769,23 +858,32 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
   }, [current?.id, current?.taskId, decisionKind, approvalSaving, finishNotificationById]);
 
   const finishCurrentNotification = async (reason: string) => {
-    if (!current) return;
-    await finishNotificationById(current.id, reason);
+    if (!current) return false;
+    return finishNotificationById(current.id, reason);
   };
 
   const acknowledge = async (openTask = false) => {
     if (!current || acknowledgingId) return;
 
+    const owner = captureNotificationAction();
+    if (!owner) {
+      setAcknowledgeError('Не удалось подтвердить текущую сессию. Повторите попытку.');
+      return;
+    }
     setAcknowledgingId(current.id);
+    setAcknowledgeError(null);
     try {
-      await finishCurrentNotification('forced-task-action-read');
+      const acknowledged = await finishCurrentNotification('forced-task-action-read');
+      if (!acknowledged || !owner.isCurrent()) return;
       if (openTask && current.taskId && onOpenTask) {
         onOpenTask(current.taskId);
       }
     } catch (error) {
+      if (!owner.isCurrent() || currentNotificationIdRef.current !== current.id) return;
+      setAcknowledgeError(extractDisplayErrorMessage(error, 'Не удалось отметить уведомление прочитанным. Повторите попытку.'));
       console.error('Failed to acknowledge task action message.', error);
     } finally {
-      setAcknowledgingId(null);
+      if (owner.isCurrent()) setAcknowledgingId(null);
     }
   };
 
@@ -824,19 +922,22 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
 
   const downloadApprovalFile = async (file: TaskJournalFile) => {
     const taskId = current?.taskId;
-    if (!taskId || approvalFileDownloadingId !== null) {
-      return;
-    }
+    const notificationId = current?.id;
+    if (!taskId || !notificationId || approvalFileDownloadingId !== null) return;
+    const owner = captureNotificationAction();
+    if (!owner) return;
+    const isCurrent = () => owner.isCurrent() && currentNotificationIdRef.current === notificationId;
 
     setApprovalFileDownloadingId(file.id);
     setApprovalFilesError(null);
     try {
       const response = await apiService.downloadTaskJournalFile(taskId, file.id);
+      if (!isCurrent()) return;
       downloadBlob(response.fileName || file.originalFileName, response.blob);
     } catch (error) {
-      setApprovalFilesError(extractDisplayErrorMessage(error, 'Не удалось скачать вложение задачи.'));
+      if (isCurrent()) setApprovalFilesError(extractDisplayErrorMessage(error, 'Не удалось скачать вложение задачи.'));
     } finally {
-      setApprovalFileDownloadingId(null);
+      if (isCurrent()) setApprovalFileDownloadingId(null);
     }
   };
 
@@ -994,14 +1095,19 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
     const queueCountText = items.length > 1 ? `Еще обязательных уведомлений: ${items.length - 1}` : null;
     const openCaseTasks = async () => {
       if (!caseId || !onOpenCaseTasks || acknowledgingId) return;
+      const owner = captureNotificationAction();
+      if (!owner) return;
       setAcknowledgingId(current.id);
+      setAcknowledgeError(null);
       try {
-        await finishCurrentNotification('forced-court-hearing-read');
-        onOpenCaseTasks(caseId);
+        const acknowledged = await finishCurrentNotification('forced-court-hearing-read');
+        if (acknowledged && owner.isCurrent()) onOpenCaseTasks(caseId);
       } catch (error) {
+        if (!owner.isCurrent() || currentNotificationIdRef.current !== current.id) return;
+        setAcknowledgeError(extractDisplayErrorMessage(error, 'Не удалось отметить уведомление прочитанным. Повторите попытку.'));
         console.error('Failed to acknowledge court hearing message.', error);
       } finally {
-        setAcknowledgingId(null);
+        if (owner.isCurrent()) setAcknowledgingId(null);
       }
     };
 
@@ -1030,6 +1136,8 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
           <p className="mt-3 text-sm leading-6 text-slate-600">
             CRM автоматически поставила ответственному задачу типа «Судебное заседание». Откройте задачи дела и проверьте подготовку юриста.
           </p>
+
+          {acknowledgeError ? <p role="alert" className="mt-2 text-sm text-red-700">{acknowledgeError}</p> : null}
 
           <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <button
@@ -1414,36 +1522,32 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
     );
   }
 
-  const isCompletedApproval = decisionKind === 'completedApproval';
-  const modalTitle = isCompletedApproval ? 'Задача согласована и завершена' : 'Задача вернулась на доработку';
-  const modalDescription = isCompletedApproval
-    ? 'Задача согласована, работа принята и задача закрыта. Ознакомьтесь с решением.'
-    : 'Прочитайте рецензию. После исправления можно повторно направить задачу на согласование.';
-  const detailsTitle = isCompletedApproval ? 'Решение' : 'Что исправить';
-  const infoText = isCompletedApproval
-    ? 'Дополнительных действий по задаче не требуется. Сообщение закроется после подтверждения.'
-    : 'Уже согласовавшие участники повторно в маршруте не участвуют. Исправьте замечания и отправьте задачу на согласование еще раз.';
-  const primaryButtonText = isCompletedApproval ? 'Ознакомлен' : 'Информация прочитана';
-  const modalEyebrow = isCompletedApproval ? 'Согласование завершено' : 'Задача на доработку';
-  const modalEyebrowClassName = isCompletedApproval
+  const isOrdinaryCompletion = decisionKind === 'completed';
+  const isCompleted = decisionKind === 'completedApproval' || decisionKind === 'completed';
+  const content = isOrdinaryCompletion
+    ? FORCED_TASK_ACKNOWLEDGEMENT_CONTENT.completed
+    : isCompleted
+      ? FORCED_TASK_ACKNOWLEDGEMENT_CONTENT.completedApproval
+      : FORCED_TASK_ACKNOWLEDGEMENT_CONTENT.revision;
+  const modalEyebrowClassName = isCompleted
     ? 'text-xs font-semibold uppercase tracking-[0.16em] text-emerald-600'
     : 'text-xs font-semibold uppercase tracking-[0.16em] text-orange-600';
-  const infoClassName = isCompletedApproval
+  const infoClassName = isCompleted
     ? 'mt-2 text-sm leading-6 text-emerald-700'
     : 'mt-2 text-sm leading-6 text-slate-500';
-  const buttonClassName = isCompletedApproval
+  const buttonClassName = isCompleted
     ? 'w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto'
     : 'w-full rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto';
   const queueCountText = items.length > 1 ? `Еще обязательных уведомлений: ${items.length - 1}` : null;
 
   return (
     <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-slate-900/45 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6" role="dialog" aria-modal="true" aria-labelledby="forced-task-revision-title" data-testid="forced-task-action-queue">
-      <div className="max-h-[calc(100vh-2rem)] w-full max-w-[min(42rem,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-6">
+      <div className={`max-h-[calc(100vh-2rem)] w-full max-w-[min(42rem,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl bg-white shadow-2xl ${isOrdinaryCompletion ? 'p-3 sm:p-4' : 'p-4 sm:p-6'}`}>
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <p className={modalEyebrowClassName}>{modalEyebrow}</p>
-            <h2 id="forced-task-revision-title" className="mt-2 text-xl font-semibold text-slate-900">
-              {modalTitle}
+            {content.eyebrow ? <p className={modalEyebrowClassName}>{content.eyebrow}</p> : null}
+            <h2 id="forced-task-revision-title" className={`${isOrdinaryCompletion ? '' : 'mt-2'} text-xl font-semibold text-slate-900`}>
+              {content.title}
             </h2>
             {queueCountText ? (
               <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
@@ -1451,25 +1555,23 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
               </p>
             ) : null}
             <p className="mt-2 line-clamp-2 text-sm text-slate-500">{getTaskTitle(current)}</p>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              {modalDescription}
-            </p>
+            {content.description ? <p className="mt-2 text-sm leading-6 text-slate-600">{content.description}</p> : null}
           </div>
           <SnoozeMenu disabled={acknowledgingId === current.id} onSnooze={snoozeCurrent} />
         </div>
         {snoozeError ? <p role="alert" className="mt-2 text-sm text-red-700">{snoozeError}</p> : null}
 
-        <div className="mt-5 block text-sm font-semibold text-slate-700">
-          {detailsTitle}
+        {acknowledgeError ? <p role="alert" className="mt-2 text-sm text-red-700">{acknowledgeError}</p> : null}
+
+        <div className={`${isOrdinaryCompletion ? 'mt-3' : 'mt-5'} block text-sm font-semibold text-slate-700`}>
+          {content.detailsTitle}
         </div>
-        <div className="mt-2 max-h-[40vh] min-h-[120px] overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm leading-6 text-slate-700 shadow-sm sm:min-h-[150px]" data-testid="forced-task-message-box">
+        <div className={`mt-2 max-h-[40vh] overflow-y-auto whitespace-pre-wrap break-words rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm leading-6 text-slate-700 shadow-sm ${isOrdinaryCompletion ? '' : 'min-h-[120px] sm:min-h-[150px]'}`} data-testid="forced-task-message-box">
           {decisionText}
         </div>
-        <p className={infoClassName}>
-          {infoText}
-        </p>
+        {content.info ? <p className={infoClassName}>{content.info}</p> : null}
 
-        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
+        <div className={`flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end ${isOrdinaryCompletion ? 'mt-3 gap-2' : 'mt-6 gap-3'}`}>
           {current.taskId && onOpenTask ? (
             <button
               type="button"
@@ -1478,7 +1580,7 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 sm:w-auto"
             >
               <ExternalLink className="h-4 w-4" />
-              Открыть задачу
+              {isOrdinaryCompletion ? 'К задаче' : 'Открыть задачу'}
             </button>
           ) : null}
           <button
@@ -1488,7 +1590,7 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
             className={buttonClassName}
           >
             {acknowledgingId === current.id || loading ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 inline h-4 w-4" />}
-            {primaryButtonText}
+            {content.primaryButton}
           </button>
         </div>
       </div>

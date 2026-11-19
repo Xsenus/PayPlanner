@@ -17,7 +17,7 @@ class DeliveryAdmissionTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
         self.scripts = Path(__file__).parent
-        self.sources = ['deploy-vps.sh', 'deploy-db-proof.py', 'deploy-history-source-proof.py', 'deploy-stopped-source-proof.py', 'deploy-roadmap-candidate-review.json', 'deploy-roadmap-candidate-delta.json']
+        self.sources = ['deploy-vps.sh', 'deploy-db-proof.py', 'deploy-history-source-proof.py', 'deploy-stopped-source-proof.py', 'deploy-roadmap-candidate-review.json', 'deploy-roadmap-candidate-delta.json', 'deploy-act-annual-review.json', 'deploy-act-annual-delta.json']
         for name in self.sources:
             (self.root/name).write_bytes((self.scripts/name).read_bytes())
         source = (self.scripts/'deploy-vps.sh').read_text()
@@ -85,7 +85,8 @@ class DeliveryAdmissionTests(unittest.TestCase):
 
     def test_admits_the_reviewed_current_baseline_with_exact_release_catalog(self):
         self.use_payment_reconciliation_baseline()
-        self.assertEqual([seed['version'] for seed in self.plan['expectedReleaseSeeds']], ['1.14.914', '1.14.913'])
+        self.assertEqual([seed['version'] for seed in self.plan['expectedReleaseSeeds']], [f'1.14.{version}' for version in range(943, 914, -1)])
+        self.assertTrue(all(seed['isActive'] for seed in self.plan['expectedReleaseSeeds']))
         self.assertTrue(self.admission().stdout.startswith(self.revision+'|'+self.plan['previousRevision']+'|'))
         self.q['backendPackageFiles']['AppReleases/releases.json'] = 'c'*64
         self.assertIn('Qualified candidate catalog binding differs', self.admission(1).stderr)
@@ -230,6 +231,67 @@ assert len(proof.validate_candidate_plan(json.load(open(sys.argv[2],encoding='ut
     def test_protected_document_tables_cannot_be_omitted(self):
         self.plan['expectedProtectedTables'].remove('Acts')
         self.admission(1)
+
+
+
+    def test_annual_admission_rejects_changed_review_schema_or_source_allowlist(self):
+        self.use_payment_reconciliation_baseline()
+        self.assertEqual(self.plan['previousRevision'], '9dc737ed3ae1b586789bbfcee34036db6e8bb728')
+        self.assertEqual(self.plan['expectedMigration'], '20261111140010_AddActAnnualNumberingPostgreSql')
+        self.assertTrue(self.admission().stdout.startswith(self.revision+'|'))
+        for name in ['deploy-act-annual-review.json', 'deploy-act-annual-delta.json']:
+            path = self.root/name
+            original = path.read_bytes()
+            value = json.loads(original)
+            if name.endswith('review.json'):
+                value['migrationIds'].append('unreviewed')
+            else:
+                value['columns']['added'][0]['type'] = 'unreviewed'
+            path.write_text(json.dumps(value), encoding='utf-8')
+            self.admission(1)
+            path.write_bytes(original)
+
+class DeploymentValidationMarkerTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='pp-deploy-validation-')
+        self.addCleanup(self.temp.cleanup)
+        self.marker = Path(self.temp.name)/'.deploy-validation-pending'
+        self.revision = 'a'*40
+        self.source = (Path(__file__).parent/'deploy-vps.sh').read_text()
+        self.body = re.search(r"deployment_validation_marker\(\).*?<<'PY'\n(.*?)\nPY", self.source, re.S).group(1)
+
+    def invoke(self, action, revision=None):
+        return subprocess.run([sys.executable, '-c', self.body, str(self.marker), revision or self.revision, action],
+                              capture_output=True, text=True, timeout=10)
+
+    def test_exact_owned_marker_can_be_created_and_cleared(self):
+        self.assertEqual(self.invoke('create').returncode, 0)
+        self.assertEqual(self.marker.read_bytes(), (self.revision+'\n').encode('ascii'))
+        self.assertEqual(self.invoke('clear').returncode, 0)
+        self.assertFalse(self.marker.exists())
+
+    def test_existing_or_changed_marker_is_retained_for_recovery(self):
+        self.assertEqual(self.invoke('create').returncode, 0)
+        self.assertNotEqual(self.invoke('create').returncode, 0)
+        self.assertNotEqual(self.invoke('clear', 'b'*40).returncode, 0)
+        self.assertTrue(self.marker.exists())
+        self.marker.write_text('changed')
+        self.assertNotEqual(self.invoke('clear').returncode, 0)
+        self.assertEqual(self.marker.read_text(), 'changed')
+
+    def test_marker_is_created_after_stopped_checks_and_cleared_after_public_verification(self):
+        stopped = self.source.index('same_db "$BACKUP/database-before.json" "$BACKUP/database-installed-stopped.json"')
+        create = self.source.index('\ndeployment_validation_marker create\n')
+        start = self.source.index('STARTUP_ATTEMPTED=true\n')
+        proof = self.source.index('same_db "$BACKUP/database-before.json" "$BACKUP/database-started.json" startup')
+        public = self.source.index('\npublic_check\n')
+        clear = self.source.index('\ndeployment_validation_marker clear\n')
+        self.assertLess(stopped, create)
+        self.assertLess(create, start)
+        self.assertLess(start, proof)
+        self.assertLess(proof, public)
+        self.assertLess(public, clear)
+        self.assertIn('"$VALIDATION_MARKER_CREATED" == true && "$STARTUP_ATTEMPTED" == false', self.source)
 
 
 if __name__ == '__main__':

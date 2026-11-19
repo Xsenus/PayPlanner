@@ -7,6 +7,9 @@ CHAT_HISTORY_MIGRATION='20261027014154_AddPersonalChatHistory'
 PAYMENT_AND_HISTORY_MIGRATIONS=PAYMENT_ATTEMPT_MIGRATION+'+'+CHAT_HISTORY_MIGRATION
 PAYMENT_AND_HISTORY_DELTA_SHA256='1d53d5c0f92ce1c36fa84d49d0f257328ec7b30d8310db3d5af7b8ff310c2327'
 CANDIDATE_REVIEW_SHA256='b658e5982d94b6631ea1898a2ce8465651910324fe1c06a2c1a0fb81d7f81c4f'
+ACT_ANNUAL_MIGRATION='20261111140010_AddActAnnualNumberingPostgreSql'
+ACT_ANNUAL_REVIEW_SHA256='9178f693eb92ce8cd66a6825e12f32efbfc2c8ac876a24ed56c890ec9dcce918'
+ACT_ANNUAL_NEW_TABLES=['ActAnnualNumberCounters','ActCreateReceipts']
 CHAT_TABLES=['InternalChatAttachments','InternalChatMembers','InternalChatMentions','InternalChatMessages','InternalChatReactions','InternalChatThreads']
 POLICY_TABLES=['Acts','Contracts','Payments']
 POLICY_COLUMN='SellerSnapshotPolicy'
@@ -41,8 +44,16 @@ def reviewed_candidate():
  need(review['schemaVersion']==1 and len(review['migrationIds'])==18 and len(set(review['migrationIds']))==18,'Exact reviewed candidate migration set required')
  return review
 
+def reviewed_act_annual():
+ path=pathlib.Path(__file__).with_name('deploy-act-annual-review.json')
+ review=read_json(path)
+ need(hashlib.sha256(canonical(review).encode()).hexdigest()==ACT_ANNUAL_REVIEW_SHA256,'Reviewed annual-act admission changed')
+ need(review['schemaVersion']==1 and review['migrationIds']==[ACT_ANNUAL_MIGRATION],'Exact reviewed annual-act migration required')
+ return review
+
 def reviewed_migration_ids(value):
  if value is None:return []
+ if value==ACT_ANNUAL_MIGRATION:return reviewed_act_annual()['migrationIds']
  if value==PAYMENT_ATTEMPT_MIGRATION:return [PAYMENT_ATTEMPT_MIGRATION]
  if value==PAYMENT_AND_HISTORY_MIGRATIONS:return [PAYMENT_ATTEMPT_MIGRATION,CHAT_HISTORY_MIGRATION]
  ids=reviewed_candidate()['migrationIds']
@@ -51,13 +62,17 @@ def reviewed_migration_ids(value):
 
 def validate_candidate_plan(plan):
  ids=reviewed_migration_ids(plan['expectedMigration'])
- if len(ids)==18:
-  review=reviewed_candidate()
+ annual=ids==[ACT_ANNUAL_MIGRATION]
+ if len(ids)==18 or annual:
+  review=reviewed_act_annual() if annual else reviewed_candidate()
   need(plan['previousRevision']==review['previousRevision'],'Reviewed candidate previous revision differs')
   need(plan['expectedReleaseCatalogSha256']==review['releaseCatalogSha256'],'Reviewed candidate catalog differs')
   seeds=plan['expectedReleaseSeeds']
   need(isinstance(seeds,list) and len(seeds)==review['releaseSeedsCount'] and hashlib.sha256(json.dumps(seeds,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()==review['releaseSeedsSha256'],'Exact reviewed candidate release seeds required')
-  delta=read_json(pathlib.Path(__file__).with_name('deploy-roadmap-candidate-delta.json'))
+  if annual:
+   need(plan['expectedBaselineMigrationIdsSha256']==review['baselineMigrationIdsSha256'],'Reviewed annual-act baseline history differs')
+   need(hashlib.sha256(canonical({key:plan[key] for key in ('expectedProtectedTables', 'minimumRemainingBytes', 'policy', 'previousRevision', 'expectedPreviousApiSha256', 'expectedPreviousMigrationsSha256', 'expectedMigration', 'expectedAddedProtectedTables', 'expectedBaselineMigrations', 'expectedBaselineMigrationRows', 'expectedBaselineMigrationIdsSha256', 'expectedReleaseCatalogSha256', 'expectedReleaseSeeds')}).encode()).hexdigest()==review['baselineCanonicalSha256'],'Reviewed annual-act baseline differs')
+  delta=read_json(pathlib.Path(__file__).with_name('deploy-act-annual-delta.json' if annual else 'deploy-roadmap-candidate-delta.json'))
   need(hashlib.sha256(canonical(delta).encode()).hexdigest()==review['schemaDeltaSha256'],'Reviewed candidate schema fixture changed')
  return ids
 
@@ -98,6 +113,16 @@ def candidate_row_controls(schema_columns,schema_objects,query):
  counts={table:query('SELECT to_json(count(*)) FROM "'+table+'";')[0] if table in relations else None for table in CANDIDATE_NEW_TABLES}
  return defaults,counts
 
+def act_annual_row_controls(schema_objects,query):
+ relations={row['name'] for row in schema_objects['relations'] if row['kind']=='r'}
+ return {table:query('SELECT to_json(count(*)) FROM "'+table+'";')[0] if table in relations else None for table in ACT_ANNUAL_NEW_TABLES}
+
+def compare_act_annual_rows(a,b,migrated):
+ for state in (a,b):
+  need(set(state['actAnnualNewTableCounts'])==set(ACT_ANNUAL_NEW_TABLES),'Annual-act row-control scope changed')
+ need(all(value is None for value in a['actAnnualNewTableCounts'].values()),'Annual-act tables already exist in the pre-migration baseline')
+ need(all(type(value) is int and value==0 if migrated else value is None for value in b['actAnnualNewTableCounts'].values()),'Annual-act tables contain unexpected startup data')
+
 def compare_financial_rows(a,b):
  for key,tables in [('projectionColumns',a['projectionColumns']),('supplementalProjectionColumns',SUPPLEMENTAL_TABLES)]:
   need(set(a[key])==set(tables) and a[key]==b[key],'Candidate all-column projection changed')
@@ -130,9 +155,11 @@ def compare_payment_attempt_schema(a,b,expected=PAYMENT_ATTEMPT_DELTA_SHA256):
 
 def compare_releases(a,b,plan,phase):
  need(a['releaseSeen']==b['releaseSeen'],'Release read markers changed during read-only delivery')
- candidate=len(reviewed_migration_ids(plan['expectedMigration']))==18
- if candidate:
-  review=reviewed_candidate()
+ ids=reviewed_migration_ids(plan['expectedMigration'])
+ candidate=len(ids)==18
+ annual=ids==[ACT_ANNUAL_MIGRATION]
+ if candidate or annual:
+  review=reviewed_act_annual() if annual else reviewed_candidate()
   need(len(plan['expectedReleaseSeeds'])==review['releaseSeedsCount'] and hashlib.sha256(json.dumps(plan['expectedReleaseSeeds'],ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()==review['releaseSeedsSha256'],'Exact reviewed candidate release seeds required')
  if phase=='unchanged':
   need(a['releaseRows']==b['releaseRows'] and a['releaseItems']==b['releaseItems'],'Release catalog changed before startup')
@@ -140,7 +167,7 @@ def compare_releases(a,b,plan,phase):
  old={r['ReleaseId']:r for r in a['releaseRows']};new={r['ReleaseId']:r for r in b['releaseRows']}
  need(len(old)==len(a['releaseRows']) and len(new)==len(b['releaseRows']),'Duplicate release identity')
  seeds={r['releaseId']:r for r in plan['expectedReleaseSeeds']}
- need(len(seeds)==len(plan['expectedReleaseSeeds']) and len(seeds)<=(review['releaseSeedsCount'] if candidate else 20),'Exact reviewed release seeds required')
+ need(len(seeds)==len(plan['expectedReleaseSeeds']) and len(seeds)<=(review['releaseSeedsCount'] if candidate or annual else 20),'Exact reviewed release seeds required')
  need(not set(old)&set(seeds) and set(new)==set(old)|set(seeds),'Unexpected release insertion/removal or stale baseline')
  for identity,row in old.items():need(new[identity]==row,'Previously published/manual release row changed')
  old_ids={r['Id'] for r in old.values()}
@@ -162,14 +189,16 @@ def compare(plan_path,a_path,b_path,phase):
  plan,a,b=map(read_json,[plan_path,a_path,b_path])
  admitted_ids=validate_candidate_plan(plan)
  candidate=len(admitted_ids)==18
+ annual=admitted_ids==[ACT_ANNUAL_MIGRATION]
  need(a['schemaVersion']==b['schemaVersion']==2 and a['baselineSha256'] is None,'Immutable stopped baseline required')
  need(b['baselineSha256']==digest(a_path),'Later proof not bound to exact baseline bytes')
  need(a['fingerprints']==b['fingerprints'],'Protected rows/counts/all-column contents changed')
  need(a['projectionColumns']==b['projectionColumns'],'Pinned all-column projection changed')
  migrated=phase=='startup' and bool(admitted_ids)
- post_candidate=not admitted_ids and len(a['controls']['migrations'])==227
+ post_candidate=(not admitted_ids or annual) and len(a['controls']['migrations'])==227
  history=plan['expectedMigration']==PAYMENT_AND_HISTORY_MIGRATIONS or candidate or post_candidate
  if candidate:compare_candidate_rows(a,b,migrated)
+ if annual:compare_act_annual_rows(a,b,migrated)
  if post_candidate:compare_financial_rows(a,b)
  if history:
   need(set(a['chatProjectionColumns'])==set(CHAT_TABLES) and a['chatProjectionColumns']==b['chatProjectionColumns'],'Chat projection scope changed')
@@ -181,7 +210,11 @@ def compare(plan_path,a_path,b_path,phase):
   else:
    need(a['chatHistoryNonDefaults'] is None,'Unexpected pre-existing history columns')
    need(b['chatHistoryNonDefaults']==(0 if migrated else None),'Existing personal history state changed')
- if migrated:compare_payment_attempt_schema(a,b,reviewed_candidate()['schemaDeltaSha256'] if candidate else PAYMENT_AND_HISTORY_DELTA_SHA256 if history else PAYMENT_ATTEMPT_DELTA_SHA256)
+ if migrated:
+  if annual:expected_schema=reviewed_act_annual()['schemaDeltaSha256']
+  elif candidate:expected_schema=reviewed_candidate()['schemaDeltaSha256']
+  else:expected_schema=PAYMENT_AND_HISTORY_DELTA_SHA256 if history else PAYMENT_ATTEMPT_DELTA_SHA256
+  compare_payment_attempt_schema(a,b,expected_schema)
  else:need(a['schemaColumns']==b['schemaColumns'] and a['schemaObjects']==b['schemaObjects'],'Unexpected schema mutation')
  need({k:v for k,v in a['controls'].items() if k!='migrations'}=={k:v for k,v in b['controls'].items() if k!='migrations'},'Protected financial/integrity controls changed')
  am=a['controls']['migrations']
@@ -245,6 +278,7 @@ def main():
  supplemental_columns={t:[c['name'] for c in schema_columns if c['table']==t] for t in SUPPLEMENTAL_TABLES} if baseline is None else baseline['supplementalProjectionColumns']
  need(set(supplemental_columns)==set(SUPPLEMENTAL_TABLES) and all(supplemental_columns.values()),'Pinned cash/request table scope differs')
  candidate_defaults,candidate_new_tables=candidate_row_controls(schema_columns,schema_objects,query)
+ act_annual_counts=act_annual_row_controls(schema_objects,query)
  history_columns={c['name'] for c in schema_columns if c['table']=='InternalChatMembers'}
  new_history_columns={'HistoryHiddenThroughMessageId','HistoryVisibilityRevision'}
  need(not (history_columns & new_history_columns) or new_history_columns.issubset(history_columns),'Incomplete personal history schema')
@@ -271,7 +305,7 @@ def main():
  supplemental_checks=fingerprints(SUPPLEMENTAL_TABLES,supplemental_columns)
  controls=query('''SELECT jsonb_build_object('legacyActive',(SELECT count(*) FROM "TaskJournalItems" WHERE "ClientBillingClassification"='legacy' AND NOT "IsDeleted"),'pendingContractor',(SELECT count(*) FROM "TaskJournalItems" t JOIN "Users" u ON u."Id"=t."AssigneeUserId" WHERE NOT t."IsDeleted" AND t."ContractorPaymentEnabled" AND t."ContractorPaymentId" IS NULL AND u."IsExternalContractor" AND round(t."ContractorPaymentAmount",2)>0 AND ((NOT t."ContractorPaymentOnResult" AND t."ContractorPaymentDueDate" IS NOT NULL) OR (t."ContractorPaymentOnResult" AND lower(t."Status")='done' AND t."ContractorPaymentResultDelayDays" BETWEEN 0 AND 365))),'invalidIndexes',(SELECT count(*) FROM pg_index WHERE NOT indisvalid),'invalidConstraints',(SELECT count(*) FROM pg_constraint WHERE NOT convalidated),'migrations',(SELECT jsonb_agg("MigrationId" ORDER BY "MigrationId") FROM "__EFMigrationsHistory"));''')[0]
  assert controls['legacyActive']==controls['pendingContractor']==controls['invalidIndexes']==controls['invalidConstraints']==0
- out=dict(schemaVersion=2,utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),fingerprints=checks,controls=controls,baselineSha256=baseline_sha,projectionColumns=projection_columns,chatProjectionColumns=chat_columns,chatFingerprints=chat_checks,chatHistoryNonDefaults=history_non_defaults,supplementalProjectionColumns=supplemental_columns,supplementalFingerprints=supplemental_checks,candidateDefaultCounts=candidate_defaults,candidateNewTableCounts=candidate_new_tables,schemaColumns=schema_columns,schemaObjects=schema_objects,migrationRows=migration_rows,newPolicyNonNullCounts=policy_non_null,releaseRows=release_rows,releaseItems=release_items,releaseSeen=release_seen)
+ out=dict(schemaVersion=2,utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),fingerprints=checks,controls=controls,baselineSha256=baseline_sha,projectionColumns=projection_columns,chatProjectionColumns=chat_columns,chatFingerprints=chat_checks,chatHistoryNonDefaults=history_non_defaults,supplementalProjectionColumns=supplemental_columns,supplementalFingerprints=supplemental_checks,candidateDefaultCounts=candidate_defaults,candidateNewTableCounts=candidate_new_tables,actAnnualNewTableCounts=act_annual_counts,schemaColumns=schema_columns,schemaObjects=schema_objects,migrationRows=migration_rows,newPolicyNonNullCounts=policy_non_null,releaseRows=release_rows,releaseItems=release_items,releaseSeen=release_seen)
  target=pathlib.Path(sys.argv[1]);target.write_text(json.dumps(out,indent=2));os.chmod(target,0o600)
  print(json.dumps(dict(tables=len(checks),tasks=next(t['count'] for t in checks if t['table']=='TaskJournalItems'),calendarLinks=sum(t['count'] for t in checks if t['table'] in ('GoogleCalendarTaskLinks','YandexCalendarTaskLinks')),pendingTaskBackfills=0)))
 

@@ -15,6 +15,7 @@ export const linuxFiles = Object.freeze([
   'deploy-db-proof.py', 'deploy-db-proof.test.py', 'deployment-baseline.json', 'deployment-baseline-current.json',
   'deploy-payment-attempt-delta.json', 'deploy-payment-history-delta.json',
   'deploy-roadmap-candidate-review.json', 'deploy-roadmap-candidate-delta.json',
+  'deploy-act-annual-review.json', 'deploy-act-annual-delta.json',
   'deploy-stopped-archive.py', 'deploy-stopped-archive.test.py',
   'deploy-history-source-proof.py', 'deploy-stopped-source-proof.py',
   'deploy-vps.sh', 'deploy-vps-admission.test.py',
@@ -282,7 +283,8 @@ export async function deploy(config, options = {}) {
       control = execute('ssh', [...sshArgs, destination, `umask 077; mktemp -d /tmp/payplanner-control-${config.sha}-XXXXXXXX`], { echo: false }).trim();
       assert.match(control, new RegExp(`^/tmp/payplanner-control-${config.sha}-[A-Za-z0-9]{8}$`));
       const controlFiles = ['deploy-vps.sh', 'deploy-db-proof.py', 'deploy-history-source-proof.py', 'deploy-stopped-source-proof.py',
-        'deploy-roadmap-candidate-review.json', 'deploy-roadmap-candidate-delta.json'];
+        'deploy-roadmap-candidate-review.json', 'deploy-roadmap-candidate-delta.json',
+        'deploy-act-annual-review.json', 'deploy-act-annual-delta.json'];
       for (const name of controlFiles) writeFileSync(join(directory, name), content.get(join(config.root, 'scripts', name)), { flag: 'wx' });
       for (const [name, bytes] of [['ci-qualification.json', prepared.qualificationRaw], ['history-manifest.json', prepared.historyManifestRaw], ['history-offsite-verified.json', prepared.historyRaw]]) {
         writeFileSync(join(directory, name), bytes, { flag: 'wx' });

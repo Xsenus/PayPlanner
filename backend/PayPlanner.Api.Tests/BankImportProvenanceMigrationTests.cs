@@ -120,6 +120,7 @@ public sealed class BankImportProvenanceMigrationTests
             "20261101000834_IndexCompanyBankBindingHistoryPostgreSql",
             "20261105040010_AddCourtDocumentAcceptedControlsPostgreSql",
             "20261105070010_AddCaseCourtNotificationOutboxPostgreSql",
+            "20261111140010_AddActAnnualNumberingPostgreSql",
         } : new[]
         {
             "20261027031742_AddTaskTimeTracking", "20261027130000_AddSalesRequestServiceInvoice",
@@ -134,6 +135,7 @@ public sealed class BankImportProvenanceMigrationTests
             "20261101000824_IndexCompanyBankBindingHistory",
             "20261105040000_AddCourtDocumentAcceptedControls",
             "20261105070000_AddCaseCourtNotificationOutbox",
+            "20261111140000_AddActAnnualNumbering",
         };
         Assert.Equal(new[] { current, policy, paymentAttempts, chatHistory }.Concat(remaining), migrations[(provenanceIndex + 1)..]);
         var upgrade = previousStage > 0;

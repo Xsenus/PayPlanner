@@ -469,5 +469,191 @@ class ReviewedCandidateAdmissionTests(unittest.TestCase):
             proof.compare_payment_attempt_schema(before, bad, review['schemaDeltaSha256'])
 
 
+
+class AnnualActAdmissionTests(unittest.TestCase):
+    compare = DatabaseProofTests.compare
+
+    def setUp(self):
+        DatabaseProofTests.setUp(self)
+        self.plan = json.loads(Path(__file__).with_name('deployment-baseline-current.json').read_text(encoding='utf-8'))
+        self.assertEqual(self.plan['expectedMigration'], proof.ACT_ANNUAL_MIGRATION)
+        self.assertEqual(len(self.plan['expectedReleaseSeeds']), 29)
+        self.before['utc'] = '2026-11-13T00:00:00+00:00'
+        self.before['controls']['migrations'] = self.plan['expectedBaselineMigrations']
+        self.before['migrationRows'] = self.plan['expectedBaselineMigrationRows']
+        self.before['chatHistoryNonDefaults'] = 2
+        for prefix, tables in [('chat', proof.CHAT_TABLES), ('supplemental', proof.SUPPLEMENTAL_TABLES)]:
+            self.before[prefix + 'ProjectionColumns'] = {table: ['Id'] for table in tables}
+            self.before[prefix + 'Fingerprints'] = [dict(table=table, count=1, hash='b'*32) for table in tables]
+            self.before['schemaColumns'].extend(dict(table=table, name='Id') for table in tables)
+        self.before['schemaColumns'].extend(dict(table=table, name='Id')
+            for table in self.before['projectionColumns'] if table not in proof.POLICY_TABLES)
+        self.delta = json.loads(Path(__file__).with_name('deploy-act-annual-delta.json').read_text(encoding='utf-8'))
+        self.before['schemaObjects'] = {name: [] for name in self.delta if name not in ['columns', 'migrations']}
+        self.before['schemaObjects']['relations'] = [dict(name='__EFMigrationsHistory', owner='fixture_owner')]
+        self.before['actAnnualNewTableCounts'] = {table: None for table in proof.ACT_ANNUAL_NEW_TABLES}
+        self.a_path.write_text(json.dumps(self.before))
+        self.after = copy.deepcopy(self.before)
+        self.after['utc'] = '2026-11-13T00:01:00+00:00'
+        self.after['baselineSha256'] = proof.digest(self.a_path)
+        for name, change in self.delta.items():
+            self.assertFalse(change['removed'])
+            added = copy.deepcopy(change['added'])
+            for row in added:
+                if 'owner' in row:
+                    self.assertEqual(row['owner'], '__migration_owner__')
+                    row['owner'] = 'fixture_owner'
+            if name == 'columns':
+                self.after['schemaColumns'].extend(added)
+            elif name == 'migrations':
+                self.after['migrationRows'].extend(added)
+            else:
+                self.after['schemaObjects'][name].extend(added)
+        self.after['controls']['migrations'] = sorted(self.plan['expectedBaselineMigrations'] + [proof.ACT_ANNUAL_MIGRATION])
+        self.after['actAnnualNewTableCounts'] = {table: 0 for table in proof.ACT_ANNUAL_NEW_TABLES}
+        next_item_id = 2
+        for release_id, seed in enumerate(self.plan['expectedReleaseSeeds'], start=2):
+            self.after['releaseRows'].append(dict(Id=release_id, ReleaseId=seed['releaseId'], Version=seed['version'],
+                ReleasedAt=seed['releasedAt'], Title=seed['title'], Summary=seed['summary'], IsActive=True,
+                Source=seed.get('source', 'agent'), CreatedAt='2026-11-13T00:00:30+00:00', UpdatedAt='2026-11-13T00:00:30+00:00',
+                CreatedByUserId=None, CreatedByUserName=None, UpdatedByUserId=None, UpdatedByUserName=None))
+            for order, item in enumerate(seed['items']):
+                self.after['releaseItems'].append(dict(Id=next_item_id, AppReleaseId=release_id,
+                    Type=item['type'], Text=item['text'], SortOrder=order))
+                next_item_id += 1
+
+    def test_exact_annual_startup_preserves_installed_227_and_all_protected_rows(self):
+        result = self.compare('startup')
+        self.assertEqual(result['migrationBaselineCount'], 227)
+        self.assertEqual(result['protectedTables'], 16)
+        self.assertEqual(result['protectedChatTables'], 6)
+        self.assertEqual(result['protectedSupplementalTables'], 4)
+        self.assertEqual(result['reviewedReleaseSeeds'], 29)
+        self.assertTrue(result['allColumnsAndRowsExact'])
+
+    def test_stopped_boundary_keeps_schema_history_and_empty_absence_exact(self):
+        self.after = copy.deepcopy(self.before)
+        self.after['utc'] = '2026-11-13T00:00:30+00:00'
+        self.after['baselineSha256'] = proof.digest(self.a_path)
+        self.compare('unchanged')
+        self.after['actAnnualNewTableCounts']['ActCreateReceipts'] = 0
+        with self.assertRaises(AssertionError):
+            self.compare('unchanged')
+
+    def test_rejects_any_financial_chat_cash_history_or_schema_mutation(self):
+        original = copy.deepcopy(self.after)
+        mutations = [lambda state: state['fingerprints'][0].update(hash='changed'),
+                     lambda state: state['chatFingerprints'][0].update(hash='changed'),
+                     lambda state: state['supplementalFingerprints'][0].update(count=2),
+                     lambda state: state.update(chatHistoryNonDefaults=3),
+                     lambda state: state['schemaObjects']['indexes'][-1].update(definition='unreviewed'),
+                     lambda state: state['migrationRows'][0].update(ProductVersion='unreviewed')]
+        for mutate in mutations:
+            with self.subTest(mutation=mutate):
+                self.after = copy.deepcopy(original)
+                mutate(self.after)
+                with self.assertRaises(AssertionError):
+                    self.compare('startup')
+
+    def test_rejects_nonempty_missing_boolean_or_extra_new_table_controls(self):
+        original = copy.deepcopy(self.after)
+        for table in proof.ACT_ANNUAL_NEW_TABLES:
+            for value in [1, True, None]:
+                with self.subTest(table=table, value=value):
+                    self.after = copy.deepcopy(original)
+                    self.after['actAnnualNewTableCounts'][table] = value
+                    with self.assertRaises(AssertionError):
+                        self.compare('startup')
+        for mutate in [lambda controls: controls.pop('ActCreateReceipts'),
+                       lambda controls: controls.update(UnreviewedTable=0)]:
+            self.after = copy.deepcopy(original)
+            mutate(self.after['actAnnualNewTableCounts'])
+            with self.assertRaises(AssertionError):
+                self.compare('startup')
+
+    def test_rejects_changed_annual_plan_release_seed_or_previous_baseline(self):
+        original = copy.deepcopy(self.plan)
+        mutations = [lambda plan: plan.update(previousRevision='b'*40),
+                     lambda plan: plan.update(expectedMigration=None),
+                     lambda plan: plan['expectedReleaseSeeds'].pop(),
+                     lambda plan: plan['expectedReleaseSeeds'].reverse(),
+                     lambda plan: plan['expectedReleaseSeeds'][0].update(isActive=False),
+                     lambda plan: plan['expectedReleaseSeeds'][0]['items'][0].update(text='unreviewed')]
+        for mutate in mutations:
+            self.plan = copy.deepcopy(original)
+            mutate(self.plan)
+            with self.assertRaises(AssertionError):
+                self.compare('startup')
+
+    def test_postgresql18_native_not_null_scope_matches_all_seven_required_columns(self):
+        required = {
+            ('ActAnnualNumberCounters', 'Year'),
+            ('ActAnnualNumberCounters', 'LastNumber'),
+            ('ActCreateReceipts', 'ActorUserId'),
+            ('ActCreateReceipts', 'UploadKey'),
+            ('ActCreateReceipts', 'ActId'),
+            ('ActCreateReceipts', 'CommandSha256'),
+            ('ActCreateReceipts', 'Operation'),
+        }
+        columns = {(row['table'], row['name']) for row in self.delta['columns']['added']
+                   if row['table'] in proof.ACT_ANNUAL_NEW_TABLES and not row['nullable']}
+        self.assertEqual(columns, required)
+        native = [row for row in self.delta['constraints']['added']
+                  if row['definition'].startswith('NOT NULL ')]
+        self.assertEqual(len(native), len(required))
+        actual = set()
+        for row in native:
+            column = row['definition'].removeprefix('NOT NULL "').removesuffix('"')
+            actual.add((row['table'], column))
+            self.assertEqual(row['name'], row['table'] + '_' + column + '_not_null')
+            self.assertIs(row['validated'], True)
+            self.assertIs(row['deferrable'], False)
+            self.assertIs(row['deferred'], False)
+        self.assertEqual(actual, required)
+
+    def test_rejects_every_missing_or_modified_native_not_null_constraint(self):
+        original = copy.deepcopy(self.after)
+        native = [row for row in self.delta['constraints']['added']
+                  if row['definition'].startswith('NOT NULL ')]
+        self.assertEqual(len(native), 7)
+        mutations = [('name', 'unreviewed'), ('table', 'Invoices'),
+                     ('definition', 'NOT NULL "Unreviewed"'), ('validated', False),
+                     ('deferrable', True), ('deferred', True)]
+        for expected in native:
+            for field, value in [('remove', None)] + mutations:
+                with self.subTest(constraint=expected['name'], mutation=field):
+                    self.after = copy.deepcopy(original)
+                    rows = self.after['schemaObjects']['constraints']
+                    row = next(item for item in rows
+                               if item['table'] == expected['table'] and item['name'] == expected['name'])
+                    if field == 'remove':
+                        rows.remove(row)
+                    else:
+                        row[field] = value
+                    with self.assertRaisesRegex(AssertionError, 'Unexpected migration schema or history delta'):
+                        self.compare('startup')
+        self.after = copy.deepcopy(original)
+        extra = copy.deepcopy(native[0])
+        extra['name'] = 'unreviewed_extra_not_null'
+        self.after['schemaObjects']['constraints'].append(extra)
+        with self.assertRaisesRegex(AssertionError, 'Unexpected migration schema or history delta'):
+            self.compare('startup')
+
+    def test_new_table_collector_is_readonly_and_avoids_absent_relations(self):
+        def absent_query(sql):
+            self.fail('The collector queried an absent annual-act table.')
+        self.assertEqual(proof.act_annual_row_controls({'relations': []}, absent_query),
+                         {table: None for table in proof.ACT_ANNUAL_NEW_TABLES})
+        calls = []
+        def present_query(sql):
+            calls.append(sql)
+            return [0]
+        relations = [dict(name=table, kind='r') for table in proof.ACT_ANNUAL_NEW_TABLES]
+        self.assertEqual(proof.act_annual_row_controls({'relations': relations}, present_query),
+                         {table: 0 for table in proof.ACT_ANNUAL_NEW_TABLES})
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all(sql.startswith('SELECT to_json(count(*)) FROM "') for sql in calls))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -51,22 +51,34 @@ type RealtimeNotificationToastsProps = {
 };
 
 function buildToastDescription(notification: RealtimeUserNotification): string {
-  const value = notification.bodyPreview?.trim() || notification.title.trim();
+  const body = notification.bodyPreview?.trim() || '';
+  const value = body || notification.title.trim();
   if (notification.type === 'taskChanged') {
-    const changes = value.match(/(?:^|\r?\n)Изменения:[ \t]*\r?\n([\s\S]*?)(?:\r?\n[ \t]*\r?\n|$)/i)?.[1]
+    const taskHeader = body.match(/(?:^|\r?\n)[ \t]*Задача[ \t]*:[ \t]*([^\r\n]*)/i);
+    const metadataTitle = parseUserNotificationMetadata(notification.metadataJson).taskTitle;
+    const taskTitle = ((typeof metadataTitle === 'string' ? metadataTitle.trim() : '') || taskHeader?.[1].trim() || '').slice(0, 500);
+    const titleCharacters = Array.from(taskTitle);
+    const visibleTitle = titleCharacters.length > 160 ? `${titleCharacters.slice(0, 157).join('')}...` : taskTitle;
+    const taskId = [notification.taskJournalItemId, notification.objectType === 'task' ? notification.objectId : null]
+      .find(id => Number.isSafeInteger(id) && (id ?? 0) > 0);
+    const taskLabel = taskId ? `Задача №${taskId}` : 'Задача';
+    const identity = visibleTitle ? `${taskLabel} — ${visibleTitle}` : taskLabel;
+    const changes = body.match(/(?:^|\r?\n)Изменения:[ \t]*\r?\n([\s\S]*?)(?:\r?\n[ \t]*\r?\n|$)/i)?.[1]
       ?.split(/\r?\n/)
       .map((line) => line.trim().replace(/^-\s*/, ''))
       .filter(Boolean);
+    let description = taskHeader ? body.replace(taskHeader[0], '').trim() : body;
     if (changes?.length) {
       const priority = (change: string) => /^(Постановщик|Срок|Исполнитель):/i.test(change) ? 0 : 1;
-      const summary = changes
+      description = changes
         .map((change, index) => ({ change, index }))
         .sort((left, right) => priority(left.change) - priority(right.change) || left.index - right.index)
         .slice(0, 3)
         .map(({ change }) => change.length > 95 ? `${change.slice(0, 92)}...` : change)
         .join('\n');
-      return summary.length > 220 ? `${summary.slice(0, 217)}...` : summary;
     }
+    const summary = description.length > 220 ? `${description.slice(0, 217)}...` : description;
+    return summary ? `${identity}\n${summary}` : identity;
   }
   return value.length > 220 ? `${value.slice(0, 217)}...` : value;
 }

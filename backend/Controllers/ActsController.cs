@@ -30,7 +30,7 @@ namespace PayPlanner.Api.Controllers;
 [Route("api/[controller]")]
 [Authorize]
 [DocumentSellerExceptionFilter]
-public class ActsController : ControllerBase
+public partial class ActsController : ControllerBase
 {
     private const string ActDocumentTemplatesSettingKey = "acts.documentTemplates";
     private const int ActDocumentTemplateHistoryObjectId = 3;
@@ -372,12 +372,12 @@ public class ActsController : ControllerBase
     private async Task<Payment?> LoadAvailableActInvoiceAsync(int invoiceId, CancellationToken ct)
     {
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        // Legacy SystemNotes can contain invoice lines. Read only metadata until all sources are authorized.
         return await _db.Payments.AsNoTracking()
             .ApplyPaymentVisibility(visibility)
             .ApplyUnambiguousInvoiceLinks()
             .ApplyInvoiceRepresentativeFilter(_db.Payments)
             .Where(payment => payment.Id == invoiceId)
-            // Legacy SystemNotes can contain invoice lines. Read only metadata until all sources are authorized.
             .Select(payment => new Payment
             {
                 Id = payment.Id,
@@ -1069,12 +1069,31 @@ public class ActsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<ActDto>> Create([FromBody] UpsertActRequest request, CancellationToken ct)
     {
+        try { return await CreateActAsync(request, ct); }
+        catch (ActAnnualNumberExhaustedException failure)
+        {
+            return UnprocessableEntity(new { message = failure.Message });
+        }
+    }
+
+    private async Task<ActionResult<ActDto>> CreateActAsync(UpsertActRequest request, CancellationToken ct)
+    {
         if (await RequireActsPermissionAsync(permission => permission.CanCreate, ct) is { } forbidden)
         {
             return forbidden;
         }
 
-        var missingCreate = await _formRequirements.GetMissingFieldsAsync("acts", request, ct);
+        if (!TryReadActUploadKey(out var uploadKey)) return BadRequest(new { message = "Некорректный идентификатор попытки создания акта." });
+        var actorId = User.GetUserId();
+        if (uploadKey.HasValue && actorId is not > 0) return Unauthorized();
+        var commandHash = uploadKey.HasValue ? ActCreateCommandHash(request) : string.Empty;
+        if (uploadKey.HasValue && await FindActReceiptAsync(actorId!.Value, uploadKey.Value, ct) is { } knownReceipt)
+            return await ReplayActCreateAsync(knownReceipt, commandHash, ct);
+        if (uploadKey.HasValue && await HasGeneratedActKeyAsync(actorId!.Value, uploadKey.Value, ct))
+            return Conflict(new { message = "Эта попытка создания акта уже относится к другой команде." });
+
+        var missingCreate = (await _formRequirements.GetMissingFieldsAsync("acts", request, ct))
+            .Where(field => !string.Equals(field, nameof(request.Number), StringComparison.OrdinalIgnoreCase)).ToList();
         if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
 
         if (!ModelState.IsValid)
@@ -1107,6 +1126,17 @@ public class ActsController : ControllerBase
             if (await RequireActsPermissionAsync(permission => permission.CanCreate, ct) is { } changedPermission)
                 return changedPermission;
 
+            var numbering = new ActAnnualNumberingService(_db);
+            await numbering.LockAsync(ct);
+            if (await RequireActsPermissionAsync(permission => permission.CanCreate, ct) is { } finalPermission)
+                return finalPermission;
+            // Requests with different source graphs can share one key. Recheck
+            // after global admission before any source-dependent write or issue.
+            if (uploadKey.HasValue && await FindActReceiptAsync(actorId!.Value, uploadKey.Value, ct) is { } receipt)
+                return await ReplayActCreateAsync(receipt, commandHash, ct);
+            if (uploadKey.HasValue && await HasGeneratedActKeyAsync(actorId!.Value, uploadKey.Value, ct))
+                return Conflict(new { message = "Эта попытка создания акта уже относится к другой команде." });
+
             var sources = await ResolveAvailableActSourcesAsync(request, null, ct);
             if (sources.Error is not null) return sources.Error;
             var invoice = sources.Invoice;
@@ -1124,7 +1154,7 @@ public class ActsController : ControllerBase
             {
                 SellerCompanyId = request.SellerCompanyId,
                 SellerBranchId = request.SellerBranchId,
-                Number = request.Number.Trim(),
+                Number = await numbering.NextAsync(request.Date, ct),
                 Title = Normalize(request.Title),
                 Date = ActDomainService.NormalizeLocalDate(request.Date),
                 Amount = resolvedLineItems.Amount,
@@ -1147,6 +1177,18 @@ public class ActsController : ControllerBase
             SyncActLineItems(act, resolvedLineItems.LineItems);
             SyncActContractLink(act, request.ContractId);
             await _db.SaveChangesAsync(ct);
+            if (uploadKey.HasValue)
+            {
+                _db.ActCreateReceipts.Add(new ActCreateReceipt
+                {
+                    ActorUserId = actorId!.Value,
+                    UploadKey = uploadKey.Value,
+                    CommandSha256 = commandHash,
+                    ActId = act.Id,
+                });
+                await _db.SaveChangesAsync(ct);
+                Response.Headers["X-Upload-Key"] = uploadKey.Value.ToString("D");
+            }
             await lease.CommitAsync(ct);
 
             await _db.Entry(act).Reference(a => a.Client).LoadAsync(ct);
@@ -1169,6 +1211,8 @@ public class ActsController : ControllerBase
             return forbidden;
         }
 
+        if (string.IsNullOrWhiteSpace(request.Number))
+            return ValidationError(nameof(request.Number), "Номер акта обязателен.");
         var missingUpdate = await _formRequirements.GetMissingFieldsAsync("acts", request, ct);
         if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
 
@@ -1207,6 +1251,7 @@ public class ActsController : ControllerBase
         return await FinancialSourceLease.RunAsync<ActDto>(_db, async lease =>
         {
             await lease.AcquireActAsync(id, preflightAct.InvoiceId, request, ct);
+            await new ActAnnualNumberingService(_db).LockAsync(ct);
             if (await RequireActsPermissionAsync(permission => permission.CanEdit, ct) is { } changedPermission)
                 return changedPermission;
             visibility = await ResolveActsVisibilityAsync(ct);
@@ -1239,7 +1284,9 @@ public class ActsController : ControllerBase
 
             var preserveContractLinks = act.InvoiceId == request.InvoiceId
                 && act.ClientId == owner.ClientId && act.LegalEntityId == owner.LegalEntityId;
-            act.Number = request.Number.Trim();
+            if (act.Date.Year != request.Date.Year || act.Number != request.Number!.Trim())
+                await new ActAnnualNumberingService(_db).RaiseFloorAsync(act.Date, act.Number, ct);
+            act.Number = request.Number!.Trim();
             act.Title = Normalize(request.Title);
             act.Date = ActDomainService.NormalizeLocalDate(request.Date);
             act.Amount = resolvedLineItems.Amount;
@@ -1257,6 +1304,7 @@ public class ActsController : ControllerBase
             SyncActLineItems(act, resolvedLineItems.LineItems);
             SyncActContractLink(act, request.ContractId, preserveContractLinks);
 
+            await new ActAnnualNumberingService(_db).RaiseFloorAsync(act.Date, act.Number, ct);
             await _db.SaveChangesAsync(ct);
             await lease.CommitAsync(ct);
 
@@ -1280,29 +1328,30 @@ public class ActsController : ControllerBase
             return forbidden;
         }
 
-        var visibility = await ResolveActsVisibilityAsync(ct);
-        if (visibility is null)
+        return await DocumentSellerLease.RunAsync<IActionResult>(_db, async lease =>
         {
-            return MissingActsVisibilityResult();
-        }
+            var visibility = await ResolveActsVisibilityAsync(ct);
+            if (visibility is null) return MissingActsVisibilityResult();
+            if (!await _db.Acts.AsNoTracking().ApplyActVisibility(visibility).AnyAsync(item => item.Id == id, ct)) return NotFound();
+            if (_db.Database.IsNpgsql())
+                await _db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"Acts\" WHERE \"Id\" = {id} FOR UPDATE NOWAIT").ToArrayAsync(ct);
+            await new ActAnnualNumberingService(_db).LockAsync(ct);
+            if (await RequireActsPermissionAsync(permission => permission.CanDelete, ct) is { } changedPermission)
+                return changedPermission;
+            visibility = await ResolveActsVisibilityAsync(ct);
+            if (visibility is null) return MissingActsVisibilityResult();
+            var act = await _db.Acts.ApplyActVisibility(visibility).Include(item => item.LineItems)
+                .FirstOrDefaultAsync(item => item.Id == id, ct);
+            if (act is null) return NotFound();
+            await _db.Entry(act).ReloadAsync(ct);
+            if (!await _db.Acts.ApplyActVisibility(visibility).AnyAsync(item => item.Id == id, ct)) return NotFound();
+            await new ActAnnualNumberingService(_db).RaiseFloorAsync(act.Date, act.Number, ct);
+            if (act.LineItems.Count > 0) _db.RemoveRange(act.LineItems);
 
-        var act = await _db.Acts
-            .ApplyActVisibility(visibility)
-            .Include(item => item.LineItems)
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (act is null)
-        {
-            return NotFound();
-        }
-
-        if (act.LineItems.Count > 0)
-        {
-            _db.RemoveRange(act.LineItems);
-        }
-
-        _db.Acts.Remove(act);
-        await _db.SaveChangesAsync(ct);
-        return NoContent();
+            _db.Acts.Remove(act);
+            await _db.SaveChangesAsync(ct);
+            return NoContent();
+        }, ct);
     }
 
     [HttpGet("document-template-settings")]

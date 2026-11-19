@@ -54,7 +54,9 @@ public class FinancialNotificationInventoryTests
         AssertMethodContains(invoicesSource, "Cancel", "CancelCoreAsync", "lease.CommitAsync", "scope.AfterCommit");
         AssertMethodContains(invoicesSource, "CancelCoreAsync", "NotifyInvoiceChangedAsync");
 
-        AssertMethodContains(actsSource, "Create", "NotifyActCreatedAsync");
+        AssertMethodContains(actsSource, "Create", "return await CreateActAsync(request, ct);");
+        AssertMethodContains(actsSource, "CreateActAsync", "await NotifyActCreatedAsync(act, ct);");
+        AssertMethodContains(actsSource, "NotifyActCreatedAsync", "await _notificationService.NotifyActCreatedAsync(");
         AssertMethodContains(actsSource, "Update", "NotifyActChangedAsync");
         AssertMethodContains(actsSource, "CreateCorrection", "NotifyActCreatedAsync");
         AssertMethodContains(actsSource, "SendToSigning", "NotifyActChangedAsync");
@@ -128,7 +130,7 @@ public class FinancialNotificationInventoryTests
         AssertMethodContains(
             contractExpirationSource,
             "RunOnceAsync",
-            "ResolveContractNotificationRecipientsAsync",
+            "ContractExpirationNotificationPolicy.ResponsibleCandidates",
             "NotifyContractExpiringAsync");
     }
 

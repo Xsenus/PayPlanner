@@ -207,6 +207,8 @@ public class TaskJournalAssigneeDto
     public bool IsExternalContractor { get; set; }
     public int? DepartmentId { get; set; }
     public string? Department { get; set; }
+    public int? RoleId { get; set; }
+    public string? RoleName { get; set; }
     public string? TimeZoneId { get; set; }
 }
 

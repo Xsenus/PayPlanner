@@ -74,7 +74,8 @@ try {
   const browserPreparation = (async () => {
     for (const channel of browserChannels) {
       recordBrowserPhase(`launch-${channel ?? 'chromium'}`);
-      try { return await chromium.launch({ headless: true, channel }); }
+      try { return await chromium.launch({ headless: true, channel,
+        ...(process.env.PAYPLANNER_TEST_BROWSER_PATH ? { executablePath: process.env.PAYPLANNER_TEST_BROWSER_PATH } : {}) }); }
       catch (error) { recordBrowserPhase(`launch-${channel ?? 'chromium'}`, 'attempt-failed', error); /* Never download a browser. */ }
     }
     assert.fail('An installed Chromium-compatible browser is required.');

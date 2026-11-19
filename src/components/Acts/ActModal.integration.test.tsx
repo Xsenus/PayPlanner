@@ -6,6 +6,7 @@ import { ActModal } from './ActModal';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
 import type { Act, ActInput, ActResponsible, Client, Invoice } from '../../types';
+import { createActGuarded } from '../../services/actCreateAttempts';
 
 const {
   getActMock,
@@ -16,6 +17,7 @@ const {
   getLegalEntitiesMock,
   getLegalEntitiesPagedMock,
   getOwnCompanyOptionsMock,
+  getActNextNumberMock,
   modalAuthState,
 } = vi.hoisted(() => ({
   getActMock: vi.fn(),
@@ -26,6 +28,7 @@ const {
   getLegalEntitiesMock: vi.fn(),
   getLegalEntitiesPagedMock: vi.fn(),
   getOwnCompanyOptionsMock: vi.fn(),
+  getActNextNumberMock: vi.fn(),
   modalAuthState: { user: { id: 1, role: { id: 1 } } },
 }));
 
@@ -79,6 +82,7 @@ vi.mock('../../hooks/useLegalEntities', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getAct: getActMock,
+    getActNextNumber: getActNextNumberMock,
     getClients: getClientsMock,
     getClientsV2: getClientsV2Mock,
     getInvoice: getInvoiceMock,
@@ -156,11 +160,11 @@ describe('ActModal integration', () => {
     const props = { open: true, mode: 'create' as const, act: null, onClose: vi.fn(), onSubmit: vi.fn().mockResolvedValue(undefined), submitting: false,
       clients: [createClient(1, 'Текущий клиент')], responsibles: [], lookupsLoading: false, lookupsError: 'Справочники временно недоступны', onRetryLookups: retry, defaultClientId: 1, presentation: 'page' as const };
     const view = render(<ActModal {...props} />); await act(async () => {});
-    fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'DRAFT-RETRY' } });
+    fireEvent.change(screen.getByLabelText('Дата'), { target: { value: '2026-04-25' } });
     fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку справочников' })); expect(retry).toHaveBeenCalledOnce();
     view.rerender(<ActModal {...props} lookupsLoading />);
     expect(screen.getByRole('button', { name: 'Повторить загрузку справочников' })).toHaveProperty('disabled', true);
-    expect(screen.getByLabelText('Номер акта')).toHaveProperty('value', 'DRAFT-RETRY'); expect(props.onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Дата')).toHaveProperty('value', '2026-04-25'); expect(props.onSubmit).not.toHaveBeenCalled();
   });
   it('requirements caller: act rules follow the editor access scope and closing', async () => {
     const p = { open: true, mode: 'create' as const, act: null, onClose: vi.fn(), onSubmit: vi.fn(), submitting: false, clients: [], responsibles: [], lookupsLoading: false, presentation: 'page' as const, accessScopeKey: 'all' };
@@ -177,6 +181,10 @@ describe('ActModal integration', () => {
   });
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
+    localStorage.setItem('pp_token', `synthetic.${btoa(JSON.stringify({ sub: '1' }))}.signature`);
+    localStorage.setItem('pp.auth-session-epoch.v1', 'act-modal-session');
+    getActNextNumberMock.mockResolvedValue({ year: 2026, nextNumber: '15' });
     modalAuthState.user = { id: 1, role: { id: 1 } };
     getActMock.mockResolvedValue(null);
     getOwnCompanyOptionsMock.mockResolvedValue([]);
@@ -224,6 +232,24 @@ describe('ActModal integration', () => {
     });
   });
 
+  it('restores a validation-rejected draft including manual positions with the original UUID', async () => {
+    const key = '11111111-1111-4111-8111-111111111111';
+    const body: ActInput = { number: '', title: 'Восстановленный акт', date: '2027-01-01', amount: 250,
+      status: 'Created', workflowStatus: 'Draft', creationMode: 'Manual', clientId: 7,
+      lineItems: [{ sourceKey: 'manual:fixed', name: 'Восстановленная услуга', quantity: 2, unit: 'усл.', price: 125 }] };
+    await expect(createActGuarded(body, { attemptKey: key }, { commit: vi.fn().mockRejectedValue(Object.assign(new Error('Исправьте данные'), { status: 400 })), lookup: vi.fn() })).rejects.toThrow();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<ActModal open mode="create" act={null} onClose={vi.fn()} onSubmit={onSubmit} submitting={false}
+      clients={[createClient(7, 'Иван Иванов')]} responsibles={[]} lookupsLoading={false} presentation="page" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Исправить данные' }));
+    expect(screen.getByDisplayValue('Восстановленный акт')).toBeTruthy();
+    expect(screen.getByDisplayValue('Восстановленная услуга')).toBeTruthy();
+    expect(screen.getByLabelText('Дата')).toHaveProperty('value', '2027-01-01');
+    fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ number: '', amount: 250,
+      lineItems: [expect.objectContaining({ sourceKey: 'manual:fixed', name: 'Восстановленная услуга', quantity: 2, price: 125 })] }), expect.objectContaining({ attemptKey: key })));
+  });
+
   it('shows one document status field and derives the legacy status on submit', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 
@@ -247,7 +273,6 @@ describe('ActModal integration', () => {
     expect(screen.queryByLabelText('Статус')).toBeNull();
     const documentStatus = screen.getByLabelText('Статус документа') as HTMLSelectElement;
     fireEvent.change(documentStatus, { target: { value: 'Signed' } });
-    fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'ACT-STATUS-1' } });
     fireEvent.change(screen.getByLabelText('Сумма'), { target: { value: '25000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
 
@@ -256,7 +281,7 @@ describe('ActModal integration', () => {
     });
 
     expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({
-      number: 'ACT-STATUS-1',
+      number: '',
       status: 'Signed',
       workflowStatus: 'Signed',
     });
@@ -271,12 +296,11 @@ describe('ActModal integration', () => {
       clients={[createClient(1, 'Базовый клиент')]} responsibles={[]} lookupsLoading={false} defaultClientId={1} presentation="page" />);
 
     fireEvent.change(await screen.findByLabelText('Подразделение-продавец'), { target: { value: '42' } });
-    fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'ACT-SELLER' } });
     fireEvent.change(screen.getByLabelText('Сумма'), { target: { value: '25000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({ sellerCompanyId: 41, sellerBranchId: 42, number: 'ACT-SELLER', amount: 25000 });
+    expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({ sellerCompanyId: 41, sellerBranchId: 42, number: '', amount: 25000 });
     expect(getActMock).not.toHaveBeenCalled();
   });
 
@@ -336,7 +360,6 @@ describe('ActModal integration', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /Сч[её]т №INV-618/i })[1]);
     expect(onOpenInvoice).toHaveBeenCalledWith(618, 'Expense');
 
-    fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'ACT-618-1' } });
     fireEvent.click(screen.getByRole('button', { name: 'По счету' }));
     await waitFor(() => {
       expect(screen.getAllByRole('button', { name: 'Удалить позицию' }).length).toBe(2);
@@ -351,7 +374,7 @@ describe('ActModal integration', () => {
 
     const payload = onSubmit.mock.calls[0]?.[0];
     expect(payload).toMatchObject({
-      number: 'ACT-618-1',
+      number: '',
       amount: 10000,
       creationMode: 'Partial',
       invoiceId: 618,
@@ -527,7 +550,6 @@ describe('ActModal integration', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Выбрать' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Юридические лица' }));
     await selectPickerOption('ООО Юрклиент');
-    fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'LEGAL-ACT-1' } });
     fireEvent.change(screen.getByLabelText('Сумма'), { target: { value: '6400' } });
     fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
 
@@ -537,7 +559,7 @@ describe('ActModal integration', () => {
 
     const payload = onSubmit.mock.calls[0]?.[0];
     expect(payload).toMatchObject({
-      number: 'LEGAL-ACT-1',
+      number: '',
       amount: 6400,
       creationMode: 'Manual',
       clientId: null,
@@ -574,7 +596,6 @@ describe('ActModal integration', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Выбрать' }));
     await selectPickerOption('Иван Иванов');
 
-    fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'MANUAL-1' } });
     fireEvent.change(screen.getByLabelText('Сумма'), { target: { value: '4321.50' } });
     fireEvent.change(screen.getByLabelText('Комментарий'), { target: { value: 'Пустой акт без счета' } });
     fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
@@ -585,7 +606,7 @@ describe('ActModal integration', () => {
 
     const payload = onSubmit.mock.calls[0]?.[0];
     expect(payload).toMatchObject({
-      number: 'MANUAL-1',
+      number: '',
       amount: 4321.5,
       creationMode: 'Manual',
       invoiceId: undefined,
@@ -642,14 +663,15 @@ describe('ActModal integration', () => {
 
     expect(screen.getByText('Позиции акта')).toBeTruthy();
 
-    fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'ACT-880' } });
     fireEvent.change(screen.getByLabelText('Название позиции акта'), { target: { value: 'Консультация' } });
     fireEvent.change(screen.getByLabelText('Количество позиции акта'), { target: { value: quantity } });
     fireEvent.change(screen.getByLabelText('Единица измерения позиции акта'), { target: { value: 'час' } });
     fireEvent.change(screen.getByLabelText('Цена позиции акта'), { target: { value: price } });
     fireEvent.change(screen.getByTestId('line-item-vat-rate'), { target: { value: vatRate } });
 
-    expect(screen.getByDisplayValue(String(amount)).hasAttribute('readonly')).toBe(true);
+    const amountInput = screen.getByRole('spinbutton', { name: /^Сумма/ });
+    expect(amountInput).toHaveProperty('value', String(amount));
+    expect(amountInput.hasAttribute('readonly')).toBe(true);
     expect(screen.getByText(String(amount), { selector: 'output' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
@@ -666,7 +688,7 @@ describe('ActModal integration', () => {
 
     const payload = onSubmit.mock.calls[0]?.[0];
     expect(payload).toMatchObject({
-      number: 'ACT-880',
+      number: '',
       amount,
       creationMode: 'Manual',
       invoiceId: 880,
@@ -697,7 +719,6 @@ describe('ActModal integration', () => {
       clients={[createClient(7, 'Иван Иванов')]} responsibles={[]} lookupsLoading={false}
       initialValues={{ invoiceId: 881 }} presentation="page" />);
     await waitFor(() => expect(getInvoiceMock).toHaveBeenCalledWith(881));
-    fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'ACT-CENTS' } });
     if (mode === 'manual') {
       fireEvent.click(screen.getByRole('button', { name: /Добавить позицию/ }));
       for (let i = 0; i < 2; i++) {

@@ -4,7 +4,28 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { runInNewContext } from 'node:vm';
 import { describe, it } from 'vitest';
-import { completeCaseUploadResponse, createCaseReadLifecycle, createCaseRetirementProofTrace, createCaseStartupReadTrace, isCaseBoundaryRead, observeCaseRetirementOperation, waitForCaseRestartResolution } from './case-retirement-browser-lifecycle.mjs';
+import { closeCaseBrowserSession, completeCaseUploadResponse, createCaseReadLifecycle, createCaseRetirementProofTrace, createCaseStartupReadTrace, isCaseBoundaryRead, observeCaseRetirementOperation, waitForCaseRestartResolution } from './case-retirement-browser-lifecycle.mjs';
+
+describe('owned financial browser shutdown', () => {
+  it('retries a premature CLI close acknowledgement while its daemon is alive', async () => {
+    let closeCalls = 0;
+    const waits = [];
+    await closeCaseBrowserSession(42, async () => { closeCalls++; }, {
+      exists: pid => { assert.equal(pid, 42); return closeCalls === 1; },
+      wait: async interval => { waits.push(interval); },
+    });
+    assert.equal(closeCalls, 2);
+    assert.deepEqual(waits, [100, 250, 500, 1000, 1500]);
+  });
+
+  it('rejects success while the named session still owns a running daemon', async () => {
+    let closeCalls = 0;
+    await assert.rejects(closeCaseBrowserSession(42, async () => { closeCalls++; }, {
+      exists: () => true, wait: async () => {},
+    }), /owned browser daemon did not exit/);
+    assert.equal(closeCalls, 2);
+  });
+});
 
 describe('real retirement operation observation', () => {
   const key = 'private-owned-key';
@@ -308,6 +329,7 @@ function deferred() {
 
 function fixture(timeoutMs = 20000) {
   const page = new EventEmitter();
+  page.bringToFront = async () => {};
   page.evaluate = async () => {};
   const timers = new Set();
   // Execute the actual serialized functions with the CLI's minimal globals.
@@ -510,7 +532,9 @@ describe('owned case read boundary', () => {
     const { page, lifecycle, timers } = fixture(5000);
     const entered = deferred();
     const frame = deferred();
-    page.evaluate = () => { entered.resolve(); return frame.promise; };
+    let activated = false;
+    page.bringToFront = async () => { activated = true; };
+    page.evaluate = () => { assert.equal(activated, true); entered.resolve(); return frame.promise; };
     const drain = lifecycle.drain('browser-close');
     await entered.promise;
     [...timers][0]();

@@ -223,6 +223,8 @@ export interface TaskJournalFile {
 }
 
 export interface TaskJournalAssignee {
+  roleId?: number | null;
+  roleName?: string | null;
   id: number;
   name: string;
   email: string;

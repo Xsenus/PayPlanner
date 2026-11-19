@@ -17,6 +17,60 @@ namespace PayPlanner.Api.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.9");
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ActAnnualNumberCounter", b =>
+                {
+                    b.Property<int>("Year")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("LastNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Year");
+
+                    b.ToTable("ActAnnualNumberCounters", t =>
+                        {
+                            t.HasCheckConstraint("CK_ActAnnualNumberCounters_Value", "\"Year\" BETWEEN 1 AND 9999 AND \"LastNumber\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ActCreateReceipt", b =>
+                {
+                    b.Property<int>("ActorUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("UploadKey")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ActId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("CaseId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CommandSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Operation")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("PublishedDocumentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("WorkOrderId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ActorUserId", "UploadKey");
+
+                    b.ToTable("ActCreateReceipts", t =>
+                        {
+                            t.HasCheckConstraint("CK_ActCreateReceipts_Identity", "\"ActorUserId\" > 0 AND \"ActId\" > 0 AND length(\"CommandSha256\") = 64 AND (\"PublishedDocumentId\" IS NULL OR \"PublishedDocumentId\" > 0) AND ((\"Operation\" = 'ordinary' AND \"CaseId\" IS NULL AND \"WorkOrderId\" IS NULL) OR (\"Operation\" = 'work-order' AND \"CaseId\" IS NOT NULL AND \"WorkOrderId\" IS NOT NULL AND \"CaseId\" > 0 AND \"WorkOrderId\" > 0))");
+                        });
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.CaseCourtNotificationOutbox", b =>
                 {
                     b.Property<long>("Id")

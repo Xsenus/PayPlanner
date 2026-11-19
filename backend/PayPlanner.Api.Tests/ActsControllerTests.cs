@@ -848,7 +848,7 @@ public class ActsControllerTests
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
         Assert.Contains("Client is not linked", Convert.ToString(badRequest.Value), StringComparison.OrdinalIgnoreCase);
-        Assert.False(await db.Acts.AsNoTracking().AnyAsync(act => act.Number == "ACT-WRONG-CONTRACT"));
+        Assert.False(await db.Acts.AsNoTracking().AnyAsync());
     }
 
     [Fact]
@@ -1106,8 +1106,11 @@ public class ActsControllerTests
         var documentResult = await controller.GetDocument(dto.Id, "html", true, CancellationToken.None);
 
         var content = Assert.IsType<ContentResult>(documentResult);
+        var normalizedHtml = System.Net.WebUtility.HtmlDecode(content.Content!)
+            .Replace("\u00A0", " ")
+            .Replace("\u202F", " ");
         Assert.Equal("text/html; charset=utf-8", content.ContentType);
-        Assert.Contains("ACT-104", content.Content);
+        Assert.Contains($"<h1>Акт № {dto.Number} от 16 апреля 2026 г.</h1>", normalizedHtml);
         Assert.Contains("Подготовка заявления", content.Content);
         Assert.Contains("Выезд в суд", content.Content);
     }
@@ -1160,9 +1163,11 @@ public class ActsControllerTests
         var documentResult = await controller.GetDocument(dto.Id, "html", true, CancellationToken.None);
 
         var content = Assert.IsType<ContentResult>(documentResult);
-        var normalizedHtml = content.Content!.Replace("&nbsp;", " ").Replace("\u00A0", " ");
+        var normalizedHtml = System.Net.WebUtility.HtmlDecode(content.Content!)
+            .Replace("\u00A0", " ")
+            .Replace("\u202F", " ");
         Assert.Equal("text/html; charset=utf-8", content.ContentType);
-        Assert.Contains("ACT-104-P", normalizedHtml);
+        Assert.Contains($"<h1>Акт № {dto.Number} от 16 апреля 2026 г.</h1>", normalizedHtml);
         Assert.Contains("Prep docs", normalizedHtml);
         Assert.DoesNotContain("Court visit", normalizedHtml);
         Assert.Contains("Всего оказано услуг 1", normalizedHtml);
@@ -1717,7 +1722,8 @@ public class ActsControllerTests
                 CreationMode = ActCreationMode.Full,
             },
             CancellationToken.None);
-        Assert.IsType<CreatedResult>(incomeCreate.Result);
+        var incomeCreated = Assert.IsType<CreatedResult>(incomeCreate.Result);
+        var incomeAct = Assert.IsType<ActDto>(incomeCreated.Value);
 
         var expenseCreate = await controller.Create(
             new UpsertActRequest
@@ -1756,7 +1762,8 @@ public class ActsControllerTests
 
         var onlyAct = Assert.Single(materialized);
         Assert.Equal(1, total);
-        Assert.Equal("ACT-105-IN", onlyAct.Number);
+        Assert.Equal(incomeAct.Id, onlyAct.Id);
+        Assert.Equal(incomeAct.Number, onlyAct.Number);
         Assert.Equal(PaymentType.Income, onlyAct.Type);
     }
 
@@ -1786,7 +1793,7 @@ public class ActsControllerTests
         var created = Assert.IsType<CreatedResult>(action.Result);
         var dto = Assert.IsType<ActDto>(created.Value);
 
-        Assert.Equal("ACT-200", dto.Number);
+        Assert.Equal("1", dto.Number);
         Assert.Equal("Ручной акт", dto.Title);
         Assert.Equal(12_345m, dto.Amount);
         Assert.Equal(ActCreationMode.Manual, dto.CreationMode);

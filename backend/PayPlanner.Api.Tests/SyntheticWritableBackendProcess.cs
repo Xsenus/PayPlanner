@@ -123,6 +123,12 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
             ["StorageOrchestration__ProductWriteEnabledClasses__0"] = "task-file",
             ["StorageOrchestration__ProductWriteEnabledClasses__1"] = "case-document",
         };
+        if (Environment.GetEnvironmentVariable("PAYPLANNER_PDF_BROWSER_PATH") is { } browserPath)
+        {
+            Assert.True(Path.IsPathFullyQualified(browserPath) && File.Exists(browserPath),
+                "The configured test browser must be an existing absolute file.");
+            settings["Pdf__BrowserPath"] = browserPath;
+        }
         if (retirementBundle is not null)
             settings[RestoredConnectionDiagnosticsHostingStartup.SyntheticRestartUrlKey] = retirementBundle.ApiAddress.GetLeftPart(UriPartial.Authority);
         if (chatAttachments)
@@ -370,6 +376,17 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
         throw new InvalidOperationException("Project root is missing.");
     }
 
+    private void ConfigureBrowserEnvironment(ProcessStartInfo start)
+    {
+        foreach (var key in new[] { "PAYPLANNER_TEST_BROWSER_PATH", "PLAYWRIGHT_MCP_EXECUTABLE_PATH" })
+        {
+            if (Environment.GetEnvironmentVariable(key) is not { } browserPath) continue;
+            Assert.True(Path.IsPathFullyQualified(browserPath) && File.Exists(browserPath),
+                "The configured browser must be an existing absolute file.");
+            start.Environment[key] = browserPath;
+        }
+    }
+
     public async Task CheckStorageCapacityBrowserAsync(string token, string? changedStagePath = null, bool releasedMarkers = false)
     {
         var repository = FindRepositoryDirectory();
@@ -388,6 +405,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
         foreach (var (key, value) in inherited)
             if (new[] { "PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "LOCALAPPDATA", "APPDATA", "ProgramFiles", "ProgramFiles(x86)", "USERPROFILE" }
                 .Contains(key, StringComparer.OrdinalIgnoreCase)) start.Environment[key] = value;
+        ConfigureBrowserEnvironment(start);
         start.ArgumentList.Add(Path.Combine(repository.FullName, "scripts", "check-storage-capacity-visual.mjs"));
         start.Environment["STORAGE_CAPACITY_ROOT"] = Root;
         start.Environment["STORAGE_CAPACITY_API"] = Client.BaseAddress!.AbsoluteUri;
@@ -493,6 +511,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
         foreach (var (key, value) in inherited)
             if (new[] { "PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "LOCALAPPDATA", "APPDATA", "ProgramFiles", "ProgramFiles(x86)", "USERPROFILE" }
                 .Contains(key, StringComparer.OrdinalIgnoreCase)) start.Environment[key] = value;
+        ConfigureBrowserEnvironment(start);
         start.ArgumentList.Add(Path.Combine(repository.FullName, "scripts", "check-task-upload-live-browser.mjs"));
         start.Environment["NODE_ENV"] = "production";
         start.Environment["TASK_UPLOAD_API"] = (apiAddress ?? Client.BaseAddress!).AbsoluteUri;
@@ -599,6 +618,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
         // These scenarios qualify the release UI against the production-mode API.
         // Keep development-only StrictMode mount repetitions out of this profile.
         start.Environment["NODE_ENV"] = "production";
+        ConfigureBrowserEnvironment(start);
         if (_retirementBundle is not null)
         {
             Assert.False(generatedDocuments || courtDocuments || financialDocuments || chatAttachments,

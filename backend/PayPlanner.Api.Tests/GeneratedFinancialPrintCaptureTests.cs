@@ -82,7 +82,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
         Assert.NotNull(sellerInfo.FrozenAtUtc);
         var image = Assert.Single(await f.Db.CompanyBrandImageVersions.AsNoTracking().ToArrayAsync());
         Assert.Equal(company.LogoDataUrl, image.DataUrl);
-        Assert.Equal("PRINT-42", frozen.Domain.Number); Assert.Equal(date.Date, frozen.Domain.Date);
+        Assert.Equal(kind == GeneratedFinancialDocumentKind.Act ? "1" : "PRINT-42", frozen.Domain.Number); Assert.Equal(date.Date, frozen.Domain.Date);
         var expectedAmount = rounding ? kind == GeneratedFinancialDocumentKind.Act ? 0.01m : 0.02m : 41.5m;
         Assert.Equal(expectedAmount, frozen.Domain.Amount); Assert.Equal(2, frozen.Domain.Lines.Length);
         Assert.Equal("Первая услуга", frozen.Domain.Lines[0].Name);
@@ -98,7 +98,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
             Assert.EndsWith(rounding ? "Итого: 0,02 ₽." : "Итого: 41,50 ₽.", frozen.Domain.Description);
         }
         var html = Encoding.UTF8.GetString(frozen.Bytes);
-        Assert.Contains("<!doctype html>", html); Assert.Contains("PRINT-42", html);
+        Assert.Contains("<!doctype html>", html); Assert.Contains(frozen.Domain.Number, html);
         Assert.Contains("&lt;script&gt;", html); Assert.DoesNotContain("Услуга <script>", html);
         Assert.Contains("Продавец до принятия", html);
         Assert.Equal(0, await FinancialRowsAsync(f.Db)); Assert.Empty(await f.Db.ClientCaseDocuments.ToArrayAsync());

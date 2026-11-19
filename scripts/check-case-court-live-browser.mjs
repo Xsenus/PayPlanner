@@ -5,6 +5,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer as createControlServer } from 'node:http';
 import { prepareSyntheticBrowserUi } from './synthetic-browser-ui.mjs';
+import { createCaseReadLifecycle, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
 assert.equal(api.hostname, '127.0.0.1');
@@ -125,50 +126,63 @@ try {
       check(results.length <= 2, 'Unexpected automatic court sync');
       await route.fulfill({ response });
     });
-    await page.locator('input[type="email"]').fill(settings.email);
-    await page.locator('input[type="password"]').fill(settings.password);
-    await page.getByRole('button', { name: 'Войти', exact: true }).click();
-    await page.locator('input[type="email"]').waitFor({ state: 'hidden' });
-    await page.getByRole('button', { name: 'Суд', exact: true }).click();
-    if (settings.flow === 'court-overview') {
-      await page.getByRole('button', { name: 'Вернуться к обзору', exact: true }).click();
-      await page.getByRole('heading', { name: 'Сводка по судебному делу', exact: true }).waitFor();
-    } else await page.getByText('Режим редактирования судебных данных', { exact: true }).waitFor();
-    const sync = page.getByRole('button', { name: 'Проверить источник', exact: true });
-    const first = page.waitForResponse(response => new URL(response.url()).pathname === path && response.request().method() === 'POST');
-    await sync.click(); await first;
-    const pending = page.getByText(/сводки ожидают обязательных копий: 1; сроки и напоминания сохранены/).first();
-    await pending.waitFor();
-    check((await pending.locator('..').getAttribute('class')).includes('bg-amber-50'), 'Pending court summary is not shown as waiting');
-    check(results.length === 1 && results[0].createdProceduralDeadlines === 1 && results[0].createdCourtActDocuments === 0
-      && results[0].pendingCourtActDocuments === 1, 'Pending response lost immediate controls or claimed a ready document');
-    const before = await page.request.get(settings.api + '/api/v2/cases/' + settings.caseId + '/documents', { headers: { Authorization: authorization } });
-    check(before.ok() && (await before.json()).length === 0, 'A document became visible before copies');
-    const boundary = await page.request.post(settings.controlUrl);
-    check(boundary.ok(), 'Owned storage worker boundary failed');
-    check(results.length === 1, 'Worker completion caused an automatic sync');
-    const second = page.waitForResponse(response => new URL(response.url()).pathname === path && response.request().method() === 'POST');
-    await sync.click(); await second;
-    await page.waitForFunction(() => !document.body.textContent.includes('сводки ожидают обязательных копий: 1'));
-    check(results.length === 2 && results[1].createdProceduralDeadlines === 0 && results[1].pendingCourtActDocuments === 0
-      && results[1].createdCourtActDocuments === 0, 'Repeated sync created another control or summary');
-    const response = await page.request.get(settings.api + '/api/v2/cases/' + settings.caseId + '/documents', { headers: { Authorization: authorization } });
-    check(response.ok(), 'Ready document list failed');
-    const documents = await response.json(); check(documents.length === 1, 'Expected one ready court summary');
-    const document = documents[0];
-    await page.getByRole('button', { name: 'Документы', exact: true }).click();
-    await page.getByText(document.originalFileName, { exact: true }).first().waitFor();
-    const actionsButton = page.getByRole('button', { name: 'Сведения и действия документа ' + document.originalFileName, exact: true });
-    await actionsButton.click();
-    check(await actionsButton.getAttribute('aria-expanded') === 'true', 'The court document actions must be expanded before downloading');
-    const downloadEvent = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'Скачать документ ' + document.originalFileName, exact: true }).click();
-    const download = await downloadEvent; check(await download.failure() === null, 'Court summary download failed');
-    await download.saveAs(settings.downloadPath);
-    check(otherWrites === 0, 'Court sync caused another business write: ' + otherWrites);
-    check(outside.length === 0, 'Browser called an external host');
-    check(errors.length === 0, 'Browser errors: ' + errors.join('; '));
-    return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ flow: settings.flow, posts: results.length, documentId: document.id });
+    const caseReads = (${createCaseReadLifecycle})(page,
+      request => (${isCaseBoundaryRead})(request, settings.api, settings.caseId), 20000);
+    try {
+      await page.locator('input[type="email"]').fill(settings.email);
+      await page.locator('input[type="password"]').fill(settings.password);
+      await page.getByRole('button', { name: 'Войти', exact: true }).click();
+      await page.locator('input[type="email"]').waitFor({ state: 'hidden' });
+      const courtTab = page.getByRole('button', { name: 'Суд', exact: true });
+      await courtTab.waitFor();
+      await caseReads.drain('document-tab');
+      await courtTab.click();
+      if (settings.flow === 'court-overview') {
+        await page.getByRole('button', { name: 'Вернуться к обзору', exact: true }).click();
+        await page.getByRole('heading', { name: 'Сводка по судебному делу', exact: true }).waitFor();
+      } else await page.getByText('Режим редактирования судебных данных', { exact: true }).waitFor();
+      const sync = page.getByRole('button', { name: 'Проверить источник', exact: true });
+      const first = page.waitForResponse(response => new URL(response.url()).pathname === path && response.request().method() === 'POST');
+      await sync.click(); await first;
+      const pending = page.getByText(/сводки ожидают обязательных копий: 1; сроки и напоминания сохранены/).first();
+      await pending.waitFor();
+      check((await pending.locator('..').getAttribute('class')).includes('bg-amber-50'), 'Pending court summary is not shown as waiting');
+      check(results.length === 1 && results[0].createdProceduralDeadlines === 1 && results[0].createdCourtActDocuments === 0
+        && results[0].pendingCourtActDocuments === 1, 'Pending response lost immediate controls or claimed a ready document');
+      const before = await page.request.get(settings.api + '/api/v2/cases/' + settings.caseId + '/documents', { headers: { Authorization: authorization } });
+      check(before.ok() && (await before.json()).length === 0, 'A document became visible before copies');
+      const boundary = await page.request.post(settings.controlUrl);
+      check(boundary.ok(), 'Owned storage worker boundary failed');
+      check(results.length === 1, 'Worker completion caused an automatic sync');
+      const second = page.waitForResponse(response => new URL(response.url()).pathname === path && response.request().method() === 'POST');
+      await sync.click(); await second;
+      await page.waitForFunction(() => !document.body.textContent.includes('сводки ожидают обязательных копий: 1'));
+      check(results.length === 2 && results[1].createdProceduralDeadlines === 0 && results[1].pendingCourtActDocuments === 0
+        && results[1].createdCourtActDocuments === 0, 'Repeated sync created another control or summary');
+      const response = await page.request.get(settings.api + '/api/v2/cases/' + settings.caseId + '/documents', { headers: { Authorization: authorization } });
+      check(response.ok(), 'Ready document list failed');
+      const documents = await response.json(); check(documents.length === 1, 'Expected one ready court summary');
+      const document = documents[0];
+      const documentsTab = page.getByRole('button', { name: 'Документы', exact: true });
+      await documentsTab.waitFor();
+      await caseReads.drain('document-tab');
+      await documentsTab.click();
+      await page.getByText(document.originalFileName, { exact: true }).first().waitFor();
+      const actionsButton = page.getByRole('button', { name: 'Сведения и действия документа ' + document.originalFileName, exact: true });
+      await actionsButton.click();
+      check(await actionsButton.getAttribute('aria-expanded') === 'true', 'The court document actions must be expanded before downloading');
+      const downloadEvent = page.waitForEvent('download');
+      await page.getByRole('button', { name: 'Скачать документ ' + document.originalFileName, exact: true }).click();
+      const download = await downloadEvent; check(await download.failure() === null, 'Court summary download failed');
+      await download.saveAs(settings.downloadPath);
+      await caseReads.drain('browser-close');
+      check(otherWrites === 0, 'Court sync caused another business write: ' + otherWrites);
+      check(outside.length === 0, 'Browser called an external host');
+      check(errors.length === 0, 'Browser errors: ' + errors.join('; '));
+      return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ flow: settings.flow, posts: results.length, documentId: document.id });
+    } finally {
+      caseReads.dispose();
+    }
   }`);
   assert.ok(result.includes('CASE_RETIREMENT_BROWSER_OK'), result); console.log(result);
 } catch (error) {

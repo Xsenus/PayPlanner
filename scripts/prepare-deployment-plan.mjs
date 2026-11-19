@@ -8,6 +8,8 @@ import { canonicalBytes, safeRelativePath } from './xsenus-artifact-store.mjs';
 
 const candidateReviewSha = 'b658e5982d94b6631ea1898a2ce8465651910324fe1c06a2c1a0fb81d7f81c4f';
 const candidateDeltaFileSha = '9e67d6e315ac1bf11f05ffb324de4584842954844df7e627e0925d550841e386';
+const actAnnualMigration = '20261111140010_AddActAnnualNumberingPostgreSql';
+const actAnnualReviewSha = '9178f693eb92ce8cd66a6825e12f32efbfc2c8ac876a24ed56c890ec9dcce918';
 const canonicalHash = value => sha256(canonicalBytes(value).subarray(0, -1));
 
 export function fileHash(path) {
@@ -35,7 +37,41 @@ export function reviewedCandidate(root) {
   return review;
 }
 
+export function reviewedActAnnual(root) {
+  const path = join(root, 'scripts/deploy-act-annual-review.json');
+  const raw = readFileSync(path);
+  assert.equal(sha256(raw), fileHash(path), 'Reviewed annual-act file changed while reading');
+  const review = JSON.parse(raw.toString('utf8'));
+  assert.equal(canonicalHash(review), actAnnualReviewSha, 'Reviewed annual-act admission changed');
+  assert.equal(review.schemaVersion, 1);
+  assert.deepEqual(review.migrationIds, [actAnnualMigration]);
+  const expectedSources = [
+    'backend/PayPlanner.Api.Migrations/Migrations/20261111140000_AddActAnnualNumbering.cs',
+    'backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/20261111140010_AddActAnnualNumberingPostgreSql.cs',
+  ];
+  assert.deepEqual(Object.keys(review.migrationSourceFiles).sort(), expectedSources.sort());
+  for (const source of expectedSources) {
+    assert.equal(fileHash(join(root, source)), review.migrationSourceFiles[source], 'Reviewed annual-act migration source changed');
+  }
+  return review;
+}
+
 export function validateReviewedBaseline(baseline, root) {
+  if (baseline.expectedMigration === actAnnualMigration) {
+    const review = reviewedActAnnual(root);
+    assert.equal(canonicalHash(baseline), review.baselineUtf8CanonicalSha256, 'Reviewed annual-act baseline differs');
+    assert.equal(baseline.previousRevision, review.previousRevision, 'Reviewed annual-act previous revision differs');
+    assert.equal(baseline.expectedBaselineMigrationIdsSha256, review.baselineMigrationIdsSha256, 'Reviewed annual-act baseline history differs');
+    assert.equal(baseline.expectedReleaseCatalogSha256, review.releaseCatalogSha256, 'Reviewed annual-act catalog differs');
+    assert.equal(baseline.expectedReleaseSeeds.length, review.releaseSeedsCount, 'Exact reviewed annual-act release seeds required');
+    assert.equal(canonicalHash(baseline.expectedReleaseSeeds), review.releaseSeedsSha256, 'Exact reviewed annual-act release seeds required');
+    const path = join(root, 'scripts/deploy-act-annual-delta.json');
+    const raw = readFileSync(path);
+    assert.equal(sha256(raw), fileHash(path), 'Reviewed annual-act schema changed while reading');
+    assert.equal(sha256(Buffer.from(raw.toString('utf8').replaceAll('\r\n', '\n'))), review.schemaDeltaFileSha256, 'Reviewed annual-act schema fixture changed');
+    return;
+  }
+
   const review = reviewedCandidate(root);
   const candidateId = review.migrationIds.join('+');
   assert.ok([null, '20261027005432_AddPaymentCreateAttempts', '20261027005432_AddPaymentCreateAttempts+20261027014154_AddPersonalChatHistory', candidateId].includes(baseline.expectedMigration), 'Only the reviewed additive migrations may be admitted');

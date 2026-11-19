@@ -54,7 +54,9 @@ if current_baseline:
         'expectedAddedProtectedTables','expectedBaselineMigrations','expectedBaselineMigrationRows',
         'expectedBaselineMigrationIdsSha256','expectedReleaseCatalogSha256','expectedReleaseSeeds')
     baseline_bytes=json.dumps({key:c[key] for key in baseline_keys},sort_keys=True,separators=(',',':')).encode('ascii')
-    need(hashlib.sha256(baseline_bytes).hexdigest()=='1497466a62d6825dc1f3484e44c5e57501314170a5a8d7e861b023c042465fa6',
+    accepted_baselines={'25907b00684747aed32782135658bdd2745c664f':'1497466a62d6825dc1f3484e44c5e57501314170a5a8d7e861b023c042465fa6',
+        '9dc737ed3ae1b586789bbfcee34036db6e8bb728':'743b88d6ca93e8c96254874aa94deb181cbddb49be8e592902dbfe8be596ce8a'}
+    need(old in accepted_baselines and hashlib.sha256(baseline_bytes).hexdigest()==accepted_baselines[old],
         'Reassess changed production baseline')
 need(re.fullmatch('[0-9]{8}T[0-9]{6}Z',c['backupUtc'] or ''),'Explicit backup identity required')
 for v in [c['archive']['sha256'],c['expectedApiSha256'],c['expectedPreviousApiSha256'],c['expectedMigrationsSha256'],c['expectedPreviousMigrationsSha256']]:
@@ -111,6 +113,8 @@ FILES=/opt/payplanner/shared/files
 ARCHIVE="/tmp/payplanner_${REV}.tar.gz"
 STAGE="/opt/payplanner/manual-deploy-staging/$REV-ci-01"
 BACKUP="/opt/payplanner/deploy-backups/manual-$REV-$BACKUP_UTC"
+VALIDATION_MARKER="$APP/.deploy-validation-pending"
+[[ ! -e "$VALIDATION_MARKER" && ! -L "$VALIDATION_MARKER" ]] || { printf '%s\n' 'Previous startup validation marker requires recovery review.' >&2; exit 67; }
 exec 9>/run/lock/payplanner-manual-deploy.lock
 flock -n 9 || exit 66
 for path in "$APP" "$BE" "$FE" "$PUBLIC" "$SHARED" "$KEYS" "$FILES"; do
@@ -221,6 +225,24 @@ for root,prefix in [(be,'be/'),(fe,'fe/'),(public,'fe/')]:
     assert actual==expected,'Installed package differs, including unexpected files'
 PY
 }
+deployment_validation_marker() {
+  python3 - "$VALIDATION_MARKER" "$REV" "$1" <<'PY'
+import os,pathlib,stat,sys
+p=pathlib.Path(sys.argv[1]);revision=sys.argv[2];action=sys.argv[3]
+assert len(revision)==40 and all(c in '0123456789abcdef' for c in revision)
+expected=(revision+'\n').encode('ascii')
+if action=='create':
+    fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_NOFOLLOW',0),0o644)
+    with os.fdopen(fd,'wb') as f:
+        if hasattr(os,'fchmod'):os.fchmod(f.fileno(),0o644)
+        f.write(expected);f.flush();os.fsync(f.fileno())
+elif action=='clear':
+    info=p.lstat()
+    assert stat.S_ISREG(info.st_mode) and info.st_nlink==1 and p.read_bytes()==expected,'Validation marker ownership differs'
+    p.unlink()
+else:raise ValueError('Unknown validation marker action')
+PY
+}
 history_check() {
   # The exact pinned helper owns canonical encoding/metadata semantics.
   python3 "$HISTORY_PROOF" "$1" && cmp -s "$HERE/history-manifest.json" "$1"
@@ -255,6 +277,7 @@ PY
 STOPPED=false
 SWITCHED=false
 STARTUP_ATTEMPTED=false
+VALIDATION_MARKER_CREATED=false
 service_inactive() {
   [[ "$(systemctl show "$SERVICE" -p ActiveState --value)" == inactive ]] &&
   [[ "$(systemctl show "$SERVICE" -p MainPID --value)" == 0 ]]
@@ -283,6 +306,9 @@ on_failure() {
   trap - ERR
   trap '' INT TERM HUP
   set +e
+  if [[ "$VALIDATION_MARKER_CREATED" == true && "$STARTUP_ATTEMPTED" == false ]]; then
+    deployment_validation_marker clear || printf '%s\n' 'Retained validation marker requires recovery review.' >&2
+  fi
   printf '%s\n' "FAILED ($reason): evidence retained; no database restore will run." >&2
   if [[ "$SWITCHED" == true && "$STARTUP_ATTEMPTED" == true ]]; then
     if systemctl stop "$SERVICE" && service_inactive; then
@@ -453,6 +479,8 @@ preserved_tree "$BACKUP/preserved-installed-stopped.private.json"
 cmp -s "$BACKUP/preserved-before.private.json" "$BACKUP/preserved-installed-stopped.private.json"
 db_proof "$BACKUP/database-installed-stopped.json"
 same_db "$BACKUP/database-before.json" "$BACKUP/database-installed-stopped.json"
+deployment_validation_marker create
+VALIDATION_MARKER_CREATED=true
 START_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 STARTUP_ATTEMPTED=true
 systemctl start "$SERVICE"
@@ -489,6 +517,9 @@ if grep -Eiq 'fail:|crit:|Unhandled exception' "$BACKUP/startup-journal.private.
   false
 fi
 space_at_least "$RESERVE"
+# Resume ordinary task synchronization only after all startup preservation checks passed.
+deployment_validation_marker clear
+VALIDATION_MARKER_CREATED=false
 trap - ERR INT TERM HUP
 printf '%s\n' 'INSTALLED_LOCAL_CHECKS_PASSED: existing public/assets/readiness and private startup review still required.'
 printf '%s\n' 'Do not claim complete production delivery until those checks and offsite evidence are qualified.'

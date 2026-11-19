@@ -2,6 +2,7 @@
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using System.Globalization;
 using System.Text.Json;
 
 namespace PayPlanner.Api.Services;
@@ -195,6 +196,33 @@ public sealed partial class SpreadsheetImportService
 
         await db.SaveChangesAsync(cancellationToken);
 
+        var changedActIds = appliedBatch.Operations
+            .Where(operation => operation.EntityType == "Act" && operation.EntityId.HasValue
+                && operation.Action is SpreadsheetImportOperationAction.Created or SpreadsheetImportOperationAction.Updated)
+            .Select(operation => operation.EntityId!.Value).Distinct().ToArray();
+        if (changedActIds.Length > 0)
+        {
+            var previousActFloors = new Dictionary<int, long>();
+            foreach (var operation in appliedBatch.Operations.Where(operation => operation.EntityType == "Act"
+                && operation.Action == SpreadsheetImportOperationAction.Updated))
+            {
+                var previousAct = DeserializeSnapshot<ActSnapshot>(operation.BeforeJson)?.Act;
+                if (previousAct is null || !long.TryParse(previousAct.Number.Trim(), NumberStyles.None,
+                    CultureInfo.InvariantCulture, out var ordinal) || ordinal <= 0)
+                    continue;
+                previousActFloors.TryGetValue(previousAct.Date.Year, out var floor);
+                previousActFloors[previousAct.Date.Year] = Math.Max(floor, ordinal);
+            }
+            var actNumbering = new Invoices.ActAnnualNumberingService(db);
+            foreach (var (year, floor) in previousActFloors.OrderBy(item => item.Key))
+                await actNumbering.RaiseFloorAsync(new DateTime(year, 1, 1), floor.ToString(CultureInfo.InvariantCulture), cancellationToken);
+
+            var changedActYears = await db.Acts.IgnoreQueryFilters().AsNoTracking()
+                .Where(act => changedActIds.Contains(act.Id)).Select(act => act.Date.Year).Distinct().OrderBy(year => year)
+                .ToArrayAsync(cancellationToken);
+            foreach (var year in changedActYears)
+                await actNumbering.RefreshYearAsync(year, cancellationToken);
+        }
         await transaction.CommitAsync(cancellationToken);
         return await GetBatchCoreAsync(batchId, 1, 25, cancellationToken)
                ?? throw new InvalidOperationException("Не удалось загрузить результат импорта.");

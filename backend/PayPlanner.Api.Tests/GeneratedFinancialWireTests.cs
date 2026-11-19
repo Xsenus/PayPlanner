@@ -327,7 +327,7 @@ public sealed partial class ManagedCaseDocumentWireTests
             documentId = result.GetProperty("documentId").GetInt32(); Assert.True(documentId > 0);
             Assert.Equal(entityId, result.GetProperty(kind switch { "invoice" => "paymentId", "act" => "actId", _ => "contractId" }).GetInt32());
             if (kind == "invoice") Assert.Equal(invoiceId, result.GetProperty("invoiceEntityId").GetInt32());
-            Assert.Equal(35m, result.GetProperty("amount").GetDecimal()); Assert.Equal("WIRE-" + kind, result.GetProperty("number").GetString());
+            Assert.Equal(35m, result.GetProperty("amount").GetDecimal()); Assert.Equal(kind == "act" ? "1" : "WIRE-" + kind, result.GetProperty("number").GetString());
         }
         Assert.Equal(frozenBytes, await runtime.Client.GetByteArrayAsync($"/api/v2/cases/{caseId}/documents/{documentId}/download"));
         await runtime.RestartAsync(TimeSpan.Zero);

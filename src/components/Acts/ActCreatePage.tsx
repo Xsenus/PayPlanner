@@ -6,6 +6,10 @@ import type { Act, ActInput, ActResponsible, Client, Invoice, PaymentKind } from
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { normalizeAct, normalizeActResponsibleArray, normalizeClientArray } from '../../utils/acts';
 import { ActModal } from './ActModal';
+import { useDocumentDeliveryOwner } from '../../hooks/useDocumentDeliveryOwner';
+import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
+import { acknowledgeCreatedAct, actCreateSuccessMessage, type ActCreateOptions } from '../../services/actCreateAttempts';
+import { useToast } from '../../hooks/useToast';
 
 interface ActCreatePageProps {
   onBack: () => void;
@@ -34,8 +38,10 @@ export function ActCreatePage({
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
   const [lookupsLoading, setLookupsLoading] = useState(true);
   const [lookupsError, setLookupsError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const toast = useToast();
+  const writeOwner = useDocumentDeliveryOwner(JSON.stringify([user?.id, user?.role, user?.departmentId, permissions.acts,
+    defaultClientId, initialValues?.clientId, initialValues?.legalEntityId, initialValues?.invoiceId, invoiceSeed?.id]));
 
   useEffect(() => {
     let cancelled = false;
@@ -75,24 +81,31 @@ export function ActCreatePage({
     };
   }, [canViewLinkedClients]);
 
-  const handleSubmit = useCallback(async (payload: ActInput) => {
-    setSubmitting(true);
+  const handleSubmit = useCallback(async (payload: ActInput, options?: ActCreateOptions) => {
+    const operation = permissions.acts.canCreate ? writeOwner.begin('create') : null;
+    if (!operation) throw new StaleUiOperationError();
     setSubmitError(null);
     try {
-      const created = normalizeAct(await apiService.createAct(payload));
+      const response = await apiService.createAct(payload, options);
+      if (!operation.isCurrent()) throw new StaleUiOperationError();
+      const created = normalizeAct(response);
       if (!created) {
         throw new Error('Не удалось прочитать созданный акт.');
       }
 
+      toast.success(actCreateSuccessMessage(response));
       onCreated(created);
+      acknowledgeCreatedAct(response);
+      return response;
     } catch (error) {
+      if (!operation.isCurrent()) throw new StaleUiOperationError();
       const message = extractDisplayErrorMessage(error, 'Не удалось создать акт.');
       setSubmitError(message);
       throw error;
     } finally {
-      setSubmitting(false);
+      operation.finish();
     }
-  }, [onCreated]);
+  }, [onCreated, permissions.acts.canCreate, toast, writeOwner]);
 
   return (
     <ActModal
@@ -102,7 +115,8 @@ export function ActCreatePage({
       onClose={onBack}
       onBack={onBack}
       onSubmit={handleSubmit}
-      submitting={submitting}
+      accessScopeKey={writeOwner.scope}
+      submitting={writeOwner.busy}
       errorMessage={submitError}
       clients={clients}
       responsibles={responsibles}

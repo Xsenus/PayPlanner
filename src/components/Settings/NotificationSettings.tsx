@@ -34,6 +34,7 @@ import {
 import { AdminWebPushGuide } from '../Notifications/NotificationHelp';
 import { DEFAULT_TIME_ZONE_ID, USER_TIME_ZONE_OPTIONS } from '../../utils/timeZoneOptions';
 import { TablePagination } from '../ui/TablePagination';
+import { ContractExpirationRecipientSettings } from './ContractExpirationRecipientSettings';
 
 type SenderForm = {
   id?: number;
@@ -1245,6 +1246,8 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
             )}
             <AdminWebPushGuide />
           </div>
+
+          <ContractExpirationRecipientSettings canEdit={canEdit} />
 
           <SmsSettingsPanel
             settings={settings}

@@ -273,6 +273,7 @@ public static class UserNotificationTypes
 
     private static readonly IReadOnlySet<string> ForcedModalPreferenceTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
+        TaskCompleted,
         TaskApprovalRequested,
         TaskApproved,
         TaskRevisionRequested,
@@ -337,6 +338,7 @@ public static class UserNotificationTypes
 
     public static readonly IReadOnlyList<string> RequiresActionTypes =
     [
+        TaskCompleted,
         TaskAssigned,
         TaskReminder,
         TaskCancelled,
@@ -1232,6 +1234,8 @@ public interface INotificationService
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalOverdueAsync(TaskJournalItem task, DateTime nowUtc, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskReassignedAsync(TaskJournalItem task, int? previousAssigneeUserId, string? previousAssigneeName, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string? comment = null, CancellationToken cancellationToken = default, IReadOnlyCollection<int>? additionalRecipientUserIds = null);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedAsync(TaskJournalItem task, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string? comment = null, CancellationToken cancellationToken = default, IReadOnlyCollection<int>? additionalRecipientUserIds = null);
+    Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedForCompletionEventAsync(TaskJournalItem task, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string completionEventKey, CancellationToken cancellationToken = default)
+        => NotifyTaskChangedAsync(task, changeLabels, actorName, actorUserId, cancellationToken: cancellationToken);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCommentAsync(TaskJournalItem task, TaskJournalComment comment, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyCaseInactivityControlTaskCreatedAsync(TaskJournalItem task, int daysWithoutActiveTask, CancellationToken cancellationToken = default);
     Task NotifyCalendarAccessChangedAsync(int roleId, IReadOnlyCollection<int> addedVisibleUserIds, IReadOnlyCollection<int> removedVisibleUserIds, string actorName, int actorUserId, CancellationToken cancellationToken = default);

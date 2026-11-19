@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { preparePackage, sha256 } from './prepare-deployment-package.mjs';
-import { createPlan, qualifiedContext, reviewedCandidate, validateReviewedBaseline } from './prepare-deployment-plan.mjs';
+import { createPlan, qualifiedContext, reviewedCandidate, reviewedActAnnual, validateReviewedBaseline } from './prepare-deployment-plan.mjs';
 import { parseWorkflow } from './validate-deploy-workflow.mjs';
 
 const revision = 'a'.repeat(40);
@@ -18,18 +18,29 @@ const env = { COMPUTERNAME: 'XSENUS', GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY:
     backend: { result: 'success', outputs: { 'backend-artifact-id': 'xsenus-local-v1:' + 'c'.repeat(64), 'manifest-sha': 'd'.repeat(64) } },
   }) };
 
-function fixture(t, candidate = false) {
+function fixture(t, candidate = false, annual = false) {
   const root = mkdtempSync(join(tmpdir(), 'pp-ci-plan-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, 'scripts'));
-  for (const name of ['deploy-vps.sh', 'deploy-db-proof.py', 'deploy-history-source-proof.py', 'deploy-stopped-source-proof.py', 'deploy-roadmap-candidate-review.json', 'deploy-roadmap-candidate-delta.json']) {
+  for (const name of ['deploy-vps.sh', 'deploy-db-proof.py', 'deploy-history-source-proof.py', 'deploy-stopped-source-proof.py', 'deploy-roadmap-candidate-review.json', 'deploy-roadmap-candidate-delta.json', 'deploy-act-annual-review.json', 'deploy-act-annual-delta.json']) {
     writeFileSync(join(root, 'scripts', name), readFileSync(resolve('scripts', name)));
   }
   mkdirSync(join(root, 'out/be/AppReleases'), { recursive: true });
   mkdirSync(join(root, 'out/fe'), { recursive: true });
   const baseline = JSON.parse(readFileSync(resolve('scripts/deployment-baseline.json'), 'utf8'));
   let releases = Buffer.from('[{"releaseId":"published"}]');
-  if (candidate) {
+  if (annual) {
+    Object.assign(baseline, JSON.parse(readFileSync(resolve('scripts/deployment-baseline-current.json'), 'utf8')));
+    releases = readFileSync(resolve('backend/AppReleases/releases.json'));
+    for (const source of [
+      'backend/PayPlanner.Api.Migrations/Migrations/20261111140000_AddActAnnualNumbering.cs',
+      'backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/20261111140010_AddActAnnualNumberingPostgreSql.cs',
+    ]) {
+      const path = join(root, source);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, readFileSync(resolve(source)));
+    }
+  } else if (candidate) {
     const current = readFileSync(resolve('backend/AppReleases/releases.json'), 'utf8');
     const firstReviewedEntry = '  {\n    "releaseId": ' + JSON.stringify(baseline.expectedReleaseSeeds[0].releaseId) + ',\n';
     const firstReviewedOffset = current.indexOf(firstReviewedEntry);
@@ -37,7 +48,7 @@ function fixture(t, candidate = false) {
     releases = Buffer.from('[\n' + current.slice(firstReviewedOffset));
     assert.equal(sha256(releases), reviewedCandidate(root).releaseCatalogSha256);
   }
-  if (!candidate) { baseline.expectedMigration = null; baseline.expectedReleaseSeeds = []; }
+  if (!candidate && !annual) { baseline.expectedMigration = null; baseline.expectedReleaseSeeds = []; }
   baseline.expectedReleaseCatalogSha256 = sha256(releases);
   writeFileSync(join(root, 'scripts/deployment-baseline-current.json'), JSON.stringify(baseline));
   for (const name of ['PayPlanner.Api.dll', 'PayPlanner.Api.Migrations.dll']) writeFileSync(join(root, 'out/be', name), name);
@@ -260,4 +271,57 @@ test('changed recovery archive or history receipt fails before stopping producti
   assert.throws(() => createPlan(input), /Recovery archive content/);
   writeFileSync(input.operator.historyReceiptPath, '{}');
   assert.throws(() => createPlan(input), /history receipt changed/);
+});
+
+function annualActFixture(t) {
+  return fixture(t, false, true);
+}
+
+test('admits the exact annual-act migration and all 29 separately active release notes', t => {
+  const input = annualActFixture(t);
+  const review = reviewedActAnnual(input.root);
+  const { plan, qualificationRaw } = createPlan(input);
+  assert.equal(plan.previousRevision, '9dc737ed3ae1b586789bbfcee34036db6e8bb728');
+  assert.equal(plan.expectedBaselineMigrations.length, 227);
+  assert.deepEqual(review.migrationIds, ['20261111140010_AddActAnnualNumberingPostgreSql']);
+  assert.equal(plan.expectedReleaseSeeds.length, 29);
+  assert.ok(plan.expectedReleaseSeeds.every(seed => seed.isActive));
+  assert.deepEqual(plan.expectedReleaseSeeds.map(seed => seed.version),
+    Array.from({ length: 29 }, (_, index) => `1.14.${943 - index}`));
+  assert.deepEqual(JSON.parse(qualificationRaw).expectedReleaseSeeds, plan.expectedReleaseSeeds);
+});
+
+test('rejects changed annual-act baseline, ordering, catalog and release contents', t => {
+  const mutations = [baseline => { baseline.previousRevision = 'b'.repeat(40); },
+    baseline => { baseline.expectedPreviousApiSha256 = 'c'.repeat(64); },
+    baseline => { baseline.expectedReleaseSeeds.pop(); },
+    baseline => { baseline.expectedReleaseSeeds.reverse(); },
+    baseline => { baseline.expectedReleaseSeeds[0].isActive = false; },
+    baseline => { baseline.expectedReleaseSeeds[0].items[0].text = 'unreviewed'; }];
+  for (const mutate of mutations) {
+    const input = annualActFixture(t);
+    const path = join(input.root, 'scripts/deployment-baseline-current.json');
+    const baseline = JSON.parse(readFileSync(path, 'utf8'));
+    mutate(baseline);
+    writeFileSync(path, JSON.stringify(baseline));
+    assert.throws(() => createPlan(input), /Reviewed annual-act/);
+  }
+});
+
+test('rejects changed annual migration source, reviewed profile or exact schema fixture', t => {
+  for (const name of ['backend/PayPlanner.Api.Migrations/Migrations/20261111140000_AddActAnnualNumbering.cs',
+    'backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/20261111140010_AddActAnnualNumberingPostgreSql.cs',
+    'scripts/deploy-act-annual-review.json', 'scripts/deploy-act-annual-delta.json']) {
+    const input = annualActFixture(t);
+    const path = join(input.root, name);
+    const raw = readFileSync(path);
+    if (name.endsWith('review.json')) {
+      const review = JSON.parse(raw);
+      review.releaseSeedsCount += 1;
+      writeFileSync(path, JSON.stringify(review));
+    } else {
+      writeFileSync(path, Buffer.concat([raw, Buffer.from('unreviewed')]));
+    }
+    assert.throws(() => createPlan(input), /Reviewed annual-act/);
+  }
 });

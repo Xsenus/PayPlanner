@@ -601,13 +601,39 @@ public static class ClientCaseDeadlineTaskSyncService
             }
         }
 
-        if (deadline.HearingAt.HasValue)
+        if (deadline.HearingAt is { } hearingAt)
         {
-            parts.Add($"Заседание назначено на {deadline.HearingAt.Value:dd.MM.yyyy HH:mm}.");
+            parts.Add($"Заседание назначено на {FormatHearingAt(clientCase, deadline, hearingAt)}.");
         }
 
         parts.Add($"Контроль: {deadline.Title}.");
         return string.Join(Environment.NewLine, parts);
+    }
+
+    private static string FormatHearingAt(ClientCase clientCase, CaseDeadline deadline, DateTime hearingAt)
+    {
+        if (deadline.DateOnly)
+            return $"{hearingAt:dd.MM.yyyy}";
+
+        var courtEvent = deadline.CourtEvent;
+        var courtUrl = courtEvent?.SourceUrl;
+        if (string.IsNullOrWhiteSpace(courtUrl)
+            && (courtEvent is null || (!string.IsNullOrWhiteSpace(courtEvent.CourtName)
+                && string.Equals(courtEvent.CourtName.Trim(), clientCase.CourtName?.Trim(), StringComparison.OrdinalIgnoreCase))))
+        {
+            courtUrl = clientCase.CourtUrl;
+        }
+
+        if (Uri.TryCreate(courtUrl, UriKind.Absolute, out var source)
+            && (source.Scheme is "http" or "https")
+            && (source.IdnHost.Equals("sam.sudrf.ru", StringComparison.OrdinalIgnoreCase)
+                || source.IdnHost.EndsWith(".sam.sudrf.ru", StringComparison.OrdinalIgnoreCase))
+            && TimeZoneInfo.TryFindSystemTimeZoneById("Europe/Samara", out var courtTimeZone))
+        {
+            return $"{CalendarTimeZoneHelper.FormatUserDateTime(hearingAt, courtTimeZone)} по местному времени суда";
+        }
+
+        return $"{CalendarTimeZoneHelper.NormalizeUtcInstant(hearingAt):dd.MM.yyyy HH:mm} UTC";
     }
 
     private static DateTime NormalizeDueAt(DateTime value, bool dateOnly)

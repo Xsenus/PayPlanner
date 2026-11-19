@@ -17,7 +17,7 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/notifications")]
 [Authorize]
-public class NotificationsController : ControllerBase
+public partial class NotificationsController : ControllerBase
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const string SystemAdministratorRoleName = "admin";

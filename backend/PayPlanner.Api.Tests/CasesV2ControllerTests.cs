@@ -6058,6 +6058,57 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Contains("\"action\":\"created\"", notification.MetadataJson, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("https://novokuibyshevsky.sam.sudrf.ru/", true, false, false, "11:00 по местному времени суда")]
+    [InlineData("", true, false, false, "11:00 по местному времени суда")]
+    [InlineData("", false, false, false, "07:00 UTC")]
+    [InlineData("https://novokuibyshevsky.sam.sudrf.ru.example.test/", true, false, false, "07:00 UTC")]
+    [InlineData("https://novokuibyshevsky.sam.sudrf.ru/", true, true, false, "")]
+    [InlineData("https://novokuibyshevsky.sam.sudrf.ru/", true, false, true, "01:00 по местному времени суда")]
+    public async Task CourtPreparationTask_FormatsHearingInConfirmedCourtTimeZoneWithoutMovingDeadline(
+        string eventUrl, bool sameCourt, bool allDay, bool crossesMidnight, string expectedTime)
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-zone-owner@example.com", "Владелец");
+        var hearingAt = new DateTime(DateTime.UtcNow.Year + 1, 12, 7, allDay ? 0 : crossesMidnight ? 21 : 7, 0, 0, DateTimeKind.Utc);
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = owner.Id },
+            Title = "Дело с подготовкой к заседанию",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            CourtName = "Новокуйбышевский городской суд",
+            CourtUrl = "https://novokuibyshevsky.sam.sudrf.ru/",
+        };
+        var courtEvent = new ClientCaseCourtEvent
+        {
+            EventType = "hearing",
+            CourtName = sameCourt ? clientCase.CourtName : "Другой суд",
+            ScheduledAt = hearingAt,
+            AllDay = allDay,
+            SourceUrl = eventUrl,
+        };
+        clientCase.CourtEvents.Add(courtEvent);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, owner.Id, owner.FullName, default);
+        var task = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        var originalDueAt = allDay ? hearingAt.AddDays(-3).AddHours(9) : hearingAt.AddDays(-3);
+        var expectedDate = crossesMidnight ? hearingAt.AddDays(1) : hearingAt;
+        var expectedLine = $"Заседание назначено на {expectedDate:dd.MM.yyyy}{(expectedTime.Length == 0 ? "" : $" {expectedTime}")}.";
+        Assert.Equal(originalDueAt, task.DueAt);
+        Assert.Contains(expectedLine, task.Description, StringComparison.Ordinal);
+
+        task.Description = $"Заседание назначено на {hearingAt:dd.MM.yyyy HH:mm}.";
+        await db.SaveChangesAsync();
+        Assert.True(await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, owner.Id, owner.FullName, default));
+        Assert.Contains(expectedLine, task.Description, StringComparison.Ordinal);
+        Assert.Equal(originalDueAt, task.DueAt);
+        Assert.Equal(hearingAt, courtEvent.ScheduledAt);
+        Assert.Equal(task.Id, (await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == clientCase.Id)).Id);
+    }
+
     [Fact]
     public async Task CreateCourtEvent_UsesNotificationServiceForResponsibleCourtHearing()
     {
@@ -13548,7 +13599,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
 
         var created = Assert.IsType<CreatedResult>(result.Result);
         var dto = Assert.IsType<CasesV2Controller.ClientCaseWorkOrderActDto>(created.Value);
-        Assert.Equal("WO-ACT-77", dto.Number);
+        Assert.Equal("1", dto.Number);
         Assert.Equal(new DateTime(2026, 06, 03), dto.Date);
         Assert.Equal(14000, dto.Amount);
         Assert.Equal(1, dto.LineItemCount);

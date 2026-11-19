@@ -20,12 +20,14 @@ public class ContractExpirationNotificationServiceTests
     [Fact]
     public async Task RunOnceAsync_LoadsRecipientsInFixedNumberOfQueriesForMultipleContracts()
     {
+        var clock = new ExpiryTestClock(new DateTimeOffset(2030, 1, 1, 12, 0, 0, TimeSpan.Zero));
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
         var interceptor = new RecordingCommandInterceptor();
         var notificationService = DispatchProxy.Create<INotificationService, RecordingNotificationServiceProxy>();
         var notificationRecorder = (RecordingNotificationServiceProxy)(object)notificationService;
         var services = new ServiceCollection();
+        services.AddSingleton<TimeProvider>(clock);
         services.AddDbContext<PaymentContext>(options => options
             .UseSqlite(connection)
             .AddInterceptors(interceptor));
@@ -73,8 +75,8 @@ public class ContractExpirationNotificationServiceTests
                 {
                     Number = $"BATCH-{index}",
                     Title = $"Договор {index}",
-                    Date = DateTime.UtcNow.Date.AddMonths(-1),
-                    ValidUntil = DateTime.UtcNow.Date.AddDays(3),
+                    Date = clock.GetUtcNow().UtcDateTime.Date.AddMonths(-1),
+                    ValidUntil = clock.GetUtcNow().UtcDateTime.Date.AddDays(3),
                     BillingMode = ContractBillingMode.Fixed,
                     Amount = 10000m,
                     Status = ContractStatus.Concluded,
@@ -112,8 +114,8 @@ public class ContractExpirationNotificationServiceTests
             {
                 Number = "DENIED-1",
                 Title = "Недоступный договор",
-                Date = DateTime.UtcNow.Date.AddMonths(-1),
-                ValidUntil = DateTime.UtcNow.Date.AddDays(3),
+                Date = clock.GetUtcNow().UtcDateTime.Date.AddMonths(-1),
+                ValidUntil = clock.GetUtcNow().UtcDateTime.Date.AddDays(3),
                 BillingMode = ContractBillingMode.Fixed,
                 Amount = 10000m,
                 Status = ContractStatus.Concluded,
@@ -129,14 +131,16 @@ public class ContractExpirationNotificationServiceTests
         interceptor.ReaderCommands.Clear();
         var service = new ContractExpirationNotificationService(
             provider.GetRequiredService<IServiceScopeFactory>(),
-            NullLogger<ContractExpirationNotificationService>.Instance);
+            NullLogger<ContractExpirationNotificationService>.Instance, clock);
 
         var affected = await service.RunOnceAsync(CancellationToken.None);
 
         Assert.Equal(12, affected);
         Assert.Equal(12, notificationRecorder.Calls.Count);
         Assert.All(notificationRecorder.Calls, call => Assert.Single(call.RecipientUserIds));
-        Assert.Equal(3, interceptor.ReaderCommands.Count);
+        Assert.Equal(5, interceptor.ReaderCommands.Count);
+        Assert.Single(interceptor.ReaderCommands, command => command.Contains(ContractExpirationRecipientSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command => command.Contains(CalendarTimeZoneHelper.UserTimeZoneSettingKey, StringComparison.Ordinal));
         Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("ClientContracts", StringComparison.Ordinal)
             && command.Contains("LegalEntityContracts", StringComparison.Ordinal)
@@ -150,9 +154,11 @@ public class ContractExpirationNotificationServiceTests
     [Fact]
     public async Task RunOnceAsync_NotifiesResponsibleWhenContractExpiresSoon()
     {
+        var clock = new ExpiryTestClock(new DateTimeOffset(2030, 1, 1, 12, 0, 0, TimeSpan.Zero));
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
         var services = new ServiceCollection();
+        services.AddSingleton<TimeProvider>(clock);
         services.AddDbContext<PaymentContext>(options => options.UseSqlite(connection));
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         services.AddSingleton<IEmailService, NoopEmailService>();
@@ -199,8 +205,8 @@ public class ContractExpirationNotificationServiceTests
             {
                 Number = "EXP-1",
                 Title = "Срочный договор",
-                Date = DateTime.UtcNow.Date.AddMonths(-1),
-                ValidUntil = DateTime.UtcNow.Date.AddDays(3),
+                Date = clock.GetUtcNow().UtcDateTime.Date.AddMonths(-1),
+                ValidUntil = clock.GetUtcNow().UtcDateTime.Date.AddDays(3),
                 BillingMode = ContractBillingMode.Fixed,
                 Amount = 10000m,
                 Status = ContractStatus.Concluded,
@@ -215,7 +221,7 @@ public class ContractExpirationNotificationServiceTests
 
         var service = new ContractExpirationNotificationService(
             provider.GetRequiredService<IServiceScopeFactory>(),
-            NullLogger<ContractExpirationNotificationService>.Instance);
+            NullLogger<ContractExpirationNotificationService>.Instance, clock);
 
         var affected = await service.RunOnceAsync(CancellationToken.None);
 
@@ -229,6 +235,11 @@ public class ContractExpirationNotificationServiceTests
         Assert.Equal(storedContract.Id, notification.ObjectId);
         Assert.Contains("EXP-1", notification.BodyPreview);
         Assert.Contains("Осталось дней: 3", notification.BodyPreview);
+    }
+
+    private sealed class ExpiryTestClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     private sealed class NoopEmailService : IEmailService

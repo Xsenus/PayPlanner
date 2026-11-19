@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using PuppeteerSharp;
 using PuppeteerSharp.Media;
 
@@ -62,13 +63,20 @@ public sealed class InvoiceDocumentPdfService : IInvoiceDocumentPdfService
                 Width = 1240,
                 Height = 1754,
             });
+            var contentReadiness = Stopwatch.StartNew();
             await page.SetContentAsync(html, new NavigationOptions
             {
-                WaitUntil =
-                [
-                    WaitUntilNavigation.Load,
-                    WaitUntilNavigation.Networkidle0,
-                ],
+                WaitUntil = [WaitUntilNavigation.Load],
+                Timeout = 30_000,
+            });
+
+            var remainingTimeout = 30_000 - (int)contentReadiness.ElapsedMilliseconds;
+            if (remainingTimeout <= 0) throw new TimeoutException("PDF content readiness exceeded 30000 ms.");
+            await page.WaitForNetworkIdleAsync(new WaitForNetworkIdleOptions
+            {
+                Concurrency = 0,
+                IdleTime = 500,
+                Timeout = remainingTimeout,
             });
 
             return await page.PdfDataAsync(new PdfOptions
@@ -76,6 +84,7 @@ public sealed class InvoiceDocumentPdfService : IInvoiceDocumentPdfService
                 Format = PaperFormat.A4,
                 PrintBackground = true,
                 PreferCSSPageSize = true,
+                WaitForFonts = true,
             });
         }
         catch (InvalidOperationException)

@@ -27,6 +27,7 @@ beforeEach(() => {
   vi.stubEnv('RESTORED_SMOKE_ROOT', resolve('owned-restored-preparation-test'));
   vi.stubEnv('RESTORED_SMOKE_PORT', '41235');
   vi.stubEnv('PAYPLANNER_TEST_BROWSER', 'chrome');
+  vi.stubEnv('PAYPLANNER_TEST_BROWSER_PATH', undefined);
   for (const name of ['VITE_RESTORED_RUNTIME_ISOLATION', 'VITE_RESTORED_RUNTIME_INSTANCE_ID', 'VITE_API_URL'])
     vi.stubEnv(name, undefined);
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -69,6 +70,19 @@ test('waits for browser ownership before preview and closes it when preview fail
   expect(mocks.preview).not.toHaveBeenCalled();
   launch.resolve(browser);
   expect(await result).toBe(failure);
+  expect(browser.close).toHaveBeenCalledTimes(1);
+});
+
+test('uses the pinned browser executable and retains ownership when preview fails', async () => {
+  const executablePath = resolve('owned-browser/chrome.exe');
+  vi.stubEnv('PAYPLANNER_TEST_BROWSER_PATH', executablePath);
+  const browser = { close: vi.fn().mockResolvedValue(undefined) };
+  const failure = new Error('owned preview failure');
+  mocks.build.mockResolvedValue(entry);
+  mocks.launch.mockResolvedValue(browser);
+  mocks.preview.mockRejectedValue(failure);
+  expect(await run().catch(error => error)).toBe(failure);
+  expect(mocks.launch).toHaveBeenCalledExactlyOnceWith({ headless: true, channel: 'chrome', executablePath });
   expect(browser.close).toHaveBeenCalledTimes(1);
 });
 

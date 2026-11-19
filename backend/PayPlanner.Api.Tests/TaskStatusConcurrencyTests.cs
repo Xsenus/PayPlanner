@@ -194,7 +194,7 @@ public partial class TasksControllerTests
         Assert.IsType<OkObjectResult>(result.Result);
         var pending = await db.TaskStatusNotificationOutboxes.AsNoTracking().SingleAsync(item => item.TaskJournalItemId == task.Id);
         Assert.Null(pending.CompletedAt);
-        Assert.Equal("completion", pending.EventType);
+        Assert.Equal(TaskCompletionNotificationPolicy.ApprovalEventType, pending.EventType);
         Assert.Equal((await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id)).StatusTransitionToken, pending.StatusTransitionToken);
         var expired = DateTime.UtcNow.AddSeconds(-1);
         await db.TaskStatusNotificationOutboxes.Where(item => item.Id == pending.Id).ExecuteUpdateAsync(setters => setters.SetProperty(item => item.LeaseUntil, (DateTime?)expired));
@@ -468,7 +468,7 @@ public partial class TasksControllerTests
         Assert.IsType<OkObjectResult>((await controller.UpdateTask(task.Id, request, CancellationToken.None)).Result);
         var pending = await db.TaskStatusNotificationOutboxes.AsNoTracking().SingleAsync(item => item.TaskJournalItemId == task.Id);
         Assert.Null(pending.CompletedAt);
-        Assert.Equal(target == "done" ? "completion" : "approval", pending.EventType);
+        Assert.Equal(target == "done" ? TaskCompletionNotificationPolicy.OrdinaryEventType : "approval", pending.EventType);
         Assert.Equal((await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id)).StatusTransitionToken, pending.StatusTransitionToken);
         var expired = DateTime.UtcNow.AddSeconds(-1);
         await db.TaskStatusNotificationOutboxes.Where(item => item.Id == pending.Id).ExecuteUpdateAsync(setters => setters.SetProperty(item => item.LeaseUntil, (DateTime?)expired));

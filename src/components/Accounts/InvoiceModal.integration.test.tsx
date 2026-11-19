@@ -170,7 +170,12 @@ vi.mock('../../services/api', () => ({
     getLegalEntitiesPaged: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 }),
     getClientBalance: vi.fn().mockResolvedValue({ clientId: 1, balance: 0 }),
     getLegalEntityBalance: vi.fn().mockResolvedValue({ clientId: null, legalEntityId: 1, balance: 0 }),
-    getNextInvoiceNumber: vi.fn().mockResolvedValue('24'),
+    getNextInvoiceNumber: vi.fn().mockImplementation(async (date?: string) => ({
+      year: Number(date?.slice(0, 4) || new Date().getFullYear()),
+      nextNumber: '24',
+      startNumber: 1,
+      allocationStrategy: 'max-plus-one' as const,
+    })),
     getPayment: vi.fn(),
     getMoneyOperationsPaged: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20, summary: createEmptyMoneyOperationsSummary() }),
     createContract: vi.fn(),
@@ -881,6 +886,12 @@ describe('InvoiceModal integration', () => {
   beforeEach(() => {
     configureDocumentDeliveryTestApi('invoice', 0, 0, false);
     vi.mocked(apiService.getDocumentStatuses).mockReset().mockResolvedValue([]);
+    vi.mocked(apiService.getNextInvoiceNumber).mockReset().mockImplementation(async (date) => ({
+      year: Number(date?.slice(0, 4) || new Date().getFullYear()),
+      nextNumber: '24',
+      startNumber: 1,
+      allocationStrategy: 'max-plus-one' as const,
+    }));
     referenceHookSpy.mockClear(); referenceState.loading = false; referenceState.error = null;
     referenceLookupSpy.mockClear();
     referenceState.refresh.mockReset().mockResolvedValue(undefined); referenceState.capture.mockReset().mockImplementation(() => ({ isCurrent: () => true }));
@@ -966,6 +977,256 @@ describe('InvoiceModal integration', () => {
     vi.mocked(apiService.createInvoice).mockReset();
     vi.mocked(apiService.cancelInvoice).mockReset();
     vi.mocked(apiService.createClient).mockReset();
+  });
+
+  describe('invoice automatic number preview', () => {
+    const propsFor = () => ({
+      ...referenceProps(),
+      defaultClientId: 1,
+      clients: [createTestClient(1, 'Клиент предварительного номера')],
+    });
+    const numberField = () => screen.getByLabelText('Номер счёта') as HTMLInputElement;
+    const dateField = (container: HTMLElement) => container.querySelector('input[type="date"]') as HTMLInputElement;
+    const preview = (nextNumber: string, date: string) => ({
+      year: Number(date.slice(0, 4)),
+      nextNumber,
+      startNumber: 1,
+      allocationStrategy: 'max-plus-one' as const,
+    });
+    const exhausted = 'Годовая последовательность номеров счетов за 2091 год исчерпана.';
+    const failure = () => new Error('HTTP 422 Unprocessable Entity - ' + JSON.stringify({ message: exhausted }));
+
+    it('clears the previous automatic number and shows the current dated 422 before saving', async () => {
+      const pending = createDeferred<Awaited<ReturnType<typeof apiService.getNextInvoiceNumber>>>();
+      const props = propsFor();
+      const view = render(<InvoiceModal {...props} />);
+      await waitFor(() => expect(numberField().value).toBe('24'));
+      vi.mocked(apiService.getNextInvoiceNumber).mockReturnValueOnce(pending.promise);
+
+      fireEvent.change(dateField(view.container), { target: { value: '2091-01-01' } });
+
+      expect(numberField().value).toBe('');
+      await waitFor(() => expect(apiService.getNextInvoiceNumber).toHaveBeenLastCalledWith('2091-01-01'));
+      await act(async () => pending.reject(failure()));
+      expect(await screen.findByText(exhausted)).toBeTruthy();
+      fireEvent.submit(document.getElementById('invoice-edit-form')!);
+      expect(props.onSubmit).not.toHaveBeenCalled();
+      expect(toastErrorMock).toHaveBeenCalledWith(exhausted, 'Проверьте данные счета');
+    });
+
+    it('retries the same date and accepts its new preview after a temporary failure', async () => {
+      vi.mocked(apiService.getNextInvoiceNumber).mockRejectedValueOnce(new Error('Сервис подбора временно недоступен'));
+      const view = render(<InvoiceModal {...propsFor()} />);
+      expect(await screen.findByText('Сервис подбора временно недоступен')).toBeTruthy();
+      const date = dateField(view.container).value;
+      vi.mocked(apiService.getNextInvoiceNumber).mockResolvedValueOnce(preview('7', date));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Повторить подбор номера' }));
+
+      await waitFor(() => expect(numberField().value).toBe('7'));
+      expect(apiService.getNextInvoiceNumber).toHaveBeenLastCalledWith(date);
+      expect(screen.queryByText('Сервис подбора временно недоступен')).toBeNull();
+    });
+
+    it('accepts a preview for the valid last calendar year', async () => {
+      const view = render(<InvoiceModal {...propsFor()} />);
+      await waitFor(() => expect(numberField().value).toBe('24'));
+      vi.mocked(apiService.getNextInvoiceNumber).mockResolvedValueOnce(preview('1', '9999-12-31'));
+
+      fireEvent.change(dateField(view.container), { target: { value: '9999-12-31' } });
+
+      await waitFor(() => expect(numberField().value).toBe('1'));
+      expect(apiService.getNextInvoiceNumber).toHaveBeenLastCalledWith('9999-12-31');
+      expect(screen.queryByRole('button', { name: 'Повторить подбор номера' })).toBeNull();
+    });
+
+    it.each(['success', 'error'] as const)('ignores a previous date preview %s after the current one succeeded', async (outcome) => {
+      const pending = createDeferred<Awaited<ReturnType<typeof apiService.getNextInvoiceNumber>>>();
+      vi.mocked(apiService.getNextInvoiceNumber).mockReturnValueOnce(pending.promise);
+      const view = render(<InvoiceModal {...propsFor()} />);
+      await waitFor(() => expect(apiService.getNextInvoiceNumber).toHaveBeenCalledOnce());
+      const previousDate = dateField(view.container).value;
+      vi.mocked(apiService.getNextInvoiceNumber).mockResolvedValueOnce(preview('88', '2092-01-01'));
+      fireEvent.change(dateField(view.container), { target: { value: '2092-01-01' } });
+      await waitFor(() => expect(numberField().value).toBe('88'));
+
+      await act(async () => {
+        if (outcome === 'success') pending.resolve(preview('999', previousDate));
+        else pending.reject(failure());
+      });
+
+      expect(numberField().value).toBe('88');
+      expect(screen.queryByText(exhausted)).toBeNull();
+    });
+
+    it.each(['success', 'error'] as const)('preserves manual input and its later date change after a preview %s', async (outcome) => {
+      const pending = createDeferred<Awaited<ReturnType<typeof apiService.getNextInvoiceNumber>>>();
+      vi.mocked(apiService.getNextInvoiceNumber).mockReturnValueOnce(pending.promise);
+      const view = render(<InvoiceModal {...propsFor()} />);
+      await waitFor(() => expect(apiService.getNextInvoiceNumber).toHaveBeenCalledOnce());
+      const date = dateField(view.container).value;
+      fireEvent.change(numberField(), { target: { value: 'РУЧНОЙ-42' } });
+
+      await act(async () => {
+        if (outcome === 'success') pending.resolve(preview('999', date));
+        else pending.reject(failure());
+      });
+      fireEvent.change(dateField(view.container), { target: { value: '2091-01-01' } });
+
+      expect(numberField().value).toBe('РУЧНОЙ-42');
+      expect(apiService.getNextInvoiceNumber).toHaveBeenCalledOnce();
+      expect(screen.queryByText(exhausted)).toBeNull();
+    });
+
+    it.each([
+      ['24', 'success'],
+      ['24', 'error'],
+      ['РУЧНОЙ-42', 'success'],
+      ['РУЧНОЙ-42', 'error'],
+    ] as const)('preserves restored create-draft number %s after a pending preview %s', async (restoredNumber, outcome) => {
+      const pending = createDeferred<Awaited<ReturnType<typeof apiService.getNextInvoiceNumber>>>();
+      vi.mocked(apiService.getNextInvoiceNumber).mockReturnValueOnce(pending.promise);
+      const resumeDraft: InvoiceEditorDraftState = {
+        mode: 'create',
+        presentation: 'modal',
+        invoiceId: null,
+        pageViewMode: false,
+        form: {
+          number: restoredNumber,
+          date: '2031-06-15',
+          dueDate: '2031-06-20',
+          amount: '1000',
+          type: 'Income',
+          status: 'Pending',
+          workflowStatus: 'Draft',
+          clientId: '1',
+          legalEntityId: '',
+          expenseClientId: '',
+          expenseLegalEntityId: '',
+          contractId: '',
+          clientCaseReference: 'Сохранённый комментарий',
+          description: 'Черновик нового счёта',
+          isNotForAccounting: false,
+          actReference: '',
+          paidDate: '',
+          responsibleIds: ['7'],
+        },
+        lineItems: [{
+          id: 'restored-row',
+          name: 'Услуга из черновика',
+          quantity: '1',
+          unit: 'усл.',
+          price: '1000',
+          serviceCategoryId: '',
+          serviceId: '',
+        }],
+        selectedActs: [],
+        selectedClientCaseIds: [],
+        installmentPlan: null,
+      };
+
+      const view = render(<InvoiceModal {...propsFor()} resumeDraft={resumeDraft} />);
+
+      await waitFor(() => expect(numberField().value).toBe(restoredNumber));
+      expect(dateField(view.container).value).toBe('2031-06-15');
+      await waitFor(() => expect(apiService.getNextInvoiceNumber).toHaveBeenCalledOnce());
+      const requestedDate = vi.mocked(apiService.getNextInvoiceNumber).mock.calls[0][0]!;
+      await act(async () => {
+        if (outcome === 'success') pending.resolve(preview('999', requestedDate));
+        else pending.reject(failure());
+      });
+      expect(numberField().value).toBe(restoredNumber);
+
+      fireEvent.change(dateField(view.container), { target: { value: '2032-01-01' } });
+
+      expect(dateField(view.container).value).toBe('2032-01-01');
+      expect(numberField().value).toBe(restoredNumber);
+      expect(apiService.getNextInvoiceNumber).toHaveBeenCalledOnce();
+      expect(screen.queryByText(exhausted)).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Повторить подбор номера' })).toBeNull();
+      expect(toastErrorMock).not.toHaveBeenCalled();
+    });
+
+    it.each(['success', 'error'] as const)('discards a previous login preview %s before auth context rerenders', async (outcome) => {
+      const pending = createDeferred<Awaited<ReturnType<typeof apiService.getNextInvoiceNumber>>>();
+      vi.mocked(apiService.getNextInvoiceNumber).mockReturnValueOnce(pending.promise);
+      const view = render(<InvoiceModal {...propsFor()} />);
+      await waitFor(() => expect(apiService.getNextInvoiceNumber).toHaveBeenCalledOnce());
+      const date = dateField(view.container).value;
+      baseAuthSession.replace();
+
+      await act(async () => {
+        if (outcome === 'success') pending.resolve(preview('999', date));
+        else pending.reject(failure());
+      });
+
+      expect(numberField().value).toBe('');
+      expect(screen.queryByText(exhausted)).toBeNull();
+      expect(toastErrorMock).not.toHaveBeenCalled();
+    });
+
+    it.each(['actor', 'role', 'permission'] as const)('discards a response after the editor %s changed', async (change) => {
+      const pending = createDeferred<Awaited<ReturnType<typeof apiService.getNextInvoiceNumber>>>();
+      vi.mocked(apiService.getNextInvoiceNumber).mockReturnValueOnce(pending.promise)
+        .mockImplementation(async (date) => preview('88', date!));
+      const props = propsFor();
+      const view = render(<InvoiceModal {...props} />);
+      await waitFor(() => expect(apiService.getNextInvoiceNumber).toHaveBeenCalledOnce());
+      const date = dateField(view.container).value;
+      if (change === 'actor') printAuthState.user = { id: 8, role: { id: 1 } };
+      if (change === 'role') printAuthState.user = { id: 7, role: { id: 8 } };
+      if (change === 'permission') {
+        permissionState.value = structuredClone(defaultRolePermissions);
+        permissionState.value.accounts.canCreate = false;
+      }
+      view.rerender(<InvoiceModal {...props} />);
+      if (change !== 'permission') await waitFor(() => expect(numberField().value).toBe('88'));
+
+      await act(async () => {
+        if (change === 'role') pending.reject(failure());
+        else pending.resolve(preview('999', date));
+      });
+
+      expect(numberField().value).toBe(change === 'permission' ? '' : '88');
+      expect(screen.queryByText(exhausted)).toBeNull();
+    });
+
+    it.each(['success', 'error'] as const)('discards a preview %s after unmount', async (outcome) => {
+      const pending = createDeferred<Awaited<ReturnType<typeof apiService.getNextInvoiceNumber>>>();
+      vi.mocked(apiService.getNextInvoiceNumber).mockReturnValueOnce(pending.promise);
+      const view = render(<InvoiceModal {...propsFor()} />);
+      await waitFor(() => expect(apiService.getNextInvoiceNumber).toHaveBeenCalledOnce());
+      const date = dateField(view.container).value;
+      view.unmount();
+
+      await act(async () => {
+        if (outcome === 'success') pending.resolve(preview('999', date));
+        else pending.reject(failure());
+      });
+
+      expect(screen.queryByLabelText('Номер счёта')).toBeNull();
+      expect(toastErrorMock).not.toHaveBeenCalled();
+    });
+
+    it.each(['success', 'error'] as const)('preserves an existing invoice after an old create preview %s', async (outcome) => {
+      const pending = createDeferred<Awaited<ReturnType<typeof apiService.getNextInvoiceNumber>>>();
+      vi.mocked(apiService.getNextInvoiceNumber).mockReturnValueOnce(pending.promise);
+      const view = render(<InvoiceModal {...propsFor()} />);
+      await waitFor(() => expect(apiService.getNextInvoiceNumber).toHaveBeenCalledOnce());
+      const date = dateField(view.container).value;
+      view.rerender(<InvoiceModal {...paymentReadProps()} />);
+      await waitFor(() => expect(numberField().value).toBe('СЧ-91'));
+
+      await act(async () => {
+        if (outcome === 'success') pending.resolve(preview('999', date));
+        else pending.reject(failure());
+      });
+      fireEvent.change(dateField(view.container), { target: { value: '2091-01-01' } });
+
+      expect(numberField().value).toBe('СЧ-91');
+      expect(apiService.getNextInvoiceNumber).toHaveBeenCalledOnce();
+      expect(screen.queryByText(exhausted)).toBeNull();
+    });
   });
 
   it('uses the profile time zone for a new invoice default date near midnight', () => {
@@ -3452,12 +3713,12 @@ describe('InvoiceModal integration', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: createActLabel }));
-    fireEvent.change(screen.getByLabelText(actNumberLabel), { target: { value: 'ACT-901' } });
+    expect(screen.getByLabelText(actNumberLabel)).toHaveProperty('readOnly', true);
     fireEvent.click(screen.getAllByRole('button', { name: createActLabel }).at(-1)!);
 
       await waitFor(() => {
         expect(createActMock).toHaveBeenCalledWith(expect.objectContaining({
-          number: 'ACT-901',
+          number: '',
         amount: 0,
         creationMode: 'Full',
         invoiceId: 618,
@@ -3466,9 +3727,39 @@ describe('InvoiceModal integration', () => {
         contractId: 77,
         responsibleId: 9,
         status: 'Created',
-        }));
+        }), expect.objectContaining({ attemptKey: expect.stringMatching(/^[0-9a-f-]{36}$/) }));
       });
+      await screen.findByText('№ACT-901');
+      expect(screen.queryByLabelText(actNumberLabel)).toBeNull();
     });
+
+    it.each(['session', 'permission', 'invoice'].flatMap(boundary => ['success', 'error'].map(outcome => ({ boundary, outcome }))))(
+      'act creation owner: late $outcome cannot follow $boundary', async ({ boundary, outcome }) => {
+        let resolve!: (value: Act) => void;
+        let reject!: (error: Error) => void;
+        vi.mocked(apiService.createAct).mockReturnValue(new Promise<Act>((done, failed) => { resolve = done; reject = failed; }));
+        const invoice = { id: 618, invoiceEntityId: 618, number: '36', date: '2026-04-10', amount: 18000,
+          type: 'Income', status: 'Pending', clientId: 1, responsibles: [], lineItems: [] } as unknown as Invoice;
+        const props = { open: true, mode: 'edit' as const, invoice, onClose: vi.fn(), onSubmit: vi.fn().mockResolvedValue(undefined),
+          submitting: false, clients: [createTestClient(1, 'Тестовый клиент')], responsibles: [], lookupsLoading: false, relatedPayments: [] };
+        const view = render(<InvoiceModal {...props} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Создать акт' }));
+        fireEvent.click(screen.getAllByRole('button', { name: 'Создать акт' }).at(-1)!);
+        await waitFor(() => expect(apiService.createAct).toHaveBeenCalledOnce());
+        if (boundary === 'session') baseAuthSession.replace();
+        if (boundary === 'permission') {
+          permissionState.value = { ...defaultRolePermissions, acts: { ...defaultRolePermissions.acts, canCreate: false } };
+          view.rerender(<InvoiceModal {...props} />);
+        }
+        if (boundary === 'invoice') view.rerender(<InvoiceModal {...props} invoice={{ ...invoice, id: 619, invoiceEntityId: 619, number: 'NEW' }} />);
+        await act(async () => {
+          if (outcome === 'success') resolve({ id: 901, number: 'STALE-ACT-901', date: '2026-04-10', amount: 18000, status: 'Created', invoiceId: 618 } as Act);
+          else reject(new Error('Ошибка старого акта'));
+        });
+        expect(screen.queryByText(/STALE-ACT-901/)).toBeNull();
+        expect(screen.queryByText('Ошибка старого акта')).toBeNull();
+        expect(toastSuccessMock).not.toHaveBeenCalled();
+      });
 
     it('routes act creation to a dedicated page and stores the page draft instead of opening an inline modal', async () => {
       const onCreateActPage = vi.fn();
@@ -3517,7 +3808,6 @@ describe('InvoiceModal integration', () => {
         presentation: 'page',
       });
       expect(onCreateActPage).toHaveBeenCalledWith(expect.objectContaining({
-        number: '36',
         amount: 18000,
         creationMode: 'Full',
         invoiceId: 618,
@@ -3529,6 +3819,7 @@ describe('InvoiceModal integration', () => {
         invoiceId: 618,
         invoiceSeed: expect.objectContaining({ id: 618, number: '36' }),
       }));
+      expect(onCreateActPage.mock.calls[0][0]).not.toHaveProperty('number');
     });
   
   describe('invoice case creation owner', () => {

@@ -152,8 +152,15 @@ async function run(options) {
     const cli = process.env.PAYPLANNER_TEST_PLAYWRIGHT_CLI;
     const cliPackage = readJson(resolve(dirname(cli), 'package.json'));
     if (cliPackage.name !== '@playwright/cli' || cliPackage.version !== '0.1.22') throw new Error('The release gate requires @playwright/cli 0.1.22');
-    const chromeCandidates = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA]
+    const browserPath = process.env.PAYPLANNER_TEST_BROWSER_PATH;
+    const browserProfile = { direct: browserPath ?? null, pdf: process.env.PAYPLANNER_PDF_BROWSER_PATH ?? null,
+      cli: process.env.PLAYWRIGHT_MCP_EXECUTABLE_PATH ?? null };
+    const pinnedBrowsers = [...new Set(Object.values(browserProfile).filter(Boolean))];
+    for (const path of pinnedBrowsers) if (!isAbsolute(path) || !existsSync(path)) throw new Error('The configured browser must be an existing absolute file');
+    const chromeCandidates = pinnedBrowsers.length ? pinnedBrowsers : [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA]
       .filter(Boolean).map(base => resolve(base, 'Google/Chrome/Application/chrome.exe'));
+    const buildEnv = { DOTNET_GCHeapHardLimit: '240000000', DOTNET_PROCESSOR_COUNT: '1', DOTNET_GCConserveMemory: '9', DOTNET_gcServer: '0',
+      CompilerResponseFile: resolve(root, 'scripts/compiler-serial.rsp') };
     async function qualifyEnvironment() {
       verifyPostgres();
       const identity = spawnSync(process.env.PAYPLANNER_TEST_PSQL, ['-X', '-w', '-h', '127.0.0.1', '-p', '5433', '-U', 'payplanner_ci', '-d', 'postgres', '-A', '-t', '-q', '-v', 'ON_ERROR_STOP=1', '-c', "select current_setting('server_version'), inet_server_addr(), inet_server_port(), pg_postmaster_start_time(), current_user, current_setting('default_tablespace')"], {
@@ -164,10 +171,10 @@ async function run(options) {
       if (sdk.status !== 0) throw new Error('Existing .NET SDK is unavailable');
       const browsers = chromeCandidates.filter(existsSync);
       if (!browsers.length) throw new Error('Install the release browser before verification');
-      const externalTools = [cli, process.env.PAYPLANNER_TEST_PSQL, process.env.PAYPLANNER_TEST_PG_DUMP, ...browsers];
-      return { sdk: sdk.stdout.trim(), configuration: options.configuration, postgresIdentity: identity.stdout.trim(), externalToolHashes: externalTools.map(path => ({ path, sha256: hashFile(path) })) };
+      const externalTools = [cli, process.env.PAYPLANNER_TEST_PSQL, process.env.PAYPLANNER_TEST_PG_DUMP, ...browsers, buildEnv.CompilerResponseFile];
+      return { sdk: sdk.stdout.trim(), configuration: options.configuration, buildProfile: buildEnv, browserProfile, postgresIdentity: identity.stdout.trim(), externalToolHashes: externalTools.map(path => ({ path, sha256: hashFile(path) })) };
     }
-    const inputOptions = { root, untestedDocs: options.untestedDocs, testedDocs: Object.keys(testedDocumentation), dependencyRoots: [resolve(root, 'node_modules'), dirname(dirname(dirname(cli)))], environment: qualifyEnvironment };
+    const inputOptions = { root, untestedDocs: options.untestedDocs, testedDocs: Object.keys(testedDocumentation), dependencyRoots: [resolve(root, 'node_modules'), dirname(dirname(dirname(cli))), ...pinnedBrowsers.map(path => dirname(path))], environment: qualifyEnvironment };
     const inputs = await snapshotVerificationInputs(inputOptions);
     if (options.resume) {
       state = readJson(stateFile);
@@ -238,7 +245,6 @@ async function run(options) {
       save(stateFile, state);
       await command('workflow-preflight', process.execPath, ['scripts/validate-deploy-workflow.mjs']);
       await command('encoding-preflight', process.execPath, ['scripts/check-source-encoding.mjs']);
-      const buildEnv = { DOTNET_GCHeapHardLimit: '200000000', DOTNET_PROCESSOR_COUNT: '2', DOTNET_GCConserveMemory: '9', DOTNET_gcServer: '0' };
       await command('build-shard-tool', 'dotnet', ['build', 'tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj', '-c', config, '--no-restore', '-m:1', '-nr:false', '-p:UseSharedCompilation=false'], buildEnv);
       supervisorTool = resolve(root, `tools/PayPlanner.TestShards/bin/${config}/net9.0/PayPlanner.TestShards.dll`);
       await command('build-tests', 'dotnet', ['build', 'backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj', '-c', config, '--no-restore', '-m:1', '-nr:false', '-p:UseSharedCompilation=false'], buildEnv);

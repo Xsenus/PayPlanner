@@ -1,8 +1,8 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
-import { AlertTriangle, ArrowLeft, Ban, Check, Download, FileText, FileX, GripVertical, Loader2, Mail, Pencil, Plus, Printer, Save, Send, Settings2, UploadCloud, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, ArrowLeft, Ban, Check, ChevronDown, Download, FileText, FileX, GripVertical, Loader2, Mail, Pencil, Plus, Printer, Save, Send, Settings2, UploadCloud, X } from 'lucide-react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentDeliveryOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
 import { useDialog } from '../../hooks/useDialog';
@@ -22,6 +22,7 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { useToast } from '../../hooks/useToast';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
+import { TableContextMenu, type TableContextMenuPosition } from '../ui/TableContextMenu';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { CounterpartyPickerModal, type CounterpartyKind, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 import { MessengerDocumentDeliveryModal } from '../Cases/MessengerDocumentDeliveryModal';
@@ -373,6 +374,47 @@ export function ContractDetailPage({
   const [actPage, setActPage] = useState(1);
   const [actState, setActState] = useState<TabListState<Act>>(() => createTabListState());
   const [actScope, setActScope] = useState<RelatedDocumentsScope>('contract');
+
+  const accountingMenuButton = useRef<HTMLButtonElement>(null);
+  const accountingMenuId = useId();
+  const accountingMenuScope = JSON.stringify([detailScope, editMode, canViewInvoices, canViewActs]);
+  const accountingMenuScopeRef = useRef(accountingMenuScope);
+  accountingMenuScopeRef.current = accountingMenuScope;
+  const [accountingMenu, setAccountingMenu] = useState<{
+    scope: string;
+    position: TableContextMenuPosition;
+    initialFocus: 'first' | 'last';
+  } | null>(null);
+  const accountingMenuOpen = accountingMenu?.scope === accountingMenuScope;
+  const accountingActions = visibleTabs.filter(tab => tab === 'invoices' || tab === 'acts').map(tab => ({
+    key: tab,
+    label: tabLabels[tab],
+    onSelect: () => {
+      if (!canView || contract?.id !== contractId || accountingMenuScopeRef.current !== accountingMenuScope) return;
+      setActiveTab(tab);
+    },
+  }));
+  const openAccountingMenu = (initialFocus: 'first' | 'last') => {
+    if (!accountingMenuButton.current || !canView || contract?.id !== contractId || accountingActions.length === 0) return;
+    const bounds = accountingMenuButton.current.getBoundingClientRect();
+    setAccountingMenu({
+      scope: accountingMenuScope,
+      position: { x: Math.max(12, bounds.left), y: bounds.bottom + 4 },
+      initialFocus,
+    });
+  };
+
+  useEffect(() => { setAccountingMenu(null); }, [accountingMenuScope]);
+  useEffect(() => {
+    if (!accountingMenuOpen) return;
+    const close = () => setAccountingMenu(null);
+    window.addEventListener('resize', close);
+    window.addEventListener('scroll', close, true);
+    return () => {
+      window.removeEventListener('resize', close);
+      window.removeEventListener('scroll', close, true);
+    };
+  }, [accountingMenuOpen]);
 
   const [paymentPage, setPaymentPage] = useState(1);
   const [paymentState, setPaymentState] = useState<TabListState<Payment>>(() => createTabListState());
@@ -1502,8 +1544,8 @@ export function ContractDetailPage({
         </div>
       ) : null}
 
-      <div className="mb-3 flex gap-2">
-        {visibleTabs.map((tab) => (
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {visibleTabs.filter(tab => tab !== 'invoices' && tab !== 'acts').map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -1512,6 +1554,37 @@ export function ContractDetailPage({
             {tabLabels[tab]}
           </button>
         ))}
+        {accountingActions.length > 0 ? (
+          <button
+            ref={accountingMenuButton}
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={accountingMenuOpen}
+            aria-controls={accountingMenuOpen ? accountingMenuId : undefined}
+            onClick={() => accountingMenuOpen ? setAccountingMenu(null) : openAccountingMenu('first')}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault();
+                openAccountingMenu(event.key === 'ArrowUp' ? 'last' : 'first');
+              }
+            }}
+            className={`inline-flex items-center gap-2 rounded px-3 py-1 ${activeTab === 'invoices' || activeTab === 'acts' ? 'bg-emerald-600 text-white' : 'border'}`}
+          >
+            Бух. документы
+            <ChevronDown className="h-4 w-4" aria-hidden="true" />
+          </button>
+        ) : null}
+        <TableContextMenu
+          open={accountingMenuOpen}
+          position={accountingMenu?.position ?? null}
+          actions={accountingActions}
+          onClose={() => setAccountingMenu(null)}
+          keyboardNavigation
+          initialFocus={accountingMenu?.initialFocus}
+          returnFocusRef={accountingMenuButton}
+          menuId={accountingMenuId}
+          ariaLabel="Бух. документы договора"
+        />
       </div>
 
       {activeTab === 'clients' && (

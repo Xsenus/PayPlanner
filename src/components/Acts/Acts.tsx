@@ -11,6 +11,9 @@ import { useActs, type ActsSortKey } from '../../hooks/useActs';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useDocumentStatusSettings } from '../../hooks/useDocumentStatusSettings';
 import { apiService } from '../../services/api';
+import { acknowledgeCreatedAct, actCreateSuccessMessage, type ActCreateOptions } from '../../services/actCreateAttempts';
+import { useDocumentDeliveryOwner } from '../../hooks/useDocumentDeliveryOwner';
+import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import type { Act, ActInput, ActResponsible, ActStatus, ActWorkflowStatus, Client, PaymentKind } from '../../types';
 import { toDateInputValue } from '../../utils/dateUtils';
 import { getDocumentStatusCodes, getDocumentStatusLabels } from '../../utils/documentStatusSettings';
@@ -209,7 +212,6 @@ export function Acts({
 
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedAct, setSelectedAct] = useState<Act | null>(null);
-  const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
@@ -506,24 +508,31 @@ export function Acts({
     setModalError(null);
   };
 
-  const handleSubmit = async (payload: ActInput) => {
-    setSubmitting(true);
+  const actWriteOwner = useDocumentDeliveryOwner(JSON.stringify([user?.id, user?.role, user?.departmentId, actsPermissions, modalOpen, selectedAct?.id]));
+  const submitting = actWriteOwner.busy;
+  const handleSubmit = async (payload: ActInput, options?: ActCreateOptions) => {
+    const operation = actsPermissions.canCreate ? actWriteOwner.begin('create') : null;
+    if (!operation) throw new StaleUiOperationError();
     setModalError(null);
     try {
       if (lockType && effectiveTypeFilter !== 'All' && !payload.invoiceId) {
         throw new Error('Для доходного или расходного акта укажите связанный счет.');
       }
-      await createAct(payload);
-      toast.success(selectedAct ? 'Акт обновлен.' : 'Акт создан.');
+      const created = await createAct(payload, operation.isCurrent, options);
+      if (!operation.isCurrent()) throw new StaleUiOperationError();
+      toast.success(actCreateSuccessMessage(created));
+      acknowledgeCreatedAct(created);
       setModalOpen(false);
       setSelectedAct(null);
+      return created;
     } catch (err) {
+      if (!operation.isCurrent()) throw new StaleUiOperationError();
       const message = extractDisplayErrorMessage(err, 'Не удалось сохранить акт');
       setModalError(message);
       toast.error(message);
       throw err;
     } finally {
-      setSubmitting(false);
+      operation.finish();
     }
   };
 
@@ -1111,6 +1120,7 @@ export function Acts({
         act={selectedAct}
         onClose={closeModal}
         onSubmit={handleSubmit}
+        accessScopeKey={actWriteOwner.scope}
         submitting={submitting}
         errorMessage={modalError}
         clients={clients}

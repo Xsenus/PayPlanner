@@ -1,6 +1,8 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Services.Notifications;
 
@@ -57,7 +59,8 @@ public sealed class TaskStatusNotificationDispatchProcessor(
                 .SingleOrDefaultAsync(entry => entry.Id == id && entry.CompletedAt == null && entry.LeaseToken == token, ct);
             if (item is null) return false;
             var task = item.TaskJournalItem;
-            if (item.EventType is not ("approval" or "completion"))
+            if (item.EventType is not ("approval" or "completion"
+                or TaskCompletionNotificationPolicy.OrdinaryEventType or TaskCompletionNotificationPolicy.CoalescedEventType or TaskCompletionNotificationPolicy.ApprovalEventType))
             {
                 Log.LogError("Unknown task status notification type for event {EventId}.", id);
                 return false;
@@ -78,19 +81,49 @@ public sealed class TaskStatusNotificationDispatchProcessor(
             {
                 "approval" => string.Equals(task.Status, "onApproval", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(task.Status, "overdueApproval", StringComparison.OrdinalIgnoreCase),
-                "completion" => string.Equals(task.Status, "done", StringComparison.OrdinalIgnoreCase),
+                "completion" or TaskCompletionNotificationPolicy.OrdinaryEventType or TaskCompletionNotificationPolicy.CoalescedEventType or TaskCompletionNotificationPolicy.ApprovalEventType
+                    => string.Equals(task.Status, "done", StringComparison.OrdinalIgnoreCase),
                 _ => false,
             };
             if (!stale && validStatus)
             {
                 // An unfinished external attempt has an unknown outcome; do not send a duplicate blindly.
-                if (await db.NotificationDeliveries.AsNoTracking().AnyAsync(delivery => delivery.EventKey == item.EventKey
+                var approvalDecisionEventKey = TaskCompletionNotificationPolicy.ApprovalDecisionEventKey(item.EventKey);
+                if (await db.NotificationDeliveries.AsNoTracking().AnyAsync(delivery => (delivery.EventKey == item.EventKey
+                    || (item.EventType == TaskCompletionNotificationPolicy.ApprovalEventType && delivery.EventKey == approvalDecisionEventKey))
                     && delivery.Status == NotificationDeliveryStatus.Pending, ct)) return false;
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 timeout.CancelAfter(TimeSpan.FromSeconds(90));
-                var deliveries = item.EventType == "approval"
-                    ? await notifications.NotifyApprovalForEventAsync(task, item.ActorName, item.ActorUserId, item.EventKey, timeout.Token)
-                    : await notifications.NotifyCompletionForEventAsync(task, item.EventKey, timeout.Token);
+                IReadOnlyList<NotificationDelivery> deliveries;
+                if (item.EventType == TaskCompletionNotificationPolicy.ApprovalEventType)
+                {
+                    var snapshot = await LoadApprovalSnapshotAsync(item, timeout.Token);
+                    if (snapshot is null)
+                    {
+                        Log.LogWarning("Task approval completion event {EventId} has no matching decision snapshot.", id);
+                        return false;
+                    }
+                    task.Result = snapshot.TaskResult;
+                    var approver = new TaskJournalParticipant
+                    {
+                        Id = snapshot.ParticipantId,
+                        TaskJournalItemId = task.Id,
+                        UserId = snapshot.ApproverUserId,
+                        DisplayName = snapshot.ApproverName,
+                        ApprovalStatus = snapshot.Decision,
+                        Resolution = snapshot.Resolution,
+                        RespondedAt = snapshot.RespondedAt
+                    };
+                    deliveries = await notifications.NotifyApprovalCompletionForEventAsync(
+                        task, approver, item.ActorName, item.ActorUserId, item.EventKey, timeout.Token);
+                }
+                else
+                {
+                    deliveries = item.EventType == "approval"
+                        ? await notifications.NotifyApprovalForEventAsync(task, item.ActorName, item.ActorUserId, item.EventKey, timeout.Token)
+                        : await notifications.NotifyCompletionForEventAsync(task, item.EventKey,
+                            TaskCompletionNotificationPolicy.OriginForEventType(item.EventType), timeout.Token);
+                }
                 if (deliveries.Any(delivery => delivery.Status is NotificationDeliveryStatus.Failed or NotificationDeliveryStatus.Pending)) return false;
             }
             var finishedAt = Clock.GetUtcNow().UtcDateTime;
@@ -107,6 +140,36 @@ public sealed class TaskStatusNotificationDispatchProcessor(
             Log.LogWarning(error, "Task status notification event {EventId} remains queued.", id);
             return false;
         }
+    }
+
+    private async Task<ApprovalDecisionSnapshot?> LoadApprovalSnapshotAsync(TaskStatusNotificationOutbox item, CancellationToken ct)
+    {
+        var raw = await db.TaskJournalComments.AsNoTracking()
+            .Where(comment => comment.TaskJournalItemId == item.TaskJournalItemId && comment.Kind == "system"
+                && comment.MetadataJson.Contains(item.EventKey))
+            .Select(comment => comment.MetadataJson).SingleOrDefaultAsync(ct);
+        if (raw is null) return null;
+        var snapshot = JsonSerializer.Deserialize<ApprovalDecisionSnapshot>(raw, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        return snapshot is not null && snapshot.Kind == "approvalDecision" && snapshot.NotificationEventKey == item.EventKey
+            && snapshot.Decision == "approved" && snapshot.ResultingStatus == "done"
+            && snapshot.ParticipantId > 0 && snapshot.ActorUserId == item.ActorUserId
+            && (!item.ApprovalParticipantId.HasValue || item.ApprovalParticipantId == snapshot.ParticipantId)
+            ? snapshot : null;
+    }
+
+    private sealed record ApprovalDecisionSnapshot
+    {
+        public string Kind { get; init; } = string.Empty;
+        public string NotificationEventKey { get; init; } = string.Empty;
+        public int ActorUserId { get; init; }
+        public int ParticipantId { get; init; }
+        public int? ApproverUserId { get; init; }
+        public string ApproverName { get; init; } = string.Empty;
+        public string Decision { get; init; } = string.Empty;
+        public string? Resolution { get; init; }
+        public string? TaskResult { get; init; }
+        public string ResultingStatus { get; init; } = string.Empty;
+        public DateTime? RespondedAt { get; init; }
     }
 }
 

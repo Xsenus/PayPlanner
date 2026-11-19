@@ -3,7 +3,8 @@ import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ForcedTaskRevisionModal } from './ForcedTaskRevisionModal';
-import type { PagedResult, UserNotificationDto } from '../../services/api';
+import { AUTH_SESSION_EXPIRED_EVENT, type PagedResult, type UserNotificationDto } from '../../services/api';
+import { documentCopyTestSession } from '../../test/documentCopySession';
 import { USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 import { TASK_JOURNAL_REALTIME_EVENT } from '../../services/realtimeNotifications';
 import {
@@ -13,9 +14,19 @@ import {
   snoozeForcedTaskActions,
 } from '../../utils/forcedTaskActionSnoozes';
 
-const authState = vi.hoisted((): { user: { id: number } | null } => ({ user: { id: 7 } }));
+const expectedForcedNotificationTypes = [
+  'courtHearing', 'taskApprovalRequested', 'taskDeadlineChangeRequested',
+  'taskRevisionRequested', 'taskApproved', 'taskCompleted',
+] as const;
+
+const authState = vi.hoisted((): { user: { id: number; role?: { id: number }; departmentId?: number | null; department?: string | null } | null } => ({ user: { id: 7 } }));
 
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => authState }));
+const permissionsState = vi.hoisted(() => ({
+  tasks: { canView: true, viewScope: 'all' },
+  cases: { canView: true, viewScope: 'all' },
+}));
+vi.mock('../../hooks/useRolePermissions', () => ({ useRolePermissions: () => permissionsState }));
 
 const apiMock = vi.hoisted(() => ({
   approveTaskJournalDeadlineChangeRequest: vi.fn(),
@@ -32,6 +43,7 @@ const apiMock = vi.hoisted(() => ({
 
 vi.mock('../../services/api', () => ({
   apiService: apiMock,
+  AUTH_SESSION_EXPIRED_EVENT: 'payplanner:auth-session-expired',
 }));
 
 function createNotification(overrides: Partial<UserNotificationDto> = {}): UserNotificationDto {
@@ -80,6 +92,16 @@ function createCompletedApprovalNotification(overrides: Partial<UserNotification
     taskId: 202,
     metadataJson: '{"decision":"approved","resultingStatus":"done","completed":true}',
     ...overrides,
+  });
+}
+
+function createCompletedTaskNotification(overrides: Partial<UserNotificationDto> = {}): UserNotificationDto {
+  return createNotification({
+    id: 81, type: 'taskCompleted', typeLabel: 'Задача завершена',
+    eventKey: 'task:505:completed', title: 'Задача выполнена: Подготовить документы',
+    bodyPreview: 'Мария Юрист завершила задачу. Документы подготовлены.',
+    taskId: 505, objectId: 505, tone: 'emerald', forcedModalEnabled: true,
+    metadataJson: '{"status":"done","completionOrigin":"ordinary"}', ...overrides,
   });
 }
 
@@ -155,8 +177,11 @@ function mockNotificationPages(
   deadlineChanges: UserNotificationDto[] = [],
   approvalRequests: UserNotificationDto[] = [],
   courtHearings: UserNotificationDto[] = [],
+  completions: UserNotificationDto[] = [],
 ) {
   apiMock.getUserNotifications.mockImplementation(async (params?: { type?: string }) => {
+    if (params?.type === 'taskCompleted') return createPage(completions);
+
     if (params?.type === 'courtHearing') {
       return createPage(courtHearings);
     }
@@ -184,6 +209,8 @@ function mockNotificationPages(
 describe('ForcedTaskRevisionModal', () => {
   beforeEach(() => {
     authState.user = { id: 7 };
+    permissionsState.tasks = { canView: true, viewScope: 'all' };
+    permissionsState.cases = { canView: true, viewScope: 'all' };
     apiMock.approveTaskJournalDeadlineChangeRequest.mockReset();
     apiMock.downloadTaskJournalFile.mockReset();
     apiMock.getTaskJournalDeadlineChangeRequest.mockReset();
@@ -215,6 +242,200 @@ describe('ForcedTaskRevisionModal', () => {
     apiMock.markUserNotificationRead.mockImplementation(async (id: number) => createNotification({ id, isRead: true }));
     apiMock.rejectTaskJournalDeadlineChangeRequest.mockResolvedValue({});
     apiMock.updateTaskJournalApproval.mockResolvedValue({});
+  });
+
+  it('shows an ordinary completion in the central queue and acknowledges it with Понятно', async () => {
+    mockNotificationPages([], [], [], [], [], [createCompletedTaskNotification()]);
+    const onOpenTask = vi.fn();
+    render(<ForcedTaskRevisionModal onOpenTask={onOpenTask} />);
+    expect(await screen.findByRole('heading', { name: 'Задача завершена' })).toBeTruthy();
+    expect(screen.getByText('Подготовить документы')).toBeTruthy();
+    expect(screen.getByText('Мария Юрист завершила задачу. Документы подготовлены.')).toBeTruthy();
+    expect(apiMock.getTaskJournalItem).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Понятно' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(81);
+    expect(onOpenTask).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges the ordinary completion before opening its exact task', async () => {
+    mockNotificationPages([], [], [], [], [], [createCompletedTaskNotification()]);
+    let finish!: (notification: UserNotificationDto) => void;
+    apiMock.markUserNotificationRead.mockReturnValue(new Promise<UserNotificationDto>(resolve => { finish = resolve; }));
+    const onOpenTask = vi.fn();
+    render(<ForcedTaskRevisionModal onOpenTask={onOpenTask} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'К задаче' }));
+    expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(81);
+    expect(onOpenTask).not.toHaveBeenCalled();
+    await act(async () => finish(createCompletedTaskNotification({ isRead: true })));
+    expect(onOpenTask).toHaveBeenCalledWith(505);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it.each(['Понятно', 'К задаче'])('keeps the ordinary completion retryable when %s acknowledgement fails', async button => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      mockNotificationPages([], [], [], [], [], [createCompletedTaskNotification()]);
+      apiMock.markUserNotificationRead.mockRejectedValueOnce(new Error('Нет связи с сервером'));
+      const onOpenTask = vi.fn();
+      render(<ForcedTaskRevisionModal onOpenTask={onOpenTask} />);
+      fireEvent.click(await screen.findByRole('button', { name: button }));
+      expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Нет связи с сервером');
+      expect(onOpenTask).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: button }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      expect(apiMock.markUserNotificationRead).toHaveBeenCalledTimes(2);
+      expect(onOpenTask).toHaveBeenCalledTimes(button === 'К задаче' ? 1 : 0);
+    } finally { error.mockRestore(); }
+  });
+
+  it.each([
+    { metadataJson: '{}' }, { metadataJson: '{' }, { metadataJson: '{"completionOrigin":"approval"}' },
+    { metadataJson: '{"completionOrigin":"legacy"}' }, { metadataJson: '{"completionOrigin":"Ordinary"}' },
+    { forcedModalEnabled: false }, { forcedModalEnabled: undefined }, { taskId: null, forcedModalEnabled: true },
+  ])('keeps historical or disabled completion outside the central queue for %j', async overrides => {
+    mockNotificationPages([], [], [], [], [], [createCompletedTaskNotification({ forcedModalEnabled: false, ...overrides })]);
+    render(<ForcedTaskRevisionModal />);
+    await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(6));
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+  });
+
+  it.each(['{}', '{', '{"completionOrigin":"legacy"}'])('trusts the authoritative completion window flag when metadata is %s', async metadataJson => {
+    mockNotificationPages([], [], [], [], [], [createCompletedTaskNotification({ metadataJson })]);
+    render(<ForcedTaskRevisionModal />);
+    expect(await screen.findByRole('button', { name: 'Понятно' })).toBeTruthy();
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+  });
+
+  it('keeps one completed-approval modal when its durable completion also exists', async () => {
+    mockNotificationPages([], [createCompletedApprovalNotification()], [], [], [], [createCompletedTaskNotification({ forcedModalEnabled: false, metadataJson: '{"completionOrigin":"approval"}' })]);
+    render(<ForcedTaskRevisionModal />);
+    expect(await screen.findByText('Согласование завершено')).toBeTruthy();
+    expect(screen.queryByText(/Еще обязательных уведомлений/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Ознакомлен' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(41);
+    expect(apiMock.markUserNotificationRead).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains an ordinary completion snooze across reload and restores it after expiry', async () => {
+    mockNotificationPages([], [], [], [], [], [createCompletedTaskNotification()]);
+    const first = render(<ForcedTaskRevisionModal />);
+    fireEvent.click(await screen.findByText('Отложить'));
+    fireEvent.click(screen.getByRole('button', { name: '30 мин' }));
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    first.unmount();
+    render(<ForcedTaskRevisionModal />);
+    await waitFor(() => expect(apiMock.getUserNotifications.mock.calls.filter(([params]) => params.type === 'taskCompleted')).toHaveLength(2));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 31 * 60_000);
+    try {
+      fireEvent(window, new CustomEvent(USER_NOTIFICATIONS_EVENT));
+      expect(await screen.findByRole('button', { name: 'Понятно' })).toBeTruthy();
+    } finally { now.mockRestore(); }
+  });
+
+  it('removes the ordinary completion after another inbox entry marks it read', async () => {
+    const completions = [createCompletedTaskNotification()];
+    mockNotificationPages([], [], [], [], [], completions);
+    render(<ForcedTaskRevisionModal />);
+    await screen.findByRole('button', { name: 'Понятно' });
+    completions[0] = { ...completions[0], isRead: true };
+    fireEvent(window, new CustomEvent(USER_NOTIFICATIONS_EVENT, { detail: { source: 'inbox', reason: 'read', notificationId: 81 } }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+  });
+
+  it.each(['actor', 'login', 'logout'] as const)('discards a late ordinary inbox response after auth %s before the context rerenders', async replacement => {
+    const session = documentCopyTestSession();
+    try {
+      let finish!: (page: PagedResult<UserNotificationDto>) => void;
+      apiMock.getUserNotifications.mockImplementation(async params => params?.type === 'taskCompleted'
+        ? new Promise<PagedResult<UserNotificationDto>>(resolve => { finish = resolve; })
+        : createPage([]));
+      render(<ForcedTaskRevisionModal />);
+      await waitFor(() => expect(finish).toBeTruthy());
+      session.replace(replacement);
+      await act(async () => finish(createPage([createCompletedTaskNotification()])));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    } finally { session.restore(); }
+  });
+
+  it.each(['account', 'logout', 'session', 'role', 'scope', 'department', 'legacyDepartment', 'permission'].flatMap(owner => ['success', 'error'].map(outcome => ({ owner, outcome }))))('discards a late ordinary acknowledgement $outcome after $owner changes', async ({ owner, outcome }) => {
+    const session = documentCopyTestSession();
+    const notifications = vi.fn();
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, notifications);
+    try {
+      authState.user = { id: 7, role: { id: 3 }, departmentId: owner === 'legacyDepartment' ? null : 1, department: 'Первый отдел' };
+      mockNotificationPages([], [], [], [], [], [createCompletedTaskNotification()]);
+      let finish!: (notification: UserNotificationDto) => void;
+      let fail!: (error: Error) => void;
+      apiMock.markUserNotificationRead.mockReturnValue(new Promise<UserNotificationDto>((resolve, reject) => { finish = resolve; fail = reject; }));
+      const onOpenTask = vi.fn();
+      const view = render(<ForcedTaskRevisionModal onOpenTask={onOpenTask} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'К задаче' }));
+      mockNotificationPages();
+      if (owner === 'account') authState.user = { id: 8, role: { id: 3 } };
+      if (owner === 'logout') { authState.user = null; session.replace('logout'); }
+      if (owner === 'session') session.replace('login');
+      if (owner === 'role') authState.user = { id: 7, role: { id: 4 } };
+      if (owner === 'scope') permissionsState.tasks = { canView: true, viewScope: 'own' };
+      if (owner === 'department') authState.user = { ...authState.user!, departmentId: 2 };
+      if (owner === 'legacyDepartment') authState.user = { ...authState.user!, department: 'Другой отдел' };
+      view.rerender(<ForcedTaskRevisionModal onOpenTask={owner === 'permission' ? undefined : onOpenTask} />);
+      notifications.mockClear();
+      await act(async () => {
+        if (outcome === 'success') finish(createCompletedTaskNotification({ isRead: true }));
+        else fail(new Error('Ответ предыдущего владельца'));
+      });
+      expect(onOpenTask).not.toHaveBeenCalled();
+      expect(notifications).not.toHaveBeenCalled();
+      expect(screen.queryByRole('alert')).toBeNull();
+      if (owner !== 'permission') expect(screen.queryByText('Мария Юрист завершила задачу. Документы подготовлены.')).toBeNull();
+    } finally {
+      window.removeEventListener(USER_NOTIFICATIONS_EVENT, notifications);
+      session.restore();
+    }
+  });
+
+  it('loads an ordinary completion under StrictMode through one finite startup read', async () => {
+    mockNotificationPages([], [], [], [], [], [createCompletedTaskNotification()]);
+    render(<StrictMode><ForcedTaskRevisionModal /></StrictMode>);
+    expect(await screen.findByRole('button', { name: 'Понятно' })).toBeTruthy();
+    expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(6);
+  });
+
+  it('discards the ordinary window on an explicit auth signal while storage is unreadable', async () => {
+    const session = documentCopyTestSession();
+    mockNotificationPages([], [], [], [], [], [createCompletedTaskNotification()]);
+    const view = render(<ForcedTaskRevisionModal />);
+    await screen.findByRole('button', { name: 'Понятно' });
+    const storage = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('storage unavailable'); });
+    try {
+      view.rerender(<ForcedTaskRevisionModal />);
+      expect(screen.getByRole('dialog')).toBeTruthy();
+      fireEvent(window, new Event(AUTH_SESSION_EXPIRED_EVENT));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    } finally { storage.mockRestore(); session.restore(); }
+  });
+
+  it('keeps the ordinary window across a same-session token refresh signal', async () => {
+    const session = documentCopyTestSession();
+    try {
+      mockNotificationPages([], [], [], [], [], [createCompletedTaskNotification()]);
+      const view = render(<ForcedTaskRevisionModal />);
+      await screen.findByRole('button', { name: 'Понятно' });
+      const reads = apiMock.getUserNotifications.mock.calls.length;
+      session.refresh();
+      fireEvent(window, new StorageEvent('storage', { key: 'pp_token' }));
+      view.rerender(<ForcedTaskRevisionModal />);
+      expect(screen.getByRole('button', { name: 'Понятно' })).toBeTruthy();
+      expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(reads);
+    } finally { session.restore(); }
   });
 
   it('coalesces mandatory notification startup reads under StrictMode', async () => {
@@ -257,7 +478,7 @@ describe('ForcedTaskRevisionModal', () => {
     let calls = 0;
     let maximumPending = 0;
     apiMock.getUserNotifications.mockImplementation((params) => {
-      const refreshed = ++calls > 5;
+      const refreshed = ++calls > 6;
       return new Promise<PagedResult<UserNotificationDto>>((resolve) => {
         pending.push(() => resolve(createPage(refreshed && params.type === 'taskRevisionRequested'
           ? [createNotification({ title: 'Задача возвращена на доработку: Свежий результат' })] : [])));
@@ -273,7 +494,7 @@ describe('ForcedTaskRevisionModal', () => {
         await act(async () => { pending.splice(0).forEach(finish => finish()); });
       }
       expect(await screen.findByText('Свежий результат')).toBeTruthy();
-      expect(calls).toBe(10);
+      expect(calls).toBe(12);
       expect(maximumPending).toBe(2);
       expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
     } finally { view.unmount(); }
@@ -319,7 +540,7 @@ describe('ForcedTaskRevisionModal', () => {
       }
       expect(await screen.findByText('current')).toBeTruthy();
       expect(screen.queryByText('previous')).toBeNull();
-      expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(7);
+      expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(8);
       expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
     } finally { view.unmount(); }
   });
@@ -344,7 +565,7 @@ describe('ForcedTaskRevisionModal', () => {
       expect(calls).toBe(2);
       await act(async () => { finishPending(); });
       expect(await screen.findByText('После восстановления')).toBeTruthy();
-      expect(calls).toBe(7);
+      expect(calls).toBe(8);
       expect(debug).toHaveBeenCalled();
       expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
     } finally { view.unmount(); debug.mockRestore(); }
@@ -359,8 +580,8 @@ describe('ForcedTaskRevisionModal', () => {
     }));
     const { unmount } = render(<ForcedTaskRevisionModal onOpenTask={vi.fn()} />);
     try {
-      for (let completed = 0; completed < 5;) {
-        const batchSize = Math.min(2, 5 - completed);
+      for (let completed = 0; completed < 6;) {
+        const batchSize = Math.min(2, 6 - completed);
         await waitFor(() => expect(pending).toHaveLength(batchSize));
         expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(completed + batchSize);
         await act(async () => { pending.splice(0).forEach(finish => finish()); });
@@ -368,7 +589,7 @@ describe('ForcedTaskRevisionModal', () => {
       }
       expect(maximumPending).toBe(2);
       expect(apiMock.getUserNotifications.mock.calls.map(([params]) => params.type)).toEqual([
-        'courtHearing', 'taskApprovalRequested', 'taskDeadlineChangeRequested', 'taskRevisionRequested', 'taskApproved',
+        'courtHearing', 'taskApprovalRequested', 'taskDeadlineChangeRequested', 'taskRevisionRequested', 'taskApproved', 'taskCompleted',
       ]);
       for (const [params] of apiMock.getUserNotifications.mock.calls)
         expect(params).toEqual(expect.objectContaining({ status: 'unread', requiresAction: true, page: 1, pageSize: 25 }));
@@ -443,7 +664,7 @@ describe('ForcedTaskRevisionModal', () => {
 
   it.each(['read', 'write'] as const)('keeps the mandatory modal open when snooze storage cannot %s', async (failure) => {
     mockNotificationPages([createNotification()]);
-    render(<ForcedTaskRevisionModal />);
+    const view = render(<ForcedTaskRevisionModal />);
     const prompt = await screen.findByRole('dialog');
     fireEvent.click(within(prompt).getByText('Отложить'));
     const storage = failure === 'read'
@@ -451,6 +672,8 @@ describe('ForcedTaskRevisionModal', () => {
       : vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('storage unavailable'); });
     try {
       fireEvent.click(within(prompt).getByRole('button', { name: '10 мин' }));
+      view.rerender(<ForcedTaskRevisionModal />);
+      expect(screen.getByRole('dialog')).toBe(prompt);
       expect(within(prompt).getByRole('alert').textContent).toContain('Не удалось отложить');
       expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
     } finally { storage.mockRestore(); }
@@ -515,15 +738,15 @@ describe('ForcedTaskRevisionModal', () => {
     fireEvent.click(within(prompt).getByRole('button', { name: '10 мин' }));
     await waitFor(() => expect(screen.queryByTestId('forced-task-approval-prompt')).toBeNull());
     const original = window.localStorage.getItem(getForcedTaskSnoozeStorageKey(7)!);
-    await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(10));
+    await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(2 * expectedForcedNotificationTypes.length));
 
     view.rerender(<ForcedTaskRevisionModal key="reload" />);
-    await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(15));
+    await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(3 * expectedForcedNotificationTypes.length));
     expect(screen.queryByTestId('forced-task-approval-prompt')).toBeNull();
     authState.user = null;
     view.rerender(<ForcedTaskRevisionModal key="reload" />);
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(15);
+    expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(3 * expectedForcedNotificationTypes.length);
 
     authState.user = { id: 8 };
     mockNotificationPages([], [], [], [createApprovalRequestNotification({ id: 62, metadataJson: '{"currentApproverId":702}' })]);
@@ -573,7 +796,7 @@ describe('ForcedTaskRevisionModal', () => {
       window.dispatchEvent(new StorageEvent('storage', { key: getForcedTaskSnoozeStorageKey(8) }));
       window.dispatchEvent(new Event(USER_NOTIFICATIONS_EVENT));
     });
-    await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(calls + 5));
+    await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(calls + expectedForcedNotificationTypes.length));
     await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledTimes(taskReads + 1));
     await waitFor(() => expect((within(screen.getByTestId('forced-task-approval-prompt')).getByLabelText('Комментарий для возврата на доработку') as HTMLTextAreaElement).disabled).toBe(false));
     expect((within(screen.getByTestId('forced-task-approval-prompt')).getByLabelText('Комментарий для возврата на доработку') as HTMLTextAreaElement).value)
@@ -609,7 +832,7 @@ describe('ForcedTaskRevisionModal', () => {
     expect(await screen.findByText('Текущий сотрудник')).toBeTruthy();
     await act(async () => { previous.forEach(finish => finish()); });
     expect(screen.queryByText('Прежний сотрудник')).toBeNull();
-    expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(7);
+    expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(2 + expectedForcedNotificationTypes.length);
     expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
   });
 
@@ -1226,6 +1449,53 @@ describe('ForcedTaskRevisionModal', () => {
     expect(screen.queryByText('Иск черновик.docx')).toBeNull();
     expect(screen.getByRole('button', { name: 'Скачать файл Иск готовый.docx' })).toBeTruthy();
     expect(apiMock.getTaskJournalFiles).toHaveBeenCalledWith(404, { latestOnly: true });
+  });
+
+  it.each(['session', 'scope'].flatMap(owner => ['success', 'error'].map(outcome => ({ owner, outcome }))))('discards an approval attachment late $outcome after $owner changes', async ({ owner, outcome }) => {
+    const session = documentCopyTestSession();
+    const createUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:owned-attachment');
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+      apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask({ status: 'onApproval' }));
+      apiMock.getTaskJournalFiles.mockResolvedValue([{ id: 12, documentKey: 'claim', version: 1, originalFileName: 'Иск.docx', sizeBytes: 128, uploadedAt: '2026-06-30T10:00:00Z' }]);
+      let finish!: (value: { blob: Blob; fileName: string }) => void;
+      let fail!: (error: Error) => void;
+      apiMock.downloadTaskJournalFile.mockReturnValue(new Promise<{ blob: Blob; fileName: string }>((resolve, reject) => { finish = resolve; fail = reject; }));
+      const view = render(<ForcedTaskRevisionModal />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Скачать файл Иск.docx' }));
+      expect(apiMock.downloadTaskJournalFile).toHaveBeenCalledWith(404, 12);
+      mockNotificationPages();
+      if (owner === 'session') session.replace('login');
+      else permissionsState.tasks = { canView: true, viewScope: 'own' };
+      view.rerender(<ForcedTaskRevisionModal />);
+      await act(async () => {
+        if (outcome === 'success') finish({ blob: new Blob(['owned']), fileName: 'Иск.docx' });
+        else fail(new Error('Ошибка прошлого владельца'));
+      });
+      expect(createUrl).not.toHaveBeenCalled();
+      expect(click).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalled();
+      expect(screen.queryByText('Ошибка прошлого владельца')).toBeNull();
+    } finally { session.restore(); createUrl.mockRestore(); click.mockRestore(); log.mockRestore(); }
+  });
+
+  it('downloads the current approval attachment after its owned response', async () => {
+    const createUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:owned-attachment');
+    const revokeUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    try {
+      mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+      apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask({ status: 'onApproval' }));
+      apiMock.getTaskJournalFiles.mockResolvedValue([{ id: 12, documentKey: 'claim', version: 1, originalFileName: 'Иск.docx', sizeBytes: 128, uploadedAt: '2026-06-30T10:00:00Z' }]);
+      apiMock.downloadTaskJournalFile.mockResolvedValue({ blob: new Blob(['owned']), fileName: 'Иск.docx' });
+      render(<ForcedTaskRevisionModal />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Скачать файл Иск.docx' }));
+      await waitFor(() => expect(click).toHaveBeenCalledOnce());
+      expect(createUrl).toHaveBeenCalledOnce();
+      expect(revokeUrl).toHaveBeenCalledWith('blob:owned-attachment');
+    } finally { createUrl.mockRestore(); revokeUrl.mockRestore(); click.mockRestore(); }
   });
 
   it('temporarily hides a pending approval before opening its task', async () => {

@@ -17,7 +17,8 @@ public static class CorsPolicyConfiguration
         {
             // Имя скачиваемого файла приходит в Content-Disposition. Явное открытие
             // заголовка позволяет доверенному frontend сохранить исходное имя.
-            policy.WithExposedHeaders(HeaderNames.ContentDisposition);
+            // X-Upload-Key подтверждает идентификатор сохранённой попытки создания.
+            policy.WithExposedHeaders(HeaderNames.ContentDisposition, "X-Upload-Key");
             if (environment.IsDevelopment())
             {
                 policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();

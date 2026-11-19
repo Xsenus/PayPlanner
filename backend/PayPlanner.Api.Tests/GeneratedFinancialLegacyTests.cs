@@ -83,7 +83,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
             _ => (await controller.CreateContractFromWorkOrder(other.ClientCaseId, new() { Number = "CLAIM", Date = date }, default)).Result!
         };
         var created = Assert.IsType<CreatedResult>(action);
-        Assert.Equal("CLAIM-2", created.Value switch
+        Assert.Equal(kind == GeneratedFinancialDocumentKind.Act ? "2" : "CLAIM-2", created.Value switch
         {
             CasesV2Controller.ClientCaseWorkOrderInvoiceDto invoice => invoice.Number,
             CasesV2Controller.ClientCaseWorkOrderActDto act => act.Number,
@@ -94,7 +94,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
         Assert.Equal("uploaded", (await f.PublishFinancial(receipt)).Status);
         Assert.Equal(kind == GeneratedFinancialDocumentKind.Invoice ? 4 : 2, await FinancialRowsAsync(f.Db));
         Assert.Equal(2, await f.Db.ClientCaseDocuments.CountAsync()); Assert.Single(await f.Db.StorageProductBindings.ToArrayAsync());
-        Assert.Equal("CLAIM", (await new GeneratedFinancialDocumentRegistry(f.Db).ReadFrozenAsync(receipt, default))!.Domain.Number);
+        Assert.Equal(kind == GeneratedFinancialDocumentKind.Act ? "1" : "CLAIM", (await new GeneratedFinancialDocumentRegistry(f.Db).ReadFrozenAsync(receipt, default))!.Domain.Number);
         Assert.Equal(1, f.Local.PutCount); Assert.Equal(1, f.Mirror.PutCount);
     }
 

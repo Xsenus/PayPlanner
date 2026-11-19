@@ -38,13 +38,21 @@ public sealed partial class MaxOutboxServiceTests
         fixture.Request() with { NotificationType = type, ActionUrl = $"https://crm.example.test/tasks/{task.Id}", ActionText = "Открыть задачу" };
 
     [Theory]
-    [InlineData(UserNotificationTypes.TaskAssigned)]
-    [InlineData(UserNotificationTypes.TaskChanged)]
-    [InlineData(UserNotificationTypes.TaskComment)]
-    [InlineData(UserNotificationTypes.TaskCompleted)]
-    [InlineData(UserNotificationTypes.TaskApprovalRequested)]
-    [InlineData(UserNotificationTypes.TaskDeadlineChangeRejected)]
-    public async Task TaskNotification_RendersFreshTitleEventAndCanonicalLink(string type)
+    [InlineData(UserNotificationTypes.TaskAssigned, " — ВЫСОКИЙ", "Задача назначена исполнителю.", "Ознакомиться с задачей и сроком выполнения")]
+    [InlineData(UserNotificationTypes.TaskReminder, " — СРОЧНО", "Напоминание о выполнении задачи.", "Проверить выполнение задачи и действующий срок")]
+    [InlineData(UserNotificationTypes.TaskChanged, "", "Изменены данные задачи.", "Проверить изменения в карточке задачи")]
+    [InlineData(UserNotificationTypes.TaskComment, "", "В задаче появился новый комментарий.", "Прочитать комментарий в карточке задачи")]
+    [InlineData(UserNotificationTypes.TaskCompleted, "", "Работа по задаче завершена.", "Ознакомиться с результатом в карточке задачи")]
+    [InlineData(UserNotificationTypes.TaskCancelled, " — ВЫСОКИЙ", "Задача отменена.", "не требуется")]
+    [InlineData(UserNotificationTypes.TaskScheduleConflict, " — ВЫСОКИЙ", "Обнаружено пересечение задач в расписании.", "Проверить расписание и сроки задач")]
+    [InlineData(UserNotificationTypes.TaskApprovalRequested, " — ВЫСОКИЙ", "Задача передана на согласование.", "Принять решение в карточке задачи")]
+    [InlineData(UserNotificationTypes.TaskApproved, "", "Задача согласована.", "не требуется")]
+    [InlineData(UserNotificationTypes.TaskRevisionRequested, " — ВЫСОКИЙ", "Запрошена доработка задачи.", "Ознакомиться с замечаниями и доработать задачу")]
+    [InlineData(UserNotificationTypes.TaskDeadlineChangeRequested, " — ВЫСОКИЙ", "Запрошен перенос срока задачи.", "Рассмотреть запрос в карточке задачи")]
+    [InlineData(UserNotificationTypes.TaskDeadlineChangeApproved, "", "Перенос срока задачи согласован.", "Ознакомиться с новым сроком задачи")]
+    [InlineData(UserNotificationTypes.TaskDeadlineChangeRejected, " — ВЫСОКИЙ", "Запрос переноса срока задачи отклонён.", "Проверить действующий срок и решение в карточке задачи")]
+    [InlineData(UserNotificationTypes.TaskApprovalOverdue, " — СРОЧНО", "Срок согласования задачи истёк.", "Рассмотреть задачу в карточке согласования")]
+    public async Task TaskNotification_RendersFreshTitleEventAndCanonicalLink(string type, string prioritySuffix, string summary, string action)
     {
         await using var fixture = await Fixture.CreateAsync();
         var task = await AddMaxTaskAsync(fixture);
@@ -56,7 +64,16 @@ public sealed partial class MaxOutboxServiceTests
         await fixture.Processor(api, TaskFrontend).ProcessBatchAsync(CancellationToken.None);
 
         var sent = Assert.Single(api.Messages);
-        Assert.Equal($"Задача: Актуальное название\n{UserNotificationTypes.Find(type)!.Label}\nhttps://crm.example.test/tasks/{task.Id}", sent.Text);
+        var label = UserNotificationTypes.Find(type)!.Label;
+        Assert.Equal(string.Join('\n',
+            $"[{label.ToUpperInvariant()}] {label}{prioritySuffix}",
+            $"Объект: задача №{task.Id}, Актуальное название",
+            $"Суть: {summary}",
+            "Данные: срок 01.08.2026 19:00 (Europe/Moscow), статус Новая, приоритет Обычный, исполнитель не назначен",
+            $"Действие: {action}",
+            $"Контекст: https://crm.example.test/tasks/{task.Id}",
+            "Кнопки: Открыть задачу"), sent.Text);
+        Assert.Equal(7, sent.Text.Split('\n').Length);
         Assert.Equal($"https://crm.example.test/tasks/{task.Id}", sent.Url!.AbsoluteUri);
         Assert.DoesNotContain("PRIVATE", sent.Text);
         Assert.Equal(MaxOutboxStatuses.Sent, message.Status);
@@ -149,9 +166,9 @@ public sealed partial class MaxOutboxServiceTests
         await fixture.Processor(api, TaskFrontend).ProcessBatchAsync(CancellationToken.None);
         var text = Assert.Single(api.Messages).Text;
         var lines = text.Split('\n');
-        Assert.Equal(3, lines.Length);
-        Assert.StartsWith("Задача: Договор готов 👩‍💻", lines[0]);
-        Assert.EndsWith("👩‍💻…", lines[0]);
+        Assert.Equal(7, lines.Length);
+        Assert.StartsWith($"Объект: задача №{task.Id}, Договор готов 👩‍💻", lines[1]);
+        Assert.EndsWith("👩‍💻…", lines[1]);
         Assert.DoesNotContain('\u202E', text);
         Assert.DoesNotContain('\r', text);
         Assert.DoesNotContain("PRIVATE", text);
@@ -175,6 +192,66 @@ public sealed partial class MaxOutboxServiceTests
         await fixture.Processor(api, TaskFrontend).ProcessBatchAsync(CancellationToken.None);
         Assert.Empty(api.Messages);
         Assert.Equal(MaxOutboxStatuses.Cancelled, queued.Status);
+    }
+
+    [Theory]
+    [InlineData(false, "done")]
+    [InlineData(false, "cancelled")]
+    [InlineData(true, "done")]
+    [InlineData(true, "cancelled")]
+    [InlineData(false, " Done ")]
+    [InlineData(true, " CANCELLED ")]
+    public async Task TaskReminder_DeferredDeliveryCancelsAfterTaskCloses(bool retry, string status)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var task = await AddMaxTaskAsync(fixture);
+        if (!retry) await fixture.ConfigureLimitsAsync(quietHoursEnabled: true, dailyLimit: 20);
+        var queued = await fixture.Outbox.QueueAsync(TaskRequest(fixture, task, UserNotificationTypes.TaskReminder), CancellationToken.None);
+        if (retry)
+        {
+            await fixture.Processor(new RecordingApiClient(transientFailure: true), TaskFrontend).ProcessBatchAsync(CancellationToken.None);
+            Assert.Equal(MaxOutboxStatuses.Failed, queued.Status);
+        }
+        else
+        {
+            Assert.True(queued.NextAttemptAt > fixture.Now);
+        }
+
+        task.Status = status;
+        await fixture.Db.SaveChangesAsync();
+        fixture.MoveTimeTo(new DateTimeOffset(queued.NextAttemptAt, TimeSpan.Zero));
+        var api = new RecordingApiClient();
+
+        await fixture.Processor(api, TaskFrontend).ProcessBatchAsync(CancellationToken.None);
+
+        Assert.Empty(api.Messages);
+        Assert.Equal(MaxOutboxStatuses.Cancelled, queued.Status);
+        Assert.Equal("task-no-longer-active", queued.LastErrorCode);
+        Assert.Null(queued.ProviderMessageId);
+        Assert.Null(queued.SentAt);
+    }
+
+    [Theory]
+    [InlineData(UserNotificationTypes.TaskCompleted, "done")]
+    [InlineData(UserNotificationTypes.TaskCompleted, "cancelled")]
+    [InlineData(UserNotificationTypes.TaskComment, "done")]
+    [InlineData(UserNotificationTypes.TaskComment, "cancelled")]
+    [InlineData(UserNotificationTypes.TaskChanged, "done")]
+    [InlineData(UserNotificationTypes.TaskChanged, "cancelled")]
+    public async Task TaskNotification_ClosedTaskRetainsHistoricalEvents(string type, string status)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var task = await AddMaxTaskAsync(fixture);
+        var queued = await fixture.Outbox.QueueAsync(TaskRequest(fixture, task, type), CancellationToken.None);
+        task.Status = status;
+        await fixture.Db.SaveChangesAsync();
+        var api = new RecordingApiClient();
+
+        await fixture.Processor(api, TaskFrontend).ProcessBatchAsync(CancellationToken.None);
+
+        Assert.Single(api.Messages);
+        Assert.Equal(MaxOutboxStatuses.Sent, queued.Status);
+        Assert.Null(queued.LastErrorCode);
     }
 
     private sealed class CallbackMaxApi(Func<Task> afterFirstSend) : IMaxApiClient

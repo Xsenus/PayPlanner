@@ -1,5 +1,7 @@
 import { act, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, screen } from '@testing-library/react';
+import { ForcedTaskRevisionModal } from './ForcedTaskRevisionModal';
 import { RealtimeNotificationToasts } from './RealtimeNotificationToasts';
 import {
   REALTIME_TASK_JOURNAL_CHANGED_EVENT,
@@ -21,6 +23,7 @@ const toastMock = vi.hoisted(() => ({
 
 const apiMock = vi.hoisted(() => ({
   getUserNotifications: vi.fn(),
+  getUserSetting: vi.fn(),
   markUserNotificationRead: vi.fn(),
   markCaseActivity: vi.fn(),
   snoozeUserNotification: vi.fn(),
@@ -38,12 +41,15 @@ const connectionState = vi.hoisted(() => ({
   onclose: vi.fn(),
 }));
 
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 5 } }) }));
+
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => toastMock,
 }));
 
 vi.mock('../../services/api', () => ({
   apiService: apiMock,
+  AUTH_SESSION_EXPIRED_EVENT: 'payplanner:auth-session-expired',
 }));
 
 vi.mock('../../services/realtimeNotifications', async (importOriginal) => {
@@ -81,6 +87,8 @@ describe('RealtimeNotificationToasts', () => {
     toastMock.showToast.mockReset();
     toastMock.success.mockReset();
     toastMock.error.mockReset();
+    apiMock.getUserSetting.mockReset();
+    apiMock.getUserSetting.mockResolvedValue(null);
     apiMock.getUserNotifications.mockReset();
     apiMock.getUserNotifications.mockResolvedValue({
       items: [],
@@ -107,6 +115,73 @@ describe('RealtimeNotificationToasts', () => {
     connectionState.onreconnecting.mockReset();
     connectionState.onclose.mockReset();
     resetRealtimeNotificationDiagnostics();
+  });
+
+  it.each(['live', 'replay', 'fallback'] as const)('refreshes the central inbox and respects server toast suppression for ordinary completion through %s', async delivery => {
+    const notification: RealtimeUserNotification = {
+      id: 811, recipientUserId: 5, type: 'taskCompleted', eventKey: 'task:505:completed',
+      title: 'Задача завершена в центральном окне', bodyPreview: 'Документы подготовлены.', tone: 'emerald',
+      toastEnabled: false, objectType: 'task', objectId: 505, taskJournalItemId: 505,
+      metadataJson: '{"status":"done","completionOrigin":"ordinary"}',
+      createdAt: new Date(Date.now() + (delivery === 'fallback' ? 1000 : -60_000)).toISOString(),
+    };
+    const changes = vi.fn();
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, changes);
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    try {
+      if (delivery !== 'live') {
+        window.localStorage.setItem('payplanner.realtimeToastLastSeenAt.v1.5', String(Date.now() - 120_000));
+        apiMock.getUserNotifications.mockResolvedValue({ items: [{ ...notification, taskId: 505, isRead: false }], total: 1, page: 1, pageSize: 50 });
+      }
+      if (delivery === 'fallback') connectionState.start.mockRejectedValue(new TypeError('Failed to fetch'));
+      render(<RealtimeNotificationToasts userId={5} />);
+      await waitFor(() => expect(connectionState.start).toHaveBeenCalledOnce());
+      if (delivery === 'live') act(() => connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.(notification));
+      await waitFor(() => expect(changes).toHaveBeenCalledWith(expect.objectContaining({ detail: expect.objectContaining({ notificationId: 811, notificationType: 'taskCompleted' }) })));
+      expect(toastMock.showToast.mock.calls.some(([options]) => options.title === notification.title)).toBe(false);
+    } finally {
+      window.removeEventListener(USER_NOTIFICATIONS_EVENT, changes);
+      debug.mockRestore();
+    }
+  });
+
+  it.each(['ordinary', 'approval', 'legacy'])('retains the completion toast when server delivery permits it for %s origin', async completionOrigin => {
+    render(<RealtimeNotificationToasts userId={5} />);
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledOnce());
+    act(() => connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+      id: 812, recipientUserId: 5, type: 'taskCompleted', eventKey: 'task:505:completed',
+      title: 'Завершение через нижнее сообщение', bodyPreview: 'Документы подготовлены.', tone: 'emerald',
+      toastEnabled: true, objectType: 'task', objectId: 505, taskJournalItemId: 505,
+      metadataJson: JSON.stringify({ status: 'done', completionOrigin }), createdAt: new Date().toISOString(),
+    }));
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Завершение через нижнее сообщение', durationMs: 0, actionLabel: 'К задаче' }));
+  });
+
+  it('shows one ordinary completion window across inbox and realtime and routes its task after acknowledgement', async () => {
+    const notification = {
+      id: 813, type: 'taskCompleted', typeLabel: 'Задача завершена', eventKey: 'task:505:completed',
+      title: 'Задача выполнена: Подготовить документы', bodyPreview: 'Документы подготовлены.', tone: 'emerald',
+      toastEnabled: false, forcedModalEnabled: true, requiresAction: true,
+      objectType: 'task', objectId: 505, taskId: 505, isRead: false,
+      metadataJson: '{"status":"done","completionOrigin":"ordinary"}', createdAt: new Date().toISOString(),
+    };
+    let items = [notification];
+    apiMock.getUserNotifications.mockImplementation(async params => ({
+      items: params?.type === 'taskCompleted' ? items : [], total: params?.type === 'taskCompleted' ? items.length : 0, page: 1, pageSize: 25,
+    }));
+    apiMock.markUserNotificationRead.mockImplementation(async () => { items = []; return { ...notification, isRead: true }; });
+    const onOpenTask = vi.fn();
+    render(<><ForcedTaskRevisionModal onOpenTask={onOpenTask} /><RealtimeNotificationToasts userId={5} onOpenTask={onOpenTask} /></>);
+    await screen.findByRole('button', { name: 'Понятно' });
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledOnce());
+    act(() => connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({ ...notification, recipientUserId: 5, taskJournalItemId: 505 }));
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(toastMock.showToast).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'К задаче' }));
+    await waitFor(() => expect(onOpenTask).toHaveBeenCalledWith(505));
+    expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(813);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(toastMock.showToast).not.toHaveBeenCalled();
   });
 
   it('shows task assignment toast and opens the task from action', async () => {
@@ -618,6 +693,89 @@ describe('RealtimeNotificationToasts', () => {
     expect(toastMock.showToast.mock.calls[0][0].durationMs).toBe(0);
   });
 
+  it.each([
+    { body: 'Задача: Сохранённое название\nАвтор изменения: Анна\n\nИзменения:\n- Срок: вчера -> завтра' },
+    { body: 'Изменения:\r\n- Срок: вчера -> завтра\r\n\r\nЗадача: Сохранённое название\r\nАвтор изменения: Анна' },
+  ])('keeps a task identity from the persisted body header for $body', async ({ body }) => {
+    render(<RealtimeNotificationToasts userId={5} />);
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledOnce());
+    act(() => connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+      id: 820, recipientUserId: 5, type: 'taskChanged', eventKey: 'task:778:changed:legacy',
+      title: 'Задача изменена', bodyPreview: body, tone: 'blue', objectType: 'task', objectId: 778,
+      taskJournalItemId: 778, createdAt: new Date().toISOString(),
+    }));
+    const description = toastMock.showToast.mock.calls[0][0].description as string;
+    expect(description).toBe('Задача №778 — Сохранённое название\nСрок: вчера -> завтра');
+  });
+
+  it('keeps metadata task identity ahead of a truncated long result and preserves priority changes', async () => {
+    const taskTitle = 'Очень длинное название задачи '.repeat(20).slice(0, 500);
+    const body = ['Изменения:', '- Срок: 10.11 -> 12.11', '- Постановщик: Анна -> Андрей', `- Результат: ${'готово '.repeat(250)}`].join('\n').slice(0, 1000);
+    render(<RealtimeNotificationToasts userId={5} />);
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledOnce());
+    act(() => connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+      id: 821, recipientUserId: 5, type: 'taskChanged', eventKey: 'task:778:changed:long',
+      title: 'Задача изменена', bodyPreview: body, metadataJson: JSON.stringify({ taskTitle }),
+      tone: 'blue', objectType: 'task', objectId: 778, taskJournalItemId: 778, createdAt: new Date().toISOString(),
+    }));
+    const description = toastMock.showToast.mock.calls[0][0].description as string;
+    const [identity, ...changes] = description.split('\n');
+    expect(identity).toBe(`Задача №778 — ${Array.from(taskTitle).slice(0, 157).join('')}...`);
+    expect(changes.join('\n').length).toBeLessThanOrEqual(220);
+    expect(changes[0]).toBe('Срок: 10.11 -> 12.11');
+    expect(changes[1]).toBe('Постановщик: Анна -> Андрей');
+    expect(body).not.toContain('Задача:');
+  });
+
+  it.each([null, 17, {}, '   '])('falls back to the body when taskTitle metadata is %j', async taskTitle => {
+    render(<RealtimeNotificationToasts userId={5} />);
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledOnce());
+    act(() => connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+      id: 822, recipientUserId: 5, type: 'taskChanged', eventKey: 'task:778:changed:invalid-meta',
+      title: 'Задача изменена', bodyPreview: 'Изменения:\n- Исполнитель: Анна -> Мария\n\nЗадача: Имя из истории',
+      metadataJson: JSON.stringify({ taskTitle }), tone: 'blue', objectType: 'task', objectId: 778,
+      taskJournalItemId: 778, createdAt: new Date().toISOString(),
+    }));
+    expect(toastMock.showToast.mock.calls[0][0].description).toBe('Задача №778 — Имя из истории\nИсполнитель: Анна -> Мария');
+  });
+
+  it('uses the object task ID for a custom template without a task header and preserves its subject', async () => {
+    render(<RealtimeNotificationToasts userId={5} />);
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledOnce());
+    act(() => connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+      id: 823, recipientUserId: 5, type: 'taskChanged', eventKey: 'task:915:changed:custom',
+      title: 'Тема пользовательского шаблона', bodyPreview: 'Исполнитель обновил документы.', metadataJson: '{',
+      tone: 'blue', objectType: 'task', objectId: 915, taskJournalItemId: null, createdAt: new Date().toISOString(),
+    }));
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Тема пользовательского шаблона', description: 'Задача №915\nИсполнитель обновил документы.',
+    }));
+  });
+
+  it('prefers trimmed authoritative task metadata over a stale body header', async () => {
+    render(<RealtimeNotificationToasts userId={5} />);
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledOnce());
+    act(() => connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+      id: 824, recipientUserId: 5, type: 'taskChanged', eventKey: 'task:778:changed:metadata',
+      title: 'Задача изменена', bodyPreview: 'Задача: Старый шаблон\nКомментарий сохранён.', metadataJson: '{"taskTitle":"  Актуальное название  "}',
+      tone: 'blue', objectType: 'task', objectId: 778, taskJournalItemId: 778, createdAt: new Date().toISOString(),
+    }));
+    expect(toastMock.showToast.mock.calls[0][0].description).toBe('Задача №778 — Актуальное название\nКомментарий сохранён.');
+  });
+
+  it('uses task identity metadata when a stored task change is replayed', async () => {
+    window.localStorage.setItem('payplanner.realtimeToastLastSeenAt.v1.5', String(Date.now() - 120_000));
+    apiMock.getUserNotifications.mockResolvedValue({ items: [{
+      id: 825, type: 'taskChanged', eventKey: 'task:778:changed:replay', title: 'Задача изменена',
+      bodyPreview: 'Пользовательский текст.', metadataJson: '{"taskTitle":"Название из сохранённого события"}',
+      objectType: 'task', objectId: 778, taskId: 778, isRead: false, createdAt: new Date(Date.now() - 60_000).toISOString(),
+    }], total: 1, page: 1, pageSize: 50 });
+    render(<RealtimeNotificationToasts userId={5} />);
+    await waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      description: 'Задача №778 — Название из сохранённого события\nПользовательский текст.',
+    })));
+  });
+
   it('shows changed deadline and author before a long task description in the toast', async () => {
     render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
     await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
@@ -654,7 +812,9 @@ describe('RealtimeNotificationToasts', () => {
     }));
     const description = toastMock.showToast.mock.calls[0][0].description as string;
     expect(description).toContain('Постановщик: Анна -> Андрей');
-    expect(description).not.toContain('Задача:');
+    expect(description).toMatch(/^Задача №778 — Подготовить документы по делу/);
+    expect(description.indexOf('Срок:')).toBeLessThan(description.indexOf('Описание:'));
+    expect(description).not.toContain('Длинное наименование');
   });
 
   it('offers persistent snooze and activity confirmation for case inactivity', async () => {

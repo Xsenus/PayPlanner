@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Invoices;
 
 namespace PayPlanner.Api.Services.Storage;
 
@@ -12,6 +13,8 @@ public sealed class GeneratedFinancialClaims(PaymentContext db)
     public async Task LockNumberScopeAsync(GeneratedFinancialDocumentKind kind, CancellationToken ct)
     {
         RequireTransaction();
+        if (kind == GeneratedFinancialDocumentKind.Act && db.Database.IsNpgsql())
+            await db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", ct);
         var id = kind switch
         {
             GeneratedFinancialDocumentKind.Invoice => 1,
@@ -27,6 +30,8 @@ public sealed class GeneratedFinancialClaims(PaymentContext db)
     public async Task<string> NextNumberAsync(GeneratedFinancialDocumentKind kind, int caseId, int workOrderId,
         DateTime date, string? requestedNumber, CancellationToken ct)
     {
+        if (kind == GeneratedFinancialDocumentKind.Act)
+            return await new ActAnnualNumberingService(db).NextAsync(date, ct);
         await LockNumberScopeAsync(kind, ct);
         var name = KindName(kind); var dateKey = DateKey(date);
         var prefix = kind switch

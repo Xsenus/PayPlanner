@@ -1,6 +1,6 @@
-## Актуальная инвентаризация — 5 ноября 2026
+## Актуальная инвентаризация — 12 ноября 2026
 
-Всего **171** мест ExecuteUpdateAsync/ExecuteDeleteAsync. Для очереди статусов два условных обновления захватывают и завершают доставку по токену и сроку; данные задачи не меняются. Для доставки переназначенного запроса два условных обновления захватывают и завершают только текущую попытку по токену; данные задачи и решения не меняются. Технический UPDATE удерживает строку чата в существующей транзакции без изменения её значения; условный UPDATE меняет только личную границу истории и её версию у авторизованного участника. При изменении счёта и переходе заявки технический UPDATE удерживает заявку в общей транзакции без изменения версии; связанные проверки и фактический переход выполняются в этой транзакции. При удалении дела техническая блокировка после проверки видимости сериализует действие с операциями над документами; изменения дела и аудит сохраняются штатно. Для таймера технические UPDATE блокируют задачу и сотрудника без изменения данных; условные обновления останавливают собственный интервал, закрывают активные интервалы при деактивации, удалении сотрудника, завершении или удалении задачи либо исправляют длительность с проверкой версии и записью причины в той же транзакции. При объединении учётных записей интервалы переносятся к основному сотруднику после остановки активного интервала источника. Публикация сообщений и личное состояние фиксируются в соответствующих транзакциях; общие сообщения не удаляются. Проверки конкурентных сценариев ещё выполняются. Прежние разделы сохранены как история.
+Всего **174** мест ExecuteUpdateAsync/ExecuteDeleteAsync. Для очереди статусов два условных обновления захватывают и завершают доставку по токену и сроку; данные задачи не меняются. Для доставки переназначенного запроса два условных обновления захватывают и завершают только текущую попытку по токену; данные задачи и решения не меняются. Технический UPDATE удерживает строку чата в существующей транзакции без изменения её значения; условный UPDATE меняет только личную границу истории и её версию у авторизованного участника. При изменении счёта и переходе заявки технический UPDATE удерживает заявку в общей транзакции без изменения версии; связанные проверки и фактический переход выполняются в этой транзакции. При удалении дела техническая блокировка после проверки видимости сериализует действие с операциями над документами; изменения дела и аудит сохраняются штатно. Для таймера технические UPDATE блокируют задачу и сотрудника без изменения данных; условные обновления останавливают собственный интервал, закрывают активные интервалы при деактивации, удалении сотрудника, завершении или удалении задачи либо исправляют длительность с проверкой версии и записью причины в той же транзакции. При объединении учётных записей интервалы переносятся к основному сотруднику после остановки активного интервала источника. Публикация сообщений и личное состояние фиксируются в соответствующих транзакциях; общие сообщения не удаляются. Проверки конкурентных сценариев ещё выполняются. Прежние разделы сохранены как история.
 
 
 Тринадцать технических UPDATE в CashOrdersController повторно подтверждают компанию, кассу и исходную операцию/ордер в одной Serializable-транзакции. Присваиваются прежние значения; предикат проверяет принадлежность, активность, валюту и известную версию/реквизиты. Порядок блокировки — компания → касса → операция или ордер. После блокировки заново проверяются права и видимость. Нулевой результат запрещает изменение; фактическое создание, проведение и копирование сохраняются штатным ChangeTracker с аудитом. Эти блокировки не создают фиктивные предметные события. Остальные изменения перечня — актуальные номера строк уже описанных операций.
@@ -8,6 +8,16 @@
 Четыре условных UPDATE судебной очереди изменяют только техническое намерение доставки: захват текущего задания, отдельное завершение журнала, отдельное завершение уведомления и итоговое освобождение своей попытки. Завершающие обновления проверяют токен, срок владения, исходный ключ, дело, вид источника, идентификатор источника и неизменный снимок. Предметные события, сроки, задачи и связи не обновляются. Их принятие и аудит сохраняются прежней судебной транзакцией; новые намерения добавляются в неё через ChangeTracker.
 
 В перечень также включены пять ранее не внесённых технических операций: блокировка профиля компании перед банковской привязкой без изменения реквизитов; блокировка графа платежей перед сверкой оплаченного счёта без изменения дат; захват и завершение очереди просрочки платежей по собственному токену и ограниченное удаление не более 200 её завершённых записей старше 30 дней. Ожидающие задания, предметные документы и оплаты при очистке не затрагиваются. Удалённая из исходника прежняя пакетная операция карточки дела больше не входит в актуальный перечень. Предметные банковские связи и распределение средств сохраняются соответствующими штатными транзакциями и аудитом.
+
+Три новые операции относятся к этапу собственной годовой нумерации актов DOC-01. [Правила и состояние этапа](development-act-annual-numbering-2026-11-11.md).
+
+Увеличение годовой серии в `backend/Services/Invoices/ActAnnualNumberingService.cs:22` выполняется для одной строки года после общей блокировки нумерации в транзакции вызывающей операции. Условие `LastNumber < long.MaxValue` допускает одну прибавку, исчерпание даёт предусмотренный отказ. Числовая граница и акт фиксируются общей транзакцией. Состояние счётчика обслуживается вне ChangeTracker, предметные акт, результат попытки и аудит сохраняются действующим путём.
+
+Отметка публикации в `backend/Controllers/V2/CasesV2Controller.cs:5870` связывает технический результат обычной публикации акта из наряда с конкретным документом. Условие включает сотрудника, ключ, вид операции, дело, акт и пустую отметку публикации. Требуется ровно одна обновлённая запись. Документ, отметка, предметный аудит и уведомления фиксируются существующей атомарной операцией сохранения. Сохранённая отметка участвует в восстановлении и обработке подтверждённого удаления документа.
+
+Запись ошибки отката в `backend/Services/SpreadsheetImportService.Rollback.cs:450` выполняется после освобождения неудачной транзакции. Один UPDATE по идентификатору меняет статус, сообщение и время импортной операции с условием, что она ещё не завершена удалением или восстановлением. Нулевой результат приводит к повторному чтению завершённого результата. Такой порядок сохраняет успешную конкурирующую попытку и подтверждённый commit после потери ответа. Изменение акта и числовой границы выполняется в соответствующей транзакции отката.
+
+В сохранённой локальной квалификации актового этапа прошли 143 сценария, включая 77 PostgreSQL. Проверены требование транзакции и возврат номера при rollback, исчерпание серии, повторное использование отметки публикации, конкурентное восстановление файла на PostgreSQL и повтор отката импорта после блокировки или потери подтверждения. [Точный манифест актового этапа](D:/PayPlannerRelease/20261112-home-integration/backend/mixed-act-corrections-qualified/annual143-case-manifest.json). Текущий выпуск проходит отдельную полную квалификацию.
 
 - `backend/Controllers/CashOrdersController.cs:1120`
 - `backend/Controllers/CashOrdersController.cs:1123`
@@ -45,18 +55,19 @@
 - `backend/Controllers/TaskTimeController.cs:146`
 - `backend/Controllers/TaskTimeController.cs:206`
 - `backend/Controllers/TaskTimeController.cs:94`
-- `backend/Controllers/TasksController.cs:3280`
-- `backend/Controllers/TasksController.cs:5006`
-- `backend/Controllers/TasksController.cs:5211`
-- `backend/Controllers/TasksController.cs:5331`
-- `backend/Controllers/TasksController.cs:5616`
+- `backend/Controllers/TasksController.cs:3381`
+- `backend/Controllers/TasksController.cs:5120`
+- `backend/Controllers/TasksController.cs:5325`
+- `backend/Controllers/TasksController.cs:5445`
+- `backend/Controllers/TasksController.cs:5733`
 - `backend/Controllers/UserActivityController.cs:418`
 - `backend/Controllers/UserActivityController.cs:540`
-- `backend/Controllers/V2/CasesV2Controller.cs:5592`
-- `backend/Controllers/V2/CasesV2Controller.cs:5989`
-- `backend/Data/PaymentContext.cs:4808`
-- `backend/Data/PaymentContext.cs:4811`
-- `backend/Data/PaymentContext.cs:4819`
+- `backend/Controllers/V2/CasesV2Controller.cs:5630`
+- `backend/Controllers/V2/CasesV2Controller.cs:5870`
+- `backend/Controllers/V2/CasesV2Controller.cs:6039`
+- `backend/Data/PaymentContext.cs:4823`
+- `backend/Data/PaymentContext.cs:4826`
+- `backend/Data/PaymentContext.cs:4834`
 - `backend/Services/AuthService.Accounts.cs:579`
 - `backend/Services/AuthService.Accounts.cs:582`
 - `backend/Services/AuthService.Accounts.cs:585`
@@ -80,6 +91,7 @@
 - `backend/Services/ExternalAuthService.cs:960`
 - `backend/Services/GoogleCalendarSyncService.cs:192`
 - `backend/Services/InternalChatThreadLock.cs:14`
+- `backend/Services/Invoices/ActAnnualNumberingService.cs:22`
 - `backend/Services/MessengerDocumentDeliveryService.cs:673`
 - `backend/Services/MessengerDocumentDeliveryService.cs:699`
 - `backend/Services/MessengerDocumentDeliveryService.cs:771`
@@ -99,8 +111,8 @@
 - `backend/Services/Notifications/PaymentOverdueNotificationDispatchProcessor.cs:62`
 - `backend/Services/Notifications/TaskDeadlineReviewerDispatchProcessor.cs:51`
 - `backend/Services/Notifications/TaskDeadlineReviewerDispatchProcessor.cs:74`
-- `backend/Services/Notifications/TaskStatusNotificationDispatchProcessor.cs:100`
-- `backend/Services/Notifications/TaskStatusNotificationDispatchProcessor.cs:48`
+- `backend/Services/Notifications/TaskStatusNotificationDispatchProcessor.cs:133`
+- `backend/Services/Notifications/TaskStatusNotificationDispatchProcessor.cs:50`
 - `backend/Services/Requests/SalesRequestService.cs:1139`
 - `backend/Services/Requests/SalesRequestService.cs:1151`
 - `backend/Services/Requests/SalesRequestService.cs:1161`
@@ -112,6 +124,7 @@
 - `backend/Services/SpreadsheetImportService.Rollback.cs:33`
 - `backend/Services/SpreadsheetImportService.Rollback.cs:35`
 - `backend/Services/SpreadsheetImportService.Rollback.cs:43`
+- `backend/Services/SpreadsheetImportService.Rollback.cs:450`
 - `backend/Services/Storage/CaseDocumentPublicationProcessor.cs:172`
 - `backend/Services/Storage/CaseDocumentPublicationProcessor.cs:187`
 - `backend/Services/Storage/CaseDocumentUploadRetirementService.cs:25`
@@ -122,11 +135,11 @@
 - `backend/Services/Storage/GeneratedCaseReservationRecovery.cs:98`
 - `backend/Services/Storage/GeneratedFinancialAttemptRecovery.cs:41`
 - `backend/Services/Storage/GeneratedFinancialAttemptRecovery.cs:54`
-- `backend/Services/Storage/GeneratedFinancialClaims.cs:23`
-- `backend/Services/Storage/GeneratedFinancialClaims.cs:69`
+- `backend/Services/Storage/GeneratedFinancialClaims.cs:26`
+- `backend/Services/Storage/GeneratedFinancialClaims.cs:74`
 - `backend/Services/Storage/GeneratedFinancialDocumentPublication.cs:77`
-- `backend/Services/Storage/GeneratedFinancialDocumentRegistry.cs:167`
-- `backend/Services/Storage/GeneratedFinancialDocumentRegistry.cs:169`
+- `backend/Services/Storage/GeneratedFinancialDocumentRegistry.cs:177`
+- `backend/Services/Storage/GeneratedFinancialDocumentRegistry.cs:179`
 - `backend/Services/Storage/InternalChatOriginalRecovery.cs:105`
 - `backend/Services/Storage/InternalChatOriginalRecovery.cs:112`
 - `backend/Services/Storage/InternalChatOriginalWriter.cs:154`

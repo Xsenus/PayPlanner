@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { chromium, expect } from '@playwright/test';
-import { createServer } from 'vite';
 import { basename, join } from 'node:path';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { runTaskUploadRoute } from './task-upload-route-lifecycle.mjs';
 import { installTaskNotificationRefreshObserver } from './task-notification-refresh-observer.mjs';
+import { prepareSyntheticBrowserUi } from './synthetic-browser-ui.mjs';
 
 console.log('TASK_UPLOAD_STAGE_MODULES_READY');
 
@@ -166,6 +166,8 @@ async function waitForInitialTaskCardData() {
   const [settings, task] = await Promise.all([
     readResponse('/api/tasks/settings'),
     initialTaskData,
+    readResponse(`/api/tasks/${taskId}/files`),
+    readResponse(`/api/tasks/${taskId}/files/uploads`),
   ]);
   assert.equal(settings.taskCardWindowMode, mode, 'The actual backend must serve the seeded card mode.');
   assert.equal(task.id, taskId, 'The actual backend must serve the requested task.');
@@ -192,33 +194,33 @@ async function completeOwnedQueue() {
 try {
   // Do not load the developer's .env files into this synthetic UI runtime.
   console.log('TASK_UPLOAD_STAGE_VITE_STARTING');
-  vite = await createServer({ envDir: process.env.TASK_UPLOAD_ROOT, cacheDir: join(process.env.TASK_UPLOAD_ROOT, 'vite-browser-cache'), plugins: [{
-    name: 'task-browser-fixed-source',
-    config(config) {
-      config.server ??= {};
-      config.server.watch = null;
-    },
-  }], server: { host: '127.0.0.1', port, strictPort: true, hmr: false }, logLevel: 'error' });
+  const browserUi = await prepareSyntheticBrowserUi({ api, port });
+  console.log('TASK_UPLOAD_STAGE_VITE_CREATED');
+  vite = await browserUi.startPreview();
   assert.equal(vite.config.isProduction, true, 'The task browser must qualify production React behavior.');
   assert.equal(vite.config.env.DEV, false, 'The release browser must not use development-only mount effects.');
-  assert.equal(vite.config.oxc.jsx.refresh, false, 'The release source transform must not inject React Refresh globals.');
-  assert.equal(vite.config.server.watch, null, 'The immutable task fixture must disable file watching.');
-  console.log('TASK_UPLOAD_STAGE_VITE_CREATED');
-  await vite.listen();
+  for (const chunk of browserUi.chunks) {
+    const code = await readFile(join(browserUi.outDir, chunk.fileName), 'utf8');
+    assert.doesNotMatch(code, /\$Refresh(?:Reg|Sig)\$|\/@react-refresh|react-refresh\/runtime/,
+      'The compiled task UI must not inject React Refresh globals.');
+    assert.ok(chunk.moduleIds.every(id => !id.includes('/react-refresh/')),
+      'The compiled task UI must not include the React Refresh runtime.');
+  }
+  assert.equal(vite.watcher, undefined, 'The immutable task preview must not create a file watcher.');
   console.log('TASK_UPLOAD_STAGE_VITE_LISTENING');
-  // Compile the actual entry before starting the browser navigation clock.
-  // The fixture bounds cold preparation separately and keeps 90 seconds for browser assertions.
+  // Qualify the complete production artifact before starting the browser clock.
+  // Its cache retains the source, dependency and tool fingerprints.
   console.log('TASK_UPLOAD_STAGE_VITE_ENTRY_PREPARING');
-  const entry = await vite.transformRequest('/src/main.tsx');
-  assert.ok(entry?.code, 'The synthetic task UI entry module must compile successfully.');
-  const taskRoute = await vite.transformRequest('/src/components/Tasks/TaskJournal.tsx');
-  assert.ok(taskRoute?.code, 'The synthetic task route must compile successfully.');
-  await vite.waitForRequestsIdle();
+  assert.ok(browserUi.chunks.some(chunk => chunk.isEntry && chunk.name === 'index' && chunk.codeLength > 0),
+    'The synthetic task UI entry module must compile successfully.');
+  assert.ok(browserUi.chunks.some(chunk => chunk.moduleIds.some(id => id.endsWith('/src/components/Tasks/TaskJournal.tsx'))),
+    'The synthetic task route must compile successfully.');
   console.log('TASK_UPLOAD_STAGE_VITE_ENTRY_READY');
   // Use the Chromium version installed for this Playwright package first.
   for (const channel of [undefined, 'msedge', 'chrome']) {
     console.log(`TASK_UPLOAD_STAGE_BROWSER_STARTING_${channel ?? 'bundled'}`);
-    try { browser = await chromium.launch({ headless: true, channel }); break; }
+    try { browser = await chromium.launch({ headless: true, channel,
+      ...(process.env.PAYPLANNER_TEST_BROWSER_PATH ? { executablePath: process.env.PAYPLANNER_TEST_BROWSER_PATH } : {}) }); break; }
     catch { console.log(`TASK_UPLOAD_STAGE_BROWSER_UNAVAILABLE_${channel ?? 'bundled'}`); /* Never download a browser. */ }
   }
   assert.ok(browser, 'An installed Chromium-compatible browser is required.');
@@ -442,6 +444,20 @@ try {
     }
     return route.continue();
   }, () => closingBrowser, () => { routeDisposalsDuringClose++; }));
+  const initialPendingUploads = !completionFlow && !creationFlow ? page.waitForResponse(response => {
+    const url = new URL(response.url());
+    return response.request().method() === 'GET' && url.origin === api.origin
+      && url.pathname === `/api/tasks/${taskId}/files/uploads`
+      && url.searchParams.get('pendingOnly') === 'true' && url.searchParams.get('includePageInfo') === 'true';
+  }).then(async response => {
+    assert.equal(response.status(), 200, 'The initial pending upload page must load successfully.');
+    const body = await response.json();
+    assert.ok(Array.isArray(body.items));
+    assert.ok(body.items.some(item => item.fileName === (queueReplay ? fileName : 'synthetic-paused.txt')
+      && item.status === 'paused'), 'The real initial page must contain the seeded paused upload.');
+  }) : null;
+  // Preserve an earlier primary failure if authentication or navigation fails first.
+  void initialPendingUploads?.catch(() => {});
   await page.goto(`${ui}/tasks/${taskId}`, { waitUntil: 'domcontentloaded' });
   await page.locator('input[type="email"]').fill(process.env.TASK_UPLOAD_EMAIL);
   await page.locator('input[type="password"]').fill(process.env.TASK_UPLOAD_PASSWORD);
@@ -478,8 +494,12 @@ try {
     assert.equal(postCount, 1);
     await completeOwnedQueue();
     await waitForCardReadsBeforeLeaving();
-    await page.goto(`${ui}/tasks/${taskId}`, { waitUntil: 'domcontentloaded' });
-    recordTaskReadBoundary('creation-reopen-dom-ready');
+    await Promise.all([
+      waitForInitialTaskCardData(),
+      page.goto(`${ui}/tasks/${taskId}`, { waitUntil: 'domcontentloaded' }).then(() => {
+        recordTaskReadBoundary('creation-reopen-dom-ready');
+      }),
+    ]);
     await expect(card).toBeVisible();
     recordTaskReadBoundary('creation-reopen-card-visible');
     await expect(card.getByText('Synthetic creation: Первый комментарий.', { exact: true })).toBeVisible();
@@ -488,6 +508,16 @@ try {
     console.log('TASK_UPLOAD_STAGE_CREATED_TASK');
   }
   if (completionFlow) {
+    const waitForCompletionResponse = async (method, suffix, status, exactUploadKey = false) => {
+      const response = await page.waitForResponse(candidate => {
+        const url = new URL(candidate.url());
+        return candidate.request().method() === method && url.origin === api.origin
+          && url.pathname === `/api/tasks/${taskId}${suffix}`
+          && (!exactUploadKey || url.searchParams.getAll('uploadKeys').includes(uploadKey));
+      });
+      assert.equal(response.status(), status, `The completion ${method} ${suffix} must return its expected status.`);
+      assert.equal(await response.finished(), null, 'The completion response body must finish before its UI assertion.');
+    };
     await card.getByRole('button', { name: 'Завершить', exact: true }).last().click();
     const result = page.locator('#task-completion-result');
     const finish = page.getByRole('button', { name: 'Завершить задачу', exact: true });
@@ -507,13 +537,18 @@ try {
       observer.observe(panel, { subtree: true, childList: true, characterData: true });
     });
     recordTaskReadBoundary('completion-first-submit');
-    await finish.click();
-    recordTaskReadBoundary('completion-first-click-returned');
+    await Promise.all([
+      waitForCompletionResponse('POST', '/files', 503),
+      finish.click().then(() => { recordTaskReadBoundary('completion-first-click-returned'); }),
+    ]);
     await expect(page.getByText(/Задача пока не завершена и не отправлена/)).toBeVisible();
     assert.equal(postCount, 1);
     rejectStatusRead = true;
     recordTaskReadBoundary('completion-status-recheck');
-    await finish.click();
+    await Promise.all([
+      waitForCompletionResponse('GET', '/files/uploads', 503, true),
+      finish.click(),
+    ]);
     await expect(page.getByText('Synthetic status unavailable', { exact: true })).toBeVisible();
     rejectStatusRead = false;
     await expect(result).toHaveValue('Synthetic completion: Работа выполнена.');
@@ -521,7 +556,12 @@ try {
     assert.equal(postCount, 1, 'An unavailable status check must not resend the selected result file.');
     await completeOwnedQueue();
     recordTaskReadBoundary('completion-after-copy-submit');
-    await finish.click();
+    await Promise.all([
+      waitForCompletionResponse('GET', '/files/uploads', 200, true),
+      waitForCompletionResponse('GET', '/files', 200),
+      waitForCompletionResponse('PATCH', '/status', completionSaveFailure ? 503 : 200),
+      finish.click(),
+    ]);
     if (completionSaveFailure) {
       await expect(page.getByText(/Не удалось подтвердить сохранение результата задачи/)).toBeVisible();
       await expect(result).toHaveValue('Synthetic completion: Работа выполнена.');
@@ -529,7 +569,11 @@ try {
       assert.equal(statusSaveCount, 1);
       assert.equal(postCount, 1);
       recordTaskReadBoundary('completion-after-save-retry');
-      await finish.click();
+      await Promise.all([
+        waitForCompletionResponse('GET', '/files', 200),
+        waitForCompletionResponse('PATCH', '/status', 200),
+        finish.click(),
+      ]);
     }
     await expect(result).toHaveCount(0);
     if (completionSaveFailure) assert.equal(statusSaveCount, 2);
@@ -564,14 +608,19 @@ try {
     recordTaskReadBoundary('completion-reopen');
     await waitForCardReadsBeforeLeaving();
     recordTaskReadBoundary('completion-reopen-after-drain');
-    await page.goto(`${ui}/tasks/${taskId}`, { waitUntil: 'domcontentloaded' });
-    recordTaskReadBoundary('completion-reopen-dom-ready');
+    await Promise.all([
+      waitForInitialTaskCardData(),
+      page.goto(`${ui}/tasks/${taskId}`, { waitUntil: 'domcontentloaded' }).then(() => {
+        recordTaskReadBoundary('completion-reopen-dom-ready');
+      }),
+    ]);
     await expect(card).toBeVisible();
     recordTaskReadBoundary('completion-reopen-card-visible');
     console.log('TASK_UPLOAD_STAGE_COMPLETED_TASK');
   }
   const uploads = card.getByRole('region', { name: 'Состояние ваших загрузок', exact: true });
   if (!completionFlow && !creationFlow) {
+    await initialPendingUploads;
     await expect(uploads).toBeVisible();
     await expect(uploads.getByText(queueReplay ? fileName : 'synthetic-paused.txt', { exact: true })).toBeVisible();
     await expect(uploads.getByText('Приостановлено', { exact: true })).toBeVisible();
@@ -592,8 +641,20 @@ try {
         // This deliberate reload is outside the file publication being exercised.
         await waitForCardReadsBeforeLeaving();
         recordTaskReadBoundary('before-replay-reload');
-        await page.reload({ waitUntil: 'domcontentloaded' });
-        recordTaskReadBoundary('after-replay-reload');
+        await Promise.all([
+          page.waitForResponse(async response => {
+            const url = new URL(response.url());
+            if (response.request().method() !== 'GET' || url.origin !== api.origin
+              || url.pathname !== '/api/notifications/inbox' || url.searchParams.get('pageSize') !== '50'
+              || url.searchParams.get('status') !== 'unread' || response.status() !== 200) return false;
+            const body = await response.json();
+            return Array.isArray(body.items) && body.items.some(item =>
+              item.title === 'Файл прикреплён к задаче' && item.taskId === taskId);
+          }),
+          page.reload({ waitUntil: 'domcontentloaded' }).then(() => {
+            recordTaskReadBoundary('after-replay-reload');
+          }),
+        ]);
       }
       const notice = page.getByTestId('toast-card').filter({ hasText: 'Файл прикреплён к задаче' });
       await expect(notice).toHaveCount(1);

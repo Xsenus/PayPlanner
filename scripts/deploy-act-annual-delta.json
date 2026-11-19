@@ -1,0 +1,379 @@
+{
+  "columns": {
+    "added": [
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CommandSha256",
+        "nullable": false,
+        "position": 5,
+        "table": "ActCreateReceipts",
+        "type": "character varying(64)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Operation",
+        "nullable": false,
+        "position": 6,
+        "table": "ActCreateReceipts",
+        "type": "character varying(16)"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ActId",
+        "nullable": false,
+        "position": 3,
+        "table": "ActCreateReceipts",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ActorUserId",
+        "nullable": false,
+        "position": 1,
+        "table": "ActCreateReceipts",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ActorUserId",
+        "nullable": true,
+        "position": 1,
+        "table": "PK_ActCreateReceipts",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CaseId",
+        "nullable": true,
+        "position": 4,
+        "table": "ActCreateReceipts",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "LastNumber",
+        "nullable": false,
+        "position": 2,
+        "table": "ActAnnualNumberCounters",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "PublishedDocumentId",
+        "nullable": true,
+        "position": 7,
+        "table": "ActCreateReceipts",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "UploadKey",
+        "nullable": false,
+        "position": 2,
+        "table": "ActCreateReceipts",
+        "type": "uuid"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "UploadKey",
+        "nullable": true,
+        "position": 2,
+        "table": "PK_ActCreateReceipts",
+        "type": "uuid"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "WorkOrderId",
+        "nullable": true,
+        "position": 8,
+        "table": "ActCreateReceipts",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Year",
+        "nullable": false,
+        "position": 1,
+        "table": "ActAnnualNumberCounters",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Year",
+        "nullable": true,
+        "position": 1,
+        "table": "PK_ActAnnualNumberCounters",
+        "type": "integer"
+      }
+    ],
+    "removed": []
+  },
+  "relations": {
+    "added": [
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "PK_ActAnnualNumberCounters",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "PK_ActCreateReceipts",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "r",
+        "name": "ActAnnualNumberCounters",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "r",
+        "name": "ActCreateReceipts",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      }
+    ],
+    "removed": []
+  },
+  "constraints": {
+    "added": [
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "CHECK (\"ActorUserId\" > 0 AND \"ActId\" > 0 AND length(\"CommandSha256\"::text) = 64 AND (\"PublishedDocumentId\" IS NULL OR \"PublishedDocumentId\" > 0) AND (\"Operation\"::text = 'ordinary'::text AND \"CaseId\" IS NULL AND \"WorkOrderId\" IS NULL OR \"Operation\"::text = 'work-order'::text AND \"CaseId\" IS NOT NULL AND \"WorkOrderId\" IS NOT NULL AND \"CaseId\" > 0 AND \"WorkOrderId\" > 0))",
+        "name": "CK_ActCreateReceipts_Identity",
+        "table": "ActCreateReceipts",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "CHECK (\"Year\" >= 1 AND \"Year\" <= 9999 AND \"LastNumber\" >= 0)",
+        "name": "CK_ActAnnualNumberCounters_Value",
+        "table": "ActAnnualNumberCounters",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "NOT NULL \"ActId\"",
+        "name": "ActCreateReceipts_ActId_not_null",
+        "table": "ActCreateReceipts",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "NOT NULL \"ActorUserId\"",
+        "name": "ActCreateReceipts_ActorUserId_not_null",
+        "table": "ActCreateReceipts",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "NOT NULL \"CommandSha256\"",
+        "name": "ActCreateReceipts_CommandSha256_not_null",
+        "table": "ActCreateReceipts",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "NOT NULL \"LastNumber\"",
+        "name": "ActAnnualNumberCounters_LastNumber_not_null",
+        "table": "ActAnnualNumberCounters",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "NOT NULL \"Operation\"",
+        "name": "ActCreateReceipts_Operation_not_null",
+        "table": "ActCreateReceipts",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "NOT NULL \"UploadKey\"",
+        "name": "ActCreateReceipts_UploadKey_not_null",
+        "table": "ActCreateReceipts",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "NOT NULL \"Year\"",
+        "name": "ActAnnualNumberCounters_Year_not_null",
+        "table": "ActAnnualNumberCounters",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "PRIMARY KEY (\"ActorUserId\", \"UploadKey\")",
+        "name": "PK_ActCreateReceipts",
+        "table": "ActCreateReceipts",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "PRIMARY KEY (\"Year\")",
+        "name": "PK_ActAnnualNumberCounters",
+        "table": "ActAnnualNumberCounters",
+        "validated": true
+      }
+    ],
+    "removed": []
+  },
+  "indexes": {
+    "added": [
+      {
+        "definition": "CREATE UNIQUE INDEX \"PK_ActAnnualNumberCounters\" ON public.\"ActAnnualNumberCounters\" USING btree (\"Year\")",
+        "live": true,
+        "name": "PK_ActAnnualNumberCounters",
+        "ready": true,
+        "table": "ActAnnualNumberCounters",
+        "valid": true
+      },
+      {
+        "definition": "CREATE UNIQUE INDEX \"PK_ActCreateReceipts\" ON public.\"ActCreateReceipts\" USING btree (\"ActorUserId\", \"UploadKey\")",
+        "live": true,
+        "name": "PK_ActCreateReceipts",
+        "ready": true,
+        "table": "ActCreateReceipts",
+        "valid": true
+      }
+    ],
+    "removed": []
+  },
+  "triggers": {
+    "added": [],
+    "removed": []
+  },
+  "routines": {
+    "added": [],
+    "removed": []
+  },
+  "sequences": {
+    "added": [],
+    "removed": []
+  },
+  "policies": {
+    "added": [],
+    "removed": []
+  },
+  "types": {
+    "added": [
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "b",
+        "name": "_ActAnnualNumberCounters",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      },
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "b",
+        "name": "_ActCreateReceipts",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      },
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "c",
+        "name": "ActAnnualNumberCounters",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      },
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "c",
+        "name": "ActCreateReceipts",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      }
+    ],
+    "removed": []
+  },
+  "migrations": {
+    "added": [
+      {
+        "MigrationId": "20261111140010_AddActAnnualNumberingPostgreSql",
+        "ProductVersion": "9.0.9"
+      }
+    ],
+    "removed": []
+  }
+}

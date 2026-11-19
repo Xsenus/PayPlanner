@@ -31,6 +31,7 @@ public class WebPushNotificationService : IWebPushNotificationService
     private const string FinancialPushBody = "Откройте CRM, чтобы посмотреть детали финансового события после проверки прав доступа.";
 
     private readonly PaymentContext _context;
+    private ContractExpirationNotificationPolicy? _contractExpirationPolicy;
     private readonly IConfiguration _configuration;
     private readonly ILogger<WebPushNotificationService> _logger;
 
@@ -139,6 +140,12 @@ public class WebPushNotificationService : IWebPushNotificationService
                 continue;
             }
 
+            if (!await CanSendContractExpirationAsync(notification, notification.EventKey, cancellationToken))
+            {
+                delivery.Status = NotificationDeliveryStatus.Skipped;
+                delivery.Error = "Уведомление об окончании договора устарело или больше не разрешено получателю.";
+                continue;
+            }
             if (!config.Ready)
             {
                 delivery.Status = NotificationDeliveryStatus.Skipped;
@@ -180,6 +187,16 @@ public class WebPushNotificationService : IWebPushNotificationService
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<bool> CanSendContractExpirationAsync(UserNotification notification, string eventKey, CancellationToken ct)
+    {
+        if (notification.Type != UserNotificationTypes.ContractExpiring
+            && !ContractExpirationNotificationPolicy.IsCandidate(eventKey)) return true;
+        if (notification.Type != UserNotificationTypes.ContractExpiring || notification.ObjectType != "contract"
+            || notification.ObjectId is not > 0 || notification.TaskJournalItemId.HasValue) return false;
+        return await (_contractExpirationPolicy ??= new(_context)).CanSendAsync(eventKey,
+            notification.RecipientUserId, ct, notification.ObjectId, requireSource: true);
     }
 
     public async Task<NotificationDelivery?> RetryDeliveryAsync(int deliveryId, CancellationToken cancellationToken = default)
@@ -271,6 +288,14 @@ public class WebPushNotificationService : IWebPushNotificationService
         {
             retry.Status = NotificationDeliveryStatus.Skipped;
             retry.Error = ResolveNotReadyReason(config);
+            await _context.SaveChangesAsync(cancellationToken);
+            return retry;
+        }
+
+        if (!await CanSendContractExpirationAsync(notification, baseEventKey, cancellationToken))
+        {
+            retry.Status = NotificationDeliveryStatus.Skipped;
+            retry.Error = "Уведомление об окончании договора устарело или больше не разрешено получателю.";
             await _context.SaveChangesAsync(cancellationToken);
             return retry;
         }

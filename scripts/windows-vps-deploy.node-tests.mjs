@@ -116,7 +116,8 @@ test('schedules both Linux scripts and exact transferred-byte checks before pack
   const preflight = state.calls.findIndex(call => call.options.input?.includes('test "$(uname -s)" = Linux'));
   const upload = state.calls.findIndex(call => call.tool === 'scp.exe' && call.args.includes(config.archive));
   const installation = state.calls.findIndex(call => call.args.at(-1).includes('--execute install '));
-  for (const name of ['deploy-roadmap-candidate-review.json', 'deploy-roadmap-candidate-delta.json']) {
+  for (const name of ['deploy-roadmap-candidate-review.json', 'deploy-roadmap-candidate-delta.json',
+    'deploy-act-annual-review.json', 'deploy-act-annual-delta.json']) {
     assert.ok(linuxFiles.includes(name), 'Reviewed candidate data must reach Linux preflight');
     const transfer = state.calls.find(call => call.tool === 'scp.exe' && call.args.at(-1).includes('/tmp/payplanner-control-') && call.args.some(arg => basename(arg) === name));
     assert.ok(transfer, 'Reviewed candidate data must also reach the installer control directory');

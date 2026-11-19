@@ -339,33 +339,121 @@ public sealed partial class SpreadsheetImportService
 
     private async Task<bool> RollbackActAsync(PaymentContext db, SpreadsheetImportBatchOperation operation, CancellationToken cancellationToken)
     {
-        return await RollbackEntityAsync<Act, ActSnapshot>(
-            db,
-            operation,
-            cancellationToken,
-            async id => await db.Acts
-                .IgnoreQueryFilters()
-                .Include(item => item.LineItems)
-                .FirstOrDefaultAsync(item => item.Id == id, cancellationToken),
-            entity => SerializeSnapshot(CaptureActSnapshot(entity)),
-            entity =>
+        await db.Entry(operation).ReloadAsync(cancellationToken);
+        if (operation.RollbackAction is SpreadsheetImportRollbackAction.Deleted or SpreadsheetImportRollbackAction.Restored)
+            return true;
+        IDbContextTransaction? transaction = null;
+        bool? outcome = null;
+        var commitStarted = false;
+        string? failureMessage = null;
+        DateTime? failureAt = null;
+        try
+        {
+            transaction = db.Database.CurrentTransaction is null
+                ? await db.Database.BeginTransactionAsync(cancellationToken) : null;
+            var numbering = new Invoices.ActAnnualNumberingService(db);
+            if (operation.EntityId.HasValue)
             {
-                if (entity.LineItems.Count > 0)
-                {
-                    db.RemoveRange(entity.LineItems);
-                }
+                // Match ordinary Act writers: row first, then the shared number scope.
+                if (db.Database.IsNpgsql())
+                    await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"Acts\" WHERE \"Id\" = {operation.EntityId.Value} FOR UPDATE NOWAIT").ToArrayAsync(cancellationToken);
+                await numbering.LockAsync(cancellationToken);
+                await db.Entry(operation).ReloadAsync(cancellationToken);
+            }
+            var result = true;
+            if (operation.RollbackAction is not (SpreadsheetImportRollbackAction.Deleted or SpreadsheetImportRollbackAction.Restored))
+            {
+                result = await RollbackEntityAsync<Act, ActSnapshot>(
+                    db,
+                    operation,
+                    cancellationToken,
+                    async id =>
+                    {
+                        // Refresh only this graph; the tracked import receipts must survive.
+                        foreach (var entry in db.Set<ActLineItem>().Local.GetEntries(nameof(ActLineItem.ActId), id).ToArray())
+                            entry.State = EntityState.Detached;
+                        if (db.Acts.Local.FindEntry(id) is { } trackedAct)
+                            trackedAct.State = EntityState.Detached;
+                        return await db.Acts.IgnoreQueryFilters().Include(item => item.LineItems)
+                            .FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+                    },
+                    entity => SerializeSnapshot(CaptureActSnapshot(entity)),
+                    async entity =>
+                    {
+                        await numbering.RaiseFloorAsync(entity.Date, entity.Number, cancellationToken);
+                        if (entity.LineItems.Count > 0)
+                        {
+                            db.RemoveRange(entity.LineItems);
+                        }
 
-                db.Remove(entity);
-                return Task.CompletedTask;
-            },
-            async (entity, snapshot) =>
+                        db.Remove(entity);
+                    },
+                    async (entity, snapshot) =>
+                    {
+                        if (snapshot.Act.InvoiceId.HasValue && !await db.Payments.IgnoreQueryFilters()
+                            .ApplyUnambiguousInvoiceLinks().AnyAsync(payment => payment.Id == snapshot.Act.InvoiceId.Value
+                                && payment.ClientId == snapshot.Act.ClientId, cancellationToken))
+                            throw new InvalidOperationException(InvoiceQueryExtensions.ConflictMessage);
+                        await numbering.RaiseFloorAsync(entity.Date, entity.Number, cancellationToken);
+                        RestoreActSnapshot(db, entity, snapshot);
+                    });
+            }
+            var stored = db.SpreadsheetImportBatchOperations.Local.FindEntry(operation.Id)?.Entity ?? operation;
+            if (!result && stored.RollbackAction == SpreadsheetImportRollbackAction.Error && transaction is not null)
             {
-                if (snapshot.Act.InvoiceId.HasValue && !await db.Payments.IgnoreQueryFilters()
-                    .ApplyUnambiguousInvoiceLinks().AnyAsync(payment => payment.Id == snapshot.Act.InvoiceId.Value
-                        && payment.ClientId == snapshot.Act.ClientId, cancellationToken))
-                    throw new InvalidOperationException(InvoiceQueryExtensions.ConflictMessage);
-                RestoreActSnapshot(db, entity, snapshot);
-            });
+                failureMessage = stored.RollbackMessage;
+                failureAt = stored.RolledBackAt;
+                await transaction.RollbackAsync(cancellationToken);
+            }
+            else
+            {
+                if (operation.EntityId.HasValue)
+                {
+                    var restored = await db.Acts.IgnoreQueryFilters().AsNoTracking().Where(act => act.Id == operation.EntityId.Value)
+                        .Select(act => new { act.Date, act.Number }).SingleOrDefaultAsync(cancellationToken);
+                    if (restored is not null)
+                        await numbering.RaiseFloorAsync(restored.Date, restored.Number, cancellationToken);
+                }
+                if (transaction is not null)
+                {
+                    commitStarted = true;
+                    await transaction.CommitAsync(cancellationToken);
+                }
+                outcome = result;
+            }
+        }
+        catch (Exception ex) when (transaction is not null)
+        {
+            _logger.LogError(ex, "Atomic Act rollback failed for operation {OperationId}", operation.Id);
+            failureMessage ??= $"Не удалось выполнить откат: {ex.Message}";
+            using var rollbackTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try { await transaction.RollbackAsync(rollbackTimeout.Token); }
+            catch (Exception rollbackError) { ex.Data["ActRollbackFailure"] = rollbackError; }
+        }
+        finally
+        {
+            if (transaction is not null) await transaction.DisposeAsync();
+        }
+        if (outcome.HasValue) return outcome.Value;
+        cancellationToken.ThrowIfCancellationRequested();
+        db.ChangeTracker.Clear();
+        var actual = await db.SpreadsheetImportBatchOperations.SingleAsync(item => item.Id == operation.Id, cancellationToken);
+        // Preserve both a lost acknowledgement and another rollback's completed receipt.
+        if (actual.RollbackAction is SpreadsheetImportRollbackAction.Deleted or SpreadsheetImportRollbackAction.Restored)
+            return true;
+        if (commitStarted && actual.RollbackAction == SpreadsheetImportRollbackAction.Skipped) return false;
+        var message = failureMessage ?? "Не удалось выполнить откат акта.";
+        var failedAt = failureAt ?? DateTime.UtcNow;
+        if (await db.SpreadsheetImportBatchOperations.Where(item => item.Id == operation.Id
+                && item.RollbackAction != SpreadsheetImportRollbackAction.Deleted
+                && item.RollbackAction != SpreadsheetImportRollbackAction.Restored)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.RollbackAction, SpreadsheetImportRollbackAction.Error)
+                .SetProperty(item => item.RollbackMessage, message)
+                .SetProperty(item => item.RolledBackAt, failedAt), cancellationToken) != 0)
+            return false;
+        await db.Entry(actual).ReloadAsync(cancellationToken);
+        return actual.RollbackAction is SpreadsheetImportRollbackAction.Deleted or SpreadsheetImportRollbackAction.Restored;
     }
 
     private async Task<bool> RollbackEntityAsync<TEntity, TSnapshot>(

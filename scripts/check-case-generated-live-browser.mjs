@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { prepareSyntheticBrowserUi } from './synthetic-browser-ui.mjs';
+import { createCaseReadLifecycle, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
 assert.equal(api.hostname, '127.0.0.1');
@@ -119,36 +120,54 @@ try {
       if (keys.length === 1) { await route.abort('failed'); completeFirst(); }
       else { await route.fulfill({ response }); completeSecond(); allowPublicationReceipts(); }
     });
-    await page.locator('input[type="email"]').fill(settings.email);
-    await page.locator('input[type="password"]').fill(settings.password);
-    await page.getByRole('button', { name: 'Войти', exact: true }).click();
-    await page.locator('input[type="email"]').waitFor({ state: 'hidden' });
-    let card = page;
-    if (modal) {
-      await page.locator('main').getByRole('button', { name: 'Дела', exact: true }).click();
-      await page.getByRole('button', { name: 'Редактировать дело Synthetic generated browser case', exact: true }).click();
-      card = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Дело', exact: true }) });
-      await card.waitFor();
-      await card.getByRole('textbox', { name: 'Стратегия и план действий', exact: true }).fill('Unsaved generated strategy');
-    } else await page.getByRole('button', { name: order ? 'Заказ-наряд' : 'Документы', exact: true }).click();
-    if (!order) await card.getByLabel('Шаблон документа дела', { exact: true }).selectOption('custom');
-    const name = order ? 'В документы' : 'Сформировать';
-    const button = card.getByRole('button', { name, exact: true });
-    await button.click(); await first;
-    await page.waitForFunction(name => [...document.querySelectorAll('button')].some(button => button.textContent.trim() === name && !button.disabled), name);
-    const pending = await page.evaluate(() => JSON.parse(sessionStorage.getItem('pp.case-document-upload-attempts.v1')));
-    check(pending?.length === 1 && pending[0].key === keys[0], 'Lost ACK did not retain the original identity');
-    check(keys.length === 1, 'Lost ACK started an automatic generation');
-    await button.click(); await second;
-    await page.waitForFunction(() => sessionStorage.getItem('pp.case-document-upload-attempts.v1') === null);
-    check(keys.length === 2 && keys[0] === keys[1], 'Explicit replay changed the attempt');
-    check(documents[0].id === documents[1].id && documents[1].version === 1, 'Replay created another document');
-    await card.getByText(documents[1].originalFileName, { exact: true }).first().waitFor();
-    if (modal) check(await card.getByRole('textbox', { name: 'Стратегия и план действий', exact: true }).inputValue() === 'Unsaved generated strategy', 'Generation lost unsaved fields');
-    check(otherWrites === 0, 'Generation caused another business write: ' + otherWrites);
-    check(outside.length === 0, 'Browser called an external host');
-    check(errors.length === 0, 'Browser errors: ' + errors.join('; '));
-    return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ flow: settings.flow, posts: keys.length, documentId: documents[0].id });
+    const caseReads = (${createCaseReadLifecycle})(page,
+      request => (${isCaseBoundaryRead})(request, settings.api, settings.caseId), 20000);
+    try {
+      await page.locator('input[type="email"]').fill(settings.email);
+      await page.locator('input[type="password"]').fill(settings.password);
+      await page.getByRole('button', { name: 'Войти', exact: true }).click();
+      await page.locator('input[type="email"]').waitFor({ state: 'hidden' });
+      let card = page;
+      if (modal) {
+        const casesTab = page.locator('main').getByRole('button', { name: 'Дела', exact: true });
+        await casesTab.waitFor();
+        await caseReads.drain('client-navigation');
+        await casesTab.click();
+        const editCaseButton = page.getByRole('button', { name: 'Редактировать дело Synthetic generated browser case', exact: true });
+        await editCaseButton.waitFor();
+        await caseReads.drain('editor-open');
+        await editCaseButton.click();
+        card = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Дело', exact: true }) });
+        await card.waitFor();
+        await card.getByRole('textbox', { name: 'Стратегия и план действий', exact: true }).fill('Unsaved generated strategy');
+      } else {
+        const caseTab = page.getByRole('button', { name: order ? 'Заказ-наряд' : 'Документы', exact: true });
+        await caseTab.waitFor();
+        await caseReads.drain('document-tab');
+        await caseTab.click();
+      }
+      if (!order) await card.getByLabel('Шаблон документа дела', { exact: true }).selectOption('custom');
+      const name = order ? 'В документы' : 'Сформировать';
+      const button = card.getByRole('button', { name, exact: true });
+      await button.click(); await first;
+      await page.waitForFunction(name => [...document.querySelectorAll('button')].some(button => button.textContent.trim() === name && !button.disabled), name);
+      const pending = await page.evaluate(() => JSON.parse(sessionStorage.getItem('pp.case-document-upload-attempts.v1')));
+      check(pending?.length === 1 && pending[0].key === keys[0], 'Lost ACK did not retain the original identity');
+      check(keys.length === 1, 'Lost ACK started an automatic generation');
+      await button.click(); await second;
+      await page.waitForFunction(() => sessionStorage.getItem('pp.case-document-upload-attempts.v1') === null);
+      check(keys.length === 2 && keys[0] === keys[1], 'Explicit replay changed the attempt');
+      check(documents[0].id === documents[1].id && documents[1].version === 1, 'Replay created another document');
+      await card.getByText(documents[1].originalFileName, { exact: true }).first().waitFor();
+      if (modal) check(await card.getByRole('textbox', { name: 'Стратегия и план действий', exact: true }).inputValue() === 'Unsaved generated strategy', 'Generation lost unsaved fields');
+      await caseReads.drain('browser-close');
+      check(otherWrites === 0, 'Generation caused another business write: ' + otherWrites);
+      check(outside.length === 0, 'Browser called an external host');
+      check(errors.length === 0, 'Browser errors: ' + errors.join('; '));
+      return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ flow: settings.flow, posts: keys.length, documentId: documents[0].id });
+    } finally {
+      caseReads.dispose();
+    }
   }`);
   assert.ok(result.includes('CASE_RETIREMENT_BROWSER_OK'), result); console.log(result);
 } catch (error) {

@@ -1,4 +1,5 @@
 import type { DocumentReadOwner } from './useDocumentDeliveryOwner';
+import type { ActCreateOptions } from '../services/actCreateAttempts';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
 import type { Act, ActInput, ActStatus, ActWorkflowStatus, ActsSummary, PaymentKind } from '../types';
@@ -54,7 +55,7 @@ interface UseActsResult {
   pagination: ActsPagination;
   refresh: () => Promise<void>;
   refreshOwned: (isCurrent: () => boolean) => Promise<void>;
-  createAct: (payload: ActInput, isCurrent?: () => boolean) => Promise<Act>;
+  createAct: (payload: ActInput, isCurrent?: () => boolean, options?: ActCreateOptions) => Promise<Act>;
   updateAct: (id: number, payload: ActInput, isCurrent?: () => boolean) => Promise<Act>;
   deleteAct: (id: number, isCurrent?: () => boolean) => Promise<void>;
 }
@@ -281,8 +282,8 @@ export function useActs(filters: ActsFilters, readOwner?: DocumentReadOwner): Us
   }, [fetchActs, fetchSummary]);
 
   const createAct = useCallback(
-    async (payload: ActInput, isCurrent: () => boolean = () => true) => {
-      const created = await awaitOwnedUiResult(() => apiService.createAct(payload), isCurrent);
+    async (payload: ActInput, isCurrent: () => boolean = () => true, options?: ActCreateOptions) => {
+      const created = await awaitOwnedUiResult(() => options ? apiService.createAct(payload, options) : apiService.createAct(payload), isCurrent);
       await refreshOwned(isCurrent);
       return created;
     },

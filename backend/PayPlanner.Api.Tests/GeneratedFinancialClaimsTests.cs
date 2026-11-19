@@ -47,7 +47,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
         {
             var number = await new GeneratedFinancialClaims(observer).NextNumberAsync(kind, f.Case.Id, orderId,
                 original.Domain.Date, original.Domain.Number, default);
-            Assert.Equal(original.Domain.Number + "-2", number);
+            Assert.Equal(kind == GeneratedFinancialDocumentKind.Act ? "2" : original.Domain.Number + "-2", number);
             await transaction.RollbackAsync();
         }
 
@@ -148,11 +148,11 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
         }
         await f.Db.SaveChangesAsync();
         await using var tx = await f.Db.Database.BeginTransactionAsync(); var claims = new GeneratedFinancialClaims(f.Db);
-        Assert.Equal("CLAIM-7", await claims.NextNumberAsync(kind, f.Case.Id, 42, date, " CLAIM ", default));
-        Assert.Equal("CLAIM", await claims.NextNumberAsync(kind, f.Case.Id, 42, date.AddDays(1), "CLAIM", default));
-        Assert.Equal(new string('x', 120), await claims.NextNumberAsync(kind, f.Case.Id, 42, date, new string('x', 130), default));
+        Assert.Equal(kind == GeneratedFinancialDocumentKind.Act ? "1" : "CLAIM-7", await claims.NextNumberAsync(kind, f.Case.Id, 42, date, " CLAIM ", default));
+        Assert.Equal(kind == GeneratedFinancialDocumentKind.Act ? "2" : "CLAIM", await claims.NextNumberAsync(kind, f.Case.Id, 42, date.AddDays(1), "CLAIM", default));
+        Assert.Equal(kind == GeneratedFinancialDocumentKind.Act ? "3" : new string('x', 120), await claims.NextNumberAsync(kind, f.Case.Id, 42, date, new string('x', 130), default));
         var prefix = kind switch { GeneratedFinancialDocumentKind.Invoice => "WO", GeneratedFinancialDocumentKind.Act => "WO-ACT", _ => "WO-CONTRACT" };
-        Assert.Equal($"{prefix}-{f.Case.Id}-42", await claims.NextNumberAsync(kind, f.Case.Id, 42, date, null, default));
+        Assert.Equal(kind == GeneratedFinancialDocumentKind.Act ? "4" : $"{prefix}-{f.Case.Id}-42", await claims.NextNumberAsync(kind, f.Case.Id, 42, date, null, default));
         Assert.Empty(await f.Db.GeneratedFinancialNumberClaims.ToArrayAsync()); await tx.RollbackAsync();
     }
 
@@ -269,7 +269,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
         await using var proof = f.IdentityObserver();
         Assert.Equal(4, await proof.GeneratedFinancialDocumentAttempts.CountAsync()); Assert.Equal(4, await proof.GeneratedFinancialNumberClaims.CountAsync());
         var numbers = await proof.GeneratedFinancialNumberClaims.Select(c => c.Number).ToArrayAsync();
-        Assert.Equal(new[] { "CLAIM", "CLAIM-2", "CLAIM-3", "CLAIM-4" }, numbers.OrderBy(n => n, StringComparer.Ordinal));
+        Assert.Equal(kind == GeneratedFinancialDocumentKind.Act ? new[] { "1", "2", "3", "4" } : new[] { "CLAIM", "CLAIM-2", "CLAIM-3", "CLAIM-4" }, numbers.OrderBy(n => n, StringComparer.Ordinal));
         Assert.Equal(0, await FinancialRowsAsync(proof)); Assert.Equal(0, f.Local.PutCount); Assert.Equal(0, f.Mirror.PutCount);
     }
 
@@ -338,7 +338,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
         var result = await CaptureWithClaimsAsync(f.Db, f.Case.Id, orderId, f.User.Id, f.User.FullName, kind);
         var receipt = result.Receipt!; var date = new DateTime(2026, 10, 2);
         if (kind == GeneratedFinancialDocumentKind.Invoice) f.Db.Invoices.Add(new Invoice { Number = "CLAIM", Date = date });
-        else if (kind == GeneratedFinancialDocumentKind.Act) f.Db.Acts.Add(new Act { Number = "CLAIM", Date = date, Amount = 1m });
+        else if (kind == GeneratedFinancialDocumentKind.Act) f.Db.Acts.Add(new Act { Number = "1", Date = date, Amount = 1m });
         else f.Db.Contracts.Add(new Contract { Number = "CLAIM", Date = date, Amount = 1m });
         await f.Db.SaveChangesAsync();
         await using var proof = f.Observer(); var registry = new GeneratedFinancialDocumentRegistry(proof);

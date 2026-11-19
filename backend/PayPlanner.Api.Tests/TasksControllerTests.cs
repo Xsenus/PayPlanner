@@ -401,6 +401,8 @@ public partial class TasksControllerTests : IDisposable
         Assert.Equal("Asia/Kamchatka", dto.TimeZoneId);
         Assert.Equal(department.Id, dto.DepartmentId);
         Assert.Equal("Контроль", dto.Department);
+        Assert.Equal(assignee.RoleId, dto.RoleId);
+        Assert.Equal(assignee.Role!.Name, dto.RoleName);
     }
 
     [Fact]
@@ -12031,6 +12033,13 @@ public partial class TasksControllerTests : IDisposable
 
         public Task<IReadOnlyList<NotificationDelivery>> NotifyCompletionForEventAsync(TaskJournalItem task, string eventKey, CancellationToken cancellationToken = default)
             => FailDurableDelivery ? throw new IOException("Injected durable delivery failure.") : NotifyTaskCompletedAsync(task, cancellationToken);
+
+        public async Task<IReadOnlyList<NotificationDelivery>> NotifyApprovalCompletionForEventAsync(TaskJournalItem task, TaskJournalParticipant approver, string actorName, int actorUserId, string eventKey, CancellationToken cancellationToken = default)
+        {
+            if (FailDurableDelivery) throw new IOException("Injected durable delivery failure.");
+            await NotifyTaskApprovalDecisionAsync(task, approver, "approved", actorName, actorUserId, approver.Resolution, cancellationToken);
+            return await NotifyTaskCompletedAsync(task, cancellationToken);
+        }
 
         public Task<IReadOnlyList<NotificationDelivery>> NotifyApprovalForEventAsync(TaskJournalItem task, string actorName, int actorUserId, string eventKey, CancellationToken cancellationToken = default)
             => FailDurableDelivery ? throw new IOException("Injected durable delivery failure.") : NotifyTaskApprovalRequestedAsync(task, actorName, actorUserId, cancellationToken);

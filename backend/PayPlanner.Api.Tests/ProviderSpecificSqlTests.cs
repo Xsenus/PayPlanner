@@ -119,11 +119,28 @@ public partial class ProviderSpecificSqlTests
     [InlineData("overdue-without-nowait")]
     [InlineData("advance-cursor-without-nowait")]
     [InlineData("invoice-cancel-without-nowait")]
+    [InlineData("act-delete-without-nowait")]
+    [InlineData("act-delete-wrong-provider")]
+    [InlineData("act-delete-without-transaction")]
+    [InlineData("act-delete-wrong-id")]
+    [InlineData("act-delete-early-number-scope")]
+    [InlineData("act-rollback-without-nowait")]
+    [InlineData("act-rollback-wrong-provider")]
+    [InlineData("act-rollback-without-transaction")]
+    [InlineData("act-rollback-wrong-id")]
+    [InlineData("act-rollback-without-id-guard")]
+    [InlineData("act-rollback-early-number-scope")]
     public void ForUpdateRegistry_RejectsUnregisteredOrUnguardedSql(string mutation)
     {
         var root = FindRepositoryRoot();
+        AssertRepositoryForUpdateSql(root);
         var relativePath = mutation switch
         {
+            "act-delete-without-nowait" or "act-delete-wrong-provider" or "act-delete-without-transaction"
+                or "act-delete-wrong-id" or "act-delete-early-number-scope" => "backend/Controllers/ActsController.cs",
+            "act-rollback-without-nowait" or "act-rollback-wrong-provider" or "act-rollback-without-transaction"
+                or "act-rollback-wrong-id" or "act-rollback-without-id-guard" or "act-rollback-early-number-scope"
+                => "backend/Services/SpreadsheetImportService.Rollback.cs",
             "document-bank-without-nowait" or "document-bank-wrong-provider" or "document-bank-weak-source-lock"
                 or "document-bank-foreign-scope" or "document-bank-unbounded" or "document-bank-without-transaction"
                 => "backend/Services/Companies/CompanyBankDocumentSelectionService.cs",
@@ -157,6 +174,19 @@ public partial class ProviderSpecificSqlTests
             ? "" : File.ReadAllText(Path.Combine(root, relativePath));
         var changed = mutation switch
         {
+            "act-delete-without-nowait" or "act-rollback-without-nowait"
+                => original.Replace("FOR UPDATE NOWAIT", "FOR UPDATE", StringComparison.Ordinal),
+            "act-delete-wrong-provider" => original.Replace("if (_db.Database.IsNpgsql())", "if (true)", StringComparison.Ordinal),
+            "act-rollback-wrong-provider" => original.Replace("if (db.Database.IsNpgsql())", "if (true)", StringComparison.Ordinal),
+            "act-delete-without-transaction" => original.Replace("DocumentSellerLease.RunAsync<IActionResult>", "WithoutTransactionAsync<IActionResult>", StringComparison.Ordinal),
+            "act-rollback-without-transaction" => original.Replace("transaction = db.Database.CurrentTransaction is null", "transaction = false", StringComparison.Ordinal),
+            "act-delete-wrong-id" => original.Replace("{id} FOR UPDATE NOWAIT", "{0} FOR UPDATE NOWAIT", StringComparison.Ordinal),
+            "act-rollback-wrong-id" => original.Replace("{operation.EntityId.Value} FOR UPDATE NOWAIT", "{0} FOR UPDATE NOWAIT", StringComparison.Ordinal),
+            "act-rollback-without-id-guard" => original.Replace("if (operation.EntityId.HasValue)", "if (true)", StringComparison.Ordinal),
+            "act-delete-early-number-scope" => original.Replace("if (_db.Database.IsNpgsql())",
+                "await new ActAnnualNumberingService(_db).LockAsync(ct);\n            if (_db.Database.IsNpgsql())", StringComparison.Ordinal),
+            "act-rollback-early-number-scope" => original.Replace("if (db.Database.IsNpgsql())",
+                "await numbering.LockAsync(cancellationToken);\n                if (db.Database.IsNpgsql())", StringComparison.Ordinal),
             "document-bank-without-nowait" => original.Replace("NOWAIT", "", StringComparison.Ordinal),
             "document-bank-wrong-provider" => original.Replace("if (db.Database.IsNpgsql())", "if (true)", StringComparison.Ordinal),
             "document-bank-weak-source-lock" => original.Replace("FOR UPDATE NOWAIT", "FOR SHARE NOWAIT", StringComparison.Ordinal),
@@ -747,6 +777,37 @@ public partial class ProviderSpecificSqlTests
         Assert.Equal(105, approved.Count(statement => statement.Contains("FOR UPDATE", StringComparison.Ordinal)));
         Assert.Equal(129, approved.Count(statement => statement.Contains("FOR SHARE", StringComparison.Ordinal)));
         Assert.Equal(234, approved.Count);
+
+        var actDeleteSource = ReadSource("backend/Controllers/ActsController.cs");
+        var actDeleteStart = actDeleteSource.IndexOf("public async Task<IActionResult> Delete(", StringComparison.Ordinal);
+        var actDeleteEnd = actDeleteSource.IndexOf("public async Task<ActionResult<InvoiceDocumentTemplateSettingsDto>> GetDocumentTemplateSettings", actDeleteStart, StringComparison.Ordinal);
+        Assert.True(actDeleteStart >= 0 && actDeleteEnd > actDeleteStart);
+        var actDeleteMethod = actDeleteSource[actDeleteStart..actDeleteEnd];
+        AssertOrdered(actDeleteMethod, "DocumentSellerLease.RunAsync<IActionResult>",
+            "ApplyActVisibility(visibility).AnyAsync(item => item.Id == id", "if (_db.Database.IsNpgsql())",
+            "{id} FOR UPDATE NOWAIT", "await new ActAnnualNumberingService(_db).LockAsync(ct);",
+            "RequireActsPermissionAsync(permission => permission.CanDelete, ct) is { } changedPermission",
+            "RaiseFloorAsync(act.Date, act.Number, ct)", "_db.Acts.Remove(act)");
+        Assert.Equal(1, actDeleteMethod.Split("await new ActAnnualNumberingService(_db).LockAsync(ct);", StringSplitOptions.None).Length - 1);
+        Approve("backend/Controllers/ActsController.cs", actDeleteSource, "Delete", actDeleteStart, actDeleteEnd,
+            ["""await _db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"Acts\" WHERE \"Id\" = {id} FOR UPDATE NOWAIT").ToArrayAsync(ct);"""]);
+
+        var actRollbackSource = ReadSource("backend/Services/SpreadsheetImportService.Rollback.cs");
+        var actRollbackStart = actRollbackSource.IndexOf("private async Task<bool> RollbackActAsync(", StringComparison.Ordinal);
+        var actRollbackEnd = actRollbackSource.IndexOf("private async Task<bool> RollbackEntityAsync<", actRollbackStart, StringComparison.Ordinal);
+        Assert.True(actRollbackStart >= 0 && actRollbackEnd > actRollbackStart);
+        var actRollbackMethod = actRollbackSource[actRollbackStart..actRollbackEnd];
+        AssertOrdered(actRollbackMethod, "transaction = db.Database.CurrentTransaction is null",
+            "? await db.Database.BeginTransactionAsync(cancellationToken) : null;", "if (operation.EntityId.HasValue)",
+            "if (db.Database.IsNpgsql())", "{operation.EntityId.Value} FOR UPDATE NOWAIT",
+            "await numbering.LockAsync(cancellationToken);", "await db.Entry(operation).ReloadAsync(cancellationToken);",
+            "await RollbackEntityAsync<Act, ActSnapshot>");
+        Assert.Equal(1, actRollbackMethod.Split("await numbering.LockAsync(cancellationToken);", StringSplitOptions.None).Length - 1);
+        Approve("backend/Services/SpreadsheetImportService.Rollback.cs", actRollbackSource, "RollbackActAsync", actRollbackStart, actRollbackEnd,
+            ["""await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"Acts\" WHERE \"Id\" = {operation.EntityId.Value} FOR UPDATE NOWAIT").ToArrayAsync(cancellationToken);"""]);
+        Assert.Equal(107, approved.Count(statement => statement.Contains("FOR UPDATE", StringComparison.Ordinal)));
+        Assert.Equal(129, approved.Count(statement => statement.Contains("FOR SHARE", StringComparison.Ordinal)));
+        Assert.Equal(236, approved.Count);
 
         // Exact identities include owner, method range, line and complete SQL call.
         // An extra statement in any other production file/method remains a failure.

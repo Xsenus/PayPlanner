@@ -1567,7 +1567,7 @@ public partial class NotificationServiceTests
             [UserNotificationTypes.TaskReminder] = (NotificationPriorities.Critical, true, true, true),
             [UserNotificationTypes.TaskChanged] = (NotificationPriorities.Normal, false, true, true),
             [UserNotificationTypes.TaskComment] = (NotificationPriorities.Normal, false, true, true),
-            [UserNotificationTypes.TaskCompleted] = (NotificationPriorities.Normal, false, true, false),
+            [UserNotificationTypes.TaskCompleted] = (NotificationPriorities.Normal, true, true, false),
             [UserNotificationTypes.TaskCancelled] = (NotificationPriorities.High, true, true, true),
             [UserNotificationTypes.TaskScheduleConflict] = (NotificationPriorities.High, true, true, true),
             [UserNotificationTypes.TaskApprovalRequested] = (NotificationPriorities.High, true, true, true),
@@ -2374,6 +2374,9 @@ public partial class NotificationServiceTests
 
         var firstDeliveries = await service.NotifyTaskReminderAsync(task, "atDue", firstDueAt);
         task.DueAt = firstDueAt.AddDays(1);
+        Assert.Empty(await service.NotifyTaskReminderAsync(task, "atDue", task.DueAt));
+        Assert.Single(emailService.Messages);
+        await db.SaveChangesAsync();
         var secondDeliveries = await service.NotifyTaskReminderAsync(task, "atDue", task.DueAt);
 
         Assert.Single(firstDeliveries);
@@ -9328,6 +9331,8 @@ public partial class NotificationServiceTests
     {
         await using var db = await CreateContextAsync();
         var recipient = await CreateUserAsync(db, "contract-expiring-recipient@example.com");
+        recipient.Role!.Permissions.Add(new RolePermission
+        { Section = RolePermissionCatalog.Contracts, CanView = true, ViewScope = DataVisibilityScope.Own });
         var client = new Client
         {
             Name = "Клиент срочного договора",
@@ -9398,6 +9403,11 @@ public partial class NotificationServiceTests
             Status = ContractStatus.Concluded,
         };
         db.Contracts.Add(contract);
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = ContractExpirationRecipientSettings.SettingKey,
+            Value = ContractExpirationRecipientSettings.Serialize(new ContractExpirationRecipientSettings { RoleIds = [adminRole.Id] })
+        });
         await db.SaveChangesAsync();
         var realtime = new RecordingRealtimeNotificationPublisher();
         var webPush = new RecordingWebPushNotificationService();
@@ -9406,7 +9416,8 @@ public partial class NotificationServiceTests
             new RecordingEmailService(),
             new RecordingTelegramService(),
             realtime,
-            webPush);
+            webPush,
+            timeProvider: new FixedTimeProvider(new DateTimeOffset(2026, 7, 19, 12, 0, 0, TimeSpan.Zero)));
         interceptor.ReaderCommands.Clear();
 
         await service.NotifyContractExpiringAsync(
@@ -9432,7 +9443,12 @@ public partial class NotificationServiceTests
         });
         Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("SELECT EXISTS", StringComparison.Ordinal)
-            && command.Contains("FROM \"Contracts\"", StringComparison.Ordinal));
+            && command.Contains("FROM \"Contracts\"", StringComparison.Ordinal)
+            && !command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal));
+        Assert.Equal(12, interceptor.ReaderCommands.Count(command =>
+            command.Contains("SELECT EXISTS", StringComparison.Ordinal)
+            && command.Contains("FROM \"Contracts\"", StringComparison.Ordinal)
+            && command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)));
         Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
             && command.Contains(UserNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
@@ -11279,6 +11295,58 @@ public partial class NotificationServiceTests
         return (task, author, assignee, observer);
     }
 
+    [Theory]
+    [InlineData("unchanged", false)]
+    [InlineData("closed", false)]
+    [InlineData("cancelled", false)]
+    [InlineData("assignee removed", false)]
+    [InlineData("unchanged", true)]
+    [InlineData("closed", true)]
+    [InlineData("cancelled", true)]
+    [InlineData("assignee removed", true)]
+    public async Task NotifyTaskReminderAsync_RechecksAssignmentAndStatusBeforeCreatingInboxEntry(string change, bool withEmail)
+    {
+        var interceptor = new ChangeTaskDuringReminderDuplicateCheck(change);
+        await using var db = await CreateContextAsync(interceptor);
+        if (withEmail) await SeedEmailSettingsAsync(db);
+        var assignee = await CreateUserAsync(db, "inbox-reminder-assignee@example.com");
+        var dueAt = new DateTime(2026, 6, 4, 10, 0, 0, DateTimeKind.Utc);
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Напоминание исполнителю",
+            AssigneeUserId = assignee.Id,
+            DueAt = dueAt,
+            RemindersJson = "[\"atDue\"]",
+            ChannelsJson = withEmail ? "[\"inApp\",\"email\"]" : "[\"inApp\"]",
+            Status = "new",
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+        var snapshot = await db.TaskJournalItems.AsNoTracking().SingleAsync();
+        interceptor.TaskId = task.Id;
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var emailService = new RecordingEmailService();
+        var service = CreateService(db, emailService, new RecordingTelegramService(), realtime);
+
+        var deliveries = await service.NotifyTaskReminderAsync(snapshot, "atDue", dueAt);
+        Assert.Equal(change == "unchanged" && withEmail ? 1 : 0, deliveries.Count);
+        Assert.Equal(change == "unchanged" && withEmail ? 1 : 0, emailService.Messages.Count);
+
+        Assert.True(interceptor.Triggered);
+        if (change == "unchanged")
+        {
+            var notification = await db.UserNotifications.SingleAsync();
+            Assert.Equal(assignee.Id, notification.RecipientUserId);
+            Assert.Equal(notification.Id, Assert.Single(realtime.Notifications).Id);
+        }
+        else
+        {
+            Assert.False(await db.UserNotifications.AnyAsync());
+            Assert.Empty(realtime.Notifications);
+        }
+    }
+
     private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -11363,7 +11431,7 @@ public partial class NotificationServiceTests
             CreatedAt = DateTime.UtcNow
         };
 
-    private static async Task<User> CreateUserAsync(
+    internal static async Task<User> CreateUserAsync(
         PaymentContext db,
         string email,
         long? chatId = null,
@@ -11603,6 +11671,41 @@ public partial class NotificationServiceTests
         return delivery;
     }
 
+    internal sealed class ChangeTaskDuringReminderDuplicateCheck(string change) : DbCommandInterceptor
+    {
+        public int TaskId { get; set; }
+        public bool Triggered { get; private set; }
+
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (TaskId <= 0 || Triggered
+                || !command.CommandText.Contains("FROM \"UserNotifications\"", StringComparison.Ordinal)
+                || !command.Parameters.Cast<DbParameter>().Any(parameter =>
+                    Equals(parameter.Value, $"task:{TaskId}:reminder:atDue:20260604100000")))
+                return result;
+
+            Triggered = true;
+            if (change == "unchanged") return result;
+            using var update = command.Connection!.CreateCommand();
+            update.Transaction = command.Transaction;
+            update.CommandText = change switch
+            {
+                "closed" => """UPDATE "TaskJournalItems" SET "Status" = 'done' WHERE "Id" = @id""",
+                "cancelled" => """UPDATE "TaskJournalItems" SET "Status" = 'cancelled' WHERE "Id" = @id""",
+                "assignee removed" => """UPDATE "TaskJournalItems" SET "AssigneeUserId" = NULL WHERE "Id" = @id""",
+                _ => throw new ArgumentOutOfRangeException(nameof(change)),
+            };
+            var id = update.CreateParameter();
+            id.ParameterName = "@id";
+            id.Value = TaskId;
+            update.Parameters.Add(id);
+            Assert.Equal(1, await update.ExecuteNonQueryAsync(cancellationToken));
+            return result;
+        }
+    }
+
     private sealed class RecordingCommandInterceptor : DbCommandInterceptor
     {
         public List<string> ReaderCommands { get; } = [];
@@ -11803,7 +11906,7 @@ public partial class NotificationServiceTests
         public override DateTimeOffset GetUtcNow() => utcNow;
     }
 
-    private sealed class RecordingRealtimeNotificationPublisher : IRealtimeNotificationPublisher
+    internal sealed class RecordingRealtimeNotificationPublisher : IRealtimeNotificationPublisher
     {
         public List<UserNotification> Notifications { get; } = [];
         public List<bool> ToastEnabledValues { get; } = [];

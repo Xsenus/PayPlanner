@@ -99,6 +99,27 @@
     "minimatch": "11.0.1",
     "postcss-selector-parser": "7.1.6",
     "undici": "7.30.1",
-    "zod": "4.6.7"
+    "zod": "4.6.7",
+    "anymatch": {
+      "picomatch": "file:vendor/picomatch-repeat-guard/picomatch-2.3.2-payplanner.1.tgz"
+    },
+    "micromatch": {
+      "picomatch": "file:vendor/picomatch-repeat-guard/picomatch-2.3.2-payplanner.1.tgz"
+    },
+    "readdirp": {
+      "picomatch": "file:vendor/picomatch-repeat-guard/picomatch-2.3.2-payplanner.1.tgz"
+    },
+    "fdir": {
+      "picomatch": "file:vendor/picomatch-repeat-guard/picomatch-4.0.7-payplanner.1.tgz"
+    },
+    "tinyglobby": {
+      "picomatch": "file:vendor/picomatch-repeat-guard/picomatch-4.0.7-payplanner.1.tgz"
+    },
+    "vite": {
+      "picomatch": "file:vendor/picomatch-repeat-guard/picomatch-4.0.7-payplanner.1.tgz"
+    },
+    "vitest": {
+      "picomatch": "file:vendor/picomatch-repeat-guard/picomatch-4.0.7-payplanner.1.tgz"
+    }
   }
 }

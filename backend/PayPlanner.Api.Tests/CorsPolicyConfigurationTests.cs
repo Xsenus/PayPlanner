@@ -26,6 +26,7 @@ public class CorsPolicyConfigurationTests
         Assert.Contains("*", policy.Headers);
         Assert.Contains("*", policy.Methods);
         Assert.Contains("Content-Disposition", policy.ExposedHeaders);
+        Assert.Contains("X-Upload-Key", policy.ExposedHeaders);
     }
 
     [Fact]
@@ -53,6 +54,7 @@ public class CorsPolicyConfigurationTests
         Assert.Contains("*", policy.Headers);
         Assert.Contains("*", policy.Methods);
         Assert.Contains("Content-Disposition", policy.ExposedHeaders);
+        Assert.Contains("X-Upload-Key", policy.ExposedHeaders);
     }
 
     [Fact]

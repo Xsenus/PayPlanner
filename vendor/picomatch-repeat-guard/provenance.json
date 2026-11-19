@@ -1,0 +1,125 @@
+{
+  "advisory": "GHSA-fc5q-39xc-vjpf",
+  "license": "MIT",
+  "packages": [
+    {
+      "upstreamVersion": "2.3.2",
+      "sourceDirectory": "picomatch-2.3.2",
+      "upstreamGitHead": "81cba8d4b767cab3cb29d26eb4f691eed75b73b2",
+      "upstreamArchive": "https://registry.npmjs.org/picomatch/-/picomatch-2.3.2.tgz",
+      "upstreamIntegrity": "sha512-V7+vQEJ06Z+c5tSye8S+nHUfI51xoXIXjHQ99cQtKUkQqqO1kO/KCJUfZXuB47h/YBlDhah2H3hdUGXn8ie0oA==",
+      "archive": "picomatch-2.3.2-payplanner.1.tgz",
+      "integrity": "sha512-QyzWjHX9hx4G6Zx5vbDVsSyJpwo9AwO8Gm4lUpcSHrAhx8Boq4Zk0hIi8y5mVXxMmWoqVh6WciB2GhZQ8finOQ==",
+      "archiveSha256": "c35fbdc1d3854828bf6b2b4c720b15e9371bbad4d963b6258489c19e0b6a0209",
+      "files": [
+        {
+          "path": "LICENSE",
+          "upstreamSha256": "d0cd141b0c322fded5dfad1d4645bb2fedfc05b7321fe1009469638190d59ef9",
+          "patchedSha256": "d0cd141b0c322fded5dfad1d4645bb2fedfc05b7321fe1009469638190d59ef9"
+        },
+        {
+          "path": "README.md",
+          "upstreamSha256": "f4653b68a1883a32f852083c1b93381ce87f44c6855ce1f01854d39d0563c98c",
+          "patchedSha256": "f4653b68a1883a32f852083c1b93381ce87f44c6855ce1f01854d39d0563c98c"
+        },
+        {
+          "path": "index.js",
+          "upstreamSha256": "5695ff5dfcd5a338a40630bd506056f2950bcb08fe1cc068519cbbfe60add480",
+          "patchedSha256": "5695ff5dfcd5a338a40630bd506056f2950bcb08fe1cc068519cbbfe60add480"
+        },
+        {
+          "path": "lib/constants.js",
+          "upstreamSha256": "980225ab847a88a784f6d315557b8434f7742b2551ce20e354455c61b938c0a5",
+          "patchedSha256": "980225ab847a88a784f6d315557b8434f7742b2551ce20e354455c61b938c0a5"
+        },
+        {
+          "path": "lib/parse.js",
+          "upstreamSha256": "3a91656f440069aa8f8e15c9d695b9f6b2209df1eab2be8127c72cbcca45ff5f",
+          "patchedSha256": "8830eabe36fb07cd8c397179e4cef28abeab8b756df5c0dc708b502b619b4aee"
+        },
+        {
+          "path": "lib/picomatch.js",
+          "upstreamSha256": "2cb169cbe17d356036c5f62a377318b85e30817877e59797842aec9d8b15f54b",
+          "patchedSha256": "2cb169cbe17d356036c5f62a377318b85e30817877e59797842aec9d8b15f54b"
+        },
+        {
+          "path": "lib/scan.js",
+          "upstreamSha256": "227fcc994a477ea95c5a0435d32783566334c6bd0dcc4a103029735ad8c9c535",
+          "patchedSha256": "227fcc994a477ea95c5a0435d32783566334c6bd0dcc4a103029735ad8c9c535"
+        },
+        {
+          "path": "lib/utils.js",
+          "upstreamSha256": "809fc29cf35ab0aa76b99cad29182f62c0ae598902481d10f9868eaef71981ee",
+          "patchedSha256": "809fc29cf35ab0aa76b99cad29182f62c0ae598902481d10f9868eaef71981ee"
+        },
+        {
+          "path": "package.json",
+          "upstreamSha256": "63264d817e856a4bff57d4304f2b38d2964a4f6df520eb169e7bcdb619f13e9a",
+          "patchedSha256": "96f20c1c23c2f7e99a481f221d8ba7af4ca4216097064f7c08adc24427c12241"
+        }
+      ]
+    },
+    {
+      "upstreamVersion": "4.0.7",
+      "sourceDirectory": "picomatch-4.0.7",
+      "upstreamGitHead": "6bb40679c218cefba5d4e9662408c5fdf699a8bb",
+      "upstreamArchive": "https://registry.npmjs.org/picomatch/-/picomatch-4.0.7.tgz",
+      "upstreamIntegrity": "sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==",
+      "archive": "picomatch-4.0.7-payplanner.1.tgz",
+      "integrity": "sha512-MArLew7304Olvp/APUlqiKk/NZY+0mzi4Xg2hKKJwkNJWP1vrRgEU+WAL9T9CWMayVpBWJpSN2lrH4Xk/ZfrPA==",
+      "archiveSha256": "118b7781d05ff1684f5a08f9755337f3144c1f3345cf5628291b159023a68f84",
+      "files": [
+        {
+          "path": "LICENSE",
+          "upstreamSha256": "d0cd141b0c322fded5dfad1d4645bb2fedfc05b7321fe1009469638190d59ef9",
+          "patchedSha256": "d0cd141b0c322fded5dfad1d4645bb2fedfc05b7321fe1009469638190d59ef9"
+        },
+        {
+          "path": "README.md",
+          "upstreamSha256": "a69b87120fe2b9cb8f9057eaef6b9f9887f803e02185ca2f431e8162f6312220",
+          "patchedSha256": "a69b87120fe2b9cb8f9057eaef6b9f9887f803e02185ca2f431e8162f6312220"
+        },
+        {
+          "path": "index.js",
+          "upstreamSha256": "02ae26406508e28f9ba0865be16cf77f0b33de6c4d4d49c212c4176df1d5625a",
+          "patchedSha256": "02ae26406508e28f9ba0865be16cf77f0b33de6c4d4d49c212c4176df1d5625a"
+        },
+        {
+          "path": "lib/constants.js",
+          "upstreamSha256": "c28f952d2758261fe5428a121add485cc25b03e0193633f649de903dc0e5e222",
+          "patchedSha256": "c28f952d2758261fe5428a121add485cc25b03e0193633f649de903dc0e5e222"
+        },
+        {
+          "path": "lib/parse.js",
+          "upstreamSha256": "4e1e05447668aa1e94366c5516a2bcd8f5fff800cc92b1d0cd7d77703b8618c4",
+          "patchedSha256": "a640d82a2214b41487f9153011d1bba6ec54ed5d28de0c3bb0766e7e084696f8"
+        },
+        {
+          "path": "lib/picomatch.js",
+          "upstreamSha256": "fdd249d7ffff853f3bb1c77eafc8baa1a437bea85a94c35877b83c6a40d9ca94",
+          "patchedSha256": "fdd249d7ffff853f3bb1c77eafc8baa1a437bea85a94c35877b83c6a40d9ca94"
+        },
+        {
+          "path": "lib/scan.js",
+          "upstreamSha256": "6457a1764e5c2e543cc3a0c00ce12ebb3764097628868198370b64d4e642aaae",
+          "patchedSha256": "6457a1764e5c2e543cc3a0c00ce12ebb3764097628868198370b64d4e642aaae"
+        },
+        {
+          "path": "lib/utils.js",
+          "upstreamSha256": "f04604f70cd1a3f6ace80b84766468674ff38b4bb83818d2ef1d81fc6355f935",
+          "patchedSha256": "f04604f70cd1a3f6ace80b84766468674ff38b4bb83818d2ef1d81fc6355f935"
+        },
+        {
+          "path": "package.json",
+          "upstreamSha256": "479b70b87aa7b44344d62c8a459ae7e53dd2bca6c61f1396bd55e63e9de73fc6",
+          "patchedSha256": "49a6081d0a0ee0afea5be4a8fb3b99b43ca62bc2a3ab99574a66dfc8f8665832"
+        },
+        {
+          "path": "posix.js",
+          "upstreamSha256": "5695ff5dfcd5a338a40630bd506056f2950bcb08fe1cc068519cbbfe60add480",
+          "patchedSha256": "5695ff5dfcd5a338a40630bd506056f2950bcb08fe1cc068519cbbfe60add480"
+        }
+      ]
+    }
+  ]
+}

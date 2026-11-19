@@ -35,6 +35,9 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentMenuLayout } from '../../hooks/useDocumentMenuLayout';
 import { useDocumentDeliveryOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
+import { acknowledgeCreatedAct, actCreateSuccessMessage, type ActCreateOptions } from '../../services/actCreateAttempts';
+import { useActCreateRecovery } from '../Acts/ActCreateRecovery';
+import { ActNumberPreview } from '../Acts/ActNumberPreview';
 import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
 import { captureAuthSessionIdentity, isAuthSessionIdentityCurrent } from '../../services/authService';
 import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
@@ -1020,7 +1023,6 @@ export function InvoiceModal({
   const [createCaseOpen, setCreateCaseOpen] = useState(false);
   const [createActOpen, setCreateActOpen] = useState(false);
   const [pageViewMode, setPageViewMode] = useState<boolean>(presentation === 'page' && mode === 'edit');
-  const [creatingAct, setCreatingAct] = useState(false);
   const [createActError, setCreateActError] = useState<string | null>(null);
   const [draftAct, setDraftAct] = useState<DraftActForm>({
     number: '',
@@ -1054,6 +1056,8 @@ export function InvoiceModal({
   const [actsError, setActsError] = useState<string | null>(null);
   const [invoiceRules, setInvoiceRules] = useState({ maxClientCasesPerInvoice: 1, maxActsPerInvoice: 1 });
   const [numberEditedManually, setNumberEditedManually] = useState(false);
+  const [numberPreviewFailure, setNumberPreviewFailure] = useState<{ scope: string; message: string } | null>(null);
+  const [numberPreviewReload, setNumberPreviewReload] = useState(0);
   const contractPreviewRequestRef = useRef(0);
   const paymentPreviewRequestRef = useRef(0);
   const visibleRelatedPayments = useMemo(
@@ -1656,6 +1660,10 @@ export function InvoiceModal({
   latestEditorDraft.current = { source: editorSourceKey, plan: serverPlanKey, conflict: editorConflict, ready: editorReadsReady };
   const captureEditorDraft = editorDraftOwner.capture;
   const canCreateInvoice = isAdmin || permissions.accounts.canCreate;
+  const numberPreviewEnabled = open && mode === 'create' && !numberEditedManually && canCreateInvoice;
+  const numberPreviewScope = JSON.stringify([editorDraftOwner.scope, form.date, numberPreviewEnabled, numberPreviewReload]);
+  const { capture: captureNumberPreview, isCurrent: isNumberPreviewCurrent } = useAsyncOperationOwner(numberPreviewScope);
+  const numberPreviewError = numberPreviewFailure?.scope === numberPreviewScope ? numberPreviewFailure.message : null;
   const canEditInvoice = isAdmin || permissions.accounts.canEdit;
   const canDeleteInvoice = isAdmin || permissions.accounts.canDelete;
   const invoiceWriteOwner = useDocumentDeliveryOwner(JSON.stringify([editorDraftOwner.scope, invoice?.id, invoice?.invoiceEntityId,
@@ -2178,18 +2186,37 @@ export function InvoiceModal({
   }, [localError, toast]);
 
   useEffect(() => {
-    if (!open || mode !== 'create' || numberEditedManually) return;
-
+    if (!numberPreviewEnabled || !/^\d{4}-\d{2}-\d{2}$/.test(form.date)) return;
+    const owner = captureEditorDraft();
+    if (!owner) return;
+    const epoch = captureNumberPreview();
+    const requestedDate = form.date;
     let cancelled = false;
+    const current = () => !cancelled && owner.isCurrent() && isNumberPreviewCurrent(epoch);
+    setNumberPreviewFailure(null);
+    setForm((previous) => {
+      if (!current() || previous.date !== requestedDate || !previous.number) return previous;
+      return { ...previous, number: '' };
+    });
 
     async function loadNextNumber() {
       try {
-        const next = await apiService.getNextInvoiceNumber(fromInputToApiDate(form.date) ?? form.date);
-        if (!cancelled) {
-          setForm((prev) => ({ ...prev, number: next.nextNumber || prev.number }));
+        const next = await apiService.getNextInvoiceNumber(fromInputToApiDate(requestedDate) ?? requestedDate);
+        if (!current()) return;
+        if (next.year !== Number(requestedDate.slice(0, 4)) || !next.nextNumber?.trim()) {
+          throw new Error('Не удалось подтвердить номер счёта для выбранной даты.');
         }
-      } catch {
-        // noop: оставляем номер как есть
+        setForm((previous) => {
+          if (!current() || previous.date !== requestedDate) return previous;
+          return { ...previous, number: next.nextNumber.trim() };
+        });
+      } catch (error) {
+        if (current()) {
+          setNumberPreviewFailure({
+            scope: numberPreviewScope,
+            message: extractDisplayErrorMessage(error, 'Не удалось подобрать номер счёта.'),
+          });
+        }
       }
     }
 
@@ -2197,7 +2224,7 @@ export function InvoiceModal({
     return () => {
       cancelled = true;
     };
-  }, [open, mode, form.date, numberEditedManually]);
+  }, [numberPreviewEnabled, numberPreviewScope, form.date, captureEditorDraft, captureNumberPreview, isNumberPreviewCurrent]);
 
   const closeContractPreview = useCallback(() => {
     contractPreviewRequestRef.current += 1;
@@ -2673,44 +2700,20 @@ export function InvoiceModal({
     } finally { operation.finish(); }
   };
 
-  const handleCreateAct = async () => {
-    if (openActCreatePage()) {
-      return;
-    }
-
-    if (!draftAct.number.trim()) {
-      setCreateActError(t('actNumber') ?? 'Номер акта обязателен');
-      return;
-    }
-
-    const actAmount = parseMoneyInput(draftAct.amount || form.amount);
-    if (!Number.isFinite(actAmount) || actAmount < 0) {
-      setCreateActError(t('invoiceAmount') ?? 'Введите корректную сумму');
-      return;
-    }
-
-    setCreatingAct(true);
+  const inlineActScope = JSON.stringify([open, createActOpen, mode, invoice?.id, currentUser?.id, currentUser?.role, currentUser?.departmentId,
+    permissions.acts, form.type, form.clientId, form.legalEntityId, form.expenseClientId, form.expenseLegalEntityId]);
+  const inlineActOwner = useDocumentDeliveryOwner(inlineActScope);
+  const creatingAct = inlineActOwner.busy;
+  const submitInlineAct = async (payload: ActInput, options?: ActCreateOptions) => {
+    const operation = open && createActOpen && (isAdmin || permissions.acts.canCreate) ? inlineActOwner.begin('create') : null;
+    if (!operation) throw new StaleUiOperationError();
     setCreateActError(null);
     try {
-      const linkedInvoiceId = typeof invoice?.id === 'number' && invoice.id > 0 ? invoice.id : undefined;
-      const shouldBuildFromInvoice = Boolean(linkedInvoiceId && (invoice?.lineItems?.length ?? 0) > 0);
-      const created = await apiService.createAct({
-        number: draftAct.number.trim(),
-        title: draftAct.title.trim() || undefined,
-        date: fromInputToApiDate(draftAct.date) ?? draftAct.date,
-        amount: shouldBuildFromInvoice ? 0 : actAmount,
-        creationMode: shouldBuildFromInvoice ? 'Full' : 'Manual',
-        invoiceId: linkedInvoiceId,
-        invoiceNumber: form.number.trim() || undefined,
-        clientId: form.clientId ? Number(form.clientId) : null,
-        legalEntityId: form.legalEntityId ? Number(form.legalEntityId) : null,
-        contractId: form.contractId ? Number(form.contractId) : undefined,
-        responsibleId: selectedResponsibleId ? Number(selectedResponsibleId) : undefined,
-        counterpartyInn: invoice?.counterpartyInn?.trim() || undefined,
-        status: 'Created',
-        comment: draftAct.comment.trim() || undefined,
-      });
-
+      const created = await apiService.createAct(payload, options);
+      if (!operation.isCurrent()) throw new StaleUiOperationError();
+      if (invoice?.id && created.invoiceId !== invoice.id) {
+        throw new Error(`Акт №${created.number} ранее сохранён для другого счёта. Откройте его в журнале актов.`);
+      }
       const option: ActOption = {
         id: created.id,
         number: created.number,
@@ -2744,11 +2747,50 @@ export function InvoiceModal({
         amount: form.amount,
         comment: '',
       });
+      toast.success(actCreateSuccessMessage(created));
+      acknowledgeCreatedAct(created);
+      return created;
     } catch (err) {
+      if (!operation.isCurrent()) throw new StaleUiOperationError();
       setCreateActError(err instanceof Error ? err.message : 'Не удалось создать акт');
+      throw err;
     } finally {
-      setCreatingAct(false);
+      operation.finish();
     }
+  };
+  const restoreInlineActDraft = (command: ActInput) => {
+    if ((command.invoiceId ?? null) !== (invoice?.id ?? null)) throw new Error('Откройте создание акта из исходного счёта, чтобы исправить этот черновик.');
+    setDraftAct({ number: '', title: command.title ?? '', date: command.date.slice(0, 10), amount: String(command.amount), comment: command.comment ?? '' });
+  };
+  const inlineActCreation = useActCreateRecovery(open && createActOpen && !onCreateActPage, inlineActOwner.scope, submitInlineAct, restoreInlineActDraft);
+  const handleCreateAct = async () => {
+    if (openActCreatePage()) return;
+    if (inlineActCreation.blocked || inlineActCreation.busy) return;
+    const actAmount = parseMoneyInput(draftAct.amount || form.amount);
+    if (!Number.isFinite(actAmount) || actAmount < 0) {
+      setCreateActError(t('invoiceAmount') ?? 'Введите корректную сумму');
+      return;
+    }
+    const linkedInvoiceId = typeof invoice?.id === 'number' && invoice.id > 0 ? invoice.id : undefined;
+    const shouldBuildFromInvoice = Boolean(linkedInvoiceId && (invoice?.lineItems?.length ?? 0) > 0);
+    try {
+      await inlineActCreation.submit({
+        number: '',
+        title: draftAct.title.trim() || undefined,
+        date: fromInputToApiDate(draftAct.date) ?? draftAct.date,
+        amount: shouldBuildFromInvoice ? 0 : actAmount,
+        creationMode: shouldBuildFromInvoice ? 'Full' : 'Manual',
+        invoiceId: linkedInvoiceId,
+        invoiceNumber: form.number.trim() || undefined,
+        clientId: form.clientId ? Number(form.clientId) : null,
+        legalEntityId: form.legalEntityId ? Number(form.legalEntityId) : null,
+        contractId: form.contractId ? Number(form.contractId) : undefined,
+        responsibleId: selectedResponsibleId ? Number(selectedResponsibleId) : undefined,
+        counterpartyInn: invoice?.counterpartyInn?.trim() || undefined,
+        status: 'Created',
+        comment: draftAct.comment.trim() || undefined,
+      });
+    } catch { /* The creation panel keeps the original attempt available. */ }
   };
 
   const handleChange = (field: keyof FormState) => (
@@ -2759,13 +2801,12 @@ export function InvoiceModal({
       setNumberEditedManually(true);
     }
     setForm((prev) => {
-      if (
-        field === 'date'
-        && !installmentPlan
-        && !hasGeneratedRelatedPayments
-        && (!prev.dueDate || prev.dueDate === prev.date)
-      ) {
-        return { ...prev, date: value, dueDate: value };
+      if (field === 'date') {
+        const number = mode === 'create' && !numberEditedManually && value !== prev.date ? '' : prev.number;
+        const dueDate = !installmentPlan && !hasGeneratedRelatedPayments && (!prev.dueDate || prev.dueDate === prev.date)
+          ? value
+          : prev.dueDate;
+        return { ...prev, date: value, dueDate, number };
       }
 
       return { ...prev, [field]: value };
@@ -3043,7 +3084,6 @@ export function InvoiceModal({
     }
     onCreateActPage(
       {
-        number: draftAct.number.trim() || form.number.trim(),
         title: draftAct.title.trim() || form.description.trim(),
         date: draftAct.date || form.date || defaultDate,
         amount: parseMoneyInput(draftAct.amount || form.amount),
@@ -3069,7 +3109,6 @@ export function InvoiceModal({
     draftAct.amount,
     draftAct.comment,
     draftAct.date,
-    draftAct.number,
     draftAct.title,
     form.amount,
     form.clientId,
@@ -3134,7 +3173,7 @@ export function InvoiceModal({
 
       const number = form.number.trim();
       if (!number) {
-        setLocalError(t('invoiceNumber') ?? 'Номер счёта обязателен');
+        setLocalError(numberPreviewError ?? t('invoiceNumber') ?? 'Номер счёта обязателен');
         return;
       }
       if (!form.date) {
@@ -4615,7 +4654,7 @@ export function InvoiceModal({
       ) : (
       <form id="invoice-edit-form" onSubmit={handleSubmit} className={`${isPageMode ? 'px-6 py-5' : 'max-h-[75vh] overflow-y-auto px-6 py-5'} space-y-6`}>
         <fieldset disabled={submitting || invoiceWriteBusy} className="contents">
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px] xl:items-start">
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_420px] xl:items-start">
             <div className="space-y-6">
               <section className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 sm:p-5">
                           <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
@@ -4673,16 +4712,30 @@ export function InvoiceModal({
                             </div>
 
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                              <label className="flex flex-col gap-1 text-sm">
-                                <span className="flex min-h-7 items-center font-medium text-slate-700">{t('invoiceNumber') ?? 'Номер счёта'}</span>
-                                <input
-                                  type="text"
-                                  value={form.number}
-                                  onChange={handleChange('number')}
-                                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                                  required
-                                />
-                              </label>
+                              <div className="flex flex-col gap-1">
+                                <label className="flex flex-col gap-1 text-sm">
+                                  <span className="flex min-h-7 items-center font-medium text-slate-700">{t('invoiceNumber') ?? 'Номер счёта'}</span>
+                                  <input
+                                    type="text"
+                                    value={form.number}
+                                    onChange={handleChange('number')}
+                                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                    required
+                                  />
+                                </label>
+                                {numberPreviewError ? (
+                                  <div role="alert" className="space-y-1 text-xs text-red-700">
+                                    <p>{numberPreviewError}</p>
+                                    <button
+                                      type="button"
+                                      onClick={() => setNumberPreviewReload((value) => value + 1)}
+                                      className="rounded-lg border border-red-200 px-2 py-1 font-semibold"
+                                    >
+                                      Повторить подбор номера
+                                    </button>
+                                  </div>
+                                ) : null}
+                              </div>
                               <label className="flex flex-col gap-1 text-sm">
                                 <span className="flex min-h-7 items-center justify-between gap-2 font-medium text-slate-700">
                                   {t('invoiceAmount') ?? 'Сумма'}
@@ -6177,10 +6230,11 @@ export function InvoiceModal({
                 <X className="h-4 w-4" />
               </button>
             </div>
+            {inlineActCreation.panel}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="text-sm">
                 <span className="mb-1 block font-medium text-slate-700">{t('actNumber') ?? 'Номер акта'}</span>
-                <input value={draftAct.number} onChange={(e) => setDraftAct((prev) => ({ ...prev, number: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <ActNumberPreview date={draftAct.date} ownerScope={inlineActOwner.scope} enabled={open && createActOpen} />
               </label>
               <label className="text-sm">
                 <span className="mb-1 block font-medium text-slate-700">{t('actDate') ?? 'Дата'}</span>
@@ -6202,7 +6256,7 @@ export function InvoiceModal({
             {createActError && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{createActError}</div>}
             <div className="mt-4 flex items-center justify-end gap-2">
               <button type="button" onClick={() => setCreateActOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">{t('cancel') ?? 'Отмена'}</button>
-              <button type="button" onClick={() => void handleCreateAct()} disabled={creatingAct} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">
+              <button type="button" onClick={() => void handleCreateAct()} disabled={creatingAct || inlineActCreation.busy || inlineActCreation.blocked} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">
                 {creatingAct && <Loader2 className="h-4 w-4 animate-spin" />}
                 {t('actCreate') ?? 'Создать акт'}
               </button>

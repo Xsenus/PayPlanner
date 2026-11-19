@@ -12,7 +12,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class NotificationInboxControllerTests
+public partial class NotificationInboxControllerTests
 {
     [Fact]
     public void UnreadSnoozePredicate_IsTranslatableForPostgreSql()
@@ -81,7 +81,8 @@ public class NotificationInboxControllerTests
         Assert.Equal(NotificationPriorities.Normal, completedTask.ToastPriority);
         Assert.Equal(NotificationPriorities.Normal, completedTask.PushPriority);
         Assert.Equal(60, completedTask.GroupingWindowSeconds);
-        Assert.Equal(new[] { NotificationChannels.InApp, NotificationChannels.Toast, NotificationChannels.Max }, completedTask.Channels);
+        Assert.Equal(new[] { NotificationChannels.InApp, NotificationChannels.Toast, NotificationChannels.ForcedModal, NotificationChannels.Max }, completedTask.Channels);
+        Assert.True(completedTask.RequiresAction);
 
         Assert.Contains(types, item => item.Key == UserNotificationTypes.PaymentAssigned && item.Domain == UserNotificationDomains.Payment && item.DomainLabel == "Платежи");
         Assert.Contains(types, item => item.Key == UserNotificationTypes.InvoiceChanged && item.Domain == UserNotificationDomains.Invoice && item.DomainLabel == "Счета");

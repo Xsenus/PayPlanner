@@ -98,10 +98,6 @@ vi.mock('../ui/TableColumnSettings', () => ({
   TableColumnSettings: () => <div data-testid="table-column-settings" />,
 }));
 
-vi.mock('../ui/TablePagination', () => ({
-  TablePagination: () => <div data-testid="table-pagination" />,
-}));
-
 vi.mock('../ui/ObjectAuditModal', () => ({
   ObjectAuditLauncher: () => null,
 }));
@@ -177,6 +173,7 @@ describe('ContractDetailPage integration', () => {
     vi.useRealTimers();
     authState.user = { id: 7, role: { id: 1 } };
     rolePermissionsResult.contracts.canView = true;
+    rolePermissionsResult.contracts.canEdit = false;
     rolePermissionsResult.contracts.canExport = true;
     rolePermissionsResult.contracts.viewScope = 'all';
     Object.assign(rolePermissionsResult.clients, { canView: true, canCreate: false, canEdit: false, canDelete: false });
@@ -280,7 +277,8 @@ describe('ContractDetailPage integration', () => {
       expect(apiService.getContract).toHaveBeenCalledWith(77);
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Счета' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Бух. документы' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Счета' }));
 
     await waitFor(() => {
       expect(apiService.getInvoices).toHaveBeenLastCalledWith({
@@ -333,7 +331,8 @@ describe('ContractDetailPage integration', () => {
       expect(apiService.getContract).toHaveBeenCalledWith(77);
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Акты' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Бух. документы' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Акты' }));
 
     await waitFor(() => {
       expect(apiService.getActs).toHaveBeenLastCalledWith({
@@ -418,12 +417,107 @@ describe('ContractDetailPage integration', () => {
       expect(apiService.getContract).toHaveBeenCalledWith(77);
     });
 
-    expect(screen.queryByRole('button', { name: 'Счета' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Акты' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Бух. документы' })).toBeNull();
+    expect(screen.queryByRole('menu')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Деньги' })).toBeNull();
     expect(apiService.getInvoices).not.toHaveBeenCalled();
     expect(apiService.getActs).not.toHaveBeenCalled();
     expect(apiService.getPaymentsV2).not.toHaveBeenCalled();
+  });
+
+  describe('accounting documents menu', () => {
+    it('supports keyboard focus, Escape and outside dismissal without loading a journal', async () => {
+      render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      const trigger = await screen.findByRole('button', { name: 'Бух. документы' });
+      expect(trigger.getAttribute('aria-expanded')).toBe('false');
+
+      fireEvent.keyDown(trigger, { key: 'ArrowUp' });
+      const menu = screen.getByRole('menu', { name: 'Бух. документы договора' });
+      expect(within(menu).getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Счета', 'Акты']);
+      expect(document.activeElement).toBe(within(menu).getByRole('menuitem', { name: 'Акты' }));
+      fireEvent.keyDown(menu, { key: 'Home' });
+      expect(document.activeElement).toBe(within(menu).getByRole('menuitem', { name: 'Счета' }));
+      fireEvent.keyDown(menu, { key: 'Escape' });
+      expect(screen.queryByRole('menu')).toBeNull();
+      expect(document.activeElement).toBe(trigger);
+
+      fireEvent.click(trigger);
+      fireEvent.click(screen.getByRole('menu').parentElement!);
+      expect(screen.queryByRole('menu')).toBeNull();
+      expect(apiService.getInvoices).not.toHaveBeenCalled();
+      expect(apiService.getActs).not.toHaveBeenCalled();
+      expect(apiService.updateContract).not.toHaveBeenCalled();
+    });
+
+    it('opens the contract invoice journal in edit mode without saving or losing the draft', async () => {
+      rolePermissionsResult.contracts.canEdit = true;
+      render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+      fireEvent.change(screen.getByDisplayValue('CTR-77'), { target: { value: 'DRAFT-77' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Бух. документы' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Счета' }));
+
+      await waitFor(() => expect(apiService.getInvoices).toHaveBeenCalledWith(expect.objectContaining({ contractId: 77 })));
+      expect(screen.getByDisplayValue('DRAFT-77')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Отменить редактирование' })).toBeTruthy();
+      expect(screen.queryByRole('menu')).toBeNull();
+      expect(apiService.updateContract).not.toHaveBeenCalled();
+    });
+
+    it.each(['invoices', 'acts'] as const)('preserves the selected client scope and page when reopening %s', async section => {
+      const load = section === 'invoices' ? apiService.getInvoices : apiService.getActs;
+      vi.mocked(load).mockResolvedValue({ items: [], total: 30, page: 1, pageSize: 10 });
+      const label = section === 'invoices' ? 'Счета' : 'Акты';
+      const allClientsLabel = section === 'invoices' ? 'Все счета клиентов' : 'Все акты клиентов';
+      render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      const trigger = await screen.findByRole('button', { name: 'Бух. документы' });
+      fireEvent.click(trigger);
+      fireEvent.click(screen.getByRole('menuitem', { name: label }));
+      await waitFor(() => expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ contractId: 77, page: 1 })));
+      fireEvent.click(screen.getByRole('button', { name: allClientsLabel }));
+      await waitFor(() => expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ clientIds: '10,20', page: 1 })));
+      fireEvent.click(screen.getByTestId('pagination-next'));
+      await waitFor(() => expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ clientIds: '10,20', page: 2 })));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Контрагенты' }));
+      const callsBeforeOpen = vi.mocked(load).mock.calls.length;
+      fireEvent.click(trigger);
+      expect(load).toHaveBeenCalledTimes(callsBeforeOpen);
+      fireEvent.click(screen.getByRole('menuitem', { name: label }));
+      await waitFor(() => expect(load).toHaveBeenCalledTimes(callsBeforeOpen + 1));
+      expect(load).toHaveBeenLastCalledWith({ clientIds: '10,20', page: 2, pageSize: 10, sortBy: 'date', sortDir: 'desc' });
+    });
+
+    it.each(['invoices', 'acts'] as const)('offers only permitted %s and closes after section rights change', async section => {
+      rolePermissionsResult.accounts.canView = section === 'invoices';
+      rolePermissionsResult.acts.canView = section === 'acts';
+      const view = render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Бух. документы' }));
+      expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([section === 'invoices' ? 'Счета' : 'Акты']);
+      rolePermissionsResult.accounts.canView = false;
+      rolePermissionsResult.acts.canView = false;
+      view.rerender(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      expect(screen.queryByRole('menu')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Бух. документы' })).toBeNull();
+      expect(apiService.getInvoices).not.toHaveBeenCalled();
+      expect(apiService.getActs).not.toHaveBeenCalled();
+    });
+
+    it.each(['contract', 'user', 'role'] as const)('closes the old menu when its %s changes', async change => {
+      const view = render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Бух. документы' }));
+      expect(screen.getByRole('menu')).toBeTruthy();
+      if (change === 'user') authState.user = { id: 8, role: { id: 1 } };
+      if (change === 'role') authState.user = { id: 7, role: { id: 2 } };
+      const nextId = change === 'contract' ? 88 : 77;
+      vi.mocked(apiService.getContract).mockResolvedValue({ ...contractFixture, id: nextId });
+      view.rerender(<ContractDetailPage contractId={nextId} onBack={vi.fn()} />);
+      expect(screen.queryByRole('menu')).toBeNull();
+      await screen.findByDisplayValue('CTR-77');
+      expect(screen.getByRole('button', { name: 'Бух. документы' }).getAttribute('aria-expanded')).toBe('false');
+      expect(apiService.getInvoices).not.toHaveBeenCalled();
+      expect(apiService.getActs).not.toHaveBeenCalled();
+    });
   });
 
   it('keeps contract clients as plain text when clients section is hidden', async () => {

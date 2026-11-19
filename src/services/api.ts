@@ -1,6 +1,7 @@
 import { acknowledgePaymentCreate, assertPaymentCreateOwner, fencePaymentCreateAdoption, createPaymentGuarded, inspectPaymentCreate, openCommittedPaymentCreate, paymentCreateTokenMatches,
   type PaymentCreateContext, type PaymentCreateOwner, type PaymentCreatePorts, type PendingPaymentCreate } from './paymentCreateAttempts';
 import { createClientRequestId } from '../utils/clientRequestId';
+import { createActGuarded, type ActCreateOptions } from './actCreateAttempts';
 import { balanceApplicationInspectionPath, parseBalanceApplicationInspection, parseManagedBalanceApplicationResult, prepareBalanceApplicationCommand, type BalanceApplicationOwnerKind } from './balanceApplicationInspection';
 import { API_BASE_URL } from './apiBaseUrl';
 import { parseCompanyBankBindingReceipt, parseCompanyBankMatchReport } from './companyBankBindings';
@@ -94,6 +95,7 @@ type ApiRequestOptions = RequestInit & {
   suppressAuthSessionExpired?: boolean;
   expectedStatus?: number;
   caseGenerationKey?: string;
+  actCreateKey?: string;
   caseUploadActorToken?: string | null;
   paymentCreateActor?: PaymentCreateOwner;
   taskUploadReceipt?: { taskId: number; uploadKey: string; actorToken: string | null };
@@ -1347,6 +1349,38 @@ export interface NotificationSenderDto {
   updatedAt?: string | null;
 }
 
+export type ContractExpirationRecipientOptionKind = 'roles' | 'users' | 'departments';
+
+export interface ContractExpirationRecipientOptionDto {
+  id: number;
+  name: string;
+  isAvailable: boolean;
+  departmentId?: number | null;
+  departmentName?: string | null;
+  roleId?: number | null;
+  roleName?: string | null;
+}
+
+export interface UpdateContractExpirationRecipientSettingsRequest {
+  departmentManagersEnabled: boolean;
+  roleIds: number[];
+  userIds: number[];
+  departmentManagers: Array<{ departmentId: number; managerUserId: number }>;
+}
+
+export interface ContractExpirationRecipientSettingsDto extends UpdateContractExpirationRecipientSettingsRequest {
+  selectedRoles: ContractExpirationRecipientOptionDto[];
+  selectedUsers: ContractExpirationRecipientOptionDto[];
+  selectedDepartments: ContractExpirationRecipientOptionDto[];
+}
+
+export interface ContractExpirationRecipientOptionsDto {
+  items: ContractExpirationRecipientOptionDto[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+}
+
 export interface NotificationSettingsDto {
   email: EmailNotificationSettingsDto;
   telegram: TelegramNotificationSettingsDto;
@@ -2206,6 +2240,12 @@ export interface TaskJournalListParams {
   sortDir?: SortDir;
 }
 
+type TaskJournalExportParams = Pick<TaskJournalListParams,
+  'search' | 'status' | 'type' | 'priority' | 'underControl' | 'assigneeUserId' | 'authorUserId'
+  | 'participantRole' | 'approvalScope' | 'metric' | 'billingStatus' | 'untriaged'
+  | 'from' | 'to' | 'todayFrom' | 'todayTo' | 'clientCaseId' | 'clientId' | 'legalEntityId' | 'calendarView'
+> & { assigneeUserIds?: number[] };
+
 /** Компактные счётчики журнала, рассчитанные сервером без выгрузки карточек. */
 export interface TaskJournalListSummary {
   total?: number;
@@ -2845,6 +2885,32 @@ function buildQuery(params: Record<string, string | number | boolean | ReadonlyA
   return s ? `?${s}` : '';
 }
 
+function taskJournalExportFilters(params?: TaskJournalExportParams) {
+  return {
+    search: params?.search,
+    status: params?.status,
+    type: params?.type,
+    priority: params?.priority,
+    underControl: params?.underControl,
+    assigneeUserId: params?.assigneeUserId,
+    assigneeUserIds: params?.assigneeUserIds,
+    authorUserId: params?.authorUserId,
+    participantRole: params?.participantRole,
+    approvalScope: params?.approvalScope,
+    metric: params?.metric,
+    billingStatus: params?.billingStatus,
+    untriaged: params?.untriaged,
+    from: params?.from,
+    to: params?.to,
+    todayFrom: params?.todayFrom,
+    todayTo: params?.todayTo,
+    clientCaseId: params?.clientCaseId,
+    clientId: params?.clientId,
+    legalEntityId: params?.legalEntityId,
+    calendarView: params?.calendarView,
+  };
+}
+
 function parseContentDispositionFileName(header: string | null): string | null {
   if (!header) {
     return null;
@@ -3009,7 +3075,7 @@ export class ApiService {
 
   private async request<T>(endpoint: string, options?: ApiRequestOptions): Promise<T> {
     const session = captureAuthSessionIdentity();
-    const { suppressAuthSessionExpired = false, expectedStatus, caseGenerationKey, caseUploadActorToken, paymentCreateActor, taskUploadReceipt, ...fetchOptions } = options ?? {};
+    const { suppressAuthSessionExpired = false, expectedStatus, caseGenerationKey, actCreateKey, caseUploadActorToken, paymentCreateActor, taskUploadReceipt, ...fetchOptions } = options ?? {};
     const url = `${API_BASE_URL}${endpoint}`;
     const isFormData = typeof FormData !== 'undefined' && fetchOptions.body instanceof FormData;
     const headers: Record<string, string> = {
@@ -3056,6 +3122,8 @@ export class ApiService {
       throw new ApiHttpFailure(response.status, `HTTP ${response.status}: результат операции ещё не подтверждён.`);
     }
     const acknowledgedGeneration = response.headers.get("X-Upload-Key");
+    if (actCreateKey && acknowledgedGeneration?.toLowerCase() !== actCreateKey.toLowerCase())
+      throw new ApiHttpFailure(409, 'Ответ не подтверждает исходную попытку создания акта. Проверьте результат сохранения.');
     if (caseGenerationKey && acknowledgedGeneration !== null && acknowledgedGeneration.toLowerCase() !== caseGenerationKey.toLowerCase())
       throw new ApiHttpFailure(409, "Ответ относится к другой попытке формирования документа. Повторите исходный запрос.");
     if (response.status === 204) {
@@ -3669,8 +3737,21 @@ export class ApiService {
     });
   }
 
-  async createAct(payload: ActInput) {
-    return this.request<Act>('/acts', { method: 'POST', body: JSON.stringify(payload) });
+  async createAct(payload: ActInput, options?: ActCreateOptions) {
+    return createActGuarded(payload, options, {
+      commit: (command, key) => this.request<Act>('/acts', {
+        method: 'POST', body: JSON.stringify(command), headers: { 'X-Upload-Key': key }, expectedStatus: 201, actCreateKey: key,
+      }),
+      lookup: (key) => this.getActCreateAttempt(key),
+    });
+  }
+
+  async getActCreateAttempt(key: string) {
+    return this.request<Act>(`/acts/create-attempts/${encodeURIComponent(key)}`, { cache: 'no-store', expectedStatus: 200 });
+  }
+
+  async getActNextNumber(date: string) {
+    return this.request<{ year: number; nextNumber: string }>(`/acts/next-number?date=${encodeURIComponent(date)}`, { cache: 'no-store', expectedStatus: 200 });
   }
 
   async updateAct(id: number, payload: ActInput) {
@@ -3979,6 +4060,35 @@ export class ApiService {
   // ===== Notifications =====
   async getNotificationSettings() {
     return this.request<NotificationSettingsDto>('/notifications/settings');
+  }
+
+  async getContractExpirationRecipientSettings() {
+    return this.request<ContractExpirationRecipientSettingsDto>('/notifications/contract-expiration', { cache: 'no-store' });
+  }
+
+  async updateContractExpirationRecipientSettings(payload: UpdateContractExpirationRecipientSettingsRequest) {
+    return this.request<ContractExpirationRecipientSettingsDto>('/notifications/contract-expiration', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getContractExpirationRecipientOptions(params: {
+    kind: ContractExpirationRecipientOptionKind;
+    search?: string;
+    page?: number;
+    pageSize?: number;
+  }, options?: { signal?: AbortSignal }) {
+    const query = buildQuery({
+      kind: params.kind,
+      search: params.search?.trim() || undefined,
+      page: Math.max(1, Math.trunc(params.page ?? 1)),
+      pageSize: Math.max(1, Math.min(100, Math.trunc(params.pageSize ?? 50))),
+    });
+    return this.request<ContractExpirationRecipientOptionsDto>(`/notifications/contract-expiration/options${query}`, {
+      cache: 'no-store',
+      signal: options?.signal,
+    });
   }
 
   async getNotificationChannels() {
@@ -5262,20 +5372,9 @@ export class ApiService {
     });
   }
 
-  async downloadTaskJournalCalendar(params?: {
-    from?: string;
-    to?: string;
-    clientCaseId?: number;
-    clientId?: number;
-    legalEntityId?: number;
-    reminderMinutes?: number[];
-  }) {
+  async downloadTaskJournalCalendar(params?: TaskJournalExportParams & { reminderMinutes?: number[] }) {
     const q = buildQuery({
-      from: params?.from,
-      to: params?.to,
-      clientCaseId: params?.clientCaseId,
-      clientId: params?.clientId,
-      legalEntityId: params?.legalEntityId,
+      ...taskJournalExportFilters(params),
       reminderMinutes: params?.reminderMinutes,
     });
     const token = getAuthToken();
@@ -5295,32 +5394,11 @@ export class ApiService {
     };
   }
 
-  async downloadTaskPlanningReport(params?: Pick<TaskJournalListParams,
-    'search' | 'status' | 'type' | 'priority' | 'underControl' | 'assigneeUserId' | 'authorUserId'
-    | 'participantRole' | 'approvalScope' | 'metric' | 'billingStatus' | 'untriaged'
-    | 'from' | 'to' | 'todayFrom' | 'todayTo' | 'clientCaseId' | 'clientId' | 'legalEntityId'
-  > & { format?: 'html' | 'word' | 'pdf' }) {
+  async downloadTaskPlanningReport(params?: TaskJournalExportParams & { format?: 'html' | 'word' | 'pdf'; timeZoneId?: string }) {
     const format = params?.format ?? 'html';
     const q = buildQuery({
-      search: params?.search,
-      status: params?.status,
-      type: params?.type,
-      priority: params?.priority,
-      underControl: params?.underControl,
-      assigneeUserId: params?.assigneeUserId,
-      authorUserId: params?.authorUserId,
-      participantRole: params?.participantRole,
-      approvalScope: params?.approvalScope,
-      metric: params?.metric,
-      billingStatus: params?.billingStatus,
-      untriaged: params?.untriaged,
-      from: params?.from,
-      to: params?.to,
-      todayFrom: params?.todayFrom,
-      todayTo: params?.todayTo,
-      clientCaseId: params?.clientCaseId,
-      clientId: params?.clientId,
-      legalEntityId: params?.legalEntityId,
+      ...taskJournalExportFilters(params),
+      timeZoneId: params?.timeZoneId,
     });
     const token = getAuthToken();
     const response = await fetch(`${API_BASE_URL}/tasks/planning-report.${format}${q}`, {
@@ -7890,6 +7968,8 @@ export class ApiService {
     to?: string;
     clientCaseId?: number;
     responsibleUserId?: number;
+    responsibleUserIds?: number[];
+    timeZoneId?: string;
     includeTasks?: boolean;
     reminderMinutes?: number[];
     search?: string;
@@ -7906,6 +7986,8 @@ export class ApiService {
       to: params?.to,
       clientCaseId: params?.clientCaseId,
       responsibleUserId: params?.responsibleUserId,
+      responsibleUserIds: params?.responsibleUserIds,
+      timeZoneId: params?.timeZoneId,
       includeTasks: params?.includeTasks,
       reminderMinutes: params?.reminderMinutes,
       search: params?.search,
@@ -7925,6 +8007,8 @@ export class ApiService {
     to?: string;
     clientCaseId?: number;
     responsibleUserId?: number;
+    responsibleUserIds?: number[];
+    timeZoneId?: string;
     includeTasks?: boolean;
   }) {
     const q = buildQuery({
@@ -7932,6 +8016,8 @@ export class ApiService {
       to: params?.to,
       clientCaseId: params?.clientCaseId,
       responsibleUserId: params?.responsibleUserId,
+      responsibleUserIds: params?.responsibleUserIds,
+      timeZoneId: params?.timeZoneId,
       includeTasks: params?.includeTasks,
     });
     return this.request<CaseCalendarSummary>(`/case-calendar/summary${q}`);
@@ -7942,6 +8028,8 @@ export class ApiService {
     to?: string;
     clientCaseId?: number;
     responsibleUserId?: number;
+    responsibleUserIds?: number[];
+    timeZoneId?: string;
     includeTasks?: boolean;
     reminderMinutes?: number[];
   }) {
@@ -7950,6 +8038,8 @@ export class ApiService {
       to: params?.to,
       clientCaseId: params?.clientCaseId,
       responsibleUserId: params?.responsibleUserId,
+      responsibleUserIds: params?.responsibleUserIds,
+      timeZoneId: params?.timeZoneId,
       includeTasks: params?.includeTasks,
       reminderMinutes: params?.reminderMinutes,
     });

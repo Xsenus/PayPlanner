@@ -61,6 +61,7 @@ import { useFormRequirements } from "../../hooks/useFormRequirements";
 import { useAuth } from "../../contexts/AuthContext";
 import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
 import { useDocumentDeliveryOwner, type DocumentReadOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
+import { acknowledgeCreatedAct, actCreateSuccessMessage, type ActCreateOptions } from '../../services/actCreateAttempts';
 import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { useRolePermissions } from "../../hooks/useRolePermissions";
 import { useDialog } from "../../hooks/useDialog";
@@ -5073,7 +5074,7 @@ function ClientDetailScreen({
     closePayModal();
   };
 
-  const submitAct = async (payload: ActInput) => {
+  const submitAct = async (payload: ActInput, options?: ActCreateOptions) => {
     const isEdit = actModalMode === 'edit';
     const action = beginRelatedAction('act', () => isEdit ? actPermissions.canEdit : actPermissions.canCreate, true);
     let dispatched = false; let accepted = false;
@@ -5085,11 +5086,17 @@ function ClientDetailScreen({
       setActModalError(null);
       const saved = await awaitOwnedUiResult(() => {
         dispatched = true;
-        return isEdit ? updateAct(selectedAct!.id, body, action.current) : createAct(body, action.current);
+        if (isEdit) return updateAct(selectedAct!.id, body, action.current);
+        return options ? createAct(body, action.current, options) : createAct(body, action.current);
       }, action.current);
       if (!Number.isSafeInteger(saved?.id) || saved.id <= 0 || (isEdit && saved.id !== selectedAct?.id)) throw new Error('Сервер вернул другой акт. Обновите список перед продолжением.');
       if (!action.listCurrent()) await awaitOwnedUiResult(() => reconcileRelatedAction('act', action.screenCurrent), action.current);
+      if (!isEdit) {
+        toast.success(actCreateSuccessMessage(saved));
+        acknowledgeCreatedAct(saved);
+      }
       accepted = true; closeActModal();
+      return saved;
     } catch (error) {
       if (!action.current()) throw new StaleUiOperationError();
       setActModalError(extractDisplayErrorMessage(error, 'Не удалось сохранить акт')); throw error;
@@ -11106,6 +11113,7 @@ function ClientDetailScreen({
           act={selectedAct}
           onClose={closeActModal}
           onSubmit={submitAct}
+          accessScopeKey={actFormOwner.scope}
           submitting={actSubmitting}
           errorMessage={actModalError}
           clients={actModalClients}

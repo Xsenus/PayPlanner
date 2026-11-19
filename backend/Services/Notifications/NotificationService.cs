@@ -48,6 +48,9 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
     private const string NotificationTemplatesKey = "notifications.templates.v1";
 
     private readonly PaymentContext _context;
+    private ContractExpirationNotificationPolicy? _contractExpirationPolicy;
+    private ContractExpirationNotificationPolicy ContractExpirationPolicy
+        => _contractExpirationPolicy ??= new(_context, _timeProvider);
     private readonly IConfiguration _configuration;
     private readonly IEmailService _emailService;
     private readonly ITelegramNotificationService _telegramService;
@@ -61,6 +64,15 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
     private readonly TimeProvider _timeProvider;
     private readonly IHttpContextAccessor? _httpContextAccessor;
     private SmsDeliveryPolicy? _smsDeliveryPolicyCache;
+
+    private sealed record TaskCompletionChannelContext(
+        string? EventType,
+        IReadOnlySet<string> Primary,
+        IReadOnlySet<string> Fallback)
+    {
+        public bool Coalesced => EventType == TaskCompletionNotificationPolicy.CoalescedEventType;
+        public bool Ordinary => EventType is not null && TaskCompletionNotificationPolicy.OrdinaryEventTypes.Contains(EventType);
+    }
 
     private sealed record NotificationSenderTarget(
         int? Id,
@@ -704,7 +716,8 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             var enabledChannels = channels
                 .Where(recipientNotificationChannels[recipientUserId].Contains)
                 .ToList();
-            if (enabledChannels.Count > 0 && externalRecipients.TryGetValue(recipientUserId, out var recipient))
+            if (enabledChannels.Count > 0 && externalRecipients.TryGetValue(recipientUserId, out var recipient)
+                && await IsTaskReminderSnapshotCurrentAsync(task, recipientUserId, cancellationToken))
             {
                 deliveries.AddRange(await SendAsync(recipient, message, enabledChannels, eventKey, cancellationToken));
             }
@@ -712,6 +725,17 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
 
         return deliveries;
     }
+
+    private Task<bool> IsTaskReminderSnapshotCurrentAsync(TaskJournalItem task, int recipientUserId, CancellationToken ct)
+        => _context.TaskJournalItems.AsNoTracking().AnyAsync(current => current.Id == task.Id
+            && current.Status.Trim().ToLower() != "done"
+            && current.Status.Trim().ToLower() != "cancelled"
+            && (current.AssigneeUserId == recipientUserId || current.Participants.Any(participant =>
+                participant.UserId == recipientUserId && participant.Role.ToLower() == "assignee"))
+            && current.DueAt == task.DueAt
+            && current.RemindersJson == task.RemindersJson
+            && current.ChannelsJson == task.ChannelsJson
+            && current.SalesRequestId == task.SalesRequestId, ct);
 
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskAssignedAsync(
         TaskJournalItem task,
@@ -963,7 +987,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                     message.Body,
                     "amber",
                     task,
-                    new { actorUserId, actorName, previousAssigneeUserId, previousAssigneeName, task.AssigneeUserId, task.AssigneeName, hasAssigneeChange = true },
+                    new { actorUserId, actorName, taskTitle = task.Title, previousAssigneeUserId, previousAssigneeName, task.AssigneeUserId, task.AssigneeName, hasAssigneeChange = true },
                     cancellationToken,
                     changedRecipientNotificationChannels[userId]);
             }
@@ -1013,7 +1037,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                     message.Body,
                     "amber",
                     task,
-                    new { actorUserId, actorName, changeLabels, previousAssigneeUserId, previousAssigneeName, task.AssigneeUserId, task.AssigneeName, hasAssigneeChange = true },
+                    new { actorUserId, actorName, taskTitle = task.Title, changeLabels, previousAssigneeUserId, previousAssigneeName, task.AssigneeUserId, task.AssigneeName, hasAssigneeChange = true },
                     cancellationToken,
                     changedRecipientNotificationChannels[userId]);
             }
@@ -1036,17 +1060,27 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
     public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCompletedAsync(
         TaskJournalItem task,
         CancellationToken cancellationToken = default)
-        => NotifyCompletionForEventCoreAsync(task, $"task:{task.Id}:completed", false, cancellationToken);
+        => NotifyCompletionForEventCoreAsync(task, $"task:{task.Id}:completed", TaskCompletionNotificationPolicy.LegacyOrigin, false, cancellationToken);
 
     public Task<IReadOnlyList<NotificationDelivery>> NotifyCompletionForEventAsync(
         TaskJournalItem task, string eventKey, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(eventKey);
-        return NotifyCompletionForEventCoreAsync(task, eventKey, true, cancellationToken);
+        return NotifyCompletionForEventCoreAsync(task, eventKey, TaskCompletionNotificationPolicy.LegacyOrigin, true, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<NotificationDelivery>> NotifyCompletionForEventAsync(
+        TaskJournalItem task, string eventKey, string completionOrigin, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(eventKey);
+        if (completionOrigin is not (TaskCompletionNotificationPolicy.OrdinaryOrigin
+            or TaskCompletionNotificationPolicy.ApprovalOrigin or TaskCompletionNotificationPolicy.LegacyOrigin))
+            throw new ArgumentException("Unknown task completion origin.", nameof(completionOrigin));
+        return NotifyCompletionForEventCoreAsync(task, eventKey, completionOrigin, true, cancellationToken);
     }
 
     private async Task<IReadOnlyList<NotificationDelivery>> NotifyCompletionForEventCoreAsync(
-        TaskJournalItem task, string eventKey, bool retryMaxQueue, CancellationToken cancellationToken)
+        TaskJournalItem task, string eventKey, string completionOrigin, bool retryMaxQueue, CancellationToken cancellationToken)
     {
         if (!task.AuthorUserId.HasValue)
         {
@@ -1058,6 +1092,12 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             return Array.Empty<NotificationDelivery>();
         }
 
+        var coalescedCompletion = retryMaxQueue && await _context.TaskStatusNotificationOutboxes.AsNoTracking()
+            .AnyAsync(entry => entry.EventKey == eventKey && entry.TaskJournalItemId == task.Id
+                && entry.EventType == TaskCompletionNotificationPolicy.CoalescedEventType
+                && entry.ActorUserId != task.AuthorUserId.Value, cancellationToken);
+        if (coalescedCompletion && await HasConflictingTaskCompletionIdentityAsync(task.AuthorUserId.Value, task.Id, eventKey, cancellationToken))
+            return Array.Empty<NotificationDelivery>();
         var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(task.AuthorUserId.Value, cancellationToken);
         var taskCompletedSubject = $"Задача выполнена: {task.Title}";
         var taskCompletedBody = BuildTaskCompletedBody(task, recipientTimeZone);
@@ -1071,7 +1111,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
 
         if (HasTaskChannel(task, NotificationChannels.InApp))
         {
-            await CreateUserNotificationAsync(
+            var created = await CreateUserNotificationAsync(
                 task.AuthorUserId.Value,
                 UserNotificationTypes.TaskCompleted,
                 eventKey,
@@ -1079,20 +1119,35 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                 message.Body,
                 "blue",
                 task,
-                new { status = task.Status },
+                new { status = task.Status, completionOrigin, coalescedTaskChange = coalescedCompletion, taskTitle = task.Title },
                 cancellationToken,
                 retryMaxQueue: retryMaxQueue,
                 replayRealtimeOnRetry: retryMaxQueue);
+            if (coalescedCompletion && !created
+                && await HasConflictingTaskCompletionIdentityAsync(task.AuthorUserId.Value, task.Id, eventKey, cancellationToken))
+                return Array.Empty<NotificationDelivery>();
         }
 
         if (retryMaxQueue && !await IsDurableTaskRecipientCurrentAsync(task, task.AuthorUserId.Value, true, cancellationToken))
             return Array.Empty<NotificationDelivery>();
 
-        var enabledChannels = await ResolveUserNotificationChannelsAsync(
-            task.AuthorUserId.Value,
-            UserNotificationTypes.TaskCompleted,
-            [NotificationChannels.Email, NotificationChannels.Telegram],
-            cancellationToken, task: task);
+        var completionChannels = coalescedCompletion
+            ? await ResolveTaskCompletionChannelsAsync(task.AuthorUserId.Value, task.Id, eventKey, cancellationToken)
+            : null;
+        var enabledChannels = completionChannels?.Coalesced == true
+            ? new[] { NotificationChannels.Email, NotificationChannels.Telegram }.Where(completionChannels.Primary.Contains)
+                .Concat(ResolveTaskMessageChannels(task).Where(completionChannels.Fallback.Contains))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
+            : await ResolveUserNotificationChannelsAsync(task.AuthorUserId.Value, UserNotificationTypes.TaskCompleted,
+                [NotificationChannels.Email, NotificationChannels.Telegram], cancellationToken, task: task);
+        if (completionChannels?.Coalesced == true && enabledChannels.Contains(NotificationChannels.Sms))
+        {
+            var smsPolicy = await GetSmsDeliveryPolicyAsync(cancellationToken);
+            var smsType = completionChannels.Primary.Contains(NotificationChannels.Sms)
+                ? UserNotificationTypes.TaskCompleted : UserNotificationTypes.TaskChanged;
+            if (smsPolicy.EmergencyStop || !smsPolicy.IsEventEnabled(smsType))
+                enabledChannels = enabledChannels.Where(channel => channel != NotificationChannels.Sms).ToArray();
+        }
         return enabledChannels.Count == 0
             ? Array.Empty<NotificationDelivery>()
             : await SendToUserAsync(
@@ -1102,6 +1157,11 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                 eventKey,
                 cancellationToken);
     }
+
+    private Task<bool> HasConflictingTaskCompletionIdentityAsync(int recipientUserId, int taskId, string eventKey, CancellationToken ct)
+        => _context.UserNotifications.AsNoTracking().AnyAsync(item => item.RecipientUserId == recipientUserId
+            && item.EventKey == eventKey
+            && (item.Type != UserNotificationTypes.TaskCompleted || item.TaskJournalItemId != taskId), ct);
 
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCancelledAsync(
         TaskJournalItem task,
@@ -2305,6 +2365,9 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             return;
         }
 
+        var stage = ContractExpirationNotificationPolicy.StageForDays(daysLeft);
+        if (!stage.HasValue) return;
+
         var visibleRecipientUserIds = await ResolveVisibleContractNotificationRecipientIdsAsync(
             contract,
             recipientUserIds,
@@ -2314,6 +2377,23 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         {
             return;
         }
+
+        var eventKeys = visibleRecipientUserIds.Select(id => ContractExpirationNotificationPolicy.EventKey(
+            contract.Id, id, contract.ValidUntil.Value, stage.Value)).ToArray();
+        var canRecoverMax = _maxService is not null && _maxOutboxService is not null;
+        var completedReceipts = await _context.UserNotifications.AsNoTracking()
+            .Where(notice => notice.Type == UserNotificationTypes.ContractExpiring
+                && notice.ObjectType == "contract" && notice.ObjectId == contract.Id && notice.TaskJournalItemId == null
+                && visibleRecipientUserIds.Contains(notice.RecipientUserId) && eventKeys.Contains(notice.EventKey)
+                && (!canRecoverMax || _context.MaxOutboxMessages.Any(message => message.RecipientUserId == notice.RecipientUserId
+                    && message.EventKey == notice.EventKey && message.Scenario == MaxMessengerScenarios.Notifications)))
+            .Select(notice => new { notice.RecipientUserId, notice.EventKey }).ToArrayAsync(cancellationToken);
+        var completedKeys = completedReceipts.Where(notice => notice.EventKey == ContractExpirationNotificationPolicy.EventKey(
+                contract.Id, notice.RecipientUserId, contract.ValidUntil.Value, stage.Value))
+            .Select(notice => notice.EventKey).ToHashSet(StringComparer.Ordinal);
+        visibleRecipientUserIds = visibleRecipientUserIds.Where(id => !completedKeys.Contains(
+            ContractExpirationNotificationPolicy.EventKey(contract.Id, id, contract.ValidUntil.Value, stage.Value))).ToArray();
+        if (visibleRecipientUserIds.Count == 0) return;
 
         var message = await RenderTemplateAsync(
             NotificationTemplateKeys.ContractExpiring,
@@ -2338,7 +2418,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             await CreateUserNotificationAsync(
                 recipientUserId,
                 UserNotificationTypes.ContractExpiring,
-                $"contract:{contract.Id}:expiring:{recipientUserId}:{expirationDate}",
+                ContractExpirationNotificationPolicy.EventKey(contract.Id, recipientUserId, contract.ValidUntil.Value, stage.Value),
                 message.Subject,
                 message.Body,
                 "rose",
@@ -2351,11 +2431,13 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                     contractId = contract.Id,
                     contractNumber = BuildContractNumber(contract),
                     validUntil = expirationDate,
-                    daysLeft
+                    daysLeft,
+                    reminderStage = stage.Value
                 },
                 cancellationToken,
                 objectVisibilityValidated: true,
-                resolvedNotificationChannels: recipientNotificationChannels[recipientUserId]);
+                resolvedNotificationChannels: recipientNotificationChannels[recipientUserId],
+                retryMaxQueue: true);
         }
     }
 
@@ -3578,7 +3660,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         return current == expectedParticipantId;
     }
 
-    public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalDecisionAsync(
+    public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalDecisionAsync(
         TaskJournalItem task,
         TaskJournalParticipant approver,
         string decision,
@@ -3586,6 +3668,25 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         int actorUserId,
         string? resolution = null,
         CancellationToken cancellationToken = default)
+        => NotifyTaskApprovalDecisionCoreAsync(task, approver, decision, actorName, actorUserId, resolution,
+            $"task:{task.Id}:approval-decision:{approver.Id}:{decision}:{DateTime.UtcNow:yyyyMMddHHmmssfff}", false, cancellationToken);
+
+    public async Task<IReadOnlyList<NotificationDelivery>> NotifyApprovalCompletionForEventAsync(
+        TaskJournalItem task, TaskJournalParticipant approver, string actorName, int actorUserId, string eventKey,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(eventKey);
+        var decisions = await NotifyTaskApprovalDecisionCoreAsync(task, approver, "approved", actorName, actorUserId,
+            approver.Resolution, TaskCompletionNotificationPolicy.ApprovalDecisionEventKey(eventKey), true, cancellationToken);
+        if (decisions.Any(delivery => delivery.Status is NotificationDeliveryStatus.Failed or NotificationDeliveryStatus.Pending))
+            return decisions;
+        var completions = await NotifyCompletionForEventAsync(task, eventKey, TaskCompletionNotificationPolicy.ApprovalOrigin, cancellationToken);
+        return decisions.Concat(completions).ToArray();
+    }
+
+    private async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalDecisionCoreAsync(
+        TaskJournalItem task, TaskJournalParticipant approver, string decision, string actorName, int actorUserId,
+        string? resolution, string eventKey, bool retryMaxQueue, CancellationToken cancellationToken)
     {
         if (string.Equals(decision, "approved", StringComparison.OrdinalIgnoreCase)
             && IsTaskWaitingForNextApprover(task))
@@ -3604,13 +3705,17 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                 ? $"Задача согласована и завершена: {task.Title}"
             : $"Задача согласована: {task.Title}";
         var recipients = ResolveApprovalDecisionRecipientUserIds(task, actorUserId);
+        if (retryMaxQueue)
+        {
+            var eligible = await ResolveDurableTaskRecipientsAsync(task.Id, recipients, cancellationToken);
+            recipients = recipients.Where(eligible.Contains).ToArray();
+        }
         if (recipients.Count == 0)
         {
             return Array.Empty<NotificationDelivery>();
         }
 
         var channels = ResolveTaskMessageChannels(task);
-        var eventKey = $"task:{task.Id}:approval-decision:{approver.Id}:{decision}:{DateTime.UtcNow:yyyyMMddHHmmssfff}";
         var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
             _context,
             recipients,
@@ -3633,6 +3738,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             .ToList();
         var deliveryRecipients = await ResolveRecipientsAsync(deliveryRecipientIds, cancellationToken);
         var deliveries = new List<NotificationDelivery>();
+        var deferredDeliveries = new List<(int UserId, NotificationMessage Message, IReadOnlyList<string> Channels)>();
         foreach (var userId in recipients)
         {
             var recipientTimeZone = recipientTimeZones[userId];
@@ -3669,16 +3775,57 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                         completed = isCompletedApproval
                     },
                     cancellationToken,
-                    recipientNotificationChannels[userId]);
+                    recipientNotificationChannels[userId],
+                    retryMaxQueue: retryMaxQueue,
+                    replayRealtimeOnRetry: retryMaxQueue,
+                    deferDelivery: retryMaxQueue);
             }
 
             var enabledChannels = channels
                 .Where(recipientNotificationChannels[userId].Contains)
                 .ToList();
+            if (retryMaxQueue)
+            {
+                deferredDeliveries.Add((userId, message, enabledChannels));
+                continue;
+            }
             if (enabledChannels.Count > 0 && deliveryRecipients.TryGetValue(userId, out var recipient))
             {
                 deliveries.AddRange(await SendAsync(recipient, message, enabledChannels, eventKey, cancellationToken));
             }
+        }
+
+        if (retryMaxQueue)
+        {
+            var notifications = await _context.UserNotifications.AsNoTracking()
+                .Where(item => item.EventKey == eventKey && item.Type == type && item.TaskJournalItemId == task.Id && recipients.Contains(item.RecipientUserId)
+                    && item.DeletedAt == null)
+                .OrderBy(item => item.Id)
+                .ToListAsync(cancellationToken);
+            recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
+                recipients, type, channels.Concat([NotificationChannels.InApp, NotificationChannels.Toast, NotificationChannels.WebPush]),
+                cancellationToken, task: task);
+            foreach (var notification in notifications)
+            {
+                var currentChannels = recipientNotificationChannels[notification.RecipientUserId];
+                if (!currentChannels.Contains(NotificationChannels.InApp)
+                    || !await IsDurableTaskRecipientCurrentAsync(task, notification.RecipientUserId, false, cancellationToken))
+                    continue;
+                await QueueMaxNotificationIfAvailableAsync(notification, cancellationToken, throwOnFailure: true);
+                if (notification.IsRead || notification.IsArchived) continue;
+                await PublishDurableRealtimeAsync(notification, currentChannels.Contains(NotificationChannels.Toast), cancellationToken);
+                if (_webPushNotificationService is not null && currentChannels.Contains(NotificationChannels.WebPush))
+                    await _webPushNotificationService.SendUserNotificationAsync(notification, cancellationToken);
+            }
+        }
+
+        foreach (var delivery in deferredDeliveries)
+        {
+            if (!await IsDurableTaskRecipientCurrentAsync(task, delivery.UserId, false, cancellationToken))
+                continue;
+            var currentChannels = delivery.Channels.Where(recipientNotificationChannels[delivery.UserId].Contains).ToArray();
+            if (currentChannels.Length > 0 && deliveryRecipients.TryGetValue(delivery.UserId, out var recipient))
+                deliveries.AddRange(await SendAsync(recipient, delivery.Message, currentChannels, eventKey, cancellationToken));
         }
 
         return deliveries;
@@ -4045,7 +4192,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         return deliveries;
     }
 
-    public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedAsync(
+    public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedAsync(
         TaskJournalItem task,
         IReadOnlyList<string> changeLabels,
         string actorName,
@@ -4053,11 +4200,27 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         string? comment = null,
         CancellationToken cancellationToken = default,
         IReadOnlyCollection<int>? additionalRecipientUserIds = null)
+        => NotifyTaskChangedCoreAsync(task, changeLabels, actorName, actorUserId, comment, cancellationToken, additionalRecipientUserIds, null);
+
+    public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedForCompletionEventAsync(
+        TaskJournalItem task, IReadOnlyList<string> changeLabels, string actorName, int actorUserId,
+        string completionEventKey, CancellationToken cancellationToken = default)
+        => NotifyTaskChangedCoreAsync(task, changeLabels, actorName, actorUserId, null, cancellationToken, null, completionEventKey);
+
+    private async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedCoreAsync(
+        TaskJournalItem task, IReadOnlyList<string> changeLabels, string actorName, int actorUserId,
+        string? comment, CancellationToken cancellationToken, IReadOnlyCollection<int>? additionalRecipientUserIds, string? completionEventKey)
     {
+        var coalescedAuthorId = completionEventKey is not null && task.AuthorUserId.HasValue
+            && await _context.TaskStatusNotificationOutboxes.AsNoTracking().AnyAsync(entry => entry.EventKey == completionEventKey
+                && entry.TaskJournalItemId == task.Id && entry.StatusTransitionToken == task.StatusTransitionToken
+                && entry.EventType == TaskCompletionNotificationPolicy.CoalescedEventType
+                && entry.ActorUserId != task.AuthorUserId.Value, cancellationToken)
+            ? task.AuthorUserId : null;
         var channels = ResolveTaskMessageChannels(task);
         var recipients = ResolveTaskNotificationUserIds(task, actorUserId)
             .Concat(additionalRecipientUserIds ?? Array.Empty<int>())
-            .Where(userId => userId > 0 && userId != actorUserId)
+            .Where(userId => userId > 0 && userId != actorUserId && userId != coalescedAuthorId)
             .Distinct()
             .ToList();
         if (recipients.Count == 0)
@@ -4126,7 +4289,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                     message.Body,
                     tone,
                     task,
-                    new { actorUserId, actorName, changeLabels, hasDueAtChange },
+                    new { actorUserId, actorName, taskTitle = task.Title, changeLabels, hasDueAtChange },
                     cancellationToken,
                     recipientNotificationChannels[userId]);
             }
@@ -4697,7 +4860,8 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         IReadOnlySet<string>? resolvedNotificationChannels = null,
         bool retryMaxQueue = false,
         bool replayRealtimeOnRetry = false,
-        int? expectedApprovalParticipantId = null)
+        int? expectedApprovalParticipantId = null,
+        bool deferDelivery = false)
         => CreateUserNotificationAsync(
             new NotificationEventEnvelope(
                 recipientUserId,
@@ -4715,7 +4879,8 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             resolvedNotificationChannels: resolvedNotificationChannels,
             retryMaxQueue: retryMaxQueue,
             replayRealtimeOnRetry: replayRealtimeOnRetry,
-            expectedApprovalParticipantId: expectedApprovalParticipantId);
+            expectedApprovalParticipantId: expectedApprovalParticipantId,
+            deferDelivery: deferDelivery);
 
     private Task<bool> CreateUserNotificationAsync(
         int recipientUserId,
@@ -4732,7 +4897,8 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         CancellationToken cancellationToken,
         bool objectVisibilityValidated = false,
         IReadOnlySet<string>? resolvedNotificationChannels = null,
-        CaseCourtDeliveryClaim? courtClaim = null)
+        CaseCourtDeliveryClaim? courtClaim = null,
+        bool retryMaxQueue = false)
         => CreateUserNotificationAsync(
             new NotificationEventEnvelope(
                 recipientUserId,
@@ -4749,6 +4915,7 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             cancellationToken,
             objectVisibilityValidated,
             resolvedNotificationChannels,
+            retryMaxQueue: retryMaxQueue,
             courtClaim: courtClaim);
 
     private async Task<bool> CreateUserNotificationAsync(
@@ -4759,7 +4926,8 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         bool retryMaxQueue = false,
         bool replayRealtimeOnRetry = false,
         int? expectedApprovalParticipantId = null,
-        CaseCourtDeliveryClaim? courtClaim = null)
+        CaseCourtDeliveryClaim? courtClaim = null,
+        bool deferDelivery = false)
     {
         if (notificationEvent.RecipientUserId <= 0 || string.IsNullOrWhiteSpace(notificationEvent.EventKey))
         {
@@ -4794,6 +4962,14 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                 return false;
         }
 
+        TaskCompletionChannelContext? completionChannels = null;
+        if (type == UserNotificationTypes.TaskCompleted)
+        {
+            completionChannels = await ResolveTaskCompletionChannelsAsync(notificationEvent.RecipientUserId,
+                notificationEvent.TaskJournalItemId, notificationEvent.EventKey, cancellationToken);
+            resolvedNotificationChannels = completionChannels.Primary.Concat(completionChannels.Fallback).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
         var inAppEnabled = courtClaim is not null
             ? await IsCourtRecipientCurrentAsync(notificationEvent.RecipientUserId, type, NotificationChannels.InApp, courtClaim, cancellationToken)
             : resolvedNotificationChannels is not null
@@ -4808,6 +4984,8 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             return false;
         }
 
+        var ordinaryCompletion = completionChannels?.Ordinary == true;
+
         var duplicates = _context.UserNotifications.AsNoTracking()
             .Where(UserNotificationAntiSpamPolicy.ExactDuplicatePredicate(notificationEvent));
         if (retryMaxQueue || courtClaim is not null)
@@ -4815,6 +4993,12 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             var existing = await duplicates.FirstOrDefaultAsync(cancellationToken);
             if (existing is not null)
             {
+                if (type == UserNotificationTypes.TaskCompleted
+                    && (existing.Type != type || existing.TaskJournalItemId != notificationEvent.TaskJournalItemId))
+                    return false;
+                if (type == UserNotificationTypes.ContractExpiring
+                    && (existing.Type != type || existing.ObjectType != notificationEvent.ObjectType
+                        || existing.ObjectId != notificationEvent.ObjectId || existing.TaskJournalItemId is not null)) return false;
                 if (courtAccessLease is not null)
                 {
                     await courtAccessLease.CommitAsync(cancellationToken);
@@ -4826,13 +5010,33 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                     type == UserNotificationTypes.TaskCompleted, cancellationToken, expectedApprovalParticipantId)) return false;
                 if (objectVisibilityValidated || await CanRecipientSeeNotificationObjectAsync(notificationEvent, type, cancellationToken))
                 {
-                    await QueueMaxNotificationIfAvailableAsync(existing, cancellationToken, throwOnFailure: true);
+                    if (deferDelivery) return false;
+                    await QueueMaxNotificationIfAvailableAsync(existing, cancellationToken, throwOnFailure: true,
+                        coalescedCompletion: completionChannels?.Coalesced == true);
+                    if (completionChannels?.Coalesced == true)
+                    {
+                        if (!await IsDurableTaskRecipientCurrentAsync(notificationEvent.Task!, existing.RecipientUserId, true, cancellationToken)) return false;
+                        completionChannels = await ResolveTaskCompletionChannelsAsync(existing.RecipientUserId, existing.TaskJournalItemId, existing.EventKey, cancellationToken);
+                        ordinaryCompletion = completionChannels.Ordinary;
+                        resolvedNotificationChannels = completionChannels.Primary.Concat(completionChannels.Fallback).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    }
                     if (replayRealtimeOnRetry && !existing.IsRead && !existing.IsArchived && existing.DeletedAt is null)
                     {
                         var toast = resolvedNotificationChannels is not null
                             ? resolvedNotificationChannels.Contains(NotificationChannels.Toast)
                             : await IsUserNotificationChannelEnabledAsync(existing.RecipientUserId, type, NotificationChannels.Toast, cancellationToken);
+                        toast = completionChannels is not null
+                            ? TaskCompletionNotificationPolicy.ResolvePresentation(type, ordinaryCompletion, completionChannels.Primary,
+                                completionChannels.Coalesced, completionChannels.Fallback).ToastEnabled
+                            : toast;
                         await PublishDurableRealtimeAsync(existing, toast, cancellationToken);
+                        if (completionChannels?.Coalesced == true)
+                        {
+                            if (!await IsDurableTaskRecipientCurrentAsync(notificationEvent.Task!, existing.RecipientUserId, true, cancellationToken)) return false;
+                            completionChannels = await ResolveTaskCompletionChannelsAsync(existing.RecipientUserId, existing.TaskJournalItemId, existing.EventKey, cancellationToken);
+                            ordinaryCompletion = completionChannels.Ordinary;
+                            resolvedNotificationChannels = completionChannels.Primary.Concat(completionChannels.Fallback).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        }
                         var push = resolvedNotificationChannels is not null
                             ? resolvedNotificationChannels.Contains(NotificationChannels.WebPush)
                             : await IsUserNotificationChannelEnabledAsync(existing.RecipientUserId, type, NotificationChannels.WebPush, cancellationToken);
@@ -4868,6 +5072,16 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
             return false;
         }
 
+        if (type == UserNotificationTypes.ContractExpiring
+            && (notificationEvent.ObjectType != "contract" || notificationEvent.ObjectId is not > 0 || notificationEvent.TaskJournalItemId.HasValue
+                || !await ContractExpirationPolicy.CanSendAsync(notificationEvent.EventKey, notificationEvent.RecipientUserId,
+                    cancellationToken, notificationEvent.ObjectId, requireSource: true))) return false;
+
+        // Recheck after duplicate and visibility reads, immediately before creating the reminder.
+        if (type == UserNotificationTypes.TaskReminder && notificationEvent.Task is { } reminderTask
+            && !await IsTaskReminderSnapshotCurrentAsync(reminderTask, notificationEvent.RecipientUserId, cancellationToken))
+            return false;
+
         var notification = new UserNotification
         {
             RecipientUserId = notificationEvent.RecipientUserId,
@@ -4893,7 +5107,16 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         if (accessLease is not null) await accessLease.CommitAsync(cancellationToken);
         if (accessLease is not null && !await IsDurableTaskRecipientCurrentAsync(notificationEvent.Task!, notificationEvent.RecipientUserId,
             type == UserNotificationTypes.TaskCompleted, cancellationToken, expectedApprovalParticipantId)) return false;
-        await QueueMaxNotificationIfAvailableAsync(notification, cancellationToken, throwOnFailure: retryMaxQueue);
+        if (deferDelivery) return true;
+        await QueueMaxNotificationIfAvailableAsync(notification, cancellationToken, throwOnFailure: retryMaxQueue,
+            coalescedCompletion: completionChannels?.Coalesced == true);
+        if (completionChannels?.Coalesced == true)
+        {
+            if (!await IsDurableTaskRecipientCurrentAsync(notificationEvent.Task!, notification.RecipientUserId, true, cancellationToken)) return true;
+            completionChannels = await ResolveTaskCompletionChannelsAsync(notification.RecipientUserId, notification.TaskJournalItemId, notification.EventKey, cancellationToken);
+            ordinaryCompletion = completionChannels.Ordinary;
+            resolvedNotificationChannels = completionChannels.Primary.Concat(completionChannels.Fallback).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
         var toastEnabled = resolvedNotificationChannels is not null
             ? resolvedNotificationChannels.Contains(NotificationChannels.Toast)
             : await IsUserNotificationChannelEnabledAsync(
@@ -4901,6 +5124,10 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
                 type,
                 NotificationChannels.Toast,
                 cancellationToken);
+        toastEnabled = completionChannels is not null
+            ? TaskCompletionNotificationPolicy.ResolvePresentation(type, ordinaryCompletion, completionChannels.Primary,
+                completionChannels.Coalesced, completionChannels.Fallback).ToastEnabled
+            : toastEnabled;
         if (type == UserNotificationTypes.CaseDocument && _context.Database.CurrentTransaction is not null)
         {
             var now = _timeProvider.GetUtcNow().UtcDateTime;
@@ -4920,6 +5147,13 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         else
             await _realtimePublisher.PublishUserNotificationAsync(notification, toastEnabled, cancellationToken);
 
+        if (completionChannels?.Coalesced == true)
+        {
+            if (!await IsDurableTaskRecipientCurrentAsync(notificationEvent.Task!, notification.RecipientUserId, true, cancellationToken)) return true;
+            completionChannels = await ResolveTaskCompletionChannelsAsync(notification.RecipientUserId, notification.TaskJournalItemId, notification.EventKey, cancellationToken);
+            ordinaryCompletion = completionChannels.Ordinary;
+            resolvedNotificationChannels = completionChannels.Primary.Concat(completionChannels.Fallback).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
         var webPushEnabled = resolvedNotificationChannels is not null
             ? resolvedNotificationChannels.Contains(NotificationChannels.WebPush)
             : await IsUserNotificationChannelEnabledAsync(
@@ -4978,7 +5212,8 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         return "completed";
     }
 
-    private async Task QueueMaxNotificationIfAvailableAsync(UserNotification notification, CancellationToken cancellationToken, bool throwOnFailure = false)
+    private async Task QueueMaxNotificationIfAvailableAsync(UserNotification notification, CancellationToken cancellationToken,
+        bool throwOnFailure = false, bool coalescedCompletion = false)
     {
         if (_maxService is null || _maxOutboxService is null
             || UserNotificationTypes.Find(notification.Type) is not { } typeDefinition
@@ -4996,11 +5231,13 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
         {
             var runtime = await (_maxRuntimeSettingsTask ??= _maxService.GetRuntimeSettingsAsync(cancellationToken));
             if (!runtime.Ready || !runtime.NotificationsEnabled
-                || !await IsUserNotificationChannelEnabledAsync(
+                || !(coalescedCompletion
+                    ? await IsCoalescedCompletionChannelEnabledAsync(notification.RecipientUserId, NotificationChannels.Max, cancellationToken)
+                    : await IsUserNotificationChannelEnabledAsync(
                     notification.RecipientUserId,
                     notification.Type,
                     NotificationChannels.Max,
-                    cancellationToken))
+                    cancellationToken)))
                 return;
 
             // An employee without a verified MAX link cannot receive this channel.
@@ -5172,6 +5409,45 @@ public sealed partial class NotificationService : INotificationService, ICaseDoc
     {
         var preferences = await GetUserNotificationPreferencesAsync(recipientUserId, cancellationToken);
         return UserNotificationPreferenceSettings.IsTypeEnabled(preferences, type);
+    }
+
+    private async Task<TaskCompletionChannelContext> ResolveTaskCompletionChannelsAsync(
+        int recipientUserId, int? taskId, string eventKey, CancellationToken ct)
+    {
+        var eventType = taskId.HasValue
+            ? await _context.TaskStatusNotificationOutboxes.AsNoTracking()
+                .Where(entry => entry.EventKey == eventKey && entry.TaskJournalItemId == taskId)
+                .Select(entry => entry.EventType == TaskCompletionNotificationPolicy.CoalescedEventType && entry.ActorUserId == recipientUserId
+                    ? TaskCompletionNotificationPolicy.OrdinaryEventType : entry.EventType).SingleOrDefaultAsync(ct)
+            : null;
+        var preferences = await GetUserNotificationPreferencesAsync(recipientUserId, ct);
+        var quietHours = await GetUserNotificationDoNotDisturbAsync(recipientUserId, ct);
+        var timeZone = quietHours.Enabled
+            ? await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_context, recipientUserId, ct)
+            : TimeZoneInfo.Utc;
+        var now = DateTime.UtcNow;
+        var coalesced = eventType == TaskCompletionNotificationPolicy.CoalescedEventType;
+        var primary = TaskCompletionNotificationPolicy.ResolveEnabledChannels(
+            preferences, UserNotificationTypes.TaskCompleted, quietHours, timeZone, now, requireInAppForDelivery: coalesced);
+        var fallback = coalesced
+            ? TaskCompletionNotificationPolicy.ResolveEnabledChannels(preferences, UserNotificationTypes.TaskChanged, quietHours, timeZone, now, requireInAppForDelivery: true)
+            : (IReadOnlySet<string>)new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return new(eventType, primary, fallback);
+    }
+
+    private async Task<bool> IsCoalescedCompletionChannelEnabledAsync(int recipientUserId, string channel, CancellationToken ct)
+    {
+        var preferences = await GetUserNotificationPreferencesAsync(recipientUserId, ct);
+        var quietHours = await GetUserNotificationDoNotDisturbAsync(recipientUserId, ct);
+        var timeZone = quietHours.Enabled
+            ? await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_context, recipientUserId, ct)
+            : TimeZoneInfo.Utc;
+        var now = DateTime.UtcNow;
+        var primary = TaskCompletionNotificationPolicy.ResolveEnabledChannels(
+            preferences, UserNotificationTypes.TaskCompleted, quietHours, timeZone, now, requireInAppForDelivery: true);
+        var fallback = TaskCompletionNotificationPolicy.ResolveEnabledChannels(
+            preferences, UserNotificationTypes.TaskChanged, quietHours, timeZone, now, requireInAppForDelivery: true);
+        return primary.Contains(channel) || fallback.Contains(channel);
     }
 
     private async Task<bool> IsUserNotificationChannelEnabledAsync(

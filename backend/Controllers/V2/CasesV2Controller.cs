@@ -2891,7 +2891,9 @@ public partial class CasesV2Controller : ControllerBase
         [FromQuery] string? courtInstance = null,
         [FromQuery] string? ourCourtRole = null,
         [FromQuery] decimal? minClaimAmount = null,
-        [FromQuery] decimal? maxClaimAmount = null)
+        [FromQuery] decimal? maxClaimAmount = null,
+        [FromQuery] int[]? responsibleUserIds = null,
+        [FromQuery] string? timeZoneId = null)
     {
         if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
         {
@@ -2909,7 +2911,17 @@ public partial class CasesV2Controller : ControllerBase
             return BadRequest("Укажите корректный диапазон суммы иска в рублях и копейках.");
         }
 
-        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        if (!AreValidCalendarResponsibleUserIds(responsibleUserIds))
+        {
+            return BadRequest(new { message = "Выберите не более 500 сотрудников с корректными идентификаторами." });
+        }
+
+        var timeZone = await ResolveCaseCalendarTimeZoneAsync(timeZoneId, ct);
+        if (timeZone is null)
+        {
+            return BadRequest(new { message = "Укажите корректный часовой пояс календаря." });
+        }
+
         var range = ResolveCaseCalendarDateRange(from, to, timeZone);
         if (range.ToDate < range.FromDate)
         {
@@ -2926,7 +2938,7 @@ public partial class CasesV2Controller : ControllerBase
             || maxClaimAmount.HasValue
             ? new CourtCalendarRegistryFilters(search, scope, caseType, courtState, courtInstance, ourCourtRole, minClaimAmount, maxClaimAmount)
             : null;
-        var events = await QueryCaseCalendarEventsAsync(visibility, range, clientCaseId, responsibleUserId, includeTasks, ct, registryFilters);
+        var events = await QueryCaseCalendarEventsAsync(visibility, range, clientCaseId, responsibleUserId, includeTasks, ct, registryFilters, responsibleUserIds);
         return Ok(events);
     }
 
@@ -2937,7 +2949,9 @@ public partial class CasesV2Controller : ControllerBase
         [FromQuery] int? clientCaseId,
         [FromQuery] int? responsibleUserId,
         [FromQuery] bool includeTasks = true,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] int[]? responsibleUserIds = null,
+        [FromQuery] string? timeZoneId = null)
     {
         if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
         {
@@ -2950,14 +2964,24 @@ public partial class CasesV2Controller : ControllerBase
             return Unauthorized();
         }
 
-        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        if (!AreValidCalendarResponsibleUserIds(responsibleUserIds))
+        {
+            return BadRequest(new { message = "Выберите не более 500 сотрудников с корректными идентификаторами." });
+        }
+
+        var timeZone = await ResolveCaseCalendarTimeZoneAsync(timeZoneId, ct);
+        if (timeZone is null)
+        {
+            return BadRequest(new { message = "Укажите корректный часовой пояс календаря." });
+        }
+
         var range = ResolveCaseCalendarDateRange(from, to, timeZone);
         if (range.ToDate < range.FromDate)
         {
             return BadRequest(new { message = "Дата окончания периода не может быть раньше даты начала." });
         }
 
-        var events = await QueryCaseCalendarEventsAsync(visibility, range, clientCaseId, responsibleUserId, includeTasks, ct);
+        var events = await QueryCaseCalendarEventsAsync(visibility, range, clientCaseId, responsibleUserId, includeTasks, ct, responsibleUserIds: responsibleUserIds);
         return Ok(BuildCaseCalendarSummary(events, range));
     }
 
@@ -2969,7 +2993,9 @@ public partial class CasesV2Controller : ControllerBase
         [FromQuery] int? responsibleUserId,
         [FromQuery] bool includeTasks = true,
         [FromQuery] string? reminderMinutes = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] int[]? responsibleUserIds = null,
+        [FromQuery] string? timeZoneId = null)
     {
         if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } viewForbidden)
         {
@@ -2987,7 +3013,17 @@ public partial class CasesV2Controller : ControllerBase
             return Unauthorized();
         }
 
-        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        if (!AreValidCalendarResponsibleUserIds(responsibleUserIds))
+        {
+            return BadRequest(new { message = "Выберите не более 500 сотрудников с корректными идентификаторами." });
+        }
+
+        var timeZone = await ResolveCaseCalendarTimeZoneAsync(timeZoneId, ct);
+        if (timeZone is null)
+        {
+            return BadRequest(new { message = "Укажите корректный часовой пояс календаря." });
+        }
+
         var range = ResolveCaseCalendarDateRange(from, to, timeZone);
         if (range.ToDate < range.FromDate)
         {
@@ -2995,7 +3031,7 @@ public partial class CasesV2Controller : ControllerBase
         }
 
         var reminders = IcsReminderOptions.Normalize(reminderMinutes);
-        var events = await QueryCaseCalendarEventsAsync(visibility, range, clientCaseId, responsibleUserId, includeTasks, ct);
+        var events = await QueryCaseCalendarEventsAsync(visibility, range, clientCaseId, responsibleUserId, includeTasks, ct, responsibleUserIds: responsibleUserIds);
         _db.ObjectAuditEvents.Add(CalendarExportAudit.CreateExportEvent(
             User,
             "cases",
@@ -3008,6 +3044,8 @@ public partial class CasesV2Controller : ControllerBase
                 to = range.ToDate,
                 clientCaseId,
                 responsibleUserId,
+                responsibleUserIds = responsibleUserIds?.Distinct().OrderBy(id => id).ToArray(),
+                timeZoneId = timeZone.Id,
                 includeTasks,
             }));
         await _db.SaveChangesAsync(ct);
@@ -5761,7 +5799,8 @@ public partial class CasesV2Controller : ControllerBase
         string auditDescription,
         string caseEventText,
         CancellationToken ct,
-        bool publishTaskJournalChanged = true, Guid? legacyUploadKey = null, CourtPublicationPlan? courtPublication = null)
+        bool publishTaskJournalChanged = true, Guid? legacyUploadKey = null, CourtPublicationPlan? courtPublication = null,
+        (int ActorId, Guid UploadKey, int ActId)? actCreate = null)
     {
         if (courtPublication is not null)
             clientCase = await RequireCourtPublicationAsync(clientCase.Id, courtPublication, ct);
@@ -5820,6 +5859,17 @@ public partial class CasesV2Controller : ControllerBase
             _db.ClientCaseDocuments.Add(document);
             AppendCaseEvent(clientCase, caseEventText);
             await _db.SaveChangesAsync(ct);
+            if (actCreate is { } proof)
+            {
+                // Publish the receipt marker with document metadata. It survives
+                // explicit document deletion and distinguishes it from lost I/O.
+                if (documentKey != BuildWorkOrderActDocumentKey(proof.ActId)
+                    || await _db.ActCreateReceipts.Where(receipt => receipt.ActorUserId == proof.ActorId
+                        && receipt.UploadKey == proof.UploadKey && receipt.Operation == "work-order"
+                        && receipt.CaseId == clientCase.Id && receipt.ActId == proof.ActId && receipt.PublishedDocumentId == null)
+                        .ExecuteUpdateAsync(setters => setters.SetProperty(receipt => receipt.PublishedDocumentId, document.Id), ct) != 1)
+                    throw new InvalidOperationException("Состояние публикации акта изменилось. Откройте сохранённый акт.");
+            }
             AddCaseDocumentAuditEvent(clientCase, document, auditAction, auditDescription);
             await AddCaseDocumentUserNotificationsAsync(
                 clientCase,
@@ -6124,6 +6174,21 @@ public partial class CasesV2Controller : ControllerBase
             nowUtc);
     }
 
+    private async Task<TimeZoneInfo?> ResolveCaseCalendarTimeZoneAsync(string? timeZoneId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(timeZoneId))
+        {
+            return await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        }
+
+        return timeZoneId.Length <= 128 && CalendarTimeZoneHelper.TryResolveTimeZone(timeZoneId, out var timeZone)
+            ? timeZone
+            : null;
+    }
+
+    private static bool AreValidCalendarResponsibleUserIds(int[]? responsibleUserIds)
+        => responsibleUserIds is null || (responsibleUserIds.Length <= 500 && responsibleUserIds.All(id => id > 0));
+
     private async Task<IReadOnlyList<CaseCalendarEventDto>> QueryCaseCalendarEventsAsync(
         DataVisibilityAccess visibility,
         CaseCalendarDateRange range,
@@ -6131,7 +6196,8 @@ public partial class CasesV2Controller : ControllerBase
         int? responsibleUserId,
         bool includeTasks,
         CancellationToken ct,
-        CourtCalendarRegistryFilters? registryFilters = null)
+        CourtCalendarRegistryFilters? registryFilters = null,
+        int[]? responsibleUserIds = null)
     {
         // Preserve Cases-only access to ordinary task metadata; sales-linked tasks keep their separate live Requests scope.
         var calendarTasks = _db.TaskJournalItems.ApplySalesRequestTaskPrivacy(visibility, _db);
@@ -6163,6 +6229,12 @@ public partial class CasesV2Controller : ControllerBase
         if (responsibleUserId.HasValue)
         {
             caseQuery = caseQuery.Where(item => item.ResponsibleUserId == responsibleUserId.Value);
+        }
+
+        if (responsibleUserIds is { Length: > 0 })
+        {
+            var selectedUserIds = responsibleUserIds.Distinct().ToArray();
+            caseQuery = caseQuery.Where(item => item.ResponsibleUserId.HasValue && selectedUserIds.Contains(item.ResponsibleUserId.Value));
         }
 
         caseQuery = caseQuery.Where(item =>
@@ -7896,6 +7968,21 @@ public partial class CasesV2Controller : ControllerBase
         [FromBody] CreateClientCaseWorkOrderActRequest? request,
         CancellationToken ct)
     {
+        try { return await CreateAnnualActFromWorkOrderAsync(id, request, ct); }
+        catch (ActAnnualNumberExhaustedException failure)
+        {
+            return UnprocessableEntity(new { message = failure.Message });
+        }
+        catch (Npgsql.PostgresException failure) when (failure.SqlState is Npgsql.PostgresErrorCodes.LockNotAvailable
+            or Npgsql.PostgresErrorCodes.SerializationFailure or Npgsql.PostgresErrorCodes.DeadlockDetected)
+        {
+            return Conflict(new { message = "Связанные данные сейчас заняты. Повторите ту же попытку создания акта." });
+        }
+    }
+
+    private async Task<ActionResult<ClientCaseWorkOrderActDto>> CreateAnnualActFromWorkOrderAsync(
+        int id, CreateClientCaseWorkOrderActRequest? request, CancellationToken ct)
+    {
         if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
         {
             return forbidden;
@@ -7906,6 +7993,12 @@ public partial class CasesV2Controller : ControllerBase
             return actsForbidden;
         }
 
+        if (!TryReadWorkOrderActKey(out var uploadKey)) return BadRequest(new { message = "Некорректный идентификатор попытки создания акта." });
+        var actorId = User.GetUserId();
+        if (uploadKey.HasValue && actorId is not > 0) return Unauthorized();
+        var commandHash = FinancialRequestHash(id, GeneratedFinancialDocumentKind.Act, null, request, null);
+        if (uploadKey.HasValue && await ReplayWorkOrderActAsync(id, uploadKey.Value, commandHash, ct) is { } replay)
+            return replay;
         if (_managedCaseUploads?.Enabled == true)
             return await GenerateManagedFinancialDocumentAsync(id, GeneratedFinancialDocumentKind.Act, null, request, null, ct);
         if (await GuardFinancialLegacyAttemptAsync(id, ct) is { } blocked) return blocked;
@@ -7920,6 +8013,14 @@ public partial class CasesV2Controller : ControllerBase
         var legacyAdmission = await BeginLegacyFinancialAsync(clientCase, workOrder, GeneratedFinancialDocumentKind.Act, ct);
         if (legacyAdmission.Blocked is { } admissionBlocked) return admissionBlocked;
         await using var legacyFinancialTransaction = legacyAdmission.Transaction!;
+        if (uploadKey.HasValue && (await _db.ActCreateReceipts.AsNoTracking()
+            .AnyAsync(item => item.ActorUserId == actorId && item.UploadKey == uploadKey, ct)
+            || await _db.GeneratedFinancialDocumentAttempts.AsNoTracking()
+                .AnyAsync(item => item.ActorId == actorId && item.UploadKey == uploadKey, ct)))
+        {
+            await legacyFinancialTransaction.DisposeAsync();
+            return await ReplayWorkOrderActAsync(id, uploadKey.Value, commandHash, ct) ?? Conflict();
+        }
         RecalculateWorkOrder(workOrder);
         if (workOrder.TotalAmount <= 0m || workOrder.Items.Count == 0)
         {
@@ -7999,32 +8100,25 @@ public partial class CasesV2Controller : ControllerBase
         _db.SetAuditReason($"По предварительному расчету дела #{id} создан акт №{number}.");
         AppendCaseEvent(clientCase, $"По предварительному расчету «{workOrder.Title}» создан акт №{number} на сумму {amount:0.##} {workOrder.Currency}. Создал: {User.GetDisplayName()}.");
         await _db.SaveChangesAsync(ct);
+        if (uploadKey.HasValue)
+        {
+            _db.ActCreateReceipts.Add(new ActCreateReceipt
+            {
+                ActorUserId = actorId!.Value,
+                UploadKey = uploadKey.Value,
+                Operation = "work-order",
+                CaseId = id,
+                WorkOrderId = workOrder.Id,
+                CommandSha256 = commandHash,
+                ActId = act.Id,
+            });
+            await _db.SaveChangesAsync(ct);
+        }
         if (await GuardLegacyFinancialSourceAsync(id, workOrder.Id, GeneratedFinancialDocumentKind.Act, ct) is { } lateBlocked) return lateBlocked;
         await legacyFinancialTransaction.CommitAsync(ct);
         await legacyFinancialTransaction.DisposeAsync();
 
-        var actDocument = await SaveGeneratedCaseDocumentAsync(
-            clientCase,
-            BuildWorkOrderActDocumentKey(act.Id),
-            "Акт",
-            "Черновик",
-            $"case-{id}-act-{act.Id}.html",
-            AppendFinancialSellerHtml(BuildWorkOrderActDocumentHtml(clientCase, workOrder, act, statusClock.NowLocal), sellerCapture.Seller),
-            "Generated",
-            $"Сформирован документ акта №{number} из заказ-наряда «{workOrder.Title}».",
-            $"Акт №{number} из заказ-наряда «{workOrder.Title}» сохранен в документы дела. Автор: {User.GetDisplayName()}.",
-            ct);
-
-        return Created($"/acts/{act.Id}", new ClientCaseWorkOrderActDto
-        {
-            ActId = act.Id,
-            Number = number,
-            Date = actDate,
-            Amount = act.Amount,
-            DocumentId = actDocument.Id,
-            LineItemCount = act.LineItems.Count,
-            WorkOrder = MapWorkOrder(workOrder),
-        });
+        return await CompleteLegacyWorkOrderActAsync(clientCase, workOrder, act, uploadKey, ct);
     }
 
     [HttpPost("{id:int}/work-order/create-contract")]

@@ -1820,17 +1820,51 @@ public class ContractsController : ControllerBase
     private static ContractTerminationCheckDto BuildTerminationCheck(Contract contract)
     {
         var unpaidInvoices = GetContractInvoicePayments(contract)
-            .Where(payment =>
-                payment.Status != PaymentStatus.Cancelled
-                && (payment.Status != PaymentStatus.Completed || payment.Amount > payment.PaidAmount))
+            .Select(GetContractInvoiceOutstandingAmount)
+            .Where(amount => amount > 0m)
             .ToList();
 
         return new ContractTerminationCheckDto
         {
             HasUnpaidInvoices = unpaidInvoices.Count > 0,
             UnpaidInvoiceCount = unpaidInvoices.Count,
-            UnpaidInvoiceAmount = unpaidInvoices.Sum(payment => Math.Max(payment.Amount - payment.PaidAmount, 0m)),
+            UnpaidInvoiceAmount = unpaidInvoices.Sum(),
         };
+    }
+
+    private static decimal GetContractInvoiceOutstandingAmount(Payment invoice)
+    {
+        if (invoice.InvoiceWorkflowStatus == InvoiceWorkflowStatus.Cancelled)
+        {
+            return 0m;
+        }
+
+        var relatedPayments = invoice.Invoice?.Payments;
+        if (relatedPayments is null || relatedPayments.Count == 0
+            || relatedPayments.Any(payment =>
+                (payment.ClientId.HasValue && payment.ClientId != invoice.ClientId)
+                || (payment.LegalEntityId.HasValue && payment.LegalEntityId != invoice.LegalEntityId)
+                || (payment.SellerCompanyId.HasValue && payment.SellerCompanyId != invoice.SellerCompanyId)
+                || (payment.SellerBranchId.HasValue && payment.SellerBranchId != invoice.SellerBranchId)
+                || (payment.DocumentKind == DocumentKind.Invoice
+                    && (payment.ClientId != invoice.ClientId || payment.LegalEntityId != invoice.LegalEntityId
+                        || payment.Type != invoice.Type || payment.SellerCompanyId != invoice.SellerCompanyId
+                        || payment.SellerBranchId != invoice.SellerBranchId))))
+        {
+            // Historical conflicting owners must not contribute another customer's amounts.
+            return InvoicePaymentStateService.ResolveOutstandingAmount(invoice);
+        }
+
+        var sources = InvoicePaymentStateService.SelectStatusSourcePayments(relatedPayments.ToList(), invoice.Id, invoice.Amount);
+        var paidAmount = sources.Sum(InvoicePaymentStateService.ResolvePaidAmount);
+        var sourceOutstandingAmount = sources.Sum(InvoicePaymentStateService.ResolveOutstandingAmount);
+        var status = InvoicePaymentStateService.DeriveInvoiceStatus(sources, invoice.Amount, invoice.Status, invoice.Date, DateTime.UtcNow);
+        return InvoicePaymentStateService.ResolveEffectiveOutstandingAmount(
+            invoice.Amount,
+            paidAmount,
+            status,
+            sourceOutstandingAmount,
+            relatedPayments.Any(payment => payment.Status == PaymentStatus.Cancelled));
     }
 
     private static List<Payment> GetContractInvoicePayments(Contract contract)

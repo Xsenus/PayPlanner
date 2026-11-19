@@ -48,6 +48,7 @@ public sealed class GeneratedFinancialDocumentRegistry(PaymentContext db)
         if (caseId <= 0 || workOrderId <= 0 || actorId <= 0 || uploadKey == Guid.Empty || kindName is null
             || string.IsNullOrWhiteSpace(actorName) || actorName.Length > 256 || !IsSha(requestSha256)) return new("invalid");
         if (!await CanCaptureAsync(actorId, caseId, workOrderId, kind, ct)) return new("forbidden");
+        if (await ActKeyConflictAsync()) return new("conflict");
         if (await CaseDocumentUploadRetirementService.IsRetiredAsync(db, caseId, actorId, uploadKey, ct)) return new("retired");
         var existing = await FindAttemptAsync(caseId, actorId, uploadKey, ct);
         if (existing is not null) return await ReplayAsync(existing);
@@ -63,6 +64,7 @@ public sealed class GeneratedFinancialDocumentRegistry(PaymentContext db)
             if (existing is not null) return await ReplayAsync(existing);
             var claims = new GeneratedFinancialClaims(db);
             await claims.LockNumberScopeAsync(kind, ct);
+            if (await ActKeyConflictAsync()) return new("conflict");
             var clientCase = await db.ClientCases.AsNoTracking().Include(c => c.Client).Include(c => c.LegalEntity)
                 .Include(c => c.ResponsibleUser).SingleAsync(c => c.Id == caseId, ct);
             var order = await db.ClientCaseWorkOrders.AsNoTracking().Include(o => o.Items)
@@ -136,6 +138,14 @@ public sealed class GeneratedFinancialDocumentRegistry(PaymentContext db)
                 }
             }
             throw;
+        }
+
+        async Task<bool> ActKeyConflictAsync()
+        {
+            if (kind != GeneratedFinancialDocumentKind.Act) return false;
+            return await db.ActCreateReceipts.AsNoTracking().AnyAsync(receipt => receipt.ActorUserId == actorId && receipt.UploadKey == uploadKey, ct)
+                || await db.GeneratedFinancialDocumentAttempts.AsNoTracking()
+                    .AnyAsync(attempt => attempt.ActorId == actorId && attempt.UploadKey == uploadKey && attempt.ClientCaseId != caseId, ct);
         }
 
         async Task<GeneratedFinancialCaptureResult> ReplayAsync(GeneratedFinancialDocumentAttempt attempt)

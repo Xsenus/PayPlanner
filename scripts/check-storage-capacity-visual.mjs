@@ -93,7 +93,8 @@ try {
   assert.ok(entry?.code, 'The synthetic storage-capacity UI entry module must compile successfully.');
   for (const channel of ['msedge', 'chrome', undefined]) {
     enterPhase(`launch-${channel ?? 'chromium'}`);
-    try { browser = await chromium.launch({ headless: true, channel }); break; }
+    try { browser = await chromium.launch({ headless: true, channel,
+      ...(process.env.PAYPLANNER_TEST_BROWSER_PATH ? { executablePath: process.env.PAYPLANNER_TEST_BROWSER_PATH } : {}) }); break; }
     catch (error) { recordPhase('attempt-failed', error); /* Do not download a browser. */ }
   }
   assert.ok(browser, 'An installed Chromium browser is required.');

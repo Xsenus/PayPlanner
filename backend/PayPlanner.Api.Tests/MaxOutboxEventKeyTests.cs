@@ -37,7 +37,14 @@ public sealed partial class MaxOutboxServiceTests
         if (restriction is "allow" or "personal-override")
         {
             Assert.Equal(MaxOutboxStatuses.Sent, queued.Status);
-            Assert.Equal(MaxMessageTemplateCatalog.RenderNotification(UserNotificationTypes.TaskCompleted), Assert.Single(api.Messages).Text);
+            Assert.Equal(string.Join('\n',
+                "[ЗАДАЧА ВЫПОЛНЕНА] Задача выполнена",
+                "Объект: задача в CRM",
+                "Суть: Задача выполнена",
+                "Данные: Срок и исполнитель не указаны",
+                "Действие: Ознакомиться с уведомлением в CRM",
+                "Контекст: https://crm.example.test/opaque-link",
+                "Кнопки: Открыть CRM"), Assert.Single(api.Messages).Text);
             Assert.Equal(0, await fixture.Processor(api).ProcessBatchAsync(CancellationToken.None));
         }
         else
@@ -196,7 +203,16 @@ public sealed partial class MaxOutboxServiceTests
         await fixture.Processor(api).ProcessBatchAsync(CancellationToken.None);
 
         Assert.Equal(MaxOutboxStatuses.Sent, queued.Status);
-        Assert.Equal(MaxMessageTemplateCatalog.RenderNotification(UserNotificationTypes.TaskCompleted), Assert.Single(api.Messages).Text);
+        var sent = Assert.Single(api.Messages);
+        Assert.Equal(string.Join('\n',
+            "[ЗАДАЧА ВЫПОЛНЕНА] Задача выполнена",
+            "Объект: задача в CRM",
+            "Суть: Задача выполнена",
+            "Данные: Срок и исполнитель не указаны",
+            "Действие: Ознакомиться с уведомлением в CRM",
+            "Контекст: https://crm.example.test/opaque-link",
+            "Кнопки: Открыть CRM"), sent.Text);
+        Assert.Equal(request.ActionUrl, sent.Url?.AbsoluteUri);
     }
 
     [Fact]
@@ -273,6 +289,31 @@ public sealed partial class MaxOutboxServiceTests
     [Fact]
     public async Task EveryLegacyNeutralTemplateResolvesThroughTheRealWorker()
     {
+        static string ExpectedText(UserNotificationTypeDefinition type)
+        {
+            if (type.Domain != UserNotificationDomains.Task)
+            {
+                return MaxMessageTemplateCatalog.RenderNotification(type.Key);
+            }
+
+            var prioritySuffix = type.Priority switch
+            {
+                NotificationPriorities.Critical => " — СРОЧНО",
+                NotificationPriorities.High => " — ВЫСОКИЙ",
+                _ => string.Empty,
+            };
+            var action = type.Key is UserNotificationTypes.TaskCancelled or UserNotificationTypes.TaskApproved
+                ? "не требуется" : "Ознакомиться с уведомлением в CRM";
+            return string.Join('\n',
+                $"[{type.Label.ToUpperInvariant()}] {type.Label}{prioritySuffix}",
+                "Объект: задача в CRM",
+                $"Суть: {type.Label}",
+                "Данные: Срок и исполнитель не указаны",
+                $"Действие: {action}",
+                "Контекст: уведомления CRM",
+                "Кнопки: отсутствуют");
+        }
+
         await using var fixture = await Fixture.CreateAsync();
         var roleId = (await fixture.Db.Users.SingleAsync()).RoleId;
         fixture.Db.SystemSettings.Add(new SystemSetting
@@ -330,8 +371,9 @@ public sealed partial class MaxOutboxServiceTests
             || item.Status == MaxOutboxStatuses.Cancelled && item.LastErrorCode == "court-source-unresolved"));
         Assert.Equal(guardedCount, await fixture.Db.MaxOutboxMessages.CountAsync(item => item.Status == MaxOutboxStatuses.Cancelled));
         Assert.Equal(types.Length - guardedCount, await fixture.Db.MaxOutboxMessages.CountAsync(item => item.Status == MaxOutboxStatuses.Sent));
-        Assert.Equal(types.Where(type => !guardedTypes.Contains(type.Key)).Select(type => MaxMessageTemplateCatalog.RenderNotification(type.Key))
+        Assert.Equal(types.Where(type => !guardedTypes.Contains(type.Key)).Select(ExpectedText)
             .OrderBy(text => text, StringComparer.Ordinal), api.Messages.Select(message => message.Text).OrderBy(text => text, StringComparer.Ordinal));
+        Assert.All(api.Messages, message => Assert.Null(message.Url));
         Assert.Equal(0, await fixture.Processor(api).ProcessBatchAsync(CancellationToken.None));
     }
 

@@ -3,6 +3,7 @@ import { PaymentCreateAdoptedError } from '../../services/paymentCreateAttempts'
 import { captureAuthSessionIdentity, isAuthSessionIdentityCurrent } from '../../services/authService';
 import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
 import { useDocumentDeliveryOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
+import { acknowledgeCreatedAct, actCreateSuccessMessage, type ActCreateOptions } from '../../services/actCreateAttempts';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -2654,22 +2655,25 @@ export function LegalEntityModal({
     setActModalError(null);
   };
 
-  const submitAct = async (payload: ActInput) => {
+  const submitAct = async (payload: ActInput, options?: ActCreateOptions) => {
     const errorOwner = relatedActOwner.capture();
     const operation = isOpen && actModalOpen && deleteSession.authenticated
       && canMutateRelated('acts', actModalMode === 'edit' ? 'canEdit' : 'canCreate') ? relatedActOwner.begin('save') : null;
     if (!operation || !errorOwner) throw new StaleUiOperationError();
     try {
       setActModalError(null);
-      if (actModalMode === "edit" && selectedAct) {
-        await legalEntityActsResult.updateAct(selectedAct.id, payload, operation.isCurrent);
-      } else {
-        await legalEntityActsResult.createAct(payload, operation.isCurrent);
-      }
+      const saved = actModalMode === 'edit' && selectedAct
+        ? await legalEntityActsResult.updateAct(selectedAct.id, payload, operation.isCurrent)
+        : await legalEntityActsResult.createAct(payload, operation.isCurrent, options);
       if (canViewAccounts) await legalEntityInvoicesResult.refreshOwned(operation.isCurrent);
       if (!operation.isCurrent()) throw new StaleUiOperationError();
       setCaseFinanceReloadToken((value) => value + 1);
+      if (actModalMode !== 'edit') {
+        toast.success(actCreateSuccessMessage(saved));
+        acknowledgeCreatedAct(saved);
+      }
       closeActModal();
+      return saved;
     } catch (err) {
       if (!operation.isCurrent()) throw new StaleUiOperationError();
       const message = extractErrorMessage(err, "Не удалось сохранить акт");
@@ -5372,6 +5376,7 @@ export function LegalEntityModal({
           act={selectedAct}
           onClose={closeActModal}
           onSubmit={submitAct}
+          accessScopeKey={relatedActOwner.scope}
           submitting={relatedActOwner.busy}
           errorMessage={actModalError?.owner.isCurrent() ? actModalError.message : null}
           clients={documentClients}

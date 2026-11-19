@@ -66,6 +66,9 @@ public static class CalendarTimeZoneHelper
             : TimeZoneInfo.Utc;
     }
 
+    public static bool TryResolveTimeZone(string? timeZoneId, out TimeZoneInfo timeZone)
+        => TryFindSystemTimeZone(NormalizeTimeZoneId(timeZoneId), out timeZone);
+
     public static DateTime NormalizeUtcInstant(DateTime value)
         => value.Kind switch
         {
