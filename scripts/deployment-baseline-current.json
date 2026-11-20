@@ -1176,11 +1176,11 @@
     }
   ],
   "expectedBaselineMigrationIdsSha256": "bf2b5530e4ad9c54a2b91d110c65a52df453d22a971daabae9495184d1b9e55a",
-  "expectedReleaseCatalogSha256": "318055a2933df99410da08bb7ac9da7230a8d3773e81798789cb96df9e6814ee",
+  "expectedReleaseCatalogSha256": "56ee45e388614d945631038c74d79135147e5d15beceafb1256c7db1e58b7a4d",
   "expectedReleaseSeeds": [
     {
       "releaseId": "2026-11-18-court-binding-stored-in-instance",
-      "version": "1.14.947",
+      "version": "1.14.946",
       "releasedAt": "2026-11-20T03:15:03Z",
       "title": "Судебные реквизиты в карточке инстанции",
       "summary": "Судебная проверка учитывает реквизиты, сохранённые в инстанции дела.",
