@@ -3259,13 +3259,25 @@ public partial class CasesV2Controller : ControllerBase
         }
 
         var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
-        var entity = await _db.ClientCases
+        var storedCourtBindings = StoredCourtSourceBindings(id);
+        var detail = await _db.ClientCases
             .WithCaseIncludes(includePayments: paymentsVisibility?.SeesAll == true)
             .ApplyClientCaseVisibility(visibility)
             .AsNoTracking()
-            .FirstOrDefaultAsync(c => c.Id == id, ct);
-        if (entity is not null)
+            .Where(item => item.Id == id)
+            .Select(item => new
+            {
+                Case = item,
+                HasStoredCourtInstanceBinding = string.IsNullOrWhiteSpace(item.CourtCaseNumber)
+                    && string.IsNullOrWhiteSpace(item.JudicialUid)
+                    && string.IsNullOrWhiteSpace(item.CourtUrl)
+                    && storedCourtBindings.Any(),
+            })
+            .FirstOrDefaultAsync(ct);
+        if (detail is not null)
         {
+            var entity = detail.Case;
+            entity.HasStoredCourtInstanceBinding = detail.HasStoredCourtInstanceBinding;
             if (paymentsVisibility is not null)
             {
                 if (!paymentsVisibility.SeesAll)
@@ -3282,10 +3294,6 @@ public partial class CasesV2Controller : ControllerBase
                 HideCaseFinanceData([entity]);
             }
             await ApplyTaskSummaryAsync([entity], ct, includeInactivityControlSummary: true);
-            if (!HasCaseCourtSourceBinding(entity))
-            {
-                entity.HasStoredCourtInstanceBinding = await StoredCourtSourceBindings(id).AnyAsync(ct);
-            }
             PopulateResponsibleViewAliases([entity]);
             CaseResponsePrivacy.KeepResponsibleCaption(entity);
             var canRevealSensitiveData = await CanRevealCaseSensitiveDataAsync(ct);
@@ -3294,23 +3302,21 @@ public partial class CasesV2Controller : ControllerBase
             {
                 HideCaseSensitiveData(entity);
             }
+            return Ok(entity);
         }
 
-        if (entity is null)
+        var isHidden = await _db.ClientCases
+            .AsNoTracking()
+            .AnyAsync(item => item.Id == id && item.IsHiddenFromExecutor, ct);
+        if (isHidden)
         {
-            var isHidden = await _db.ClientCases
-                .AsNoTracking()
-                .AnyAsync(item => item.Id == id && item.IsHiddenFromExecutor, ct);
-            if (isHidden)
+            return StatusCode(StatusCodes.Status403Forbidden, new
             {
-                return StatusCode(StatusCodes.Status403Forbidden, new
-                {
-                    message = "Дело скрыто от исполнителя. Отправьте запрос доступа ответственному руководителю.",
-                });
-            }
+                message = "Дело скрыто от исполнителя. Отправьте запрос доступа ответственному руководителю.",
+            });
         }
 
-        return entity is not null ? Ok(entity) : NotFound();
+        return NotFound();
     }
 
     [HttpGet("{id:int}/procedural-deadlines")]
