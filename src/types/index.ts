@@ -919,6 +919,7 @@ export interface ClientCase {
   accessRequestReason?: string | null;
   canRevealSensitiveData?: boolean;
   courtInstanceKeys?: string[];
+  hasStoredCourtInstanceBinding?: boolean;
   title: string;
   description?: string;
   status: string;

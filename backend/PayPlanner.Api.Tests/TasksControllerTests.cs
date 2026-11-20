@@ -312,8 +312,10 @@ public partial class TasksControllerTests : IDisposable
         Assert.Contains("клиента", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
-    public async Task CreateTask_PersistsRecurrenceAndReturnsNextOccurrence()
+    [Theory]
+    [InlineData("weekly")]
+    [InlineData("monthly")]
+    public async Task CreateTask_PersistsRecurrenceAndReturnsItInCardAndJournal(string frequency)
     {
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "recurrence-create@example.com", "Автор повторения");
@@ -327,8 +329,9 @@ public partial class TasksControllerTests : IDisposable
             Title = "Регулярно проверять документы",
             DueAt = dueAt,
             RecurrenceEnabled = true,
-            RecurrenceFrequency = "monthly",
-            RecurrenceInterval = 1,
+            RecurrenceFrequency = frequency,
+            RecurrenceInterval = 2,
+            RecurrenceDayOfWeek = (int)dueAt.DayOfWeek,
             RecurrenceDayOfMonth = dueAt.Day,
             RecurrenceTimeMinutes = 9 * 60,
             RecurrenceSkipWeekends = true,
@@ -338,7 +341,7 @@ public partial class TasksControllerTests : IDisposable
         var created = Assert.IsType<CreatedResult>(result.Result);
         var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
         Assert.True(dto.RecurrenceEnabled);
-        Assert.Equal("monthly", dto.RecurrenceFrequency);
+        Assert.Equal(frequency, dto.RecurrenceFrequency);
         Assert.Equal(dueAt.Day, dto.RecurrenceDayOfMonth);
         Assert.True(DateTime.Parse(dto.RecurrenceNextAt!).ToUniversalTime() > dueAt);
 
@@ -346,6 +349,25 @@ public partial class TasksControllerTests : IDisposable
         Assert.True(stored.RecurrenceEnabled);
         Assert.NotNull(stored.RecurrenceNextAt);
         Assert.Equal("UTC", stored.RecurrenceTimeZoneId);
+
+        var detailResult = await controller.GetTask(dto.Id, CancellationToken.None);
+        var detail = Assert.IsType<TaskJournalItemDto>(Assert.IsType<OkObjectResult>(detailResult.Result).Value);
+        var listResult = await controller.GetTasks(null, null, null, null, null, null, ct: CancellationToken.None);
+        var list = Assert.IsType<PagedResponse<TaskJournalItemDto>>(Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        var row = Assert.Single(list.Items, item => item.Id == dto.Id);
+
+        foreach (var read in new[] { detail, row })
+        {
+            Assert.True(read.RecurrenceEnabled);
+            Assert.Equal(dto.RecurrenceFrequency, read.RecurrenceFrequency);
+            Assert.Equal(dto.RecurrenceInterval, read.RecurrenceInterval);
+            Assert.Equal(dto.RecurrenceDayOfWeek, read.RecurrenceDayOfWeek);
+            Assert.Equal(dto.RecurrenceDayOfMonth, read.RecurrenceDayOfMonth);
+            Assert.Equal(dto.RecurrenceTimeMinutes, read.RecurrenceTimeMinutes);
+            Assert.Equal(dto.RecurrenceSkipWeekends, read.RecurrenceSkipWeekends);
+            Assert.Equal(dto.RecurrenceTimeZoneId, read.RecurrenceTimeZoneId);
+            Assert.Equal(dto.RecurrenceNextAt, read.RecurrenceNextAt);
+        }
     }
 
     [Fact]

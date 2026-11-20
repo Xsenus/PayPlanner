@@ -77,7 +77,7 @@ class DeliveryAdmissionTests(unittest.TestCase):
         self.assertTrue(self.admission().stdout.startswith(self.revision+'|'))
 
     def use_payment_reconciliation_baseline(self):
-        baseline = json.loads((self.scripts/'deployment-baseline-current.json').read_text(encoding='utf-8'))
+        baseline = json.loads((self.scripts/'deployment-baseline-act-annual.json').read_text(encoding='utf-8'))
         self.plan.update(baseline)
         self.q['expectedReleaseSeeds'] = copy.deepcopy(baseline['expectedReleaseSeeds'])
         self.q['activeReleaseJsonSha256'] = baseline['expectedReleaseCatalogSha256']

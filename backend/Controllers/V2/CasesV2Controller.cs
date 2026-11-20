@@ -3282,6 +3282,10 @@ public partial class CasesV2Controller : ControllerBase
                 HideCaseFinanceData([entity]);
             }
             await ApplyTaskSummaryAsync([entity], ct, includeInactivityControlSummary: true);
+            if (!HasCaseCourtSourceBinding(entity))
+            {
+                entity.HasStoredCourtInstanceBinding = await StoredCourtSourceBindings(id).AnyAsync(ct);
+            }
             PopulateResponsibleViewAliases([entity]);
             CaseResponsePrivacy.KeepResponsibleCaption(entity);
             var canRevealSensitiveData = await CanRevealCaseSensitiveDataAsync(ct);
@@ -8843,6 +8847,16 @@ public partial class CasesV2Controller : ControllerBase
         }
         catch (SudrfCourtSyncException ex) { syncError = ex.Message; }
         ct.ThrowIfCancellationRequested();
+        if (courtData is not null && provider.Key == "sudrf" && normalizedInstance is ("first" or "appeal")
+            && NormalizeCourtInstance(courtData.Instance) != normalizedInstance)
+        {
+            return Conflict(new { message = "Ссылка ведёт на карточку другой судебной инстанции. Выберите соответствующую инстанцию перед привязкой." });
+        }
+        if (courtData is not null && judicialUid is not null && !string.IsNullOrWhiteSpace(courtData.JudicialUid)
+            && !SameNormalizedCourtSyncText(judicialUid, courtData.JudicialUid))
+        {
+            return Conflict(new { message = "УИД найденной судебной карточки отличается от УИД дела. Проверьте ссылку перед привязкой." });
+        }
         var externalIdSuffix = judicialUid is null ? string.Empty : $" Внешний идентификатор: {Truncate(judicialUid, 120)}.";
         var bindingMessage = $"Привязана судебная карточка «{ResolveCourtInstanceLabel(normalizedInstance)}» через {provider.Label}. Суд: {FormatCaseTextValue(courtName)}; № в суде: {FormatCaseTextValue(courtCaseNumber)}.{externalIdSuffix}";
         var accepted = await WithCurrentCourtCheckAsync(id, expected.Source, async currentCase =>
@@ -9010,10 +9024,7 @@ public partial class CasesV2Controller : ControllerBase
         var expectedCourtFields = CourtSyncCaseState.Capture(clientCase);
         var actorName = User.GetDisplayName();
         var checkedAt = DateTime.UtcNow;
-        var hasCourtBinding =
-            !string.IsNullOrWhiteSpace(clientCase.CourtCaseNumber)
-            || !string.IsNullOrWhiteSpace(clientCase.JudicialUid)
-            || !string.IsNullOrWhiteSpace(clientCase.CourtUrl);
+        var hasCourtBinding = HasCaseCourtSourceBinding(clientCase);
         var manualOnly = request?.ManualOnly == true;
         var manualComment = NormalizeOptional(request?.Comment);
         manualComment = manualComment is null ? string.Empty : Truncate(NormalizeHistoryText(manualComment), 1000);
@@ -9257,7 +9268,7 @@ public partial class CasesV2Controller : ControllerBase
             && nextHearingAt.Value != previousNextHearingAt.Value
             && !previousHearingStillScheduled;
         if (clientCase.NextHearingAt != nextHearingAt
-            && (nextHearingAt.HasValue || courtData.MovementEvents.Count > 0))
+            && (nextHearingAt.HasValue || courtData.MovementEvents.Any(static movement => movement.ScheduledAt.HasValue)))
         {
             if (nextHearingAt.HasValue)
             {
@@ -9937,6 +9948,13 @@ public partial class CasesV2Controller : ControllerBase
                 .FirstOrDefault(item => item.ClientCaseId == clientCase.Id && item.Instance == instance)
                 ?? await _db.ClientCaseCourtInstances
                     .FirstOrDefaultAsync(item => item.ClientCaseId == clientCase.Id && item.Instance == instance, ct);
+            if (instance == "first" && sourceInstance == "appeal" && reference is not null
+                && !string.IsNullOrWhiteSpace(reference.CourtUrl)
+                && SameNormalizedCourtSyncText(reference.CourtUrl, courtData.SourceUrl))
+            {
+                conflictItems.Add("У первой инстанции указана ссылка на апелляцию. Для загрузки её хронологии нужна отдельная ссылка на карточку первой инстанции.");
+            }
+
             var created = reference is null;
             if (created)
             {

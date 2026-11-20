@@ -4,6 +4,7 @@ using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Cases;
+using PayPlanner.Api.Services.LegalIntegrations;
 
 namespace PayPlanner.Api.Controllers.V2;
 
@@ -43,6 +44,17 @@ public partial class CasesV2Controller
 
     private sealed record CourtSyncPrepared(ClientCase Case, Func<Task<CourtSyncApplyResult>> CompleteAsync, CourtPublicationPlan? Changes);
 
+    private static bool HasCaseCourtSourceBinding(ClientCase clientCase)
+        => !string.IsNullOrWhiteSpace(clientCase.CourtCaseNumber)
+            || !string.IsNullOrWhiteSpace(clientCase.JudicialUid)
+            || !string.IsNullOrWhiteSpace(clientCase.CourtUrl);
+
+    private IQueryable<ClientCaseCourtInstance> StoredCourtSourceBindings(int caseId)
+        => _db.ClientCaseCourtInstances.AsNoTracking().Where(instance => instance.ClientCaseId == caseId
+            && (!string.IsNullOrWhiteSpace(instance.CourtCaseNumber)
+                || !string.IsNullOrWhiteSpace(instance.JudicialUid)
+                || !string.IsNullOrWhiteSpace(instance.CourtUrl)));
+
     private async Task<ActionResult<ClientCaseCourtSyncRunDto>> RecordCourtCheckAsync(
         int id, CourtCheckSource expectedSource, DateTime checkedAt, string actorName,
         bool manualOnly, string manualCommentSuffix, CancellationToken ct,
@@ -52,9 +64,16 @@ public partial class CasesV2Controller
         string? recordedFailureMessage = null;
         var result = await WithCurrentCourtCheckAsync(id, expectedSource, async clientCase =>
         {
-            var hasCourtBinding = !string.IsNullOrWhiteSpace(clientCase.CourtCaseNumber)
-                || !string.IsNullOrWhiteSpace(clientCase.JudicialUid)
-                || !string.IsNullOrWhiteSpace(clientCase.CourtUrl);
+            var hasCaseBinding = HasCaseCourtSourceBinding(clientCase);
+            List<string> instanceSourceUrls = [];
+            if (!hasCaseBinding && failureReason is null)
+            {
+                instanceSourceUrls = await StoredCourtSourceBindings(id)
+                    .Select(instance => instance.CourtUrl)
+                    .Take(2)
+                    .ToListAsync(ct);
+            }
+            var hasCourtBinding = hasCaseBinding || instanceSourceUrls.Count > 0;
             string status;
             string message;
             if (failureReason is not null)
@@ -68,6 +87,16 @@ public partial class CasesV2Controller
             {
                 status = "binding-required";
                 message = "Ручная проверка судебного источника не выполнена: в деле не указан номер дела в суде или ссылка на первоисточник.";
+            }
+            else if (!hasCaseBinding && instanceSourceUrls.Count > 0 && !manualOnly)
+            {
+                status = "manual-check-recorded";
+                var sourceUrl = instanceSourceUrls.Count == 1 ? instanceSourceUrls[0] : null;
+                var isUnavailableKadArbitr = ResolveCourtSyncJournalProvider(sourceUrl).Key == "kadArbitr"
+                    && ResolveCourtSyncProvider(sourceUrl) is not ICourtSyncCaseReader;
+                message = isUnavailableKadArbitr
+                    ? "Попытка проверки судебного источника зафиксирована: в судебной инстанции сохранена ссылка на КАД Арбитр. Автоматическая загрузка из КАД Арбитр пока недоступна. Откройте ссылку в инстанции, чтобы внести сведения вручную."
+                    : "Попытка проверки судебного источника зафиксирована: судебные реквизиты сохранены в инстанции. Откройте её, чтобы проверить источник вручную.";
             }
             else
             {

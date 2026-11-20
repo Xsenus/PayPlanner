@@ -31,6 +31,33 @@ public class SudrfCourtSyncServiceTests
         Assert.Contains(data.Participants, item => item.Role == "АДМИНИСТРАТИВНЫЙ ИСТЕЦ" && item.Name == "Шафорост Антон Евгеньевич");
     }
 
+    [Theory]
+    [InlineData("2-438/2026", "first")]
+    [InlineData("33-10176/2026", "appeal")]
+    public void ParseCaseHtml_DistinguishesCaseNumberFromReferencesToAppeal(string number, string instance)
+    {
+        var html = $$"""
+            <html><body><table class="cont1">
+            <tr><th>Номер дела</th><td>{{number}}</td></tr>
+            <tr><th>Уникальный идентификатор дела</th><td>63RS0018-01-2025-000001-01</td></tr>
+            </table>
+            <table class="cont2">
+            <tr><th>Дата размещения</th><th>Событие</th><th>Дата события</th></tr>
+            <tr><td>15.11.2026</td><td>Поступила апелляционная жалоба</td><td>12.11.2026</td></tr>
+            <tr><td>16.11.2026</td><td>Событие без даты</td><td></td></tr>
+            </table></body></html>
+            """;
+
+        var data = SudrfCourtSyncService.ParseCaseHtml(html, new Uri(
+            "https://test--sam.sudrf.ru/modules.php?name=sud_delo&name_op=case&_deloId=1540005&judicial_uid=63RS0018-01-2025-000002-02"));
+
+        Assert.Equal(instance, data.Instance);
+        Assert.Equal("63RS0018-01-2025-000001-01", data.JudicialUid);
+        var movement = Assert.Single(data.MovementEvents, item => item.ScheduledAt.HasValue);
+        Assert.Equal(new DateTime(2026, 11, 12), movement.ScheduledAt);
+        Assert.Equal(new DateTime(2026, 11, 15), movement.PostedAt);
+    }
+
     [Fact]
     public void ParseCaseHtml_ResolvesNextHearingFromProvidedUtcDate()
     {
@@ -263,6 +290,24 @@ public class SudrfCourtSyncServiceTests
         Assert.Equal("appeal", result.Instance);
         Assert.Contains("Хабаровский краевой суд", result.Title);
         Assert.Contains("Судья: Казарикова Оксана Витальевна", result.Summary);
+    }
+
+    [Theory]
+    [InlineData("first", "63RS0018-01-2025-000001-01", "другой инстанции")]
+    [InlineData("appeal", "63RS0018-01-2025-000002-02", "не подтверждает указанный УИД")]
+    public async Task SudrfProvider_SearchRejectsWrongInstanceOrUid(string instance, string uid, string message)
+    {
+        var html = """
+            <table class="cont1"><tr><th>Номер дела</th><td>33-10176/2026</td></tr>
+            <tr><th>Уникальный идентификатор дела</th><td>63RS0018-01-2025-000001-01</td></tr></table>
+            """;
+        using var client = new HttpClient(new FixedResponseHandler(_ => Encoding.GetEncoding(1251).GetBytes(html)));
+        var provider = new SudrfCourtSyncProvider(new SudrfCourtSyncService(client, NullLogger<SudrfCourtSyncService>.Instance));
+        var error = await Assert.ThrowsAsync<SudrfCourtSyncException>(() => provider.SearchCasesAsync(
+            new CourtSyncCaseSearchRequest("https://test--sam.sudrf.ru/modules.php?name=sud_delo&name_op=case&_deloId=1540005",
+                JudicialUid: uid, Instance: instance), CancellationToken.None));
+
+        Assert.Contains(message, error.Message);
     }
 
     [Fact]

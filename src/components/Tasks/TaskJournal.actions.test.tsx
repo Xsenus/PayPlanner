@@ -495,6 +495,22 @@ describe('TaskJournal', () => {
     expect(apiMock.bulkUpdateTaskJournalItems.mock.calls[0][0]).toEqual(expect.objectContaining({ ids: [task.id], billingClassification: 'internal' }));
   });
 
+  it.each(['legacy', 'modern'] as const)('shows saved recurrence in the journal and the %s card', async (taskCardWindowMode) => {
+    const recurring = createTask({ recurrenceEnabled: true, recurrenceFrequency: 'weekly' });
+    const ordinary = createTask({ id: recurring.id + 1, title: 'Разовая задача', recurrenceEnabled: false });
+    await renderJournal([recurring, ordinary], { settings: { taskCardWindowMode } });
+
+    const recurringTitle = await screen.findByTestId(`task-title-link-${recurring.id}`);
+    const ordinaryTitle = screen.getByTestId(`task-title-link-${ordinary.id}`);
+    expect(recurringTitle.closest('td')?.textContent).toContain('Повторяется');
+    expect(ordinaryTitle.closest('td')?.textContent).not.toContain('Повторяется');
+
+    apiMock.getTaskJournalItem.mockResolvedValue(recurring);
+    fireEvent.click(recurringTitle);
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect(within(card).getByText('Повторяется')).not.toBeNull();
+  });
+
   it.each(['legacy', 'modern'] as const)('refreshes billing after bulk without saving or replacing the draft in the %s card', async (taskCardWindowMode) => {
     const task = createTask({ clientBillingClassification: 'billable', billingStatus: 'unbilled' });
     await renderJournal([task], { settings: { taskCardWindowMode } });

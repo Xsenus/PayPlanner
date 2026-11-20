@@ -1213,15 +1213,24 @@ function getLatestCourtSyncSummaryRecord(
     .sort(sortNewestFirst)[0] ?? null;
 }
 
+function hasCourtBindingDetails(source: Pick<ClientCaseCourtInstance, 'courtCaseNumber' | 'judicialUid' | 'courtUrl'>): boolean {
+  return Boolean(source.courtCaseNumber?.trim() || source.judicialUid?.trim() || source.courtUrl?.trim());
+}
+
+function hasStoredCourtInstanceBinding(instances: ClientCaseCourtInstance[], caseId: number): boolean {
+  return instances.some((instance) => instance.id > 0 && instance.clientCaseId === caseId && hasCourtBindingDetails(instance));
+}
+
 function getCourtSyncSummary(
   caseItem: ClientCase,
+  hasInstanceBinding: boolean,
   logs: ClientCaseCourtSyncLog[],
   loading: boolean,
   loadError: string | null,
   lastResult: ClientCaseCourtSyncRun | null,
 ): { value: string; tone: SummaryTone } {
-  const hasCourtBinding = Boolean(caseItem.courtCaseNumber || caseItem.judicialUid || caseItem.courtUrl);
-  if (!hasCourtBinding) {
+  if (!hasCourtBindingDetails(caseItem)) {
+    if (hasInstanceBinding) return { value: 'Реквизиты в инстанции', tone: 'cyan' };
     return isPretrialCaseStage(caseItem)
       ? { value: 'Не требуется', tone: 'slate' }
       : { value: 'Нет привязки', tone: 'rose' };
@@ -2517,11 +2526,14 @@ function CaseDetailScreen({
     };
   }, [captureScreen, caseId, reloadToken, headerReloadToken]);
 
+  const hasInstanceCourtBinding = caseItem?.id === caseId && (
+    caseItem.hasStoredCourtInstanceBinding === true || hasStoredCourtInstanceBinding(courtInstances, caseId)
+  );
+
   useEffect(() => {
     if (caseItem?.id !== caseId) return;
 
-    const hasCourtBinding = Boolean(caseItem.courtCaseNumber || caseItem.judicialUid || caseItem.courtUrl);
-    if (!hasCourtBinding) {
+    if (!hasCourtBindingDetails(caseItem) && !hasInstanceCourtBinding) {
       setCourtSyncLogs([]);
       setCourtSyncLogsError(null);
       setCourtSyncLogsLoading(false);
@@ -2558,6 +2570,7 @@ function CaseDetailScreen({
     caseItem?.courtUrl,
     caseItem?.id,
     caseItem?.judicialUid,
+    hasInstanceCourtBinding,
     reloadToken, headerReloadToken,
   ]);
 
@@ -4374,6 +4387,7 @@ function CaseDetailScreen({
   const responsibleLastViewedByName = caseItem.lastViewedByResponsibleUserName ?? caseItem.lastViewedByUserName ?? null;
   const courtSyncSummary = getCourtSyncSummary(
     caseItem,
+    hasInstanceCourtBinding,
     courtSyncLogs,
     courtSyncLogsLoading,
     courtSyncLogsError,
@@ -7936,6 +7950,7 @@ function CourtPanel({
   onCloseProceduralDeadline: (deadline: ClientCaseProceduralDeadline) => void;
 }) {
   const hasCourtBinding = Boolean(caseItem.courtName || caseItem.courtCaseNumber || caseItem.judicialUid || caseItem.courtUrl);
+  const hasInstanceBinding = caseItem.hasStoredCourtInstanceBinding === true || hasStoredCourtInstanceBinding(courtInstances, caseItem.id);
   const isPretrialCase = isPretrialCaseStage(caseItem);
   const deadlines = [
     ['Подача заявления', caseItem.claimFiledAt],
@@ -8337,7 +8352,9 @@ function CourtPanel({
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Судебный блок</h2>
           <div className="mt-1 text-sm text-slate-500">
-            {hasCourtBinding ? 'Суд, номер дела, источник и процессуальные сроки по карточке.' : 'Судебная привязка пока не настроена.'}
+            {hasCourtBinding
+              ? 'Суд, номер дела, источник и процессуальные сроки по карточке.'
+              : hasInstanceBinding ? 'Судебные реквизиты сохранены в инстанции.' : 'Судебная привязка пока не настроена.'}
           </div>
           {caseItem.judicialUid ? (
             <div className="mt-2 inline-flex flex-wrap items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm text-cyan-950">

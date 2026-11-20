@@ -3220,6 +3220,35 @@ describe('CaseDetailPage', () => {
     });
   });
 
+  it('shows the court binding saved in an instance when the case-level fields are empty', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      courtName: null, courtCaseNumber: null, courtUrl: null, judicialUid: null,
+      hasStoredCourtInstanceBinding: true,
+    }));
+    vi.mocked(apiService.getCaseCourtInstances).mockResolvedValue([
+      {
+        id: 81,
+        clientCaseId: 15,
+        instance: 'first',
+        instanceLabel: 'Первая инстанция',
+        courtUrl: 'https://kad.arbitr.ru/Card/11111111-1111-1111-1111-111111111111',
+        createdAt: '2026-11-18T00:00:00Z',
+        complaints: [],
+      },
+    ]);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    expect(await screen.findByLabelText('Судебная проверка: Реквизиты в инстанции')).toBeTruthy();
+    expect(screen.queryByLabelText('Судебная проверка: Нет привязки')).toBeNull();
+    await waitFor(() => expect(apiService.getCaseCourtSyncLogs).toHaveBeenCalledWith(15, expect.anything()));
+    expect(apiService.getCaseCourtInstances).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    expect(await screen.findByText('Судебные реквизиты сохранены в инстанции.')).toBeTruthy();
+    await waitFor(() => expect(apiService.getCaseCourtInstances).toHaveBeenCalledWith(15, expect.anything()));
+  });
+
   it('does not require a court binding for a pretrial case', async () => {
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
       stage: 'Досудебная работа',

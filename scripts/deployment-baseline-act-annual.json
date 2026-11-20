@@ -1,0 +1,1640 @@
+{
+  "expectedProtectedTables": [
+    "Acts",
+    "ClientCaseAppealDecisions",
+    "ClientCaseProceduralDeadlines",
+    "Contracts",
+    "GoogleCalendarTaskLinks",
+    "Invoices",
+    "MoneyOperations",
+    "PaymentRemainderTransfers",
+    "PaymentResponsibles",
+    "Payments",
+    "TaskJournalComments",
+    "TaskJournalDeadlineChangeRequests",
+    "TaskJournalFiles",
+    "TaskJournalItems",
+    "TaskJournalParticipants",
+    "YandexCalendarTaskLinks"
+  ],
+  "minimumRemainingBytes": 3221225472,
+  "policy": {
+    "automaticDatabaseRestore": false,
+    "credentialInThisPlan": false,
+    "localEvidenceIsCI": false,
+    "productionDataRepair": false,
+    "sendRealNotificationsForSmoke": false,
+    "sourceOrArtifactRebuild": false
+  },
+  "previousRevision": "9dc737ed3ae1b586789bbfcee34036db6e8bb728",
+  "expectedPreviousApiSha256": "29e40b548ac43123b804d0adcf9e6c124dab60985bb4c1a6c8f1c9c75ef5053c",
+  "expectedPreviousMigrationsSha256": "36772d2095a6c21a93019fc70d4977b728702a4fe1aaa29ddc9e1f8adf55a2cc",
+  "expectedMigration": "20261111140010_AddActAnnualNumberingPostgreSql",
+  "expectedAddedProtectedTables": [],
+  "expectedBaselineMigrations": [
+    "20260401081905_InitialPostgreSqlBaseline",
+    "20260401165131_AddExternalAuthSupport",
+    "20260403042518_AddRoleManagementAuditAndPermissions",
+    "20260406074652_AddExternalAuthLinkingAndProfileFlows",
+    "20260407103411_AddContactsDirectory",
+    "20260408045602_AddExpenseClientAttribution",
+    "20260408071611_AddInvoiceLineItems",
+    "20260408111047_AddObjectAuditMetadata",
+    "20260408155452_AddObjectAuditEvents",
+    "20260409011619_AddUserAndRoleAuditMetadata",
+    "20260410004943_ExpandInvoiceLineItemNameLength",
+    "20260410121435_AddAreaAndSettlementToAddressRecords",
+    "20260413060351_AddUserCompanyAccesses",
+    "20260413081212_AddBanksDirectory",
+    "20260414103148_AddServiceCategoriesAndServiceFields",
+    "20260414160832_AddContractBillingModeAndOpenEndedFlag",
+    "20260414185429_AddActLineItemsAndCreationModes",
+    "20260414194537_AddInvoicePrintOptions",
+    "20260415154738_AddInvoiceLineItemServiceReference",
+    "20260417052543_AddSpreadsheetImportBatches",
+    "20260424034051_AddPaymentDocumentMetadata",
+    "20260424082356_AddClientStatusSystemKey",
+    "20260428075947_AddClientBalanceTransactions",
+    "20260428193743_AddCashOrders",
+    "20260429102114_AddCashOrderDocumentFields",
+    "20260429104933_AddMoneyOperationInvoiceMatching",
+    "20260429112034_AddBankStatementImportBatches",
+    "20260430032746_AddMoneyOperationAccountingTypeIndex",
+    "20260430045509_AddMoneyAccounts",
+    "20260430073824_BackfillMoneyAccountsFromOperations",
+    "20260430102735_LinkMoneyOperationsToIncomeTypesPostgres",
+    "20260502114300_AddDocumentWorkflowStatusesPostgres",
+    "20260502132156_AddDocumentSigningWorkflowPostgres",
+    "20260502133417_AddInvoiceCancellationFieldsPostgres",
+    "20260502140343_AddActCancellationFieldsPostgres",
+    "20260502195448_AddMoneyBalanceReconciliationResultsPostgres",
+    "20260503100030_AddMoneyOperationVatFieldsPostgres",
+    "20260504024859_SyncPostgreSqlModelSnapshot",
+    "20260504094814_RepairPostgreSqlMoneySchema",
+    "20260504110423_AddTaskJournalPostgres",
+    "20260504190603_AddLegalEntityDocumentOwnersPostgres",
+    "20260505033827_AddLegalEntityBalanceTransactionsPostgres",
+    "20260505080331_AddLegalEntityContractsPostgres",
+    "20260505204535_AddNotificationDeliveriesPostgres",
+    "20260505211117_AddNotificationSendersPostgres",
+    "20260506035403_AddNotificationBotSubscriptionsPostgres",
+    "20260507110101_AddPaymentRemainderTransfersPostgres",
+    "20260508074227_AddTaskClientLinksPostgres",
+    "20260508101215_AddTaskJournalParticipantsPostgres",
+    "20260508143247_AddTaskJournalCommentsPostgres",
+    "20260508145720_AddTaskJournalFilesPostgres",
+    "20260510125000_AddTaskJournalDurationPostgres",
+    "20260512055059_AddCounterpartyDualRolePostgres",
+    "20260512071821_AddTaskLegalEntityLinksPostgres",
+    "20260512180103_AddFinancialActionReasonSettingPostgres",
+    "20260512190023_AddDocumentStatusDictionaryPostgres",
+    "20260513120000_AddRoleVisibilityScopesAndUserDepartmentsPostgres",
+    "20260513185108_AddDepartmentDictionaryPostgres",
+    "20260515151139_ExpandServiceDictionaryNameLengthPostgres",
+    "20260515173000_ExpandServiceDictionaryTextFieldsPostgres",
+    "20260515185307_AddUserNotificationsPostgres",
+    "20260517173131_AddClientCaseRegistryFieldsPostgres",
+    "20260517190944_AddClientCaseDetailFieldsPostgres",
+    "20260517194755_AddClientCaseDocumentsPostgres",
+    "20260517231301_AddClientCaseActivityFieldsPostgres",
+    "20260518002437_AddClientCaseRelatedPartiesPostgres",
+    "20260518012203_AddClientCaseProceduralDeadlinesPostgres",
+    "20260519062530_AddTaskApprovalDueAtPostgres",
+    "20260519122626_AddClientCaseHiddenAccessFieldsPostgres",
+    "20260520071340_AddClientCaseWorkOrdersPostgres",
+    "20260520083207_AddClientCaseWorkOrderApprovalPostgres",
+    "20260520085946_AddClientCaseRelatedPartyArchivePostgres",
+    "20260521093030_AddClientCaseProceduralDeadlineEntitiesPostgres",
+    "20260521120030_AddClientCaseCourtEventsPostgres",
+    "20260521133030_AddClientCaseCourtPartiesPostgres",
+    "20260521150030_AddClientCaseCourtEventHistoryPostgres",
+    "20260521162030_AddClientCaseCourtDirectoryPostgres",
+    "20260521170130_AddAppReleasesPostgres",
+    "20260521173030_AddClientCaseCalendarAuditColumnsPostgres",
+    "20260521190030_AddTaskContractorPaymentsPostgres",
+    "20260522025030_AddMoneyOperationResponsibleUserPostgres",
+    "20260524093337_AddClientCaseCourtInstancesPostgres",
+    "20260525074224_AddTaskContractorPaymentResultDelayPostgres",
+    "20260525092434_AddUserPresenceFieldsPostgres",
+    "20260529064455_ExpandActCommentLengthPostgres",
+    "20260601013100_AddYandexDiskCrmSyncStatesPostgres",
+    "20260601144644_AddGoogleCalendarSyncPostgres",
+    "20260602041322_AddYandexCalendarSyncPostgres",
+    "20260602053100_AddCalendarSyncFromDatePostgres",
+    "20260611064918_AddManualControlFlagsPostgres",
+    "20260611151100_SetCalendarViewScopeForRolesPostgres",
+    "20260612032104_AddPaymentAdvanceReviewPostgres",
+    "20260614141716_AddActCorrectionLinksPostgres",
+    "20260616045521_AddStickyNotes",
+    "20260617043730_AddRoleCalendarVisibleUsersPostgres",
+    "20260617054207_RepairPostgresUserExternalContractorColumn",
+    "20260617054605_RepairPostgresTaskContractorPaymentColumns",
+    "20260617085422_AddUserPushSubscriptionsPostgres",
+    "20260617145326_AddStickyNoteAssignmentsPostgres",
+    "20260709091323_AddTaskDeadlineChangeRequestsPostgres",
+    "20260709162712_AddTaskJournalTemplatesPostgres",
+    "20260713160212_AddStickyNoteAppearancePostgres",
+    "20260714032100_EnhanceStickyNoteFormattingPostgres",
+    "20260715161542_AddTaskClientBillingPostgres",
+    "20260716072736_AddTaskOtherPermissionsPostgres",
+    "20260716173640_AddCalendarSyncLogCreatedAtIndexesPostgres",
+    "20260716185521_AddTaskJournalReadIndexesPostgres",
+    "20260716195737_AddActJournalReadIndexPostgres",
+    "20260716201802_AddPaymentJournalReadIndexesPostgres",
+    "20260716223532_AddCashOrderReadIndexesPostgres",
+    "20260716234145_OptimizePaymentStatusUpdaterIndexPostgres",
+    "20260717010239_OptimizeStickyNoteReminderIndexPostgres",
+    "20260729120612_AddCourtEventExternalKeys",
+    "20260729133331_AddCourtSyncProvenance",
+    "20260730035123_AddNotificationDeliveryChannelCreatedAtIndexPostgres",
+    "20260730060909_AddTaskInactivityControlCycleStatePostgres",
+    "20260730095232_AddCaseInactivityDisabledReasonPostgres",
+    "20260730105653_AddNotificationSnoozePostgres",
+    "20260731015057_AddExternalWorkOrderApprovalPostgres",
+    "20260731071501_AddClientPortalPostgres",
+    "20260731090614_AddExternalCalendarCommentVisibilityPostgres",
+    "20260731093753_AddMessengerDocumentDeliveriesPostgres",
+    "20260731095249_AddMessengerDocumentDeliveryOutboxPostgres",
+    "20260731105832_AddElectronicSignatureCorePostgres",
+    "20260731112535_AddMaxMessengerLinkingPostgres",
+    "20260731114224_AddMaxMessengerOutboxPostgres",
+    "20260731115644_AddExternalWorkOrderExpirationNotificationPostgres",
+    "20260731122051_AddExternalWorkOrderApprovalAttachmentsPostgres",
+    "20260731141306_AddMaxInboundCorrespondencePostgres",
+    "20260731200204_AddSmsProviderDeliveryStatusPostgres",
+    "20260731201635_AddClientPassportEncryptionColumnsPostgres",
+    "20260804213832_AddAuthTokenVersionPostgres",
+    "20260805123714_AddExternalCalendarTaskSyncOutboxPostgres",
+    "20260810062118_AddInvoiceDocumentTemplateKeyPostgreSql",
+    "20260813154419_UnifyContactsDirectoryPostgres",
+    "20260815194547_LinkContractsToClientCasesPostgres",
+    "20260816010000_AlignLegacyTimestamptzColumnsWithUtcStoragePostgres",
+    "20260914153730_AddJudicialUidTrackingPostgreSql",
+    "20260921101641_AddTaskRecurrencePostgres",
+    "20260921112150_AddClientBirthdayAutomationPostgres",
+    "20260921130903_ExpandInvoiceDescriptionForTaskEvidencePostgres",
+    "20260921152240_AddInternalChatPostgres",
+    "20260922052737_AddStorageCatalogPostgres",
+    "20260923075121_AddClientCaseAppealDecisionPostgres",
+    "20260923110958_AddCourtSyncHealthStatePostgres",
+    "20260923125903_AddCaseWritMilestonesPostgres",
+    "20260923144837_AddCasePositionReviewPostgres",
+    "20260923152458_AddAppealComplaintFiledByPostgres",
+    "20260923184012_AddCourtHearingOutcomePostgres",
+    "20260923193454_AddNextHearingConfirmationPostgres",
+    "20260923230145_AddClientCaseOurCourtRolePostgres",
+    "20260923233153_AddClientCasePartyIdentifiersPostgres",
+    "20260924002727_AddClientCaseCourtAmountsPostgres",
+    "20260924022633_AddCaseWritSubmissionPostgres",
+    "20260924033011_AddCaseCourtRecoveryPaymentsPostgres",
+    "20260924105659_AddCourtHearingPreviousSchedulePostgres",
+    "20260924120629_AddInternalChatPersonalStatePostgres",
+    "20260924174244_AddInternalChatNoReplyReminderPostgres",
+    "20260924185041_AddCaseHearingPreparationPostgres",
+    "20260924222802_ReclassifySudrfCourtSummariesPostgres",
+    "20260925113001_ReleaseTasksFromCancelledInvoicesPostgres",
+    "20260925140001_AddCasePositionTemplatesPostgres",
+    "20260925150001_AddCaseFinalReportMarkerPostgres",
+    "20260927052814_AddCourtRegistrationDatePostgres",
+    "20260927183105_AddDatabaseBackupCatalogPostgres",
+    "20260928004704_IndexDatabaseBackupCatalogPagingPostgres",
+    "20260928044359_AddDatabaseBackupAttemptsPostgres",
+    "20260928201537_AddStorageProductBindingsPostgres",
+    "20260928220550_AddTaskFileCaseDocumentLinksPostgres",
+    "20260929080553_AddTaskUploadDiscoveryPrefixIndexPostgres",
+    "20260929184130_AddStorageCapacityReservationsPostgres",
+    "20260929223428_AddInternalChatSendRequestIdPostgres",
+    "20260929225710_AddInternalChatNotificationRecoveryPostgres",
+    "20260930073631_AddStorageUploadProductContextsPostgres",
+    "20260930110843_AddCaseDocumentNotificationDispatchPostgres",
+    "20260930152428_AddPendingCaseUploadDiscoveryPrefixIndexPostgres",
+    "20260930174624_AddCasePublicationQueuePagingIndexesPostgres",
+    "20260930191728_AddCaseDocumentUploadRetirementsPostgres",
+    "20261001095344_ExpandGeneratedCaseDocumentKeysPostgres",
+    "20261001183645_AddCourtDeadlineSourceIdentityPostgres",
+    "20261001205522_AddCourtDocumentSourceClaimsPostgres",
+    "20261001213238_AddCourtDocumentSourceContentPostgres",
+    "20261002053002_AddGeneratedFinancialDocumentAttemptsPostgres",
+    "20261002063941_AddGeneratedFinancialClaimsPostgres",
+    "20261002124144_AddGeneratedFinancialRegistryLifecyclePostgres",
+    "20261002134415_AddGeneratedFinancialAttemptRecoveryPostgres",
+    "20261002203603_AddGeneratedCaseReservationRecoveryPostgres",
+    "20261003062921_AddInternalChatSendAttemptsPostgres",
+    "20261004160240_AddStageWriterAdmissionPostgres",
+    "20261005084510_AddStageFileReceiptPostgres",
+    "20261005183010_AddStageWriterMarkerIdentityPostgres",
+    "20261005194510_AddStageRootIdentityPostgres",
+    "20261009104024_AddCompanyBranchesPostgres",
+    "20261009121033_AddDocumentSellerSelectionPostgres",
+    "20261009125621_AddContractSellerSelectionPostgres",
+    "20261009132451_AddBankConnectionsPostgres",
+    "20261009182414_AddLineItemVatRatePostgres",
+    "20261009202808_ExtendBankConnectionsPostgres",
+    "20261009210536_AddTaxRegisterPostgres",
+    "20261010031710_TaxRegisterUniqueCorrectionPostgres",
+    "20261010062233_AddSalesRequestsPostgres",
+    "20261010083529_SalesRequestResultCasePostgres",
+    "20261010103657_SalesRequestStatusAutoAdvancePostgres",
+    "20261010125412_SalesRequestConditionsAndSlaPostgres",
+    "20261011031732_AddCompanyBrandImageVersionsPostgres",
+    "20261011035748_AddSalesRequestNotificationOutboxPostgres",
+    "20261016101256_AddBankImportProvenancePostgreSql",
+    "20261016132320_AddMoneyBalanceScopePostgreSql",
+    "20261024110001_AddDocumentSellerSnapshotPolicyPostgres",
+    "20261027005432_AddPaymentCreateAttempts",
+    "20261027014154_AddPersonalChatHistory",
+    "20261027031752_AddTaskTimeTracking",
+    "20261027130010_AddSalesRequestServiceInvoice",
+    "20261028020010_ProtectStickyNoteVersion",
+    "20261028030010_ProtectDeadlineDecision",
+    "20261028040010_AddDeadlineReviewerDispatch",
+    "20261028050010_AddTaskStatusNotificationOutbox",
+    "20261028060010_AddTaskStatusTransitionToken",
+    "20261028070010_BindApprovalNotificationStage",
+    "20261028080010_CashInventoryAccountIdentityPostgreSql",
+    "20261030224445_AddBalanceApplicationReceiptsPostgreSql",
+    "20261030232554_FenceCancelledBalanceApplicationsPostgreSql",
+    "20261031125252_AddPaymentOverdueNotificationOutboxPostgreSql",
+    "20261031233007_AddCompanyBankAccountBindingsPostgreSql",
+    "20261101000834_IndexCompanyBankBindingHistoryPostgreSql",
+    "20261105040010_AddCourtDocumentAcceptedControlsPostgreSql",
+    "20261105070010_AddCaseCourtNotificationOutboxPostgreSql"
+  ],
+  "expectedBaselineMigrationRows": [
+    {
+      "MigrationId": "20260401081905_InitialPostgreSqlBaseline",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260401165131_AddExternalAuthSupport",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260403042518_AddRoleManagementAuditAndPermissions",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260406074652_AddExternalAuthLinkingAndProfileFlows",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260407103411_AddContactsDirectory",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260408045602_AddExpenseClientAttribution",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260408071611_AddInvoiceLineItems",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260408111047_AddObjectAuditMetadata",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260408155452_AddObjectAuditEvents",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260409011619_AddUserAndRoleAuditMetadata",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260410004943_ExpandInvoiceLineItemNameLength",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260410121435_AddAreaAndSettlementToAddressRecords",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260413060351_AddUserCompanyAccesses",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260413081212_AddBanksDirectory",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260414103148_AddServiceCategoriesAndServiceFields",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260414160832_AddContractBillingModeAndOpenEndedFlag",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260414185429_AddActLineItemsAndCreationModes",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260414194537_AddInvoicePrintOptions",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260415154738_AddInvoiceLineItemServiceReference",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260417052543_AddSpreadsheetImportBatches",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260424034051_AddPaymentDocumentMetadata",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260424082356_AddClientStatusSystemKey",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260428075947_AddClientBalanceTransactions",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260428193743_AddCashOrders",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260429102114_AddCashOrderDocumentFields",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260429104933_AddMoneyOperationInvoiceMatching",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260429112034_AddBankStatementImportBatches",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260430032746_AddMoneyOperationAccountingTypeIndex",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260430045509_AddMoneyAccounts",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260430073824_BackfillMoneyAccountsFromOperations",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260430102735_LinkMoneyOperationsToIncomeTypesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260502114300_AddDocumentWorkflowStatusesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260502132156_AddDocumentSigningWorkflowPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260502133417_AddInvoiceCancellationFieldsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260502140343_AddActCancellationFieldsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260502195448_AddMoneyBalanceReconciliationResultsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260503100030_AddMoneyOperationVatFieldsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260504024859_SyncPostgreSqlModelSnapshot",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260504094814_RepairPostgreSqlMoneySchema",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260504110423_AddTaskJournalPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260504190603_AddLegalEntityDocumentOwnersPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260505033827_AddLegalEntityBalanceTransactionsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260505080331_AddLegalEntityContractsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260505204535_AddNotificationDeliveriesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260505211117_AddNotificationSendersPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260506035403_AddNotificationBotSubscriptionsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260507110101_AddPaymentRemainderTransfersPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260508074227_AddTaskClientLinksPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260508101215_AddTaskJournalParticipantsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260508143247_AddTaskJournalCommentsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260508145720_AddTaskJournalFilesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260510125000_AddTaskJournalDurationPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260512055059_AddCounterpartyDualRolePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260512071821_AddTaskLegalEntityLinksPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260512180103_AddFinancialActionReasonSettingPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260512190023_AddDocumentStatusDictionaryPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260513120000_AddRoleVisibilityScopesAndUserDepartmentsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260513185108_AddDepartmentDictionaryPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260515151139_ExpandServiceDictionaryNameLengthPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260515173000_ExpandServiceDictionaryTextFieldsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260515185307_AddUserNotificationsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260517173131_AddClientCaseRegistryFieldsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260517190944_AddClientCaseDetailFieldsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260517194755_AddClientCaseDocumentsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260517231301_AddClientCaseActivityFieldsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260518002437_AddClientCaseRelatedPartiesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260518012203_AddClientCaseProceduralDeadlinesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260519062530_AddTaskApprovalDueAtPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260519122626_AddClientCaseHiddenAccessFieldsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260520071340_AddClientCaseWorkOrdersPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260520083207_AddClientCaseWorkOrderApprovalPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260520085946_AddClientCaseRelatedPartyArchivePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260521093030_AddClientCaseProceduralDeadlineEntitiesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260521120030_AddClientCaseCourtEventsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260521133030_AddClientCaseCourtPartiesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260521150030_AddClientCaseCourtEventHistoryPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260521162030_AddClientCaseCourtDirectoryPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260521170130_AddAppReleasesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260521173030_AddClientCaseCalendarAuditColumnsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260521190030_AddTaskContractorPaymentsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260522025030_AddMoneyOperationResponsibleUserPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260524093337_AddClientCaseCourtInstancesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260525074224_AddTaskContractorPaymentResultDelayPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260525092434_AddUserPresenceFieldsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260529064455_ExpandActCommentLengthPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260601013100_AddYandexDiskCrmSyncStatesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260601144644_AddGoogleCalendarSyncPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260602041322_AddYandexCalendarSyncPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260602053100_AddCalendarSyncFromDatePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260611064918_AddManualControlFlagsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260611151100_SetCalendarViewScopeForRolesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260612032104_AddPaymentAdvanceReviewPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260614141716_AddActCorrectionLinksPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260616045521_AddStickyNotes",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260617043730_AddRoleCalendarVisibleUsersPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260617054207_RepairPostgresUserExternalContractorColumn",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260617054605_RepairPostgresTaskContractorPaymentColumns",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260617085422_AddUserPushSubscriptionsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260617145326_AddStickyNoteAssignmentsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260709091323_AddTaskDeadlineChangeRequestsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260709162712_AddTaskJournalTemplatesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260713160212_AddStickyNoteAppearancePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260714032100_EnhanceStickyNoteFormattingPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260715161542_AddTaskClientBillingPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260716072736_AddTaskOtherPermissionsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260716173640_AddCalendarSyncLogCreatedAtIndexesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260716185521_AddTaskJournalReadIndexesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260716195737_AddActJournalReadIndexPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260716201802_AddPaymentJournalReadIndexesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260716223532_AddCashOrderReadIndexesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260716234145_OptimizePaymentStatusUpdaterIndexPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260717010239_OptimizeStickyNoteReminderIndexPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260729120612_AddCourtEventExternalKeys",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260729133331_AddCourtSyncProvenance",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260730035123_AddNotificationDeliveryChannelCreatedAtIndexPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260730060909_AddTaskInactivityControlCycleStatePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260730095232_AddCaseInactivityDisabledReasonPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260730105653_AddNotificationSnoozePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260731015057_AddExternalWorkOrderApprovalPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260731071501_AddClientPortalPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260731090614_AddExternalCalendarCommentVisibilityPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260731093753_AddMessengerDocumentDeliveriesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260731095249_AddMessengerDocumentDeliveryOutboxPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260731105832_AddElectronicSignatureCorePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260731112535_AddMaxMessengerLinkingPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260731114224_AddMaxMessengerOutboxPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260731115644_AddExternalWorkOrderExpirationNotificationPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260731122051_AddExternalWorkOrderApprovalAttachmentsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260731141306_AddMaxInboundCorrespondencePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260731200204_AddSmsProviderDeliveryStatusPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260731201635_AddClientPassportEncryptionColumnsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260804213832_AddAuthTokenVersionPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260805123714_AddExternalCalendarTaskSyncOutboxPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260810062118_AddInvoiceDocumentTemplateKeyPostgreSql",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260813154419_UnifyContactsDirectoryPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260815194547_LinkContractsToClientCasesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260816010000_AlignLegacyTimestamptzColumnsWithUtcStoragePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260914153730_AddJudicialUidTrackingPostgreSql",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260921101641_AddTaskRecurrencePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260921112150_AddClientBirthdayAutomationPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260921130903_ExpandInvoiceDescriptionForTaskEvidencePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260921152240_AddInternalChatPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260922052737_AddStorageCatalogPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260923075121_AddClientCaseAppealDecisionPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260923110958_AddCourtSyncHealthStatePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260923125903_AddCaseWritMilestonesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260923144837_AddCasePositionReviewPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260923152458_AddAppealComplaintFiledByPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260923184012_AddCourtHearingOutcomePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260923193454_AddNextHearingConfirmationPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260923230145_AddClientCaseOurCourtRolePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260923233153_AddClientCasePartyIdentifiersPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260924002727_AddClientCaseCourtAmountsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260924022633_AddCaseWritSubmissionPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260924033011_AddCaseCourtRecoveryPaymentsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260924105659_AddCourtHearingPreviousSchedulePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260924120629_AddInternalChatPersonalStatePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260924174244_AddInternalChatNoReplyReminderPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260924185041_AddCaseHearingPreparationPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260924222802_ReclassifySudrfCourtSummariesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260925113001_ReleaseTasksFromCancelledInvoicesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260925140001_AddCasePositionTemplatesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260925150001_AddCaseFinalReportMarkerPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260927052814_AddCourtRegistrationDatePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260927183105_AddDatabaseBackupCatalogPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260928004704_IndexDatabaseBackupCatalogPagingPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260928044359_AddDatabaseBackupAttemptsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260928201537_AddStorageProductBindingsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260928220550_AddTaskFileCaseDocumentLinksPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260929080553_AddTaskUploadDiscoveryPrefixIndexPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260929184130_AddStorageCapacityReservationsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260929223428_AddInternalChatSendRequestIdPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260929225710_AddInternalChatNotificationRecoveryPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260930073631_AddStorageUploadProductContextsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260930110843_AddCaseDocumentNotificationDispatchPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260930152428_AddPendingCaseUploadDiscoveryPrefixIndexPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260930174624_AddCasePublicationQueuePagingIndexesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20260930191728_AddCaseDocumentUploadRetirementsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261001095344_ExpandGeneratedCaseDocumentKeysPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261001183645_AddCourtDeadlineSourceIdentityPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261001205522_AddCourtDocumentSourceClaimsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261001213238_AddCourtDocumentSourceContentPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261002053002_AddGeneratedFinancialDocumentAttemptsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261002063941_AddGeneratedFinancialClaimsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261002124144_AddGeneratedFinancialRegistryLifecyclePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261002134415_AddGeneratedFinancialAttemptRecoveryPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261002203603_AddGeneratedCaseReservationRecoveryPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261003062921_AddInternalChatSendAttemptsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261004160240_AddStageWriterAdmissionPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261005084510_AddStageFileReceiptPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261005183010_AddStageWriterMarkerIdentityPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261005194510_AddStageRootIdentityPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261009104024_AddCompanyBranchesPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261009121033_AddDocumentSellerSelectionPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261009125621_AddContractSellerSelectionPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261009132451_AddBankConnectionsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261009182414_AddLineItemVatRatePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261009202808_ExtendBankConnectionsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261009210536_AddTaxRegisterPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261010031710_TaxRegisterUniqueCorrectionPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261010062233_AddSalesRequestsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261010083529_SalesRequestResultCasePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261010103657_SalesRequestStatusAutoAdvancePostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261010125412_SalesRequestConditionsAndSlaPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261011031732_AddCompanyBrandImageVersionsPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261011035748_AddSalesRequestNotificationOutboxPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261016101256_AddBankImportProvenancePostgreSql",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261016132320_AddMoneyBalanceScopePostgreSql",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261024110001_AddDocumentSellerSnapshotPolicyPostgres",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261027005432_AddPaymentCreateAttempts",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261027014154_AddPersonalChatHistory",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261027031752_AddTaskTimeTracking",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261027130010_AddSalesRequestServiceInvoice",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261028020010_ProtectStickyNoteVersion",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261028030010_ProtectDeadlineDecision",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261028040010_AddDeadlineReviewerDispatch",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261028050010_AddTaskStatusNotificationOutbox",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261028060010_AddTaskStatusTransitionToken",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261028070010_BindApprovalNotificationStage",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261028080010_CashInventoryAccountIdentityPostgreSql",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261030224445_AddBalanceApplicationReceiptsPostgreSql",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261030232554_FenceCancelledBalanceApplicationsPostgreSql",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261031125252_AddPaymentOverdueNotificationOutboxPostgreSql",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261031233007_AddCompanyBankAccountBindingsPostgreSql",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261101000834_IndexCompanyBankBindingHistoryPostgreSql",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261105040010_AddCourtDocumentAcceptedControlsPostgreSql",
+      "ProductVersion": "9.0.9"
+    },
+    {
+      "MigrationId": "20261105070010_AddCaseCourtNotificationOutboxPostgreSql",
+      "ProductVersion": "9.0.9"
+    }
+  ],
+  "expectedBaselineMigrationIdsSha256": "44af6928621887a0099c8eb13e35734a6c415e7a6461f26d875332707da3b6be",
+  "expectedReleaseCatalogSha256": "030fdf23009ba7d2a17c65e1bacbce043efb0d8a6175606f7f4d712ba30a6bb5",
+  "expectedReleaseSeeds": [
+    {
+      "releaseId": "2026-11-17-act-preview-refresh-on-return",
+      "version": "1.14.943",
+      "releasedAt": "2026-11-17T07:02:11Z",
+      "title": "Актуальная подсказка номера акта",
+      "summary": "Подсказка номера акта обновляется при возврате к ранее выбранному году или повторном открытии формы.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "В форме акта и при создании акта из счёта подсказка номера запрашивается заново при возврате к выбранному году или повторном открытии формы. Пока загружается актуальная подсказка, поле показывает, что номер присвоится при сохранении."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-17-task-reminder-recheck-before-inbox",
+      "version": "1.14.942",
+      "releasedAt": "2026-11-17T07:02:10Z",
+      "title": "Напоминания по актуальным задачам",
+      "summary": "Плановые напоминания учитывают последние изменения состояния задачи и состава исполнителей.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "Перед появлением планового напоминания в центре уведомлений и отправкой по подключённым каналам CRM повторно проверяет задачу и её исполнителей. Устаревшее напоминание подавляется, если задача уже завершена, отменена или сотрудник перестал быть её исполнителем."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-17-samara-court-task-local-time",
+      "version": "1.14.941",
+      "releasedAt": "2026-11-17T01:38:16Z",
+      "title": "Местное время суда в задаче",
+      "summary": "В задачах подготовки к заседаниям судов Самарской области время в описании показывается по местному времени суда.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "В описании задачи подготовки к заседанию суда Самарской области время заседания показывается по местному времени суда."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-15-invoice-pdf-template-readiness",
+      "version": "1.14.940",
+      "releasedAt": "2026-11-15T01:44:58Z",
+      "title": "Скачивание счёта в PDF",
+      "summary": "PDF счёта формируется после готовности печатного шаблона, изображений и шрифтов.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "В карточке счёта исправлена ошибка при скачивании PDF. Документ формируется после загрузки печатного шаблона, изображений и шрифтов."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-12-invoice-form-responsive-layout",
+      "version": "1.14.939",
+      "releasedAt": "2026-11-12T01:52:08Z",
+      "title": "Форма счёта на небольших экранах",
+      "summary": "Поля, кнопки выбора и связанные документы помещаются в доступную ширину формы.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "В форме счёта на телефонах и планшетах поля, кнопки выбора и блоки связанных документов помещаются в доступную ширину. Широкие таблицы прокручиваются внутри своих блоков."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-12-contract-expiration-stages",
+      "version": "1.14.938",
+      "releasedAt": "2026-11-12T01:29:38Z",
+      "title": "Напоминания за 30, 14 и 7 дней",
+      "summary": "CRM напоминает об окончании договора на трёх этапах и показывает оставшийся срок.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "improved",
+          "text": "Напоминания об окончании договоров охватывают этапы 30, 14 и 7 дней. В сообщении указано фактическое количество оставшихся дней в часовом поясе сотрудника. Если договор добавлен позже, отправляется напоминание текущего этапа. Ранее отправленные напоминания последних семи дней учитываются при повторной доставке."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-12-contract-expiration-recipients",
+      "version": "1.14.937",
+      "releasedAt": "2026-11-12T01:29:38Z",
+      "title": "Получатели напоминаний по договорам",
+      "summary": "В настройках уведомлений можно сочетать руководителей подразделений, роли и отдельных сотрудников.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "new",
+          "text": "В «Настройках» → «Уведомления» можно задать руководителей подразделений ответственных и добавить получателей по ролям или поимённо. Эти способы можно сочетать. Напоминания получают ответственные и выбранные дополнительные адресаты с учётом доступа к договору и настроек доставки. Сотрудник, выбранный несколькими способами, получает одно напоминание на каждом этапе."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-12-invoice-number-preview",
+      "version": "1.14.936",
+      "releasedAt": "2026-11-12T00:43:28Z",
+      "title": "Обновление номера в форме счёта",
+      "summary": "Подсказка номера учитывает выбранную дату, а ошибку подбора можно исправить повтором.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "В форме счёта автоматически предложенный номер обновляется при изменении даты. Если подбор завершился ошибкой, рядом с полем показана причина и доступна кнопка повтора. Форма сохраняет номер, введённый вручную или восстановленный из черновика. При быстрой смене даты поле показывает результат для текущего выбора."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-12-invoice-final-year",
+      "version": "1.14.935",
+      "releasedAt": "2026-11-12T00:43:28Z",
+      "title": "Счета с датами 9999 года",
+      "summary": "Подбор и проверка номера учитывают последний допустимый год.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "Для счетов с датами 9999 года корректно подбирается номер и проверяются совпадения. Редактирование и перенос таких счетов учитывают весь год, включая 31 декабря."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-12-invoice-number-exhaustion",
+      "version": "1.14.934",
+      "releasedAt": "2026-11-12T00:43:28Z",
+      "title": "Исчерпание номеров счетов",
+      "summary": "При исчерпании годовой последовательности появляется понятное сообщение.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "При подборе номера счёта и переносе старых счетов система показывает понятное сообщение, если номера за выбранный год исчерпаны."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-12-act-import-rollback-retry",
+      "version": "1.14.933",
+      "releasedAt": "2026-11-11T19:27:00Z",
+      "title": "Повтор отката импорта актов",
+      "summary": "Повторный откат сохраняет результаты уже завершённых операций с актами.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "В «Истории партий» импорта повторный откат сохраняет успешный результат ранее отменённых операций с актами и продолжает оставшиеся. Если акт временно занят другим изменением, причина сохраняется в строке партии, а остальные операции продолжаются. После освобождения акта откат можно повторить."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-12-act-import-rollback-number-floor",
+      "version": "1.14.932",
+      "releasedAt": "2026-11-11T19:27:00Z",
+      "title": "Нумерация актов после отката импорта",
+      "summary": "Откат старого импорта сохраняет достигнутую последовательность номеров актов.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "При откате импорта, который изменил дату или номер акта, сохраняется достигнутая граница каждой затронутой годовой серии. После восстановления прежнего акта новые документы продолжают сохранённую последовательность соответствующего года. Откат доступен в «Истории партий» импорта."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-12-max-task-seven-lines",
+      "version": "1.14.931",
+      "releasedAt": "2026-11-11T18:56:47Z",
+      "title": "Понятные уведомления о задачах в MAX",
+      "summary": "События задач собраны в единое сообщение из семи строк с быстрым переходом в карточку.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "improved",
+          "text": "Уведомления о задачах в MAX показывают номер и актуальное название задачи, суть события, срок в вашем часовом поясе, статус, приоритет и исполнителя. Отдельная строка подсказывает нужное действие, а кнопка «Открыть задачу» ведёт в её карточку."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-12-contract-accounting-documents-menu",
+      "version": "1.14.930",
+      "releasedAt": "2026-11-11T17:20:11Z",
+      "title": "Бухгалтерские документы договора",
+      "summary": "Счета и акты договора собраны в меню «Бух. документы».",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "improved",
+          "text": "В карточке договора при просмотре и редактировании откройте «Бух. документы», чтобы перейти к счетам или актам. При переключении между разделами карточки сохраняются выбранный отбор и страница списка. Меню показывает разделы, доступные вам по правам."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-11-work-order-act-retry",
+      "version": "1.14.929",
+      "releasedAt": "2026-11-11T13:40:00Z",
+      "title": "Повтор создания акта из заказ-наряда",
+      "summary": "Повторная отправка восстанавливает сохранённый акт и его документ.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "При повторе создания акта из заказ-наряда используется ранее сохранённый акт с его номером. Сформированный файл открывается из документов дела, а прерванное создание файла продолжается для того же акта."
+        },
+        {
+          "type": "important",
+          "text": "Если создание файла прервалось после сохранения акта, сообщение уточняет состояние акта и файла. При изменении настроек хранилища завершение файла может потребовать восстановления прежней попытки администратором."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-11-act-create-recovery",
+      "version": "1.14.928",
+      "releasedAt": "2026-11-11T13:40:00Z",
+      "title": "Восстановление сохранения акта",
+      "summary": "Форма акта помогает узнать результат сохранения после сетевого сбоя.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "improved",
+          "text": "В форме создания акта доступны незавершённые попытки сохранения из текущей вкладки. Можно получить результат или повторить отправку исходного черновика. После подтверждённого сохранения открывается уже созданный акт."
+        },
+        {
+          "type": "improved",
+          "text": "Ошибки заполнения позволяют исправить черновик. Действие «Создать другой акт» начинает отдельную команду, сохраняя предыдущую попытку для восстановления."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-11-act-annual-numbering",
+      "version": "1.14.927",
+      "releasedAt": "2026-11-11T13:40:00Z",
+      "title": "Собственная годовая нумерация актов",
+      "summary": "При обычном создании акта, в том числе из заказ-наряда, номер присваивается автоматически.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "new",
+          "text": "При создании акта из журнала, карточки клиента или организации, счёта и заказ-наряда номер присваивается автоматически. Год определяется датой акта. Номер счёта хранится отдельно, в связи со счётом. В форме показана предварительная подсказка, окончательный номер поступает после сохранения."
+        },
+        {
+          "type": "important",
+          "text": "При создании обычного акта, в том числе из заказ-наряда, используется общая годовая серия. Пустой год начинается с 1. Серия продолжается после наибольшего занятого порядкового номера. Номер корректировочного акта дополняется суффиксом «-К» и порядковым номером корректировки. При импорте используется номер из исходных данных. Длинные исторические идентификаторы хранятся в документах в исходном виде."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-11-single-ordinary-completion-notification",
+      "version": "1.14.926",
+      "releasedAt": "2026-11-11T11:00:00Z",
+      "title": "Одно уведомление о завершении задачи",
+      "summary": "Исправлен повтор уведомлений постановщику при завершении задачи с результатом.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "При обычном переводе задачи в «Готово» с вводом результата постановщик получает одно сообщение о завершении. Доставка по каждому каналу учитывает личные и ролевые настройки уведомлений о завершении и изменениях задачи."
+        },
+        {
+          "type": "important",
+          "text": "Одновременное изменение срока, исполнителя или других данных задачи может сопровождаться отдельным уведомлением об этих изменениях."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-11-task-change-toast-identity",
+      "version": "1.14.925",
+      "releasedAt": "2026-11-11T11:00:00Z",
+      "title": "Название задачи во всплывающем уведомлении",
+      "summary": "Сообщение об изменении задачи показывает её номер и название рядом с краткой сводкой изменений.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "Во всплывающем уведомлении об изменении задачи видны её номер и название. Изменения срока, постановщика и исполнителя сохраняются в краткой сводке, поэтому сразу понятно, к какой задаче относится сообщение."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-11-notification-action-current-preferences",
+      "version": "1.14.924",
+      "releasedAt": "2026-11-11T10:00:00Z",
+      "title": "Настройки показа после действий с уведомлением",
+      "summary": "Действия с уведомлением учитывают текущие личные и ролевые настройки его показа.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "После отметки прочтения, возврата в непрочитанные, архивации или отсрочки состояние уведомления учитывает действующие настройки центрального окна, всплывающего сообщения и тихих часов."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-11-completed-approval-notification-recovery",
+      "version": "1.14.923",
+      "releasedAt": "2026-11-11T10:00:00Z",
+      "title": "Повтор доставки завершённого согласования",
+      "summary": "Уведомление о принятом результате сохраняется для повторной доставки после временного сбоя.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "Если отправка уведомления после завершения согласования временно прервалась, система сохраняет подтверждение принятого результата и повторяет доставку. При повторе учитываются текущие права и настройки адресатов."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-11-central-notification-current-access",
+      "version": "1.14.922",
+      "releasedAt": "2026-11-11T10:00:00Z",
+      "title": "Центральные уведомления при смене доступа",
+      "summary": "Очередь центральных уведомлений обновляется при смене пользователя, сеанса, роли или области доступа.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "При смене пользователя, повторном входе или изменении прав прежнее центральное уведомление скрывается, а доступная очередь загружается заново. Подтверждение, переход к задаче и скачивание её файлов привязаны к текущему сеансу и области доступа."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-11-task-completion-central-window",
+      "version": "1.14.921",
+      "releasedAt": "2026-11-11T10:00:00Z",
+      "title": "Окно завершения задачи",
+      "summary": "Постановщику доступно центральное окно ознакомления с выполненной задачей.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "improved",
+          "text": "После завершения задачи постановщик видит центральное уведомление с кнопками «Понятно» и «К задаче». Можно подтвердить прочтение, перейти к задаче или отложить ознакомление."
+        },
+        {
+          "type": "improved",
+          "text": "Канал «Окно» для события «Задача выполнена» доступен в личных и ролевых настройках уведомлений. При включённом центральном окне сообщение справа внизу для этого завершения скрывается."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-11-max-reminder-current-task-status",
+      "version": "1.14.920",
+      "releasedAt": "2026-11-11T08:00:00Z",
+      "title": "Напоминания MAX о закрытых задачах",
+      "summary": "Перед отправкой отложенного напоминания MAX проверяется текущий статус задачи.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "Если задача завершена или отменена, ожидающее отправки напоминание со ссылкой на неё отменяется. Проверка действует и после тихих часов, и при повторе неудачной доставки."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-11-calendar-ics-size-limit",
+      "version": "1.14.919",
+      "releasedAt": "2026-11-11T08:00:00Z",
+      "title": "Полнота выгрузки календаря",
+      "summary": "При слишком большом календаре выгрузка ICS сообщает о превышении лимита.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "Если в выбранную область попадает больше 1000 задач, при выгрузке ICS появляется сообщение с предложением сократить период или уточнить фильтры. Это помогает избежать получения неполного календаря."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-11-calendar-export-access",
+      "version": "1.14.918",
+      "releasedAt": "2026-11-11T08:00:00Z",
+      "title": "Доступ к выгрузке календаря",
+      "summary": "Выгрузки учитывают область календарей, доступную текущему сотруднику.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "В календаре и недельной нагрузке файлы ICS и отчёты по задачам учитывают ограничения просмотра календарей. Состав выгрузки также ограничивается действующими правами сотрудника на задачи."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-11-calendar-visible-period-export",
+      "version": "1.14.917",
+      "releasedAt": "2026-11-11T08:00:00Z",
+      "title": "Выгрузка открытого периода календаря",
+      "summary": "Выгрузки календаря используют открытый день, неделю или месячную сетку и выбранные фильтры.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "После перехода на другой день или неделю выгрузки CSV, ICS и отчёты HTML, Word и PDF используют открытый период. Учитываются ручные ограничения дат, поиск и выбранные фильтры задач. В месячном виде в период входят видимые дни соседних месяцев."
+        },
+        {
+          "type": "improved",
+          "text": "Даты отчёта соответствуют часовому поясу выбранного календаря. При смене периода, календаря или прав запоздавшая выгрузка прежнего набора больше не скачивается."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-11-calendar-employee-groups",
+      "version": "1.14.916",
+      "releasedAt": "2026-11-11T08:00:00Z",
+      "title": "Выбор рабочих календарей",
+      "summary": "Администратор может выбрать календари отдельных сотрудников, ролей и подразделений.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "new",
+          "text": "В календаре задач и недельной нагрузке администратору доступен выбор отображаемых календарей. Можно отметить нескольких сотрудников, роли и подразделения. Выбор сохраняется для текущего пользователя."
+        },
+        {
+          "type": "improved",
+          "text": "Выбранные календари учитываются при показе задач, сроков и судебных событий, в сводке и выгрузках. Чтобы снова видеть весь доступный календарь, выберите всех сотрудников."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-11-11-contract-termination-cancelled-installments",
+      "version": "1.14.915",
+      "releasedAt": "2026-11-11T08:00:00Z",
+      "title": "Остаток долга при расторжении",
+      "summary": "Проверка расторжения учитывает отмену неоплаченных взносов счёта.",
+      "isActive": true,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "При расторжении договора отменённые неоплаченные взносы рассрочки больше не увеличивают долг. В карточке договора показывается действующий неоплаченный остаток счёта с учётом поступивших оплат."
+        }
+      ]
+    }
+  ]
+}

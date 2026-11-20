@@ -10546,8 +10546,10 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Equal("appeal-uid-42", Assert.Single(instances, item => item.Instance == "appeal").JudicialUid);
     }
 
-    [Fact]
-    public async Task RunCourtSync_PreservesLowerCourtReferenceWithoutGuessingDecision()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunCourtSync_PreservesLowerCourtReferenceWithoutGuessingDecision(bool copiedAppealUrl)
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "appeal-lower-court@example.com", "Юрист");
@@ -10559,6 +10561,17 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             CourtUrl = "https://appeal.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
         };
         db.ClientCases.Add(clientCase);
+        if (copiedAppealUrl)
+        {
+            db.ClientCaseCourtInstances.Add(new ClientCaseCourtInstance
+            {
+                ClientCase = clientCase,
+                Instance = "first",
+                CourtName = "Районный суд",
+                CourtCaseNumber = "2-42/2026",
+                CourtUrl = clientCase.CourtUrl,
+            });
+        }
         await db.SaveChangesAsync();
         var controller = CreateController(db, owner,
             sudrfCourtSyncService: new FixedSudrfCourtSyncService(new SudrfCourtCaseData
@@ -10573,7 +10586,12 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
                 CaseOutcome = "Апелляционная жалоба оставлена без удовлетворения",
             }));
 
-        Assert.IsType<OkObjectResult>((await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None)).Result);
+        var check = Assert.IsType<OkObjectResult>((await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None)).Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(check.Value);
+        if (copiedAppealUrl)
+        {
+            Assert.Contains(dto.ConflictItems, item => item.Contains("ссылка на апелляцию", StringComparison.Ordinal));
+        }
         Assert.IsType<OkObjectResult>((await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None)).Result);
 
         var first = Assert.Single(await db.ClientCaseCourtInstances
@@ -10581,7 +10599,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Equal("Районный суд", first.CourtName);
         Assert.Equal("2-42/2026", first.CourtCaseNumber);
         Assert.Empty(first.JudicialUid);
-        Assert.Empty(first.CourtUrl);
+        Assert.Equal(copiedAppealUrl ? clientCase.CourtUrl : string.Empty, first.CourtUrl);
         Assert.Empty(first.Notes);
         var appeal = Assert.Single(await db.ClientCaseCourtInstances
             .Where(item => item.ClientCaseId == clientCase.Id && item.Instance == "appeal").ToListAsync());
@@ -12349,8 +12367,10 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Empty(await db.ClientCaseCourtInstances.ToListAsync());
     }
 
-    [Fact]
-    public async Task BindCourtSyncCase_UpdatesCaseAndCourtInstance()
+    [Theory]
+    [InlineData("appeal")]
+    [InlineData("first")]
+    public async Task BindCourtSyncCase_UpdatesCaseAndCourtInstance(string selectedInstance)
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "court-bind-owner@example.com", "Владелец");
@@ -12410,7 +12430,8 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             clientCase.Id,
             new CasesV2Controller.ClientCaseCourtSyncBindRequest
             {
-                Instance = "appeal",
+                Instance = selectedInstance,
+                ConfirmDifferences = selectedInstance == "first",
                 ProviderKey = "sudrf",
                 SourceType = "sudrf",
                 SourceUrl = "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
@@ -12419,6 +12440,19 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
                 JudicialUid = "27RS0005-01-2025-002659-56",
             },
             CancellationToken.None);
+
+        if (selectedInstance == "first")
+        {
+            var conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+            var message = JsonSerializer.SerializeToElement(conflict.Value).GetProperty("message").GetString();
+            Assert.Contains("другой судебной инстанции", message, StringComparison.OrdinalIgnoreCase);
+            var stored = await db.ClientCases.AsNoTracking().SingleAsync(item => item.Id == clientCase.Id);
+            Assert.Empty(stored.CourtUrl);
+            Assert.Empty(await db.ClientCaseCourtEvents.Where(item => item.ClientCaseId == clientCase.Id).ToListAsync());
+            Assert.Equal("УСТАРЕВШИЙ-UID", (await db.ClientCaseCourtInstances.AsNoTracking()
+                .SingleAsync(item => item.ClientCaseId == clientCase.Id)).JudicialUid);
+            return;
+        }
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncBindingDto>(ok.Value);
@@ -12560,6 +12594,42 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
 
         clientCase = await db.ClientCases.SingleAsync(item => item.Id == clientCase.Id);
         Assert.Contains("Ручная проверка судебного источника не выполнена", clientCase.EventHistory, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunCourtSync_RecognizesKadArbitrLinkSavedOnlyInCourtInstance()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-owner@example.com", "Владелец");
+        var client = new Client { Name = "Тестовый клиент", IsActive = true, ResponsibleUserId = owner.Id };
+        var clientCase = new ClientCase { Client = client, Title = "Арбитражное дело", Status = ClientCaseStatus.Open };
+        const string instanceUrl = "https://kad.arbitr.ru/Card/11111111-1111-1111-1111-111111111111";
+        db.ClientCaseCourtInstances.Add(new ClientCaseCourtInstance
+        {
+            ClientCase = clientCase,
+            Instance = "first",
+            CourtUrl = instanceUrl,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var detail = Assert.IsType<OkObjectResult>(await controller.GetById(clientCase.Id, CancellationToken.None));
+        Assert.True(Assert.IsType<ClientCase>(detail.Value).HasStoredCourtInstanceBinding);
+
+        var result = await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);
+        Assert.True(dto.HasCourtBinding);
+        Assert.Equal("manual-check-recorded", dto.Status);
+        Assert.Contains("сохранена ссылка на КАД Арбитр", dto.Message, StringComparison.Ordinal);
+        Assert.Contains("Автоматическая загрузка из КАД Арбитр пока недоступна", dto.Message, StringComparison.Ordinal);
+        var storedCase = await db.ClientCases.AsNoTracking().SingleAsync(item => item.Id == clientCase.Id);
+        Assert.Contains(dto.Message, storedCase.EventHistory, StringComparison.Ordinal);
+        Assert.Empty(storedCase.CourtUrl);
+        Assert.Null(storedCase.CourtSyncLastAttemptAt);
+        Assert.Equal(instanceUrl, await db.ClientCaseCourtInstances
+            .Where(instance => instance.ClientCaseId == clientCase.Id).Select(instance => instance.CourtUrl).SingleAsync());
     }
 
     [Fact]

@@ -461,6 +461,10 @@ namespace PayPlanner.Api.Models
         [NotMapped]
         public List<string> CourtInstanceKeys { get; set; } = new();
 
+        [NotMapped]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool HasStoredCourtInstanceBinding { get; set; }
+
         /// <summary>Подтверждённый результат именно отображаемого в реестре заседания.</summary>
         [NotMapped]
         public string? NextHearingOutcome { get; set; }

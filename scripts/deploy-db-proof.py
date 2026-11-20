@@ -63,6 +63,15 @@ def reviewed_migration_ids(value):
 def validate_candidate_plan(plan):
  ids=reviewed_migration_ids(plan['expectedMigration'])
  annual=ids==[ACT_ANNUAL_MIGRATION]
+ baseline_ids=plan.get('expectedBaselineMigrations',[])
+ if not ids and (len(baseline_ids)>=228 or ACT_ANNUAL_MIGRATION in baseline_ids):
+  previous_ids=[value for value in baseline_ids if value!=ACT_ANNUAL_MIGRATION]
+  review=reviewed_act_annual()
+  need(len(previous_ids)==227 and baseline_ids==sorted(previous_ids+review['migrationIds'])
+       and hashlib.sha256(canonical(previous_ids).encode()).hexdigest()==review['baselineMigrationIdsSha256'],
+       'Expected exact installed annual-act migration catalog')
+  need(hashlib.sha256(canonical(baseline_ids).encode()).hexdigest()==plan['expectedBaselineMigrationIdsSha256'],
+       'Installed annual-act migration catalog pin differs')
  if len(ids)==18 or annual:
   review=reviewed_act_annual() if annual else reviewed_candidate()
   need(plan['previousRevision']==review['previousRevision'],'Reviewed candidate previous revision differs')
@@ -117,11 +126,43 @@ def act_annual_row_controls(schema_objects,query):
  relations={row['name'] for row in schema_objects['relations'] if row['kind']=='r'}
  return {table:query('SELECT to_json(count(*)) FROM "'+table+'";')[0] if table in relations else None for table in ACT_ANNUAL_NEW_TABLES}
 
+def act_annual_projection(schema_columns,counts,migration_rows,baseline):
+ observed={table:[column['name'] for column in schema_columns if column['table']==table]
+           for table,count in counts.items() if count is not None}
+ columns=observed if baseline is None else baseline.get('actAnnualProjectionColumns',{})
+ need(isinstance(columns,dict) and set(columns).issubset(ACT_ANNUAL_NEW_TABLES) and all(columns.values()),
+      'Pinned annual-act table projection differs')
+ # A pre-migration receipt keeps its empty projection during the additive upgrade.
+ baseline_rows=migration_rows if baseline is None else baseline['migrationRows']
+ if any(row['MigrationId']==ACT_ANNUAL_MIGRATION for row in baseline_rows):
+  need(set(columns)==set(ACT_ANNUAL_NEW_TABLES) and columns==observed,'Pinned annual-act table projection differs')
+ return columns
+
 def compare_act_annual_rows(a,b,migrated):
  for state in (a,b):
   need(set(state['actAnnualNewTableCounts'])==set(ACT_ANNUAL_NEW_TABLES),'Annual-act row-control scope changed')
  need(all(value is None for value in a['actAnnualNewTableCounts'].values()),'Annual-act tables already exist in the pre-migration baseline')
  need(all(type(value) is int and value==0 if migrated else value is None for value in b['actAnnualNewTableCounts'].values()),'Annual-act tables contain unexpected startup data')
+
+def compare_installed_act_annual_rows(a,b):
+ columns=a.get('actAnnualProjectionColumns')
+ need(isinstance(columns,dict) and set(columns)==set(ACT_ANNUAL_NEW_TABLES)
+      and columns==b.get('actAnnualProjectionColumns'),'Installed annual-act projection scope changed')
+ for table in ACT_ANNUAL_NEW_TABLES:
+  need(columns[table] and columns[table]==[c['name'] for c in a['schemaColumns'] if c['table']==table],
+       'Installed annual-act projection must include every baseline column: '+table)
+ for state in (a,b):
+  counts=state['actAnnualNewTableCounts']
+  rows=state.get('actAnnualFingerprints')
+  need(set(counts)==set(ACT_ANNUAL_NEW_TABLES)
+       and isinstance(rows,list) and len(rows)==len(ACT_ANNUAL_NEW_TABLES)
+       and {row['table'] for row in rows}==set(ACT_ANNUAL_NEW_TABLES),'Installed annual-act fingerprint scope changed')
+  for row in rows:
+   table=row['table']
+   need(type(row['count']) is int and row['count']>=0 and type(counts[table]) is int
+        and row['count']==counts[table] and re.fullmatch('[a-f0-9]{32}',row['hash']),
+        'Installed annual-act row count or fingerprint invalid: '+table)
+ need(a['actAnnualFingerprints']==b['actAnnualFingerprints'],'Existing annual-act rows changed')
 
 def compare_financial_rows(a,b):
  for key,tables in [('projectionColumns',a['projectionColumns']),('supplementalProjectionColumns',SUPPLEMENTAL_TABLES)]:
@@ -195,10 +236,13 @@ def compare(plan_path,a_path,b_path,phase):
  need(a['fingerprints']==b['fingerprints'],'Protected rows/counts/all-column contents changed')
  need(a['projectionColumns']==b['projectionColumns'],'Pinned all-column projection changed')
  migrated=phase=='startup' and bool(admitted_ids)
- post_candidate=(not admitted_ids or annual) and len(a['controls']['migrations'])==227
+ am=a['controls']['migrations']
+ post_annual=not admitted_ids and len(plan['expectedBaselineMigrations'])==228
+ post_candidate=((not admitted_ids or annual) and len(am)==227) or post_annual
  history=plan['expectedMigration']==PAYMENT_AND_HISTORY_MIGRATIONS or candidate or post_candidate
  if candidate:compare_candidate_rows(a,b,migrated)
  if annual:compare_act_annual_rows(a,b,migrated)
+ if post_annual:compare_installed_act_annual_rows(a,b)
  if post_candidate:compare_financial_rows(a,b)
  if history:
   need(set(a['chatProjectionColumns'])==set(CHAT_TABLES) and a['chatProjectionColumns']==b['chatProjectionColumns'],'Chat projection scope changed')
@@ -217,8 +261,8 @@ def compare(plan_path,a_path,b_path,phase):
   compare_payment_attempt_schema(a,b,expected_schema)
  else:need(a['schemaColumns']==b['schemaColumns'] and a['schemaObjects']==b['schemaObjects'],'Unexpected schema mutation')
  need({k:v for k,v in a['controls'].items() if k!='migrations'}=={k:v for k,v in b['controls'].items() if k!='migrations'},'Protected financial/integrity controls changed')
- am=a['controls']['migrations']
- need(len(am)==(227 if post_candidate else 209) and am==plan['expectedBaselineMigrations'],'Baseline is not the accepted installed migration catalog')
+ expected_migration_count=228 if post_annual else 227 if post_candidate else 209
+ need(len(am)==expected_migration_count and am==plan['expectedBaselineMigrations'],'Baseline is not the accepted installed migration catalog')
  need(hashlib.sha256(json.dumps(am,sort_keys=True,separators=(',',':')).encode()).hexdigest()==plan['expectedBaselineMigrationIdsSha256'],'Baseline migration catalog pin differs')
  need(len(a['migrationRows'])==len(am) and a['migrationRows']==plan['expectedBaselineMigrationRows'],'Full baseline migration rows/ProductVersion must remain exact')
  if migrated:need(b['controls']['migrations']==sorted(am+admitted_ids),'Unexpected migration IDs after startup')
@@ -234,7 +278,7 @@ def compare(plan_path,a_path,b_path,phase):
   need(c['type']=='character varying(32)' and c['nullable'] is True and c['default'] is None and c['identity']=='' and c['generated']=='' and c['collation'] in ['pg_catalog.default','pg_catalog."default"'],'Installed Seller policy shape changed')
  need(a['newPolicyNonNullCounts']==b['newPolicyNonNullCounts'] and set(a['newPolicyNonNullCounts'])==set(POLICY_TABLES) and all(type(v) is int and v>=0 for v in a['newPolicyNonNullCounts'].values()),'Existing policy values/counts changed')
  compare_releases(a,b,plan,'unchanged' if phase=='unchanged' or not plan['expectedReleaseSeeds'] else 'startup')
- print(json.dumps({'status':'passed','phase':phase,'protectedTables':16,'protectedChatTables':len(CHAT_TABLES) if history else 0,'protectedSupplementalTables':len(SUPPLEMENTAL_TABLES) if candidate or post_candidate else 0,'allColumnsAndRowsExact':True,'migrationHistory209Exact':len(am)==209,'migrationBaselineCount':len(am),'releaseCatalogUnchanged':a['releaseRows']==b['releaseRows'] and a['releaseItems']==b['releaseItems'],'reviewedReleaseSeeds':len(plan['expectedReleaseSeeds']) if phase=='startup' else 0,'baselineSha256':digest(a_path)}))
+ print(json.dumps({'status':'passed','phase':phase,'protectedTables':16,'protectedChatTables':len(CHAT_TABLES) if history else 0,'protectedSupplementalTables':len(SUPPLEMENTAL_TABLES) if candidate or post_candidate else 0,'protectedActAnnualTables':len(ACT_ANNUAL_NEW_TABLES) if post_annual else 0,'allColumnsAndRowsExact':True,'migrationHistory209Exact':len(am)==209,'migrationBaselineCount':len(am),'releaseCatalogUnchanged':a['releaseRows']==b['releaseRows'] and a['releaseItems']==b['releaseItems'],'reviewedReleaseSeeds':len(plan['expectedReleaseSeeds']) if phase=='startup' else 0,'baselineSha256':digest(a_path)}))
 
 def main():
  if len(sys.argv)>1 and sys.argv[1]=='--compare':
@@ -279,6 +323,7 @@ def main():
  need(set(supplemental_columns)==set(SUPPLEMENTAL_TABLES) and all(supplemental_columns.values()),'Pinned cash/request table scope differs')
  candidate_defaults,candidate_new_tables=candidate_row_controls(schema_columns,schema_objects,query)
  act_annual_counts=act_annual_row_controls(schema_objects,query)
+ act_annual_columns=act_annual_projection(schema_columns,act_annual_counts,migration_rows,baseline)
  history_columns={c['name'] for c in schema_columns if c['table']=='InternalChatMembers'}
  new_history_columns={'HistoryHiddenThroughMessageId','HistoryVisibilityRevision'}
  need(not (history_columns & new_history_columns) or new_history_columns.issubset(history_columns),'Incomplete personal history schema')
@@ -303,9 +348,10 @@ def main():
  checks=fingerprints(tables,projection_columns)
  chat_checks=fingerprints(CHAT_TABLES,chat_columns)
  supplemental_checks=fingerprints(SUPPLEMENTAL_TABLES,supplemental_columns)
+ act_annual_checks=fingerprints(sorted(act_annual_columns),act_annual_columns)
  controls=query('''SELECT jsonb_build_object('legacyActive',(SELECT count(*) FROM "TaskJournalItems" WHERE "ClientBillingClassification"='legacy' AND NOT "IsDeleted"),'pendingContractor',(SELECT count(*) FROM "TaskJournalItems" t JOIN "Users" u ON u."Id"=t."AssigneeUserId" WHERE NOT t."IsDeleted" AND t."ContractorPaymentEnabled" AND t."ContractorPaymentId" IS NULL AND u."IsExternalContractor" AND round(t."ContractorPaymentAmount",2)>0 AND ((NOT t."ContractorPaymentOnResult" AND t."ContractorPaymentDueDate" IS NOT NULL) OR (t."ContractorPaymentOnResult" AND lower(t."Status")='done' AND t."ContractorPaymentResultDelayDays" BETWEEN 0 AND 365))),'invalidIndexes',(SELECT count(*) FROM pg_index WHERE NOT indisvalid),'invalidConstraints',(SELECT count(*) FROM pg_constraint WHERE NOT convalidated),'migrations',(SELECT jsonb_agg("MigrationId" ORDER BY "MigrationId") FROM "__EFMigrationsHistory"));''')[0]
  assert controls['legacyActive']==controls['pendingContractor']==controls['invalidIndexes']==controls['invalidConstraints']==0
- out=dict(schemaVersion=2,utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),fingerprints=checks,controls=controls,baselineSha256=baseline_sha,projectionColumns=projection_columns,chatProjectionColumns=chat_columns,chatFingerprints=chat_checks,chatHistoryNonDefaults=history_non_defaults,supplementalProjectionColumns=supplemental_columns,supplementalFingerprints=supplemental_checks,candidateDefaultCounts=candidate_defaults,candidateNewTableCounts=candidate_new_tables,actAnnualNewTableCounts=act_annual_counts,schemaColumns=schema_columns,schemaObjects=schema_objects,migrationRows=migration_rows,newPolicyNonNullCounts=policy_non_null,releaseRows=release_rows,releaseItems=release_items,releaseSeen=release_seen)
+ out=dict(schemaVersion=2,utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),fingerprints=checks,controls=controls,baselineSha256=baseline_sha,projectionColumns=projection_columns,chatProjectionColumns=chat_columns,chatFingerprints=chat_checks,chatHistoryNonDefaults=history_non_defaults,supplementalProjectionColumns=supplemental_columns,supplementalFingerprints=supplemental_checks,candidateDefaultCounts=candidate_defaults,candidateNewTableCounts=candidate_new_tables,actAnnualNewTableCounts=act_annual_counts,actAnnualProjectionColumns=act_annual_columns,actAnnualFingerprints=act_annual_checks,schemaColumns=schema_columns,schemaObjects=schema_objects,migrationRows=migration_rows,newPolicyNonNullCounts=policy_non_null,releaseRows=release_rows,releaseItems=release_items,releaseSeen=release_seen)
  target=pathlib.Path(sys.argv[1]);target.write_text(json.dumps(out,indent=2));os.chmod(target,0o600)
  print(json.dumps(dict(tables=len(checks),tasks=next(t['count'] for t in checks if t['table']=='TaskJournalItems'),calendarLinks=sum(t['count'] for t in checks if t['table'] in ('GoogleCalendarTaskLinks','YandexCalendarTaskLinks')),pendingTaskBackfills=0)))
 

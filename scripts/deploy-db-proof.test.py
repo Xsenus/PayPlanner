@@ -72,8 +72,14 @@ class DatabaseProofTests(unittest.TestCase):
         self.assertEqual(result['protectedTables'], 16)
         self.assertTrue(result['releaseCatalogUnchanged'])
 
-    def test_installed_227_release_preserves_migration_chat_and_cash_state(self):
-        current = json.loads(Path(__file__).with_name('deployment-baseline-current.json').read_text(encoding='utf-8'))
+    def configure_installed_catalog(self, annual=False):
+        current = json.loads(Path(__file__).with_name('deployment-baseline-act-annual.json').read_text(encoding='utf-8'))
+        if annual:
+            delta = proof.read_json(Path(__file__).with_name('deploy-act-annual-delta.json'))
+            migration = delta['migrations']['added'][0]
+            current['expectedBaselineMigrations'] = sorted(current['expectedBaselineMigrations'] + [migration['MigrationId']])
+            current['expectedBaselineMigrationRows'] = sorted(current['expectedBaselineMigrationRows'] + [migration], key=lambda row: row['MigrationId'])
+            current['expectedBaselineMigrationIdsSha256'] = hashlib.sha256(proof.canonical(current['expectedBaselineMigrations']).encode()).hexdigest()
         for key in ['expectedBaselineMigrations', 'expectedBaselineMigrationRows', 'expectedBaselineMigrationIdsSha256']:
             self.plan[key] = current[key]
         self.before['controls']['migrations'] = self.plan['expectedBaselineMigrations']
@@ -86,18 +92,117 @@ class DatabaseProofTests(unittest.TestCase):
         policy_tables = set(proof.POLICY_TABLES)
         self.before['schemaColumns'].extend(dict(table=table, name='Id')
                                             for table in self.before['projectionColumns'] if table not in policy_tables)
+        if annual:
+            annual_columns = sorted(
+                (column for column in delta['columns']['added'] if column['table'] in proof.ACT_ANNUAL_NEW_TABLES),
+                key=lambda column: (column['table'], column['position']),
+            )
+            columns = {table: [column['name'] for column in annual_columns if column['table'] == table]
+                       for table in proof.ACT_ANNUAL_NEW_TABLES}
+            self.before['actAnnualProjectionColumns'] = columns
+            self.before['actAnnualNewTableCounts'] = {table: 2 for table in columns}
+            self.before['actAnnualFingerprints'] = [
+                dict(table=table, count=2, hash='c'*32) for table in columns
+            ]
+            self.before['schemaColumns'].extend(annual_columns)
+            self.before['schemaObjects']['constraints'].extend(
+                row for row in delta['constraints']['added'] if row['table'] in proof.ACT_ANNUAL_NEW_TABLES
+            )
+        self.refresh_proof_pair()
+        self.add_seed()
+
+    def refresh_proof_pair(self):
         self.a_path.write_text(json.dumps(self.before))
         self.after = copy.deepcopy(self.before)
         self.after['utc'] = '2026-10-26T00:01:00+00:00'
         self.after['baselineSha256'] = proof.digest(self.a_path)
-        self.add_seed()
 
+    def test_installed_227_release_preserves_migration_chat_and_cash_state(self):
+        self.configure_installed_catalog()
         result = self.compare('startup')
         self.assertEqual(result['migrationBaselineCount'], 227)
         self.assertEqual(result['protectedChatTables'], len(proof.CHAT_TABLES))
         self.assertEqual(result['protectedSupplementalTables'], len(proof.SUPPLEMENTAL_TABLES))
         self.after['supplementalFingerprints'][0]['hash'] = 'changed'
         with self.assertRaisesRegex(AssertionError, 'cash and request rows'):
+            self.compare('startup')
+
+    def test_installed_228_release_preserves_nonempty_annual_act_chat_and_cash_tables(self):
+        self.configure_installed_catalog(annual=True)
+        result = self.compare('startup')
+        self.assertEqual(result['migrationBaselineCount'], 228)
+        self.assertEqual(result['protectedActAnnualTables'], 2)
+        self.assertEqual(result['protectedChatTables'], 6)
+        self.assertEqual(result['protectedSupplementalTables'], 4)
+        version = self.after['migrationRows'][-1]['ProductVersion']
+        self.after['migrationRows'][-1]['ProductVersion'] = 'changed'
+        with self.assertRaisesRegex(AssertionError, 'ProductVersion'):
+            self.compare('startup')
+        self.after['migrationRows'][-1]['ProductVersion'] = version
+        for key, error in [('chatFingerprints', 'Existing chat rows'),
+                           ('supplementalFingerprints', 'Existing cash and request rows')]:
+            with self.subTest(key=key):
+                rows = self.after[key]
+                original = rows[0]['hash']
+                rows[0]['hash'] = 'd'*32
+                with self.assertRaisesRegex(AssertionError, error):
+                    self.compare('startup')
+                rows[0]['hash'] = original
+
+    def test_installed_228_rejects_changed_annual_act_contents_with_same_counts(self):
+        self.configure_installed_catalog(annual=True)
+        for row in self.after['actAnnualFingerprints']:
+            with self.subTest(table=row['table']):
+                row['hash'] = 'd'*32
+                with self.assertRaisesRegex(AssertionError, 'Existing annual-act rows changed'):
+                    self.compare('startup')
+                row['hash'] = 'c'*32
+
+    def test_installed_228_rejects_removing_a_postgresql18_not_null_constraint(self):
+        self.configure_installed_catalog(annual=True)
+        before = self.before['schemaObjects']['constraints']
+        native = [row for row in before if isinstance(row, dict) and row['definition'].startswith('NOT NULL ')]
+        self.assertEqual(len(native), 7)
+        after = self.after['schemaObjects']['constraints']
+        for row in native:
+            with self.subTest(constraint=row['name']):
+                self.after['schemaObjects']['constraints'] = [item for item in after if item != row]
+                with self.assertRaisesRegex(AssertionError, 'Unexpected schema mutation'):
+                    self.compare('startup')
+
+    def test_installed_228_requires_every_annual_act_column_and_both_tables(self):
+        self.configure_installed_catalog(annual=True)
+        self.before['actAnnualProjectionColumns']['ActAnnualNumberCounters'] = ['Year']
+        self.refresh_proof_pair()
+        with self.assertRaisesRegex(AssertionError, 'must include every baseline column'):
+            self.compare()
+        self.before['actAnnualProjectionColumns']['ActAnnualNumberCounters'].append('LastNumber')
+        self.refresh_proof_pair()
+        self.after['actAnnualFingerprints'].pop()
+        with self.assertRaisesRegex(AssertionError, 'fingerprint scope changed'):
+            self.compare()
+
+    def test_installed_228_cannot_collect_or_compare_without_a_pinned_annual_projection(self):
+        self.configure_installed_catalog(annual=True)
+        self.assertEqual(len(self.before['migrationRows']), 228)
+        columns = self.after['schemaColumns']
+        counts = self.after['actAnnualNewTableCounts']
+        migrations = self.after['migrationRows']
+        self.assertEqual(proof.act_annual_projection(columns, counts, migrations, self.before),
+                         self.before['actAnnualProjectionColumns'])
+        del self.before['actAnnualProjectionColumns']
+        with self.assertRaisesRegex(AssertionError, 'Pinned annual-act table projection differs'):
+            proof.act_annual_projection(columns, counts, migrations, self.before)
+        self.refresh_proof_pair()
+        with self.assertRaisesRegex(AssertionError, 'Installed annual-act projection scope changed'):
+            self.compare()
+
+    def test_installed_228_rejects_unreviewed_migration_even_with_updated_plan_hash(self):
+        self.configure_installed_catalog(annual=True)
+        migrations = self.plan['expectedBaselineMigrations']
+        migrations[0] = '00000000000000_UnreviewedMigration'
+        self.plan['expectedBaselineMigrationIdsSha256'] = hashlib.sha256(proof.canonical(migrations).encode()).hexdigest()
+        with self.assertRaisesRegex(AssertionError, 'exact installed annual-act migration catalog'):
             self.compare('startup')
 
     def test_reviewed_insert_only_at_startup_and_receipt_is_truthful(self):
@@ -475,7 +580,7 @@ class AnnualActAdmissionTests(unittest.TestCase):
 
     def setUp(self):
         DatabaseProofTests.setUp(self)
-        self.plan = json.loads(Path(__file__).with_name('deployment-baseline-current.json').read_text(encoding='utf-8'))
+        self.plan = json.loads(Path(__file__).with_name('deployment-baseline-act-annual.json').read_text(encoding='utf-8'))
         self.assertEqual(self.plan['expectedMigration'], proof.ACT_ANNUAL_MIGRATION)
         self.assertEqual(len(self.plan['expectedReleaseSeeds']), 29)
         self.before['utc'] = '2026-11-13T00:00:00+00:00'
@@ -530,6 +635,14 @@ class AnnualActAdmissionTests(unittest.TestCase):
         self.assertEqual(result['protectedSupplementalTables'], 4)
         self.assertEqual(result['reviewedReleaseSeeds'], 29)
         self.assertTrue(result['allColumnsAndRowsExact'])
+
+    def test_legacy_227_receipt_does_not_need_an_annual_projection(self):
+        self.assertEqual(len(self.before['migrationRows']), 227)
+        self.assertNotIn('actAnnualProjectionColumns', self.before)
+        for current in (self.before, self.after):
+            with self.subTest(migrations=len(current['migrationRows'])):
+                self.assertEqual(proof.act_annual_projection(current['schemaColumns'],
+                    current['actAnnualNewTableCounts'], current['migrationRows'], self.before), {})
 
     def test_stopped_boundary_keeps_schema_history_and_empty_absence_exact(self):
         self.after = copy.deepcopy(self.before)

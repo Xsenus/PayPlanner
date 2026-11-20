@@ -7,6 +7,7 @@ import test from 'node:test';
 import { preparePackage, sha256 } from './prepare-deployment-package.mjs';
 import { createPlan, qualifiedContext, reviewedCandidate, reviewedActAnnual, validateReviewedBaseline } from './prepare-deployment-plan.mjs';
 import { parseWorkflow } from './validate-deploy-workflow.mjs';
+import { canonicalBytes } from './xsenus-artifact-store.mjs';
 
 const revision = 'a'.repeat(40);
 const env = { COMPUTERNAME: 'XSENUS', GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'Xsenus/PayPlanner',
@@ -30,8 +31,13 @@ function fixture(t, candidate = false, annual = false) {
   const baseline = JSON.parse(readFileSync(resolve('scripts/deployment-baseline.json'), 'utf8'));
   let releases = Buffer.from('[{"releaseId":"published"}]');
   if (annual) {
-    Object.assign(baseline, JSON.parse(readFileSync(resolve('scripts/deployment-baseline-current.json'), 'utf8')));
-    releases = readFileSync(resolve('backend/AppReleases/releases.json'));
+    Object.assign(baseline, JSON.parse(readFileSync(resolve('scripts/deployment-baseline-act-annual.json'), 'utf8')));
+    const catalog = readFileSync(resolve('backend/AppReleases/releases.json'));
+    const firstReviewedEntry = '  {\n    "releaseId": ' + JSON.stringify(baseline.expectedReleaseSeeds[0].releaseId) + ',\n';
+    const reviewedStart = catalog.indexOf(firstReviewedEntry);
+    assert.ok(reviewedStart >= 0, 'Historic annual-act release catalog is missing');
+    releases = Buffer.concat([Buffer.from('[\n'), catalog.subarray(reviewedStart)]);
+    assert.equal(sha256(releases), baseline.expectedReleaseCatalogSha256);
     for (const source of [
       'backend/PayPlanner.Api.Migrations/Migrations/20261111140000_AddActAnnualNumbering.cs',
       'backend/PayPlanner.Api.Migrations/Migrations/PostgreSql/20261111140010_AddActAnnualNumberingPostgreSql.cs',
@@ -323,5 +329,49 @@ test('rejects changed annual migration source, reviewed profile or exact schema 
       writeFileSync(path, Buffer.concat([raw, Buffer.from('unreviewed')]));
     }
     assert.throws(() => createPlan(input), /Reviewed annual-act/);
+  }
+});
+
+function installedAnnualActFixture(t) {
+  const input = annualActFixture(t);
+  const path = join(input.root, 'scripts/deployment-baseline-current.json');
+  const baseline = JSON.parse(readFileSync(path, 'utf8'));
+  const delta = JSON.parse(readFileSync(join(input.root, 'scripts/deploy-act-annual-delta.json'), 'utf8'));
+  baseline.expectedMigration = null;
+  baseline.expectedReleaseSeeds = [];
+  baseline.expectedBaselineMigrations.push(delta.migrations.added[0].MigrationId);
+  baseline.expectedBaselineMigrations.sort();
+  baseline.expectedBaselineMigrationRows.push(delta.migrations.added[0]);
+  baseline.expectedBaselineMigrationRows.sort((left, right) => left.MigrationId.localeCompare(right.MigrationId));
+  baseline.expectedBaselineMigrationIdsSha256 = sha256(canonicalBytes(baseline.expectedBaselineMigrations).subarray(0, -1));
+  writeFileSync(path, JSON.stringify(baseline));
+  return { input, path, baseline };
+}
+
+test('plans an update without migrations over the exact installed 228-migration history', t => {
+  const { input, baseline } = installedAnnualActFixture(t);
+  const { plan } = createPlan(input);
+  assert.equal(plan.expectedMigration, null);
+  assert.equal(plan.expectedBaselineMigrations.length, 228);
+  assert.deepEqual(plan.expectedBaselineMigrationRows, baseline.expectedBaselineMigrationRows);
+});
+
+test('rejects reordered or substituted installed migrations and incomplete history rows', t => {
+  const { input, path, baseline } = installedAnnualActFixture(t);
+  const mutations = [
+    plan => { plan.expectedBaselineMigrations.reverse(); },
+    plan => {
+      plan.expectedBaselineMigrations[0] = '00000000000000_UnreviewedMigration';
+      plan.expectedBaselineMigrationRows[0].MigrationId = plan.expectedBaselineMigrations[0];
+    },
+    plan => { plan.expectedBaselineMigrationRows.reverse(); },
+    plan => { delete plan.expectedBaselineMigrationRows[0].ProductVersion; },
+  ];
+  for (const mutate of mutations) {
+    const changed = structuredClone(baseline);
+    mutate(changed);
+    changed.expectedBaselineMigrationIdsSha256 = sha256(canonicalBytes(changed.expectedBaselineMigrations).subarray(0, -1));
+    writeFileSync(path, JSON.stringify(changed));
+    assert.throws(() => createPlan(input), /Expected (?:exact|full|ordered) installed annual-act migration/);
   }
 });

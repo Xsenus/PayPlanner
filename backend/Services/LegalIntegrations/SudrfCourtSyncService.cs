@@ -333,7 +333,11 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
             SourceUrl = sourceUri.ToString(),
             CourtName = courtName,
             CaseNumber = caseNumber,
-            JudicialUid = FirstNotEmpty(ExtractQueryValue(sourceUri, "judicial_uid"), ExtractJudicialUid(html)),
+            JudicialUid = FirstNotEmpty(
+                GetValue(labelValues, "уникальный идентификатор дела"),
+                GetValue(labelValues, "уид"),
+                GetValue(labelValues, "уин"),
+                ExtractJudicialUid(html)),
             Category = category,
             JudgeName = judgeName,
             SecretaryName = FirstNotEmpty(
@@ -345,7 +349,7 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
                 GetValue(labelValues, "суд (судебный участок) первой инстанции"),
                 GetValue(labelValues, "нижестоящий суд")),
             LowerCourtCaseNumber = lowerCourtCaseNumber,
-            Instance = ResolveInstance(sourceUri, sourceText),
+            Instance = ResolveInstance(sourceUri, caseNumber, sourceText),
             ReceivedAt = ParseDate(GetValue(labelValues, "дата поступления")),
             DecisionAt = decisionAt,
             CaseOutcome = caseOutcome,
@@ -536,7 +540,8 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         var events = new List<SudrfCourtMovementEvent>();
         foreach (var blockHtml in ExtractSemanticContentBlocks(
                      html,
-                     static text => text.Contains("наименование события", StringComparison.OrdinalIgnoreCase)
+                     static text => (text.Contains("наименование события", StringComparison.OrdinalIgnoreCase)
+                                     || text.Contains("событие", StringComparison.OrdinalIgnoreCase))
                          && text.Contains("дата", StringComparison.OrdinalIgnoreCase)))
         {
             var rows = ExtractRows(blockHtml);
@@ -560,7 +565,22 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
                     title = row[0];
                 }
 
-                var dateText = FirstNotEmpty(GetCell(headers, row, "дата"), row.FirstOrDefault(ContainsDate));
+                var dateText = GetCell(headers, row, "дата события", "дата заседания");
+                if (string.IsNullOrWhiteSpace(dateText))
+                {
+                    var dateColumn = Array.FindIndex(headers, static header =>
+                        header.Contains("дата", StringComparison.OrdinalIgnoreCase)
+                        && !header.Contains("размещен", StringComparison.OrdinalIgnoreCase)
+                        && !header.Contains("публикаци", StringComparison.OrdinalIgnoreCase));
+                    if (dateColumn >= 0 && dateColumn < row.Count)
+                    {
+                        dateText = row[dateColumn];
+                    }
+                    else if (headers.Length == 0)
+                    {
+                        dateText = row.FirstOrDefault(ContainsDate) ?? string.Empty;
+                    }
+                }
                 var timeText = FirstNotEmpty(GetCell(headers, row, "время"), row.FirstOrDefault(ContainsTime));
                 var scheduledAt = ParseDateTime(dateText, timeText);
                 if (string.IsNullOrWhiteSpace(title) || scheduledAt is null && !ContainsDate(string.Join(' ', row)))
@@ -1045,8 +1065,18 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         return string.Empty;
     }
 
-    private static string ResolveInstance(Uri sourceUri, string pageText)
+    private static string ResolveInstance(Uri sourceUri, string caseNumber, string pageText)
     {
+        if (AppealCaseNumberRegex().IsMatch(caseNumber))
+        {
+            return "appeal";
+        }
+
+        if (FirstCivilCaseNumberRegex().IsMatch(caseNumber))
+        {
+            return "first";
+        }
+
         var deloId = ExtractQueryValue(sourceUri, "delo_id");
         if (string.Equals(deloId, "42", StringComparison.Ordinal))
         {
@@ -1156,6 +1186,12 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
 
     [GeneratedRegex(@"^\d{2}[A-ZА-Я]{2}\d{4}-\d{2}-\d{4}-\d{6}-\d{2}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex JudicialUidValueRegex();
+
+    [GeneratedRegex(@"^33[аa]?\s*[-–—]\s*\d", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex AppealCaseNumberRegex();
+
+    [GeneratedRegex(@"^2[аa]?\s*[-–—]\s*\d", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex FirstCivilCaseNumberRegex();
 
     [GeneratedRegex(@"\d{2}\.\d{2}\.\d{4}", RegexOptions.CultureInvariant)]
     private static partial Regex DateRegex();

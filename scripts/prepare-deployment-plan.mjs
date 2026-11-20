@@ -72,6 +72,21 @@ export function validateReviewedBaseline(baseline, root) {
     return;
   }
 
+  const installed = baseline.expectedBaselineMigrations;
+  if (baseline.expectedMigration === null && (installed.length >= 228 || installed.includes(actAnnualMigration))) {
+    const review = reviewedActAnnual(root);
+    const previous = installed.filter(id => id !== actAnnualMigration);
+    assert.equal(previous.length, 227, 'Expected exact installed annual-act migration catalog');
+    assert.equal(canonicalHash(previous), review.baselineMigrationIdsSha256, 'Expected exact installed annual-act migration catalog');
+    assert.deepEqual(installed, [...previous, ...review.migrationIds].sort(), 'Expected exact installed annual-act migration catalog');
+    assert.equal(canonicalHash(installed), baseline.expectedBaselineMigrationIdsSha256, 'Installed annual-act migration catalog pin differs');
+    const rows = baseline.expectedBaselineMigrationRows;
+    assert.ok(Array.isArray(rows) && rows.every(row => typeof row?.ProductVersion === 'string' && row.ProductVersion.length > 0),
+      'Expected full installed annual-act migration rows');
+    assert.deepEqual(rows.map(row => row.MigrationId), installed, 'Expected ordered installed annual-act migration rows');
+    return;
+  }
+
   const review = reviewedCandidate(root);
   const candidateId = review.migrationIds.join('+');
   assert.ok([null, '20261027005432_AddPaymentCreateAttempts', '20261027005432_AddPaymentCreateAttempts+20261027014154_AddPersonalChatHistory', candidateId].includes(baseline.expectedMigration), 'Only the reviewed additive migrations may be admitted');

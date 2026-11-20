@@ -9089,6 +9089,7 @@ function TaskTable({
                       <TaskPriorityBadge priority={task.priority} compact />
                       <TaskBillingBadge task={task} compact />
                     </div>
+                    {task.recurrenceEnabled && <div className="mt-1.5"><TaskRecurrenceBadge /></div>}
                     {pendingDeadlineRequest ? (
                       <div
                         className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800"
@@ -9248,6 +9249,15 @@ function TaskTable({
         </table>
       </div>
     </div>
+  );
+}
+
+function TaskRecurrenceBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">
+      <Repeat2 aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+      Повторяется
+    </span>
   );
 }
 
@@ -9579,6 +9589,7 @@ function TaskBoard({
                   <button type="button" onClick={() => onEdit(task)} className="mt-2 block text-left text-sm font-bold leading-5 text-slate-900 hover:text-blue-700 hover:underline" title="Открыть задачу">{task.title}</button>
                   <span className={`mt-2 inline-flex rounded-lg px-2 py-1 text-xs font-bold ${statusClass(task.status)}`}>{getStatusLabel(task.status)}</span>
                   <TaskBillingBadge task={task} className="mt-2" />
+                  {task.recurrenceEnabled && <div className="mt-2"><TaskRecurrenceBadge /></div>}
                   <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
                     <TypeIcon className="h-3.5 w-3.5" />
                     {getTypeMeta(task.type).label}
@@ -13770,6 +13781,7 @@ function TaskModal({
                     <span className="h-2 w-2 rounded-full bg-orange-500" />
                     {statusOption.label}
                   </span>
+                  {form.recurrenceEnabled && <TaskRecurrenceBadge />}
                   {state?.task ? <TaskBillingBadge task={state.task} /> : form.clientBillingClassification ? (
                     <TaskStickerBadge
                       stickerKey={form.clientBillingClassification === 'billable'
@@ -14554,7 +14566,10 @@ function TaskModal({
                 Журнал задач
               </button>
             ) : null}
-            <h2 className="text-2xl font-semibold text-slate-900">{state?.mode === 'view' ? 'Просмотр задачи' : state?.mode === 'edit' ? 'Редактировать задачу' : 'Новая задача'}</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-2xl font-semibold text-slate-900">{state?.mode === 'view' ? 'Просмотр задачи' : state?.mode === 'edit' ? 'Редактировать задачу' : 'Новая задача'}</h2>
+              {form.recurrenceEnabled && <TaskRecurrenceBadge />}
+            </div>
             <p className="mt-1 text-sm text-slate-500">Заполните контрагента, исполнителя, срок и правила напоминаний.</p>
           </div>
           <div className="flex shrink-0 flex-wrap items-start justify-end gap-2">

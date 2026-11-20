@@ -155,10 +155,22 @@ public sealed class SudrfCourtSyncProvider : ICourtSyncCaseSearchProvider, ICour
         var courtData = await ReadCaseAsync(
             new CourtSyncCaseBinding(
                 request.SourceUrl,
-                FirstNonEmpty(request.CourtCaseNumber, request.JudicialUid),
+                FirstNonEmpty(request.JudicialUid, request.CourtCaseNumber),
                 request.JudicialUid,
                 request.Instance),
             ct);
+
+        var requestedInstance = request.Instance?.Trim().ToLowerInvariant();
+        if (requestedInstance is ("first" or "appeal") && courtData.Instance != requestedInstance)
+        {
+            throw new SudrfCourtSyncException("По указанной ссылке найдена карточка другой инстанции. Укажите сайт суда выбранной инстанции.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.JudicialUid)
+            && !string.Equals(courtData.JudicialUid, request.JudicialUid.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new SudrfCourtSyncException("Судебная карточка не подтверждает указанный УИД. Проверьте ссылку и идентификатор дела.");
+        }
 
         return [MapSearchResult(courtData)];
     }
