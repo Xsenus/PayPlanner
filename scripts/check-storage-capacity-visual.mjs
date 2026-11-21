@@ -151,7 +151,25 @@ try {
     await route.continue();
   });
   enterPhase('fixture-navigation');
-  await page.goto(`${origin}/scripts/fixtures/storage-capacity-visual.html${releasedMarkers ? '?markers=true' : ''}`, { waitUntil: 'domcontentloaded' });
+  const apiOrigin = liveApi?.origin ?? origin;
+  const previewPath = `/api/storage/capacity/stages/${releasedMarkers ? 'markers/' : ''}reconcile`;
+  const initialReads = [page.waitForResponse(response => {
+    const url = new URL(response.url());
+    return url.origin === apiOrigin && url.pathname === previewPath
+      && url.searchParams.get('apply') === 'false' && response.request().method() === 'POST';
+  })];
+  if (!releasedMarkers) {
+    initialReads.push(page.waitForResponse(response =>
+      response.url() === `${apiOrigin}/api/storage/health` && response.request().method() === 'GET'));
+  }
+  const [, initialResponses] = await Promise.all([
+    page.goto(`${origin}/scripts/fixtures/storage-capacity-visual.html${releasedMarkers ? '?markers=true' : ''}`, { waitUntil: 'domcontentloaded' }),
+    Promise.all(initialReads),
+  ]);
+  for (const response of initialResponses) {
+    assert.equal(response.status(), 200, 'The storage preview must load successfully.');
+    assert.equal(await response.finished(), null, 'The storage preview response must be complete.');
+  }
   enterPhase('preview-assertions');
   if (!releasedMarkers) await expect(page.getByText('Файл неполный — резерв сохранён')).toBeVisible();
   if (releasedMarkers) {
