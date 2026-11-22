@@ -147,11 +147,14 @@ async function waitForCardReadsBeforeLeaving() {
 async function waitForNotificationRefreshBeforeClosing() {
   // TopBar debounces realtime count refreshes by 800 ms. An empty request map
   // does not mean that this scheduled real GET has started or completed yet.
-  // Wait for that actual successful read instead of cancelling it at close.
+  // Check dispatch with the usual short poll. Let the dispatched read complete
+  // within the page's response budget before closing the browser.
   await expect.poll(() => page.evaluate(() =>
-    window.__taskUploadUnreadCountRefreshRevision >= window.__taskUploadNotificationRevision), {
-    message: 'The real unread-count refresh after the latest notification must succeed before browser close.',
+    window.__taskUploadUnreadCountStartedRevision >= window.__taskUploadNotificationRevision), {
+    message: 'The real unread-count refresh after the latest notification must start before browser close.',
   }).toBe(true);
+  await page.waitForFunction(() =>
+    window.__taskUploadUnreadCountRefreshRevision >= window.__taskUploadNotificationRevision, undefined, { polling: 100 });
 }
 async function waitForInitialTaskCardData() {
   const readResponse = async path => {
@@ -444,25 +447,34 @@ try {
     }
     return route.continue();
   }, () => closingBrowser, () => { routeDisposalsDuringClose++; }));
-  const initialPendingUploads = !completionFlow && !creationFlow ? page.waitForResponse(response => {
-    const url = new URL(response.url());
-    return response.request().method() === 'GET' && url.origin === api.origin
-      && url.pathname === `/api/tasks/${taskId}/files/uploads`
-      && url.searchParams.get('pendingOnly') === 'true' && url.searchParams.get('includePageInfo') === 'true';
-  }).then(async response => {
-    assert.equal(response.status(), 200, 'The initial pending upload page must load successfully.');
-    const body = await response.json();
-    assert.ok(Array.isArray(body.items));
-    assert.ok(body.items.some(item => item.fileName === (queueReplay ? fileName : 'synthetic-paused.txt')
-      && item.status === 'paused'), 'The real initial page must contain the seeded paused upload.');
-  }) : null;
-  // Preserve an earlier primary failure if authentication or navigation fails first.
-  void initialPendingUploads?.catch(() => {});
+  let initialPendingUploads;
   await page.goto(`${ui}/tasks/${taskId}`, { waitUntil: 'domcontentloaded' });
   await page.locator('input[type="email"]').fill(process.env.TASK_UPLOAD_EMAIL);
   await page.locator('input[type="password"]').fill(process.env.TASK_UPLOAD_PASSWORD);
   const signIn = () => page.getByRole('button', { name: 'Войти', exact: true }).click();
-  await Promise.all([waitForInitialTaskCardData(), signIn()]);
+  // Register the card reads when the login response arrives. The page still
+  // needs its login body before it can send authenticated requests.
+  const signedIn = page.waitForResponse(response =>
+    response.url() === new URL('/api/auth/login', api).href && response.request().method() === 'POST'
+  ).then(response => {
+    assert.equal(response.status(), 200, 'The owned browser must sign in to the synthetic backend.');
+    initialPendingUploads = !completionFlow && !creationFlow ? page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET' && url.origin === api.origin
+        && url.pathname === `/api/tasks/${taskId}/files/uploads`
+        && url.searchParams.get('pendingOnly') === 'true' && url.searchParams.get('includePageInfo') === 'true';
+    }).then(async response => {
+      assert.equal(response.status(), 200, 'The initial pending upload page must load successfully.');
+      const body = await response.json();
+      assert.ok(Array.isArray(body.items));
+      assert.ok(body.items.some(item => item.fileName === (queueReplay ? fileName : 'synthetic-paused.txt')
+        && item.status === 'paused'), 'The real initial page must contain the seeded paused upload.');
+    }) : null;
+    // Preserve an earlier primary failure if authentication or navigation fails first.
+    void initialPendingUploads?.catch(() => {});
+    return waitForInitialTaskCardData();
+  });
+  await Promise.all([signedIn, signIn()]);
   await page.locator('input[type="email"]').waitFor({ state: 'hidden' });
   console.log('TASK_UPLOAD_STAGE_AUTHENTICATED');
   const card = page.getByTestId(`task-${mode}-card-window`);

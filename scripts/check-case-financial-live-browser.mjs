@@ -180,10 +180,12 @@ try {
       }
       firstHandled();
     });
+    const loginEmail = page.locator('input[type="email"]');
+    await loginEmail.waitFor({ state: 'visible' });
     await checkpoint('login-read-boundary');
-    await reads.drain('client-navigation');
+    await initialReads.drain('client-navigation');
     await checkpoint('login-fields');
-    await page.locator('input[type="email"]').fill(settings.email);
+    await loginEmail.fill(settings.email);
     await page.locator('input[type="password"]').fill(settings.password);
     await page.getByRole('button', { name: 'Войти', exact: true }).click();
     await page.locator('input[type="email"]').waitFor({ state: 'hidden' });

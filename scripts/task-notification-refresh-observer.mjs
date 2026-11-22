@@ -1,6 +1,7 @@
 // Runs inside the browser. Observe causal order without comparing browser and Node clocks.
 export function installTaskNotificationRefreshObserver(apiOrigin) {
   window.__taskUploadNotificationRevision = 0;
+  window.__taskUploadUnreadCountStartedRevision = 0;
   window.__taskUploadUnreadCountRefreshRevision = 0;
   window.addEventListener('payplanner:user-notifications-changed', () => {
     window.__taskUploadNotificationRevision++;
@@ -16,6 +17,9 @@ export function installTaskNotificationRefreshObserver(apiOrigin) {
         && (args[1]?.method ?? input?.method ?? 'GET').toUpperCase() === 'GET';
     } catch {
       // Unsupported fetch inputs still go through the original browser implementation.
+    }
+    if (isUnreadCount) {
+      window.__taskUploadUnreadCountStartedRevision = Math.max(window.__taskUploadUnreadCountStartedRevision, revision);
     }
     const response = await originalFetch(...args);
     if (isUnreadCount && response.status === 200) {

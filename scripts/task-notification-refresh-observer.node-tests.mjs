@@ -24,6 +24,7 @@ function browser(fetchImpl = async () => new Response('1')) {
   return {
     window, calls,
     notify: () => listeners.get('payplanner:user-notifications-changed')(),
+    refreshStarted: () => window.__taskUploadUnreadCountStartedRevision >= window.__taskUploadNotificationRevision,
     refreshed: () => window.__taskUploadUnreadCountRefreshRevision >= window.__taskUploadNotificationRevision,
   };
 }
@@ -32,13 +33,16 @@ test('observes a real successful read after the event and preserves fetch argume
   const response = new Response('7');
   const b = browser(async () => response);
   b.notify();
+  assert.equal(b.refreshStarted(), false);
   assert.equal(b.refreshed(), false);
   const options = { headers: { Authorization: 'synthetic' }, cache: 'no-store' };
   assert.equal(await b.window.fetch(countUrl, options), response);
   assert.deepEqual(b.calls, [[countUrl, options]]);
   assert.equal(await response.text(), '7');
+  assert.equal(b.refreshStarted(), true);
   assert.equal(b.refreshed(), true);
   b.notify();
+  assert.equal(b.refreshStarted(), false);
   assert.equal(b.refreshed(), false);
 });
 
@@ -49,6 +53,7 @@ test('a response to a request started before the event cannot satisfy the latest
   b.notify();
   complete(new Response('1'));
   await pending;
+  assert.equal(b.refreshStarted(), false);
   assert.equal(b.refreshed(), false);
 });
 
@@ -67,6 +72,7 @@ test('does not mark a pending or failed body as successfully refreshed', async (
   b.notify();
   const pending = b.window.fetch(countUrl);
   await started;
+  assert.equal(b.refreshStarted(), true);
   assert.equal(b.refreshed(), false);
   completeBody.reject(new Error('synthetic connection interrupted'));
   assert.equal(await pending, response);
@@ -81,6 +87,7 @@ test('ignores non-success, other endpoints, foreign origins and non-GET requests
     ['http://127.0.0.1:5081/api/notifications/inbox/unread-count', undefined],
     [countUrl, { method: 'POST' }],
   ]) await b.window.fetch(url, options);
+  assert.equal(b.refreshStarted(), false);
   assert.equal(b.refreshed(), false);
   const denied = browser(async () => new Response('denied', { status: 403 }));
   denied.notify();
