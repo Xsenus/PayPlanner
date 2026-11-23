@@ -104,7 +104,9 @@ try {
   const result = await cli('run-code', String.raw`async (page) => {
     const settings = ${settings};
     const check = (condition, message) => { if (!condition) throw new Error(message); };
-    const path = '/api/v2/cases/' + settings.caseId + '/court-sync/run';
+    const casePath = '/api/v2/cases/' + settings.caseId;
+    const path = casePath + '/court-sync/run';
+    const courtLogsPath = casePath + '/court-sync/logs';
     const outside = []; const errors = []; const results = [];
     let otherWrites = 0; let authorization;
     page.setDefaultTimeout(20000);
@@ -128,10 +130,25 @@ try {
     });
     const caseReads = (${createCaseReadLifecycle})(page,
       request => (${isCaseBoundaryRead})(request, settings.api, settings.caseId), 20000);
+    const completeRead = async (ownedPath, timeout = 20000) => {
+      const response = await page.waitForResponse(candidate => candidate.request().method() === 'GET'
+        && candidate.url() === settings.api + ownedPath, { timeout });
+      check(response.status() === 200 && await response.finished() === null, 'Owned court page read failed: ' + ownedPath);
+    };
+    const waitForSyncPost = () => page.waitForResponse(response => response.url() === settings.api + path
+      && response.request().method() === 'POST');
     try {
+      await page.bringToFront();
       await page.locator('input[type="email"]').fill(settings.email);
       await page.locator('input[type="password"]').fill(settings.password);
-      await page.getByRole('button', { name: 'Войти', exact: true }).click();
+      // The case render depends on the first authenticated reads. Use the
+      // cold-start budget for those reads before timing the court controls.
+      const ready = page.waitForResponse(response => response.request().method() === 'POST'
+        && response.url() === settings.api + '/api/auth/login').then(response => {
+        check(response.status() === 200, 'Owned court browser login failed');
+        return Promise.all([completeRead(casePath, 45000), completeRead(courtLogsPath, 45000)]);
+      });
+      await Promise.all([ready, page.getByRole('button', { name: 'Войти', exact: true }).click()]);
       await page.locator('input[type="email"]').waitFor({ state: 'hidden' });
       const courtTab = page.getByRole('button', { name: 'Суд', exact: true });
       await courtTab.waitFor();
@@ -142,8 +159,7 @@ try {
         await page.getByRole('heading', { name: 'Сводка по судебному делу', exact: true }).waitFor();
       } else await page.getByText('Режим редактирования судебных данных', { exact: true }).waitFor();
       const sync = page.getByRole('button', { name: 'Проверить источник', exact: true });
-      const first = page.waitForResponse(response => new URL(response.url()).pathname === path && response.request().method() === 'POST');
-      await sync.click(); await first;
+      await Promise.all([waitForSyncPost(), completeRead(courtLogsPath), sync.click()]);
       const pending = page.getByText(/сводки ожидают обязательных копий: 1; сроки и напоминания сохранены/).first();
       await pending.waitFor();
       check((await pending.locator('..').getAttribute('class')).includes('bg-amber-50'), 'Pending court summary is not shown as waiting');
@@ -154,8 +170,7 @@ try {
       const boundary = await page.request.post(settings.controlUrl);
       check(boundary.ok(), 'Owned storage worker boundary failed');
       check(results.length === 1, 'Worker completion caused an automatic sync');
-      const second = page.waitForResponse(response => new URL(response.url()).pathname === path && response.request().method() === 'POST');
-      await sync.click(); await second;
+      await Promise.all([waitForSyncPost(), completeRead(courtLogsPath), sync.click()]);
       await page.waitForFunction(() => !document.body.textContent.includes('сводки ожидают обязательных копий: 1'));
       check(results.length === 2 && results[1].createdProceduralDeadlines === 0 && results[1].pendingCourtActDocuments === 0
         && results[1].createdCourtActDocuments === 0, 'Repeated sync created another control or summary');

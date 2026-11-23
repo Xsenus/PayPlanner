@@ -165,6 +165,8 @@ try {
       { name: 'first.txt', mimeType: 'text/plain', buffer: Buffer.from([1, 2, 3]) },
       { name: 'second.txt', mimeType: 'text/plain', buffer: Buffer.from([4, 5, 6]) },
     ]);
+    // Finish UI startup reads before driving the real multipart request.
+    await drainNavigationReads();
     await page.getByRole('button', { name: 'Отправить', exact: true }).click(); await firstAccepted;
     if (settings.lostAcknowledgement) {
       await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.getAttribute('aria-label') === 'Отправить' && !button.disabled));
@@ -190,6 +192,7 @@ try {
       ]);
       const newTimes = await page.locator('input[type="file"]').evaluate(input => Array.from(input.files, file => file.lastModified));
       check(newTimes.some((time, index) => time !== unconfirmed.files[index].lastModified), 'Reselection did not exercise changed file timestamps');
+      await drainNavigationReads();
       const retried = page.waitForResponse(response => response.url() === settings.api + prefix + '/messages' && response.status() === 202);
       await page.getByRole('button', { name: 'Отправить', exact: true }).click(); await retried;
     }

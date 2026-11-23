@@ -23,6 +23,7 @@ process.env.VITE_API_URL = new URL('/api', api).href;
 const ui = `http://127.0.0.1:${port}`;
 const queueReplay = process.env.TASK_UPLOAD_QUEUE_REPLAY === 'true';
 const delayCardSettings = process.env.TASK_UPLOAD_DELAY_CARD_SETTINGS === 'true';
+const delayedSettingsRelease = delayCardSettings ? Promise.withResolvers() : null;
 const liveFlow = process.env.TASK_UPLOAD_FLOW === 'live';
 const completionSaveFailure = process.env.TASK_UPLOAD_FLOW === 'completionSaveFailure';
 const completionFlow = process.env.TASK_UPLOAD_FLOW === 'completion' || completionSaveFailure;
@@ -156,7 +157,7 @@ async function waitForNotificationRefreshBeforeClosing() {
   await page.waitForFunction(() =>
     window.__taskUploadUnreadCountRefreshRevision >= window.__taskUploadNotificationRevision, undefined, { polling: 100 });
 }
-async function waitForInitialTaskCardData() {
+async function waitForInitialTaskCardData(beforeCardReads) {
   const readResponse = async path => {
     const response = await page.waitForResponse(candidate => {
       const url = new URL(candidate.url());
@@ -165,13 +166,17 @@ async function waitForInitialTaskCardData() {
     assert.equal(response.status(), 200, `Initial task card dependency failed: ${path}`);
     return response.json();
   };
+  const readCardDependencies = async () => {
+    if (beforeCardReads) await beforeCardReads;
+    const [settings] = await Promise.all([
+      readResponse('/api/tasks/settings'),
+      readResponse(`/api/tasks/${taskId}/files`),
+      readResponse(`/api/tasks/${taskId}/files/uploads`),
+    ]);
+    return settings;
+  };
   initialTaskData = readResponse(`/api/tasks/${taskId}`);
-  const [settings, task] = await Promise.all([
-    readResponse('/api/tasks/settings'),
-    initialTaskData,
-    readResponse(`/api/tasks/${taskId}/files`),
-    readResponse(`/api/tasks/${taskId}/files/uploads`),
-  ]);
+  const [task, settings] = await Promise.all([initialTaskData, readCardDependencies()]);
   assert.equal(settings.taskCardWindowMode, mode, 'The actual backend must serve the seeded card mode.');
   assert.equal(task.id, taskId, 'The actual backend must serve the requested task.');
 }
@@ -385,27 +390,33 @@ try {
     if (![api.origin, ui].includes(url.origin)) { outside.push(url.origin); return route.abort(); }
     if (delayCardSettings && !delayedSettingsChecked && url.pathname === '/api/tasks/settings' && request.method() === 'GET') {
       delayedSettingsChecked = true;
-      const response = await route.fetch();
-      assert.equal(response.status(), 200);
-      assert.equal((await response.json()).taskCardWindowMode, mode);
-      assert.ok(initialTaskData, 'Observe the real task request before holding its settings response.');
-      await initialTaskData;
-      const gate = page.getByTestId('task-card-settings-gate');
-      await expect(gate).toBeVisible();
-      await expect(page.getByTestId('task-legacy-card-window')).toHaveCount(0);
-      await expect(page.getByTestId('task-modern-card-window')).toHaveCount(0);
-      await mkdir('.playwright-cli', { recursive: true });
-      const screenshotStem = `task-card-settings-${mode}-${basename(process.env.TASK_UPLOAD_ROOT)}`;
-      await page.screenshot({ path: join('.playwright-cli', `${screenshotStem}-desktop.png`), fullPage: true, animations: 'disabled' });
-      const viewport = page.viewportSize();
-      await page.setViewportSize({ width: 390, height: 844 });
-      await expect(gate).toBeVisible();
-      await page.screenshot({ path: join('.playwright-cli', `${screenshotStem}-mobile.png`), fullPage: true, animations: 'disabled' });
-      await page.setViewportSize(viewport);
-      await expect(page.getByTestId('task-legacy-card-window')).toHaveCount(0);
-      await expect(page.getByTestId('task-modern-card-window')).toHaveCount(0);
-      console.log('TASK_UPLOAD_STAGE_SETTINGS_WAIT_VERIFIED');
-      return route.fulfill({ response });
+      try {
+        const response = await route.fetch();
+        assert.equal(response.status(), 200);
+        assert.equal((await response.json()).taskCardWindowMode, mode);
+        assert.ok(initialTaskData, 'Observe the real task request before holding its settings response.');
+        await initialTaskData;
+        const gate = page.getByTestId('task-card-settings-gate');
+        await expect(gate).toBeVisible();
+        await expect(page.getByTestId('task-legacy-card-window')).toHaveCount(0);
+        await expect(page.getByTestId('task-modern-card-window')).toHaveCount(0);
+        await mkdir('.playwright-cli', { recursive: true });
+        const screenshotStem = `task-card-settings-${mode}-${basename(process.env.TASK_UPLOAD_ROOT)}`;
+        await page.screenshot({ path: join('.playwright-cli', `${screenshotStem}-desktop.png`), fullPage: true, animations: 'disabled' });
+        const viewport = page.viewportSize();
+        await page.setViewportSize({ width: 390, height: 844 });
+        await expect(gate).toBeVisible();
+        await page.screenshot({ path: join('.playwright-cli', `${screenshotStem}-mobile.png`), fullPage: true, animations: 'disabled' });
+        await page.setViewportSize(viewport);
+        await expect(page.getByTestId('task-legacy-card-window')).toHaveCount(0);
+        await expect(page.getByTestId('task-modern-card-window')).toHaveCount(0);
+        console.log('TASK_UPLOAD_STAGE_SETTINGS_WAIT_VERIFIED');
+        delayedSettingsRelease.resolve();
+        return route.fulfill({ response });
+      } catch (error) {
+        delayedSettingsRelease.reject(error);
+        throw error;
+      }
     }
     if (completionSaveFailure && url.pathname === `/api/tasks/${taskId}/status` && request.method() === 'PATCH') {
       statusSaveCount++;
@@ -449,6 +460,7 @@ try {
   }, () => closingBrowser, () => { routeDisposalsDuringClose++; }));
   let initialPendingUploads;
   await page.goto(`${ui}/tasks/${taskId}`, { waitUntil: 'domcontentloaded' });
+  await page.bringToFront();
   await page.locator('input[type="email"]').fill(process.env.TASK_UPLOAD_EMAIL);
   await page.locator('input[type="password"]').fill(process.env.TASK_UPLOAD_PASSWORD);
   const signIn = () => page.getByRole('button', { name: 'Войти', exact: true }).click();
@@ -458,7 +470,16 @@ try {
     response.url() === new URL('/api/auth/login', api).href && response.request().method() === 'POST'
   ).then(response => {
     assert.equal(response.status(), 200, 'The owned browser must sign in to the synthetic backend.');
-    initialPendingUploads = !completionFlow && !creationFlow ? page.waitForResponse(response => {
+    // The delayed-settings scenario holds the real response while it checks
+    // two viewports. Attachment requests can only start after that inspection.
+    const beforeCardReads = delayedSettingsRelease && Promise.all([
+      page.waitForRequest(request => {
+        const url = new URL(request.url());
+        return request.method() === 'GET' && url.origin === api.origin && url.pathname === '/api/tasks/settings';
+      }),
+      delayedSettingsRelease.promise,
+    ]);
+    const readInitialPendingUploads = () => !completionFlow && !creationFlow ? page.waitForResponse(response => {
       const url = new URL(response.url());
       return response.request().method() === 'GET' && url.origin === api.origin
         && url.pathname === `/api/tasks/${taskId}/files/uploads`
@@ -470,9 +491,10 @@ try {
       assert.ok(body.items.some(item => item.fileName === (queueReplay ? fileName : 'synthetic-paused.txt')
         && item.status === 'paused'), 'The real initial page must contain the seeded paused upload.');
     }) : null;
+    initialPendingUploads = beforeCardReads ? beforeCardReads.then(readInitialPendingUploads) : readInitialPendingUploads();
     // Preserve an earlier primary failure if authentication or navigation fails first.
     void initialPendingUploads?.catch(() => {});
-    return waitForInitialTaskCardData();
+    return waitForInitialTaskCardData(beforeCardReads);
   });
   await Promise.all([signedIn, signIn()]);
   await page.locator('input[type="email"]').waitFor({ state: 'hidden' });
