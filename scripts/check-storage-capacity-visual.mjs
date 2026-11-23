@@ -9,6 +9,7 @@ import { createServer } from 'vite';
 const port = Number(process.env.STORAGE_CAPACITY_BROWSER_PORT ?? 5197);
 assert.ok(Number.isSafeInteger(port) && port > 0 && port < 65536);
 const origin = `http://127.0.0.1:${port}`;
+const fixturePath = 'scripts/fixtures/storage-capacity-visual.html';
 const liveApi = process.env.STORAGE_CAPACITY_API ? new URL(process.env.STORAGE_CAPACITY_API) : null;
 const liveToken = process.env.STORAGE_CAPACITY_TOKEN;
 const writerRoot = process.env.STORAGE_CAPACITY_WRITER_ROOT;
@@ -55,9 +56,9 @@ const phaseNames = new Set([
 let phase = 'module-ready';
 let phaseEvents = 0;
 let screenshots = 0;
-function recordPhase(event = 'enter', error = null) {
+function recordPhase(event = 'enter', error = null, phaseName = phase) {
   try {
-    if (phaseEvents >= 64 || !phaseNames.has(phase)
+    if (phaseEvents >= 64 || !phaseNames.has(phaseName)
       || !['enter', 'failed', 'attempt-failed'].includes(event)) return;
     const values = [Math.round(performance.now() - phaseStartedAt), Math.round(process.uptime() * 1000),
       browserErrors.length, externalRequests.length, screenshots];
@@ -65,7 +66,7 @@ function recordPhase(event = 'enter', error = null) {
     const name = error instanceof Error ? error.name : null;
     const errorKind = error === null ? 'none' : name === 'TimeoutError' ? 'timeout'
       : name === 'AssertionError' ? 'assertion' : name === null ? 'unknown' : 'error';
-    const marker = { Phase: phase, Event: event, ElapsedMs: values[0], ProcessUptimeMs: values[1],
+    const marker = { Phase: phaseName, Event: event, ElapsedMs: values[0], ProcessUptimeMs: values[1],
       BrowserErrors: values[2], OutsideRequests: values[3], Screenshots: values[4], ErrorKind: errorKind };
     phaseEvents++;
     writeSync(1, `PP_STORAGE_CAPACITY_BROWSER_PHASE ${JSON.stringify(marker)}\n`);
@@ -74,13 +75,14 @@ function recordPhase(event = 'enter', error = null) {
 function enterPhase(next) { phase = next; recordPhase(); }
 recordPhase();
 
-try {
+async function prepareFixture() {
   enterPhase('create-server');
   vite = await createServer({
     envDir: resolve('scripts'),
     cacheDir: join(browserRoot, 'vite-storage-capacity-cache'),
     // The default bundled config loader writes outside cacheDir to node_modules/.vite-temp.
     configLoader: 'runner',
+    optimizeDeps: { entries: [fixturePath] },
     server: { host: '127.0.0.1', port, strictPort: true },
     logLevel: 'error',
   });
@@ -91,13 +93,30 @@ try {
   enterPhase('entry-transform');
   const entry = await vite.transformRequest('/src/components/Settings/StorageCapacityRecoverySettings.visual.tsx');
   assert.ok(entry?.code, 'The synthetic storage-capacity UI entry module must compile successfully.');
+}
+
+async function launchBrowser() {
   for (const channel of ['msedge', 'chrome', undefined]) {
-    enterPhase(`launch-${channel ?? 'chromium'}`);
-    try { browser = await chromium.launch({ headless: true, channel,
-      ...(process.env.PAYPLANNER_TEST_BROWSER_PATH ? { executablePath: process.env.PAYPLANNER_TEST_BROWSER_PATH } : {}) }); break; }
-    catch (error) { recordPhase('attempt-failed', error); /* Do not download a browser. */ }
+    const launchPhase = `launch-${channel ?? 'chromium'}`;
+    recordPhase('enter', null, launchPhase);
+    try {
+      browser = await chromium.launch({ headless: true, channel,
+        ...(process.env.PAYPLANNER_TEST_BROWSER_PATH ? { executablePath: process.env.PAYPLANNER_TEST_BROWSER_PATH } : {}) });
+      return;
+    } catch (error) {
+      recordPhase('attempt-failed', error, launchPhase);
+    }
   }
-  assert.ok(browser, 'An installed Chromium browser is required.');
+  throw new Error('An installed Chromium browser is required.');
+}
+
+try {
+  // Chromium startup and fixture compilation are independent. Settle both so
+  // the cleanup below owns every initialized resource even if either fails.
+  const preparation = await Promise.allSettled([prepareFixture(), launchBrowser()]);
+  for (const result of preparation) {
+    if (result.status === 'rejected') throw result.reason;
+  }
   enterPhase('browser-context');
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, timezoneId: 'Asia/Novosibirsk' });
   enterPhase('new-page');
@@ -163,7 +182,7 @@ try {
       response.url() === `${apiOrigin}/api/storage/health` && response.request().method() === 'GET'));
   }
   const [, initialResponses] = await Promise.all([
-    page.goto(`${origin}/scripts/fixtures/storage-capacity-visual.html${releasedMarkers ? '?markers=true' : ''}`, { waitUntil: 'domcontentloaded' }),
+    page.goto(`${origin}/${fixturePath}${releasedMarkers ? '?markers=true' : ''}`, { waitUntil: 'domcontentloaded' }),
     Promise.all(initialReads),
   ]);
   for (const response of initialResponses) {
