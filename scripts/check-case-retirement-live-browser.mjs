@@ -169,6 +169,11 @@ try {
     let tracePhase = 'login';
     let traceSequence = 0;
     const traceStarted = Date.now();
+    const isSidebarAdvanceCount = request => {
+      const url = new URL(request.url());
+      return request.method() === 'GET' && url.origin === settings.api
+        && url.pathname === '/api/v2/payments' && url.searchParams.get('advanceReviewStatus') === 'RequiresDecision';
+    };
     const isClientFormRequirements = request => {
       const url = new URL(request.url());
       return request.method() === 'GET' && url.origin === settings.api
@@ -272,6 +277,9 @@ try {
     await page.context().route('**/*', async route => {
       const request = route.request(); const url = new URL(request.url());
       if (![settings.api, settings.ui].includes(url.origin)) { outside.push(url.origin); return route.abort(); }
+      // The real sidebar refresh is unrelated to the intentional outage.
+      // Forward it unchanged after the owned server is back.
+      if (restarting && settings.flow.includes('slow') && isSidebarAdvanceCount(request)) await restartFinished;
       if (restarted && !settings.flow.includes('slow') && restartObserver.snapshot().begun
         && request.method() === 'POST' && url.origin === settings.api && url.pathname === '/hubs/notifications/negotiate') {
         if (!restartReadBoundary) restartReadBoundary = (async () => {
@@ -343,11 +351,26 @@ try {
       }
       return route.continue();
     });
+    await page.bringToFront();
     await page.locator('input[type="email"]').fill(settings.email);
     await page.locator('input[type="password"]').fill(settings.password);
-    await page.getByRole('button', { name: 'Войти', exact: true }).click();
-    await waitAtPhase(page.locator('input[type="email"]'), 'login-finished', { state: 'hidden' });
-    await waitAtPhase(page.getByRole('button', { name: 'Редактировать дело', exact: true }), 'case-ready');
+    const initialCaseRead = page.waitForResponse(response => response.request().method() === 'POST'
+      && response.url() === settings.api + '/api/auth/login').then(response => {
+      check(response.status() === 200, 'The owned browser login failed.');
+      return page.waitForRequest(request => {
+        const url = new URL(request.url());
+        return request.method() === 'GET' && url.origin === settings.api
+          && url.pathname === '/api/v2/cases/' + settings.caseId;
+      });
+    });
+    const [caseRequest] = await Promise.all([initialCaseRead,
+      page.getByRole('button', { name: 'Войти', exact: true }).click()]);
+    // The case readiness timeout starts only once the real case request is in flight.
+    await Promise.all([
+      waitAtPhase(page.locator('input[type="email"]'), 'login-finished', { state: 'hidden' }),
+      waitAtPhase(page.getByRole('button', { name: 'Редактировать дело', exact: true }), 'case-ready'),
+    ]);
+    check((await caseRequest.response())?.status() === 200, 'The owned case details read failed.');
     tracePhase = 'fixture-identity';
     // Register a fixture identity through the real helper, then bind it to the owned durable server attempt.
     await page.evaluate(async settings => {
@@ -375,6 +398,7 @@ try {
         page.goto(settings.ui + '/clients/' + settings.clientId, { waitUntil: 'domcontentloaded' }),
       ]);
       check((await formRequirements.response())?.ok(), 'Client profile form requirements could not be loaded');
+      await caseReads.drain('client-navigation');
       await page.locator('main').getByRole('button', { name: 'Дела', exact: true }).click();
       await page.getByRole('button', { name: 'Редактировать дело Synthetic retirement browser case', exact: true }).click();
       const card = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Дело', exact: true }) });
