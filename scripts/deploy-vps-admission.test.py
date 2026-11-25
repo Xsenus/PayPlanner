@@ -76,31 +76,35 @@ class DeliveryAdmissionTests(unittest.TestCase):
     def test_actual_admission_body_accepts_a_complete_synthetic_ci_delivery(self):
         self.assertTrue(self.admission().stdout.startswith(self.revision+'|'))
 
-    def use_payment_reconciliation_baseline(self):
-        baseline = json.loads((self.scripts/'deployment-baseline-act-annual.json').read_text(encoding='utf-8'))
+    def use_payment_reconciliation_baseline(self, filename='deployment-baseline-act-annual.json'):
+        baseline = json.loads((self.scripts/filename).read_text(encoding='utf-8'))
         self.plan.update(baseline)
         self.q['expectedReleaseSeeds'] = copy.deepcopy(baseline['expectedReleaseSeeds'])
         self.q['activeReleaseJsonSha256'] = baseline['expectedReleaseCatalogSha256']
         self.q['backendPackageFiles']['AppReleases/releases.json'] = baseline['expectedReleaseCatalogSha256']
 
     def test_admits_the_reviewed_current_baseline_with_exact_release_catalog(self):
-        self.use_payment_reconciliation_baseline()
-        self.assertEqual([seed['version'] for seed in self.plan['expectedReleaseSeeds']], [f'1.14.{version}' for version in range(943, 914, -1)])
-        self.assertTrue(all(seed['isActive'] for seed in self.plan['expectedReleaseSeeds']))
-        self.assertTrue(self.admission().stdout.startswith(self.revision+'|'+self.plan['previousRevision']+'|'))
-        self.q['backendPackageFiles']['AppReleases/releases.json'] = 'c'*64
-        self.assertIn('Qualified candidate catalog binding differs', self.admission(1).stderr)
+        for filename, versions in [('deployment-baseline-act-annual.json', range(943, 914, -1)),
+                                   ('deployment-baseline-current.json', range(946, 943, -1))]:
+            with self.subTest(filename=filename):
+                self.use_payment_reconciliation_baseline(filename)
+                self.assertEqual([seed['version'] for seed in self.plan['expectedReleaseSeeds']], [f'1.14.{version}' for version in versions])
+                self.assertTrue(all(seed['isActive'] for seed in self.plan['expectedReleaseSeeds']))
+                self.assertTrue(self.admission().stdout.startswith(self.revision+'|'+self.plan['previousRevision']+'|'))
+                self.q['backendPackageFiles']['AppReleases/releases.json'] = 'c'*64
+                self.assertIn('Qualified candidate catalog binding differs', self.admission(1).stderr)
 
     def test_rejects_changes_to_the_reviewed_current_baseline(self):
-        self.use_payment_reconciliation_baseline()
-        original = copy.deepcopy(self.plan)
-        for key, value in [('previousRevision', 'b'*40), ('expectedPreviousApiSha256', 'c'*64),
-                           ('expectedPreviousMigrationsSha256', 'd'*64), ('expectedMigration', 'unreviewed'),
-                           ('expectedBaselineMigrationRows', []), ('expectedReleaseSeeds', [])]:
-            with self.subTest(key=key):
-                self.plan = copy.deepcopy(original)
-                self.plan[key] = value
-                self.assertIn('Reassess changed production baseline', self.admission(1).stderr)
+        for filename in ['deployment-baseline-act-annual.json', 'deployment-baseline-current.json']:
+            self.use_payment_reconciliation_baseline(filename)
+            original = copy.deepcopy(self.plan)
+            for key, value in [('previousRevision', 'b'*40), ('expectedPreviousApiSha256', 'c'*64),
+                               ('expectedPreviousMigrationsSha256', 'd'*64), ('expectedMigration', 'unreviewed'),
+                               ('expectedBaselineMigrationRows', []), ('expectedReleaseSeeds', [])]:
+                with self.subTest(filename=filename, key=key):
+                    self.plan = copy.deepcopy(original)
+                    self.plan[key] = value
+                    self.assertIn('Reassess changed production baseline', self.admission(1).stderr)
 
     def use_current_candidate(self):
         baseline = json.loads((self.scripts/'deployment-baseline.json').read_text(encoding='utf-8'))

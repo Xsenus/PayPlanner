@@ -55,7 +55,8 @@ if current_baseline:
         'expectedBaselineMigrationIdsSha256','expectedReleaseCatalogSha256','expectedReleaseSeeds')
     baseline_bytes=json.dumps({key:c[key] for key in baseline_keys},sort_keys=True,separators=(',',':')).encode('ascii')
     accepted_baselines={'25907b00684747aed32782135658bdd2745c664f':'1497466a62d6825dc1f3484e44c5e57501314170a5a8d7e861b023c042465fa6',
-        '9dc737ed3ae1b586789bbfcee34036db6e8bb728':'743b88d6ca93e8c96254874aa94deb181cbddb49be8e592902dbfe8be596ce8a'}
+        '9dc737ed3ae1b586789bbfcee34036db6e8bb728':'743b88d6ca93e8c96254874aa94deb181cbddb49be8e592902dbfe8be596ce8a',
+        '109faa2090db3fad5c9caebe7df04b3e715357b0':'df19386fe6b8c0073236f7e7a3f6ab9ea21e68c00e90d8de893f3251ae0e8fe6'}
     need(old in accepted_baselines and hashlib.sha256(baseline_bytes).hexdigest()==accepted_baselines[old],
         'Reassess changed production baseline')
 need(re.fullmatch('[0-9]{8}T[0-9]{6}Z',c['backupUtc'] or ''),'Explicit backup identity required')
