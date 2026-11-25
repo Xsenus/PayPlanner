@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer as createControlServer } from 'node:http';
 import { prepareSyntheticBrowserUi } from './synthetic-browser-ui.mjs';
 import { createCaseReadLifecycle, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
+import { redactChatBrowserDiagnostic } from './chat-browser-read-lifecycle.mjs';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
 assert.equal(api.hostname, '127.0.0.1');
@@ -43,12 +44,20 @@ assert.equal(resolve(cliPath), resolve(dirname(cliPath), cliMetadata.bin['playwr
 const browser = process.env.CASE_RETIREMENT_BROWSER ?? (process.platform === 'win32' ? 'msedge' : 'chrome');
 assert.ok(['msedge', 'chrome'].includes(browser), 'Use an installed Edge or Chrome channel.');
 const session = `case-retire-${basename(root).slice(-12)}`;
+const scenarioPath = join(root, 'court-browser-scenario.js');
 const execute = promisify(execFile);
+const safe = value => redactChatBrowserDiagnostic(value,
+  [process.env.CASE_RETIREMENT_PASSWORD, process.env.CASE_RETIREMENT_EMAIL]).slice(0, 16000);
 async function cli(...args) {
-  const result = await execute(process.execPath, [cliPath, `-s=${session}`, ...args], {
-    timeout: 110_000, maxBuffer: 1024 * 1024, windowsHide: true,
-  });
-  assert.ok(!result.stdout.includes('### Error'), result.stdout + result.stderr);
+  let result;
+  try {
+    result = await execute(process.execPath, [cliPath, `-s=${session}`, ...args], {
+      timeout: 110_000, maxBuffer: 1024 * 1024, windowsHide: true,
+    });
+  } catch (error) {
+    throw new Error(safe(error.stdout || error.stderr || `Court Playwright command ${args[0]} ${error.killed ? 'timed out' : 'failed'}`));
+  }
+  assert.ok(!result.stdout.includes('### Error'), safe(result.stdout + result.stderr));
   return result.stdout;
 }
 process.env.VITE_RESTORED_RUNTIME_ISOLATION = 'false';
@@ -101,9 +110,10 @@ try {
   await cli('snapshot');
   const settings = JSON.stringify({ api: api.origin, ui, caseId, flow, controlUrl, downloadPath: join(root, 'court-browser-download.html'),
     email: process.env.CASE_RETIREMENT_EMAIL, password: process.env.CASE_RETIREMENT_PASSWORD });
-  const result = await cli('run-code', String.raw`async (page) => {
+  const scenario = String.raw`async (page) => {
     const settings = ${settings};
     const check = (condition, message) => { if (!condition) throw new Error(message); };
+    const checkpoint = name => page.evaluate(value => { globalThis.__ppCourtGatePhase = value; }, name);
     const casePath = '/api/v2/cases/' + settings.caseId;
     const path = casePath + '/court-sync/run';
     const courtLogsPath = casePath + '/court-sync/logs';
@@ -131,13 +141,18 @@ try {
     const caseReads = (${createCaseReadLifecycle})(page,
       request => (${isCaseBoundaryRead})(request, settings.api, settings.caseId), 20000);
     const completeRead = async (ownedPath, timeout = 20000) => {
-      const response = await page.waitForResponse(candidate => candidate.request().method() === 'GET'
-        && candidate.url() === settings.api + ownedPath, { timeout });
-      check(response.status() === 200 && await response.finished() === null, 'Owned court page read failed: ' + ownedPath);
+      // Reload can cancel a superseded read after its headers arrived. Observe
+      // the next completed request, including its body, within the same deadline.
+      const request = await page.waitForEvent('requestfinished', {
+        predicate: candidate => candidate.method() === 'GET' && candidate.url() === settings.api + ownedPath,
+        timeout,
+      });
+      check((await request.response())?.status() === 200, 'Owned court page read failed: ' + ownedPath);
     };
     const waitForSyncPost = () => page.waitForResponse(response => response.url() === settings.api + path
       && response.request().method() === 'POST');
     try {
+      await checkpoint('login');
       await page.bringToFront();
       await page.locator('input[type="email"]').fill(settings.email);
       await page.locator('input[type="password"]').fill(settings.password);
@@ -159,6 +174,7 @@ try {
         await page.getByRole('heading', { name: 'Сводка по судебному делу', exact: true }).waitFor();
       } else await page.getByText('Режим редактирования судебных данных', { exact: true }).waitFor();
       const sync = page.getByRole('button', { name: 'Проверить источник', exact: true });
+      await checkpoint('first-source-check');
       await Promise.all([waitForSyncPost(), completeRead(courtLogsPath), sync.click()]);
       const pending = page.getByText(/сводки ожидают обязательных копий: 1; сроки и напоминания сохранены/).first();
       await pending.waitFor();
@@ -167,9 +183,11 @@ try {
         && results[0].pendingCourtActDocuments === 1, 'Pending response lost immediate controls or claimed a ready document');
       const before = await page.request.get(settings.api + '/api/v2/cases/' + settings.caseId + '/documents', { headers: { Authorization: authorization } });
       check(before.ok() && (await before.json()).length === 0, 'A document became visible before copies');
+      await checkpoint('storage-worker-boundary');
       const boundary = await page.request.post(settings.controlUrl);
       check(boundary.ok(), 'Owned storage worker boundary failed');
       check(results.length === 1, 'Worker completion caused an automatic sync');
+      await checkpoint('second-source-check');
       await Promise.all([waitForSyncPost(), completeRead(courtLogsPath), sync.click()]);
       await page.waitForFunction(() => !document.body.textContent.includes('сводки ожидают обязательных копий: 1'));
       check(results.length === 2 && results[1].createdProceduralDeadlines === 0 && results[1].pendingCourtActDocuments === 0
@@ -198,18 +216,29 @@ try {
     } finally {
       caseReads.dispose();
     }
-  }`);
+  }`;
+  await writeFile(scenarioPath, scenario, { flag: 'wx', mode: 0o600 });
+  const result = await cli('run-code', '--filename', scenarioPath);
   assert.ok(result.includes('CASE_RETIREMENT_BROWSER_OK'), result); console.log(result);
 } catch (error) {
-  if (opened) { console.error(await cli('snapshot')); console.error(await cli('console', 'error')); }
-  throw new Error(error.stdout || error.message);
+  if (opened) {
+    try {
+      console.error(safe(await cli('run-code', 'async page => page.evaluate(() => globalThis.__ppCourtGatePhase ?? "not-started")')));
+      console.error(safe(await cli('snapshot')));
+      console.error(safe(await cli('console', 'error')));
+    } catch { /* Preserve the original browser failure. */ }
+  }
+  throw error;
 } finally {
   try { if (opened) await cli('close'); }
   finally {
     try { if (vite) await vite.close(); }
     finally {
       try { if (control) await new Promise((resolve, reject) => control.close(error => error ? reject(error) : resolve())); }
-      finally { if (control) process.stdin.destroy(); }
+      finally {
+        if (control) process.stdin.destroy();
+        await rm(scenarioPath, { force: true });
+      }
     }
   }
 }
