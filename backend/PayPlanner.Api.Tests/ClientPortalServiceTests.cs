@@ -24,6 +24,54 @@ public sealed class ClientPortalServiceTests
     }
 
     [Fact]
+    public async Task Staff_preview_of_draft_permissions_works_with_client_login_disabled()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: false);
+        var own = new ClientCaseDocument { ClientCaseId = fixture.Case1Id, OriginalFileName = "Клиентский документ.pdf", DocumentKey = "own" };
+        var other = new ClientCaseDocument { ClientCaseId = fixture.Case2Id, OriginalFileName = "Чужой документ.pdf", DocumentKey = "other" };
+        fixture.Db.ClientCaseDocuments.AddRange(own, other);
+        await fixture.Db.SaveChangesAsync();
+
+        var preview = await fixture.Service.PreviewCaseAsync(fixture.Case1Id,
+            new ClientPortalCasePreviewRequest { CanViewDocuments = true, DocumentIds = [own.Id, other.Id] },
+            7, "Администратор", CancellationToken.None);
+
+        Assert.NotNull(preview);
+        Assert.Equal("Дело 1", preview.Title);
+        Assert.Equal("Клиентский документ.pdf", Assert.Single(preview.Documents).Name);
+        Assert.Empty(preview.Invoices);
+        Assert.Empty(await fixture.Db.ClientPortalAccounts.ToListAsync());
+        Assert.Empty(await fixture.Db.ClientPortalCaseGrants.ToListAsync());
+        Assert.Empty(await fixture.Db.ClientPortalLoginChallenges.ToListAsync());
+        Assert.Empty(await fixture.Db.ClientPortalSessions.ToListAsync());
+        Assert.Empty(fixture.Email.Subjects);
+        var audit = Assert.Single(await fixture.Db.ObjectAuditEvents.Where(item => item.Action == "ClientPortalPreview").ToListAsync());
+        Assert.Equal("client-case", audit.ObjectType);
+        Assert.Equal(fixture.Case1Id, audit.ObjectId);
+        Assert.Equal(7, audit.ActorUserId);
+    }
+
+    [Fact]
+    public async Task Staff_preview_of_saved_access_enforces_the_case_grant()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var account = await fixture.CreateAccessAsync(1, fixture.Client1Id, fixture.Case1Id);
+        var document = new ClientCaseDocument { ClientCaseId = fixture.Case1Id, OriginalFileName = "Внутренний документ.pdf", DocumentKey = "private" };
+        fixture.Db.ClientCaseDocuments.Add(document);
+        await fixture.Db.SaveChangesAsync();
+
+        var request = new ClientPortalCasePreviewRequest { AccountId = account.Id, CanViewDocuments = true, DocumentIds = [document.Id] };
+        Assert.Null(await fixture.Service.PreviewCaseAsync(fixture.Case2Id, request, 7, "Администратор", CancellationToken.None));
+        var preview = await fixture.Service.PreviewCaseAsync(fixture.Case1Id, request, 7, "Администратор", CancellationToken.None);
+        Assert.NotNull(preview);
+        Assert.Equal(account.Grants.Single().CasePublicId, preview.PublicId);
+        Assert.Empty(preview.Documents);
+        await fixture.Service.RevokeCaseAccessAsync(account.Id, fixture.Case1Id, 7, null, CancellationToken.None);
+        Assert.Null(await fixture.Service.PreviewCaseAsync(fixture.Case1Id, request, 7, "Администратор", CancellationToken.None));
+        Assert.Single(await fixture.Db.ObjectAuditEvents.Where(item => item.Action == "ClientPortalPreview").ToListAsync());
+    }
+
+    [Fact]
     public async Task Magic_link_and_otp_are_single_use_and_create_session()
     {
         await using var fixture = await Fixture.CreateAsync(enabled: true);

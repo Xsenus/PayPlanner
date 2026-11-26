@@ -272,6 +272,9 @@ export interface ClientPortalAccessRequest {
   legalEntityId?: number | null; clientCaseId: number; canViewCaseSummary: boolean; canViewDeadlines: boolean;
   canViewDocuments: boolean; canViewFinance: boolean; canViewApprovals: boolean; canViewMessages: boolean; documentIds: number[];
 }
+export type ClientPortalCasePreviewRequest = { accountId: number } | Pick<
+  ClientPortalAccessRequest, 'email' | 'canViewDeadlines' | 'canViewDocuments' | 'canViewFinance' | 'canViewApprovals' | 'documentIds'
+>;
 
 export type AppReleaseItemType = 'new' | 'improved' | 'fixed' | 'important';
 
@@ -7624,6 +7627,14 @@ export class ApiService {
 
   async getClientPortalCaseAccess(caseId: number) {
     return this.request<ClientPortalCaseAccess[]>(`/portal/admin/cases/${caseId}/accounts`);
+  }
+
+  async previewClientPortalCase(caseId: number, payload: ClientPortalCasePreviewRequest) {
+    return this.request<ClientPortalCase>(`/portal/admin/cases/${caseId}/preview`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      cache: 'no-store',
+    });
   }
 
   async getClientPortalAudit(caseId: number) {

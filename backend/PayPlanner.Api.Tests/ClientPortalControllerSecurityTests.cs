@@ -1,3 +1,5 @@
+using System.Reflection;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -11,6 +13,23 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class ClientPortalControllerSecurityTests
 {
+    [Fact]
+    public async Task StaffCasePreviewRequiresAdminAndAnAuthenticatedActor()
+    {
+        var endpoint = typeof(ClientPortalAdminController).GetMethod(nameof(ClientPortalAdminController.PreviewCase))!;
+        var policy = endpoint.DeclaringType!.GetCustomAttribute<AuthorizeAttribute>();
+        Assert.Equal("Admin", policy?.Policy);
+        Assert.Null(endpoint.GetCustomAttribute<AllowAnonymousAttribute>());
+        var controller = new ClientPortalAdminController(new PortalServiceStub(), null!)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+
+        var result = await controller.PreviewCase(1, new ClientPortalCasePreviewRequest(), CancellationToken.None);
+
+        Assert.IsType<UnauthorizedResult>(result.Result);
+    }
+
     [Fact]
     public async Task PreviewAppliesPrivateResponseAndBrowserIsolationHeaders()
     {
@@ -104,6 +123,7 @@ public sealed class ClientPortalControllerSecurityTests
         public Task<ClientPortalAdminAccountDto?> GetAccountAsync(int accountId, CancellationToken ct) => throw new NotSupportedException();
         public Task<List<ClientPortalCaseAccessDto>> GetCaseAccountsAsync(int caseId, CancellationToken ct) => throw new NotSupportedException();
         public Task<List<ClientPortalAuditDto>> GetCaseAuditAsync(int caseId, CancellationToken ct) => throw new NotSupportedException();
+        public Task<ClientPortalCaseDto?> PreviewCaseAsync(int caseId, ClientPortalCasePreviewRequest request, int actorId, string actorName, CancellationToken ct) => throw new NotSupportedException();
         public Task<ClientPortalChallengeCreatedDto> SendLoginAsync(int accountId, CancellationToken ct) => throw new NotSupportedException();
         public Task RevokeAccountAsync(int accountId, int actorId, string actorName, string? reason, CancellationToken ct) => throw new NotSupportedException();
         public Task RevokeCaseAccessAsync(int accountId, int caseId, int actorId, string? reason, CancellationToken ct) => throw new NotSupportedException();

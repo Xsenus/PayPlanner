@@ -18,6 +18,7 @@ public interface IClientPortalService
     Task<ClientPortalAdminAccountDto?> GetAccountAsync(int accountId, CancellationToken ct);
     Task<List<ClientPortalCaseAccessDto>> GetCaseAccountsAsync(int caseId, CancellationToken ct);
     Task<List<ClientPortalAuditDto>> GetCaseAuditAsync(int caseId, CancellationToken ct);
+    Task<ClientPortalCaseDto?> PreviewCaseAsync(int caseId, ClientPortalCasePreviewRequest request, int actorId, string actorName, CancellationToken ct);
     Task<ClientPortalChallengeCreatedDto> SendLoginAsync(int accountId, CancellationToken ct);
     Task RevokeAccountAsync(int accountId, int actorId, string actorName, string? reason, CancellationToken ct);
     Task RevokeCaseAccessAsync(int accountId, int caseId, int actorId, string? reason, CancellationToken ct);
@@ -72,15 +73,7 @@ public sealed class ClientPortalService : IClientPortalService
         EnsureEnabled();
         var email = NormalizeEmail(request.Email);
         var name = Require(request.DisplayName, 256, "Укажите имя внешнего пользователя.");
-        var requestedDocumentIds = (request.CanViewDocuments ? request.DocumentIds ?? [] : [])
-            .Where(id => id > 0)
-            .Distinct()
-            .Take(201)
-            .ToList();
-        if (requestedDocumentIds.Count > 200)
-        {
-            throw Error("validation_error", "За один раз можно открыть не более 200 документов.");
-        }
+        var requestedDocumentIds = GetRequestedDocumentIds(request.CanViewDocuments ? request.DocumentIds : null);
         var type = request.AccountType?.Trim().ToLowerInvariant() switch
         {
             "client" or null or "" => "client",
@@ -577,15 +570,56 @@ public sealed class ClientPortalService : IClientPortalService
 
     public async Task<ClientPortalCaseDto?> GetCaseAsync(ClientPortalSessionContext session, Guid casePublicId, CancellationToken ct)
     {
-        var grant = await _db.ClientPortalCaseGrants.AsNoTracking()
-            .Where(item => item.ClientPortalAccountId == session.AccountId
-                && item.RevokedAt == null && item.CanViewCaseSummary
-                && item.PublicId == casePublicId)
-            .Select(item => new
-            {
-                item.Id,
-                item.ClientCaseId,
-                Case = new ClientPortalCaseDto
+        var view = await ReadGrantedCaseAsync(
+            _db.ClientPortalCaseGrants.Where(item => item.ClientPortalAccountId == session.AccountId
+                && item.PublicId == casePublicId), ct);
+        if (view is null) return null;
+
+        await LoadCaseContentsAsync(view, [], ct);
+        Audit(session.AccountId, view.GrantId, "case_viewed", "case", casePublicId.ToString("D"), null, null);
+        await _db.SaveChangesAsync(ct);
+        return view.Case;
+    }
+
+    public async Task<ClientPortalCaseDto?> PreviewCaseAsync(
+        int caseId, ClientPortalCasePreviewRequest request, int actorId, string actorName, CancellationToken ct)
+    {
+        var view = request.AccountId is int accountId
+            ? await ReadGrantedCaseAsync(_db.ClientPortalCaseGrants.Where(item =>
+                item.ClientCaseId == caseId && item.ClientPortalAccountId == accountId), ct)
+            : await ReadDraftCaseAsync(caseId, request, ct);
+        if (view is null) return null;
+
+        List<int> documentIds = request.AccountId.HasValue || !request.CanViewDocuments
+            ? []
+            : GetRequestedDocumentIds(request.DocumentIds);
+        await LoadCaseContentsAsync(view, documentIds, ct);
+        _db.ObjectAuditEvents.Add(new ObjectAuditEvent
+        {
+            ObjectType = "client-case",
+            ObjectId = caseId,
+            Action = "ClientPortalPreview",
+            Description = request.AccountId.HasValue
+                ? "Просмотр дела с правами клиента."
+                : "Предпросмотр настроек клиентского доступа к делу.",
+            ActorUserId = actorId,
+            ActorUserName = Truncate(actorName, 256),
+            MetadataJson = JsonSerializer.Serialize(new { accountId = request.AccountId }),
+            CreatedAt = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync(ct);
+        return view.Case;
+    }
+
+    private static Task<CaseView?> ReadGrantedCaseAsync(IQueryable<ClientPortalCaseGrant> grants, CancellationToken ct)
+    {
+        return grants.AsNoTracking()
+            .Where(item => item.RevokedAt == null && item.CanViewCaseSummary
+                && item.Account.IsActive && item.Account.RevokedAt == null)
+            .Select(item => new CaseView(
+                item.Id, item.ClientCaseId, item.Account.Email, item.CanViewDeadlines,
+                item.CanViewDocuments, item.CanViewFinance, item.CanViewApprovals,
+                new ClientPortalCaseDto
                 {
                     PublicId = item.PublicId,
                     Title = item.ClientCase.Title,
@@ -595,14 +629,34 @@ public sealed class ClientPortalService : IClientPortalService
                     Stage = item.ClientCase.Stage,
                     StartDate = item.ClientCase.StartDate,
                     DueDate = item.ClientCase.DueDate,
-                },
-                item.CanViewDeadlines,
-                item.CanViewDocuments,
-                item.CanViewFinance,
-                item.CanViewApprovals,
-            }).FirstOrDefaultAsync(ct);
-        if (grant is null) return null;
+                })).SingleOrDefaultAsync(ct);
+    }
 
+    private async Task<CaseView?> ReadDraftCaseAsync(int caseId, ClientPortalCasePreviewRequest request, CancellationToken ct)
+    {
+        var preview = await _db.ClientCases.AsNoTracking()
+            .Where(item => item.Id == caseId)
+            .Select(item => new ClientPortalCaseDto
+            {
+                Title = item.Title,
+                CaseNumber = item.CaseNumber,
+                CaseType = item.CaseType,
+                Status = item.Status.ToString(),
+                Stage = item.Stage,
+                StartDate = item.StartDate,
+                DueDate = item.DueDate,
+            }).SingleOrDefaultAsync(ct);
+        if (preview is null) return null;
+
+        var email = request.CanViewApprovals && !string.IsNullOrWhiteSpace(request.Email)
+            ? NormalizeEmail(request.Email)
+            : null;
+        return new CaseView(null, caseId, email, request.CanViewDeadlines, request.CanViewDocuments,
+            request.CanViewFinance, request.CanViewApprovals, preview);
+    }
+
+    private async Task LoadCaseContentsAsync(CaseView grant, List<int> draftDocumentIds, CancellationToken ct)
+    {
         if (grant.CanViewDeadlines)
         {
             grant.Case.Deadlines = await _db.ClientCaseProceduralDeadlines.AsNoTracking()
@@ -625,19 +679,33 @@ public sealed class ClientPortalService : IClientPortalService
         }
         if (grant.CanViewDocuments)
         {
-            grant.Case.Documents = await _db.ClientPortalDocumentGrants.AsNoTracking()
-                .Where(item => item.ClientPortalCaseGrantId == grant.Id && item.RevokedAt == null)
-                .OrderByDescending(item => item.Document.UploadedAt).Take(100)
-                .Select(item => new ClientPortalDocumentDto
-                {
-                    PublicId = item.PublicId,
-                    Name = item.Document.OriginalFileName,
-                    DocumentType = item.Document.DocumentType,
-                    Status = item.Document.Status,
-                    Version = item.Document.Version,
-                    SizeBytes = item.Document.SizeBytes,
-                    UploadedAt = item.Document.UploadedAt,
-                }).ToListAsync(ct);
+            grant.Case.Documents = grant.GrantId is int grantId
+                ? await _db.ClientPortalDocumentGrants.AsNoTracking()
+                    .Where(item => item.ClientPortalCaseGrantId == grantId && item.RevokedAt == null
+                        && item.Document.ClientCaseId == grant.ClientCaseId)
+                    .OrderByDescending(item => item.Document.UploadedAt).Take(100)
+                    .Select(item => new ClientPortalDocumentDto
+                    {
+                        PublicId = item.PublicId,
+                        Name = item.Document.OriginalFileName,
+                        DocumentType = item.Document.DocumentType,
+                        Status = item.Document.Status,
+                        Version = item.Document.Version,
+                        SizeBytes = item.Document.SizeBytes,
+                        UploadedAt = item.Document.UploadedAt,
+                    }).ToListAsync(ct)
+                : await _db.ClientCaseDocuments.AsNoTracking()
+                    .Where(item => item.ClientCaseId == grant.ClientCaseId && draftDocumentIds.Contains(item.Id))
+                    .OrderByDescending(item => item.UploadedAt).Take(100)
+                    .Select(item => new ClientPortalDocumentDto
+                    {
+                        Name = item.OriginalFileName,
+                        DocumentType = item.DocumentType,
+                        Status = item.Status,
+                        Version = item.Version,
+                        SizeBytes = item.SizeBytes,
+                        UploadedAt = item.UploadedAt,
+                    }).ToListAsync(ct);
         }
         if (grant.CanViewFinance)
         {
@@ -684,11 +752,11 @@ public sealed class ClientPortalService : IClientPortalService
                 })
                 .ToListAsync(ct);
         }
-        if (grant.CanViewApprovals)
+        if (grant.CanViewApprovals && grant.RecipientEmail is not null)
         {
             grant.Case.Approvals = await _db.ExternalWorkOrderApprovalRequests.AsNoTracking()
                 .Where(item => item.WorkOrder.ClientCaseId == grant.ClientCaseId
-                    && item.RecipientEmail == session.Email)
+                    && item.RecipientEmail == grant.RecipientEmail)
                 .OrderByDescending(item => item.Version).Take(20)
                 .Select(item => new ClientPortalApprovalDto
                 {
@@ -699,10 +767,10 @@ public sealed class ClientPortalService : IClientPortalService
                     DecisionAt = item.DecisionAt,
                 }).ToListAsync(ct);
         }
-        Audit(session.AccountId, grant.Id, "case_viewed", "case", casePublicId.ToString("D"), null, null);
-        await _db.SaveChangesAsync(ct);
-        return grant.Case;
     }
+
+    private sealed record CaseView(int? GrantId, int ClientCaseId, string? RecipientEmail,
+        bool CanViewDeadlines, bool CanViewDocuments, bool CanViewFinance, bool CanViewApprovals, ClientPortalCaseDto Case);
 
     public async Task<ClientPortalDocumentGrantDto?> CreateDocumentGrantAsync(
         ClientPortalSessionContext session,
@@ -817,6 +885,14 @@ public sealed class ClientPortalService : IClientPortalService
         });
 
     private static ClientPortalException Error(string code, string message) => new(code, message);
+    private static List<int> GetRequestedDocumentIds(List<int>? ids)
+    {
+        var requestedIds = (ids ?? []).Where(id => id > 0).Distinct().Take(201).ToList();
+        if (requestedIds.Count > 200)
+            throw Error("validation_error", "За один раз можно открыть не более 200 документов.");
+        return requestedIds;
+    }
+
     private static string GenerateToken(int bytes) => Convert.ToBase64String(RandomNumberGenerator.GetBytes(bytes)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     private static bool FixedTimeEquals(string a, string b)
@@ -840,6 +916,17 @@ public sealed class ClientPortalException(string code, string message) : Excepti
 public sealed record ClientPortalSessionContext(int AccountId, Guid AccountPublicId, string DisplayName, string Email);
 public sealed record ClientPortalDocumentDownloadDto(string FullPath, string ContentType, string FileName);
 public sealed record ClientPortalDocumentGrantPayload(int AccountId, Guid DocumentPublicId);
+public sealed class ClientPortalCasePreviewRequest
+{
+    public int? AccountId { get; set; }
+    public string? Email { get; set; }
+    public bool CanViewDeadlines { get; set; }
+    public bool CanViewDocuments { get; set; }
+    public bool CanViewFinance { get; set; }
+    public bool CanViewApprovals { get; set; }
+    public List<int> DocumentIds { get; set; } = [];
+}
+
 public sealed class ClientPortalAccessRequest
 {
     public string? Email { get; set; }
