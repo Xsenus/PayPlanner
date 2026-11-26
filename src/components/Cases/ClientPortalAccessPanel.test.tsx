@@ -78,4 +78,23 @@ describe('ClientPortalAccessPanel', () => {
     expect(await screen.findByRole('heading', { name: 'Кабинет клиента · Иван Иванов' })).toBeTruthy();
     expect(apiServiceMock.previewClientPortalCase).toHaveBeenCalledWith(15, { accountId: 7 });
   });
+
+  it('can resend a login email after access was saved and the first email failed', async () => {
+    apiServiceMock.getClientPortalCaseAccess.mockResolvedValueOnce([]);
+    apiServiceMock.saveClientPortalAccess.mockResolvedValue({ id: 7 });
+    apiServiceMock.sendClientPortalLogin
+      .mockRejectedValueOnce(new Error('Почта недоступна'))
+      .mockResolvedValueOnce({ challengeId: 'replacement', emailHint: 'i***n@example.test', expiresAt: '2026-11-26T12:00:00Z' });
+    render(<ClientPortalAccessPanel caseItem={{ id: 15 } as ClientCase} documents={[]} />);
+
+    fireEvent.change(await screen.findByPlaceholderText('ФИО получателя'), { target: { value: 'Иван Иванов' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Email для входа' }), { target: { value: 'ivan@example.test' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Предоставить доступ' }));
+    expect(await screen.findByText(/Доступ сохранён. Отправка письма не подтверждена/)).toBeTruthy();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Отправить новый код' }));
+    expect(await screen.findByText(/Письмо для входа отправлено на i\*\*\*n@example\.test/)).toBeTruthy();
+    expect(apiServiceMock.saveClientPortalAccess).toHaveBeenCalledTimes(1);
+    expect(apiServiceMock.sendClientPortalLogin.mock.calls).toEqual([[7, 15], [7, 15]]);
+  });
 });

@@ -91,6 +91,30 @@ public sealed class ClientPortalServiceTests
     }
 
     [Fact]
+    public async Task Resend_from_case_requires_saved_access_and_retires_the_previous_link()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var account = await fixture.CreateAccessAsync(1, fixture.Client1Id, fixture.Case1Id);
+        var noGrant = await Assert.ThrowsAsync<ClientPortalException>(() =>
+            fixture.Service.SendLoginAsync(account.Id, CancellationToken.None, fixture.Case2Id));
+        Assert.Equal("grant_not_found", noGrant.Code);
+        Assert.Empty(fixture.Email.Subjects);
+
+        var first = await fixture.Service.SendLoginAsync(account.Id, CancellationToken.None, fixture.Case1Id);
+        var firstToken = fixture.Email.Token;
+        var replacement = await fixture.Service.SendLoginAsync(account.Id, CancellationToken.None, fixture.Case1Id);
+        Assert.NotEqual(first.ChallengeId, replacement.ChallengeId);
+        var oldLink = await Assert.ThrowsAsync<ClientPortalException>(() =>
+            fixture.Service.PreviewLoginAsync(first.ChallengeId, firstToken, CancellationToken.None));
+        Assert.Equal("link_unavailable", oldLink.Code);
+        var valid = await fixture.Service.PreviewLoginAsync(replacement.ChallengeId, fixture.Email.Token, CancellationToken.None);
+        Assert.Equal("Клиент 1", valid.DisplayName);
+        Assert.Single(await fixture.Db.ClientPortalLoginChallenges.Where(item => item.RevokedAt == null).ToListAsync());
+        var audit = await fixture.Service.GetCaseAuditAsync(fixture.Case1Id, CancellationToken.None);
+        Assert.Equal(2, audit.Count(item => item.EventType == "login_sent"));
+    }
+
+    [Fact]
     public async Task Five_invalid_codes_lock_challenge()
     {
         await using var fixture = await Fixture.CreateAsync(enabled: true);

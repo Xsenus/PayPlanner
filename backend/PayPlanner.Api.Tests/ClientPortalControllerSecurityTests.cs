@@ -124,7 +124,7 @@ public sealed class ClientPortalControllerSecurityTests
         public Task<List<ClientPortalCaseAccessDto>> GetCaseAccountsAsync(int caseId, CancellationToken ct) => throw new NotSupportedException();
         public Task<List<ClientPortalAuditDto>> GetCaseAuditAsync(int caseId, CancellationToken ct) => throw new NotSupportedException();
         public Task<ClientPortalCaseDto?> PreviewCaseAsync(int caseId, ClientPortalCasePreviewRequest request, int actorId, string actorName, CancellationToken ct) => throw new NotSupportedException();
-        public Task<ClientPortalChallengeCreatedDto> SendLoginAsync(int accountId, CancellationToken ct) => throw new NotSupportedException();
+        public Task<ClientPortalChallengeCreatedDto> SendLoginAsync(int accountId, CancellationToken ct, int? caseId = null) => throw new NotSupportedException();
         public Task RevokeAccountAsync(int accountId, int actorId, string actorName, string? reason, CancellationToken ct) => throw new NotSupportedException();
         public Task RevokeCaseAccessAsync(int accountId, int caseId, int actorId, string? reason, CancellationToken ct) => throw new NotSupportedException();
         public Task RevokeSessionAsync(string? token, bool all, CancellationToken ct) => Task.CompletedTask;

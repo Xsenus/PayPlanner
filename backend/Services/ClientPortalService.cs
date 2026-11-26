@@ -19,7 +19,7 @@ public interface IClientPortalService
     Task<List<ClientPortalCaseAccessDto>> GetCaseAccountsAsync(int caseId, CancellationToken ct);
     Task<List<ClientPortalAuditDto>> GetCaseAuditAsync(int caseId, CancellationToken ct);
     Task<ClientPortalCaseDto?> PreviewCaseAsync(int caseId, ClientPortalCasePreviewRequest request, int actorId, string actorName, CancellationToken ct);
-    Task<ClientPortalChallengeCreatedDto> SendLoginAsync(int accountId, CancellationToken ct);
+    Task<ClientPortalChallengeCreatedDto> SendLoginAsync(int accountId, CancellationToken ct, int? caseId = null);
     Task RevokeAccountAsync(int accountId, int actorId, string actorName, string? reason, CancellationToken ct);
     Task RevokeCaseAccessAsync(int accountId, int caseId, int actorId, string? reason, CancellationToken ct);
     Task<ClientPortalLoginPreviewDto> PreviewLoginAsync(Guid challengeId, string token, CancellationToken ct);
@@ -254,29 +254,53 @@ public sealed class ClientPortalService : IClientPortalService
             .ToListAsync(ct);
     }
 
-    public async Task<ClientPortalChallengeCreatedDto> SendLoginAsync(int accountId, CancellationToken ct)
+    public async Task<ClientPortalChallengeCreatedDto> SendLoginAsync(int accountId, CancellationToken ct, int? caseId = null)
     {
         EnsureEnabled();
-        var account = await _db.ClientPortalAccounts
-            .FirstOrDefaultAsync(item => item.Id == accountId && item.IsActive && item.RevokedAt == null, ct)
-            ?? throw Error("account_unavailable", "Аккаунт не найден или отключён.");
-        var active = await _db.ClientPortalLoginChallenges
-            .Where(item => item.ClientPortalAccountId == accountId && item.ConsumedAt == null && item.RevokedAt == null)
-            .ToListAsync(ct);
-        foreach (var item in active) item.RevokedAt = DateTime.UtcNow;
 
+        ClientPortalAccount account;
+        ClientPortalLoginChallenge challenge;
+        int? grantId = null;
         var token = GenerateToken(32);
         var otp = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", CultureInfo.InvariantCulture);
-        var challenge = new ClientPortalLoginChallenge
+        await using (var transaction = await _db.Database.BeginTransactionAsync(ct))
         {
-            ClientPortalAccountId = accountId,
-            TokenHash = Hash(token),
-            OtpHash = Hash($"{token}:{otp}"),
-            ExpiresAt = DateTime.UtcNow.AddHours(ChallengeHours),
-            MaxAttempts = MaxAttempts,
-        };
-        _db.ClientPortalLoginChallenges.Add(challenge);
-        await _db.SaveChangesAsync(ct);
+            if (_db.Database.IsNpgsql())
+            {
+                await _db.Database.SqlQuery<int>(
+                    $"SELECT 1 FROM \"ClientPortalAccounts\" WHERE \"Id\" = {accountId} FOR UPDATE").ToListAsync(ct);
+            }
+            account = await _db.ClientPortalAccounts.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Id == accountId && item.IsActive && item.RevokedAt == null, ct)
+                ?? throw Error("account_unavailable", "Аккаунт не найден или отключён.");
+            if (caseId is int requestedCaseId)
+            {
+                grantId = await _db.ClientPortalCaseGrants.AsNoTracking()
+                    .Where(item => item.ClientPortalAccountId == accountId && item.ClientCaseId == requestedCaseId
+                        && item.RevokedAt == null && item.CanViewCaseSummary)
+                    .Select(item => (int?)item.Id).SingleOrDefaultAsync(ct)
+                    ?? throw Error("grant_not_found", "Доступ к выбранному делу не найден.");
+            }
+
+            var now = DateTime.UtcNow;
+            var active = await _db.ClientPortalLoginChallenges
+                .Where(item => item.ClientPortalAccountId == accountId && item.ConsumedAt == null && item.RevokedAt == null)
+                .ToListAsync(ct);
+            foreach (var item in active) item.RevokedAt = now;
+
+            challenge = new ClientPortalLoginChallenge
+            {
+                ClientPortalAccountId = accountId,
+                TokenHash = Hash(token),
+                OtpHash = Hash($"{token}:{otp}"),
+                CreatedAt = now,
+                ExpiresAt = now.AddHours(ChallengeHours),
+                MaxAttempts = MaxAttempts,
+            };
+            _db.ClientPortalLoginChallenges.Add(challenge);
+            await _db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
 
         var baseUrl = (_configuration["App:FrontendUrl"]
             ?? _configuration["Frontend:BaseUrl"]
@@ -299,7 +323,7 @@ public sealed class ClientPortalService : IClientPortalService
             throw Error("delivery_failed", "Не удалось отправить письмо; ссылка отключена.");
         }
 
-        Audit(account.Id, null, "login_sent", "account", account.PublicId.ToString("D"), null, null);
+        Audit(account.Id, grantId, "login_sent", "account", account.PublicId.ToString("D"), null, null);
         await _db.SaveChangesAsync(ct);
         return new ClientPortalChallengeCreatedDto { ChallengeId = challenge.PublicId, ExpiresAt = challenge.ExpiresAt, EmailHint = MaskEmail(account.Email) };
     }

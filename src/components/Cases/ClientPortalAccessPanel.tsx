@@ -27,16 +27,20 @@ export function ClientPortalAccessPanel({ caseItem, documents, canPreview = fals
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ details: ClientPortalCase; heading: string } | null>(null);
 
-  const load = async () => {
-    const flags = await apiService.getFeatureFlags();
-    if (!flags.legal.clientPortal) return;
-    setAvailable(true);
+  const refreshAccessDetails = async () => {
     const [loadedAccesses, loadedAudit] = await Promise.all([
       apiService.getClientPortalCaseAccess(caseItem.id),
       apiService.getClientPortalAudit(caseItem.id),
     ]);
     setAccesses(loadedAccesses);
     setAudit(loadedAudit);
+  };
+
+  const load = async () => {
+    const flags = await apiService.getFeatureFlags();
+    if (!flags.legal.clientPortal) return;
+    setAvailable(true);
+    await refreshAccessDetails();
   };
 
   useEffect(() => {
@@ -75,10 +79,25 @@ export function ClientPortalAccessPanel({ caseItem, documents, canPreview = fals
     );
   }
 
+  const sendLoginEmail = async (accountId: number) => {
+    const sent = await apiService.sendClientPortalLogin(accountId, caseItem.id);
+    const expires = new Date(sent.expiresAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
+    setNotice(`Письмо для входа отправлено на ${sent.emailHint}. Код действует до ${expires}.`);
+  };
+
+  const refreshAfterChange = async () => {
+    try {
+      await refreshAccessDetails();
+    } catch {
+      setError((current) => current ?? 'Не удалось обновить список доступов. Обновите страницу.');
+    }
+  };
+
   const saveAndSend = async () => {
     setBusy(true);
     setError(null);
     setNotice(null);
+    let accessSaved = false;
     try {
       const account = await apiService.saveClientPortalAccess({
         email: email.trim(),
@@ -95,16 +114,27 @@ export function ClientPortalAccessPanel({ caseItem, documents, canPreview = fals
         canViewMessages: false,
         documentIds: rights.documents ? documentIds : [],
       });
-      const sent = await apiService.sendClientPortalLogin(account.id);
-      setNotice(`Доступ сохранён, письмо отправлено на ${sent.emailHint}.`);
-      const [loadedAccesses, loadedAudit] = await Promise.all([
-        apiService.getClientPortalCaseAccess(caseItem.id),
-        apiService.getClientPortalAudit(caseItem.id),
-      ]);
-      setAccesses(loadedAccesses);
-      setAudit(loadedAudit);
+      accessSaved = true;
+      await sendLoginEmail(account.id);
     } catch (err) {
-      setError(extractDisplayErrorMessage(err, 'Не удалось выдать доступ.'));
+      setError(accessSaved
+        ? 'Доступ сохранён. Отправка письма не подтверждена. Нажмите «Отправить новый код» в списке доступов.'
+        : extractDisplayErrorMessage(err, 'Не удалось выдать доступ.'));
+    } finally {
+      if (accessSaved) await refreshAfterChange();
+      setBusy(false);
+    }
+  };
+
+  const resend = async (accountId: number) => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await sendLoginEmail(accountId);
+      await refreshAfterChange();
+    } catch (err) {
+      setError(extractDisplayErrorMessage(err, 'Не удалось отправить письмо для входа.'));
     } finally {
       setBusy(false);
     }
@@ -115,12 +145,7 @@ export function ClientPortalAccessPanel({ caseItem, documents, canPreview = fals
     setError(null);
     try {
       await apiService.revokeClientPortalCaseAccess(accountId, caseItem.id, 'Доступ к делу отозван из карточки.');
-      const [loadedAccesses, loadedAudit] = await Promise.all([
-        apiService.getClientPortalCaseAccess(caseItem.id),
-        apiService.getClientPortalAudit(caseItem.id),
-      ]);
-      setAccesses(loadedAccesses);
-      setAudit(loadedAudit);
+      await refreshAfterChange();
       setNotice('Доступ и активные сессии отозваны.');
     } catch (err) {
       setError(extractDisplayErrorMessage(err, 'Не удалось отозвать доступ.'));
@@ -148,6 +173,11 @@ export function ClientPortalAccessPanel({ caseItem, documents, canPreview = fals
                 { accountId: item.accountId }, `Кабинет клиента · ${item.displayName}`,
               )} className="text-xs font-semibold text-blue-700 hover:underline">Посмотреть как клиент</button>
             ) : null}
+            {available && item.canViewCaseSummary ? (
+              <button type="button" disabled={busy} onClick={() => void resend(item.accountId)} className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:underline">
+                <Mail className="h-3.5 w-3.5" /> Отправить новый код
+              </button>
+            ) : null}
             <button type="button" disabled={busy} onClick={() => void revoke(item.accountId)} className="inline-flex items-center gap-1 text-xs text-rose-600"><Trash2 className="h-3.5 w-3.5" /> Отозвать</button>
           </div> : null}
         </div>
@@ -155,8 +185,9 @@ export function ClientPortalAccessPanel({ caseItem, documents, canPreview = fals
       <div className="mt-3 grid gap-2 md:grid-cols-3">
         <select value={accountType} onChange={(event) => setAccountType(event.target.value as 'client' | 'representative')} className="rounded-lg border border-slate-300 px-3 py-2 text-sm"><option value="client">Клиент</option><option value="representative">Представитель</option></select>
         <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="ФИО получателя" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-        <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Email" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" aria-label="Email для входа" placeholder="Email для входа" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
       </div>
+      {available ? <p className="mt-2 text-xs text-slate-600">CRM создаст одноразовый код и отправит его вместе со ссылкой для входа на эту почту.</p> : null}
       <div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-700">
         <CheckLabel label="Сроки" checked={rights.deadlines} onChange={(value) => setRights((old) => ({ ...old, deadlines: value }))} />
         <CheckLabel label="Документы" checked={rights.documents} onChange={(value) => setRights((old) => ({ ...old, documents: value }))} />
@@ -180,10 +211,10 @@ export function ClientPortalAccessPanel({ caseItem, documents, canPreview = fals
           {accesses.length > 0 ? 'Предпросмотр настроек' : 'Посмотреть как клиент'}
         </button> : null}
         {available ? <button type="button" disabled={busy || !displayName.trim() || !email.trim()} onClick={() => void saveAndSend()} className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />} Сохранить и отправить вход
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />} Предоставить доступ
         </button> : null}
       </div>
-      {audit.length > 0 ? <details className="mt-3 rounded-lg border border-slate-200 px-3 py-2"><summary className="cursor-pointer text-sm font-medium text-slate-700">Последние действия ({audit.length})</summary><div className="mt-2 max-h-48 space-y-1 overflow-auto">{audit.map((item, index) => <div key={`${item.occurredAt}-${index}`} className="text-xs text-slate-500">{new Date(item.occurredAt).toLocaleString('ru-RU')} · {item.displayName || item.email || 'Система'} · {item.eventType}</div>)}</div></details> : null}
+      {audit.length > 0 ? <details className="mt-3 rounded-lg border border-slate-200 px-3 py-2"><summary className="cursor-pointer text-sm font-medium text-slate-700">Последние действия ({audit.length})</summary><div className="mt-2 max-h-48 space-y-1 overflow-auto">{audit.map((item, index) => <div key={`${item.occurredAt}-${index}`} className="text-xs text-slate-500">{new Date(item.occurredAt).toLocaleString('ru-RU')} · {item.displayName || item.email || 'Система'} · {item.eventType === 'login_sent' ? 'Письмо для входа отправлено' : item.eventType}</div>)}</div></details> : null}
     </section>
   );
 }

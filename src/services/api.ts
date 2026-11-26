@@ -7648,9 +7648,9 @@ export class ApiService {
     });
   }
 
-  async sendClientPortalLogin(accountId: number) {
+  async sendClientPortalLogin(accountId: number, caseId: number) {
     return this.request<{ challengeId: string; expiresAt: string; emailHint: string }>(
-      `/portal/admin/accounts/${accountId}/login`,
+      `/portal/admin/accounts/${accountId}/login?caseId=${caseId}`,
       { method: 'POST' },
     );
   }

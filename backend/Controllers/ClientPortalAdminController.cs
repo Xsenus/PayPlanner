@@ -115,11 +115,12 @@ public sealed class ClientPortalAdminController(IClientPortalService service, Pa
     }
 
     [HttpPost("accounts/{accountId:int}/login")]
-    public async Task<ActionResult<ClientPortalChallengeCreatedDto>> SendLogin(int accountId, CancellationToken ct)
+    public async Task<ActionResult<ClientPortalChallengeCreatedDto>> SendLogin(
+        int accountId, [FromQuery] int? caseId, CancellationToken ct)
     {
         try
         {
-            return Ok(await service.SendLoginAsync(accountId, ct));
+            return Ok(await service.SendLoginAsync(accountId, ct, caseId));
         }
         catch (ClientPortalException ex)
         {
