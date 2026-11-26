@@ -46,7 +46,7 @@ env:
 jobs:
   frontend:
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
-    timeout-minutes: 45
+    timeout-minutes: 60
     outputs:
       frontend-artifact-id: ${{ steps.frontend-upload.outputs.artifact-id }}
     defaults:
