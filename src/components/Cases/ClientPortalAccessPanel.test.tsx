@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiServiceMock, resetApiServiceMock } from '../../test/apiMock';
@@ -12,7 +12,7 @@ vi.mock('../../services/api', async () => ({
 describe('ClientPortalAccessPanel', () => {
   beforeEach(() => {
     resetApiServiceMock('getFeatureFlags', 'getClientPortalCaseAccess', 'getClientPortalAudit',
-      'previewClientPortalCase', 'saveClientPortalAccess', 'sendClientPortalLogin');
+      'previewClientPortalCase', 'saveClientPortalAccess', 'sendClientPortalLogin', 'createClientPortalLoginInvitation');
     apiServiceMock.getFeatureFlags.mockResolvedValue({ legal: { clientPortal: true } });
     apiServiceMock.getClientPortalAudit.mockResolvedValue([]);
     apiServiceMock.getClientPortalCaseAccess.mockResolvedValue([{
@@ -41,6 +41,7 @@ describe('ClientPortalAccessPanel', () => {
     expect(rights.textContent).toContain('Согласования');
     expect(rights.textContent).not.toContain('Финансы');
     expect(screen.queryByRole('button', { name: 'Посмотреть как клиент' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Сгенерировать код без письма' })).toBeNull();
   });
 
   it('shows a draft preview with client login disabled and does not offer document downloads', async () => {
@@ -63,6 +64,7 @@ describe('ClientPortalAccessPanel', () => {
     }));
     expect(apiServiceMock.saveClientPortalAccess).not.toHaveBeenCalled();
     expect(apiServiceMock.sendClientPortalLogin).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Предоставить доступ без письма' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Закрыть предпросмотр' }));
     expect(screen.queryByRole('heading', { name: 'Тестовое дело' })).toBeNull();
   });
@@ -89,12 +91,54 @@ describe('ClientPortalAccessPanel', () => {
 
     fireEvent.change(await screen.findByPlaceholderText('ФИО получателя'), { target: { value: 'Иван Иванов' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Email для входа' }), { target: { value: 'ivan@example.test' } });
-    fireEvent.click(await screen.findByRole('button', { name: 'Предоставить доступ' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Предоставить доступ и отправить письмо' }));
     expect(await screen.findByText(/Доступ сохранён. Отправка письма не подтверждена/)).toBeTruthy();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Отправить новый код' }));
     expect(await screen.findByText(/Письмо для входа отправлено на i\*\*\*n@example\.test/)).toBeTruthy();
     expect(apiServiceMock.saveClientPortalAccess).toHaveBeenCalledTimes(1);
     expect(apiServiceMock.sendClientPortalLogin.mock.calls).toEqual([[7, 15], [7, 15]]);
+  });
+
+  it('generates a code for the selected account and clears the details after hiding them', async () => {
+    const loginUrl = 'https://crm.example.test/portal/login/test#token=example';
+    apiServiceMock.createClientPortalLoginInvitation.mockResolvedValue({
+      loginUrl, code: '012345', expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    render(<ClientPortalAccessPanel caseItem={{ id: 15 } as ClientCase} documents={[]} canPreview />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Сгенерировать код без письма' }));
+    const invitation = await screen.findByRole('region', { name: 'Приглашение для входа' });
+    expect(within(invitation).getByRole('heading', { name: 'Код для ivan@example.test' })).toBeTruthy();
+    expect(within(invitation).getByDisplayValue(loginUrl)).toBeTruthy();
+    expect(within(invitation).getByDisplayValue('012345')).toBeTruthy();
+    expect(apiServiceMock.createClientPortalLoginInvitation).toHaveBeenCalledExactlyOnceWith(15, 7);
+    expect(apiServiceMock.sendClientPortalLogin).not.toHaveBeenCalled();
+    expect(apiServiceMock.saveClientPortalAccess).not.toHaveBeenCalled();
+
+    fireEvent.click(within(invitation).getByRole('button', { name: 'Скрыть приглашение' }));
+    expect(screen.queryByDisplayValue('012345')).toBeNull();
+    expect(screen.queryByDisplayValue(loginUrl)).toBeNull();
+  });
+
+  it('can grant first access without sending email', async () => {
+    apiServiceMock.getClientPortalCaseAccess.mockResolvedValueOnce([]);
+    apiServiceMock.saveClientPortalAccess.mockResolvedValue({ id: 7 });
+    apiServiceMock.createClientPortalLoginInvitation.mockResolvedValue({
+      loginUrl: 'https://crm.example.test/portal/login/test#token=example',
+      code: '654321', expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    render(<ClientPortalAccessPanel caseItem={{ id: 15 } as ClientCase} documents={[]} canPreview />);
+
+    fireEvent.change(await screen.findByPlaceholderText('ФИО получателя'), { target: { value: 'Иван Иванов' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Email для входа' }), { target: { value: 'ivan@example.test' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Предоставить доступ без письма' }));
+
+    expect(await screen.findByDisplayValue('654321')).toBeTruthy();
+    expect(apiServiceMock.saveClientPortalAccess).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      clientCaseId: 15, email: 'ivan@example.test',
+    }));
+    expect(apiServiceMock.createClientPortalLoginInvitation).toHaveBeenCalledExactlyOnceWith(15, 7);
+    expect(apiServiceMock.sendClientPortalLogin).not.toHaveBeenCalled();
   });
 });

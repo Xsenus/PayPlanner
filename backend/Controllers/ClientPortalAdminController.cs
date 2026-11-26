@@ -128,6 +128,38 @@ public sealed class ClientPortalAdminController(IClientPortalService service, Pa
         }
     }
 
+    [HttpPost("cases/{caseId:int}/accounts/{accountId:int}/login-invitation")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<ActionResult<ClientPortalLoginInvitationDto>> CreateLoginInvitation(
+        int caseId, int accountId, CancellationToken ct)
+    {
+        var actorId = GetActorId();
+        if (actorId is not > 0)
+        {
+            return Unauthorized();
+        }
+
+        var access = await db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Cases, ct, requireApprovedUser: true);
+        if (access?.Visibility.IsAdmin != true || access.Permission is not { CanView: true, CanEdit: true })
+        {
+            return Forbid();
+        }
+        if (!await db.ClientCases.AsNoTracking().ApplyClientCaseVisibility(access.Visibility).AnyAsync(item => item.Id == caseId, ct))
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            return Ok(await service.CreateLoginInvitationAsync(
+                accountId, caseId, actorId.Value, User.Identity?.Name ?? "Администратор", ct));
+        }
+        catch (ClientPortalException ex)
+        {
+            return MapError(ex);
+        }
+    }
+
     [HttpDelete("accounts/{accountId:int}")]
     public async Task<IActionResult> Revoke(
         int accountId,

@@ -245,6 +245,7 @@ export interface AppFeatureFlagsDto {
 }
 
 export interface ClientPortalLoginPreview { displayName: string; emailHint: string; expiresAt: string }
+export interface ClientPortalLoginInvitation { loginUrl: string; code: string; expiresAt: string }
 export interface ClientPortalCaseListItem { publicId: string; title: string; caseNumber: string; caseType: string; status: string; stage: string; dueDate?: string | null }
 export interface ClientPortalHome {
   displayName: string; items: ClientPortalCaseListItem[]; total: number; page: number; pageSize: number;
@@ -7652,6 +7653,13 @@ export class ApiService {
     return this.request<{ challengeId: string; expiresAt: string; emailHint: string }>(
       `/portal/admin/accounts/${accountId}/login?caseId=${caseId}`,
       { method: 'POST' },
+    );
+  }
+
+  async createClientPortalLoginInvitation(caseId: number, accountId: number) {
+    return this.request<ClientPortalLoginInvitation>(
+      `/portal/admin/cases/${caseId}/accounts/${accountId}/login-invitation`,
+      { method: 'POST', cache: 'no-store' },
     );
   }
 

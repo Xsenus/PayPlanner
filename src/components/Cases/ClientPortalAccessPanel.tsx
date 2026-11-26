@@ -1,11 +1,22 @@
 import { useEffect, useState } from 'react';
-import { Loader2, Mail, ShieldCheck, Trash2 } from 'lucide-react';
+import { Copy, Loader2, Mail, ShieldCheck, Trash2 } from 'lucide-react';
 
-import { apiService, type ClientPortalAudit, type ClientPortalCase, type ClientPortalCaseAccess, type ClientPortalCasePreviewRequest } from '../../services/api';
+import { apiService, type ClientPortalAudit, type ClientPortalCase, type ClientPortalCaseAccess, type ClientPortalCasePreviewRequest, type ClientPortalLoginInvitation } from '../../services/api';
 import type { ClientCase, ClientCaseDocument } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { ClientPortalCaseDetails } from '../Public/ClientPortalCaseDetails';
+
+type InviteDelivery = 'email' | 'manual';
+
+const inviteAuditLabels: Record<string, string> = {
+  login_sent: 'Письмо для входа отправлено',
+  login_prepared: 'Приглашение создано без отправки письма',
+};
+
+function formatInvitationExpiry(expiresAt: string) {
+  return new Date(expiresAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
+}
 
 export function ClientPortalAccessPanel({ caseItem, documents, canPreview = false }: {
   caseItem: ClientCase;
@@ -26,6 +37,8 @@ export function ClientPortalAccessPanel({ caseItem, documents, canPreview = fals
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ details: ClientPortalCase; heading: string } | null>(null);
+  const [invitation, setInvitation] = useState<(ClientPortalLoginInvitation & { recipient: string }) | null>(null);
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
 
   const refreshAccessDetails = async () => {
     const [loadedAccesses, loadedAudit] = await Promise.all([
@@ -49,11 +62,18 @@ export function ClientPortalAccessPanel({ caseItem, documents, canPreview = fals
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseItem.id]);
 
+  useEffect(() => {
+    if (!invitation) return;
+    const timeout = window.setTimeout(() => setInvitation(null), new Date(invitation.expiresAt).getTime() - Date.now());
+    return () => window.clearTimeout(timeout);
+  }, [invitation]);
+
   if (!available && !canPreview) return null;
 
   const openPreview = async (request: ClientPortalCasePreviewRequest, heading: string) => {
     setBusy(true);
     setError(null);
+    setInvitation(null);
     try {
       const details = await apiService.previewClientPortalCase(caseItem.id, request);
       setPreview({ details, heading });
@@ -79,10 +99,15 @@ export function ClientPortalAccessPanel({ caseItem, documents, canPreview = fals
     );
   }
 
-  const sendLoginEmail = async (accountId: number) => {
-    const sent = await apiService.sendClientPortalLogin(accountId, caseItem.id);
-    const expires = new Date(sent.expiresAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
-    setNotice(`Письмо для входа отправлено на ${sent.emailHint}. Код действует до ${expires}.`);
+  const issueLogin = async (accountId: number, recipient: string, delivery: InviteDelivery) => {
+    if (delivery === 'manual') {
+      const created = await apiService.createClientPortalLoginInvitation(caseItem.id, accountId);
+      setCopyStatus(null);
+      setInvitation({ ...created, recipient });
+    } else {
+      const sent = await apiService.sendClientPortalLogin(accountId, caseItem.id);
+      setNotice(`Письмо для входа отправлено на ${sent.emailHint}. Код действует до ${formatInvitationExpiry(sent.expiresAt)}.`);
+    }
   };
 
   const refreshAfterChange = async () => {
@@ -93,10 +118,11 @@ export function ClientPortalAccessPanel({ caseItem, documents, canPreview = fals
     }
   };
 
-  const saveAndSend = async () => {
+  const saveAccess = async (delivery: InviteDelivery) => {
     setBusy(true);
     setError(null);
     setNotice(null);
+    setInvitation(null);
     let accessSaved = false;
     try {
       const account = await apiService.saveClientPortalAccess({
@@ -115,26 +141,33 @@ export function ClientPortalAccessPanel({ caseItem, documents, canPreview = fals
         documentIds: rights.documents ? documentIds : [],
       });
       accessSaved = true;
-      await sendLoginEmail(account.id);
+      await issueLogin(account.id, email.trim(), delivery);
     } catch (err) {
-      setError(accessSaved
-        ? 'Доступ сохранён. Отправка письма не подтверждена. Нажмите «Отправить новый код» в списке доступов.'
-        : extractDisplayErrorMessage(err, 'Не удалось выдать доступ.'));
+      if (!accessSaved) {
+        setError(extractDisplayErrorMessage(err, 'Не удалось выдать доступ.'));
+      } else {
+        setError(delivery === 'email'
+          ? 'Доступ сохранён. Отправка письма не подтверждена. Нажмите «Отправить новый код» в списке доступов.'
+          : 'Доступ сохранён. Не удалось показать код. Сгенерируйте новый код в списке доступов.');
+      }
     } finally {
       if (accessSaved) await refreshAfterChange();
       setBusy(false);
     }
   };
 
-  const resend = async (accountId: number) => {
+  const renewInvitation = async (item: ClientPortalCaseAccess, delivery: InviteDelivery) => {
     setBusy(true);
     setError(null);
     setNotice(null);
+    setInvitation(null);
     try {
-      await sendLoginEmail(accountId);
+      await issueLogin(item.accountId, item.email, delivery);
       await refreshAfterChange();
     } catch (err) {
-      setError(extractDisplayErrorMessage(err, 'Не удалось отправить письмо для входа.'));
+      setError(extractDisplayErrorMessage(err, delivery === 'email'
+        ? 'Не удалось отправить письмо для входа.'
+        : 'Не удалось сгенерировать код для входа.'));
     } finally {
       setBusy(false);
     }
@@ -143,6 +176,7 @@ export function ClientPortalAccessPanel({ caseItem, documents, canPreview = fals
   const revoke = async (accountId: number) => {
     setBusy(true);
     setError(null);
+    setInvitation(null);
     try {
       await apiService.revokeClientPortalCaseAccess(accountId, caseItem.id, 'Доступ к делу отозван из карточки.');
       await refreshAfterChange();
@@ -151,6 +185,17 @@ export function ClientPortalAccessPanel({ caseItem, documents, canPreview = fals
       setError(extractDisplayErrorMessage(err, 'Не удалось отозвать доступ.'));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const copyInvitation = async (details: ClientPortalLoginInvitation) => {
+    try {
+      await navigator.clipboard.writeText(
+        `Ссылка для входа в клиентский кабинет: ${details.loginUrl}\nОдноразовый код: ${details.code}\nКод действует до ${formatInvitationExpiry(details.expiresAt)}.`,
+      );
+      setCopyStatus('Ссылка и код скопированы.');
+    } catch {
+      setCopyStatus('Не удалось скопировать. Выделите ссылку и код в полях ниже.');
     }
   };
 
@@ -174,20 +219,46 @@ export function ClientPortalAccessPanel({ caseItem, documents, canPreview = fals
               )} className="text-xs font-semibold text-blue-700 hover:underline">Посмотреть как клиент</button>
             ) : null}
             {available && item.canViewCaseSummary ? (
-              <button type="button" disabled={busy} onClick={() => void resend(item.accountId)} className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:underline">
-                <Mail className="h-3.5 w-3.5" /> Отправить новый код
-              </button>
+              <>
+                <button type="button" disabled={busy} onClick={() => void renewInvitation(item, 'email')} className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:underline">
+                  <Mail className="h-3.5 w-3.5" /> Отправить новый код
+                </button>
+                {canPreview ? <button type="button" disabled={busy} onClick={() => void renewInvitation(item, 'manual')} className="text-xs font-semibold text-blue-700 hover:underline">
+                  Сгенерировать код без письма
+                </button> : null}
+              </>
             ) : null}
             <button type="button" disabled={busy} onClick={() => void revoke(item.accountId)} className="inline-flex items-center gap-1 text-xs text-rose-600"><Trash2 className="h-3.5 w-3.5" /> Отозвать</button>
           </div> : null}
         </div>
       ))}</div> : null}
+      {invitation && available && canPreview ? (
+        <section aria-label="Приглашение для входа" className="mt-3 space-y-2 rounded-lg border border-blue-200 bg-blue-50 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-900">Код для {invitation.recipient}</h3>
+            <button type="button" onClick={() => setInvitation(null)} className="text-sm font-semibold text-blue-800">Скрыть приглашение</button>
+          </div>
+          <p className="text-xs text-slate-700">Код действует до {formatInvitationExpiry(invitation.expiresAt)}. Скопируйте ссылку и код, пока они открыты, и передайте их получателю.</p>
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_9rem]">
+            <label className="text-xs font-medium text-slate-700">Ссылка для входа
+              <input readOnly value={invitation.loginUrl} autoComplete="off" className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
+            </label>
+            <label className="text-xs font-medium text-slate-700">Одноразовый код
+              <input readOnly value={invitation.code} autoComplete="off" className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm" />
+            </label>
+          </div>
+          <button type="button" onClick={() => void copyInvitation(invitation)} className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-800">
+            <Copy className="h-4 w-4" /> Скопировать ссылку и код
+          </button>
+          {copyStatus ? <p role="status" className="text-xs text-slate-700">{copyStatus}</p> : null}
+        </section>
+      ) : null}
       <div className="mt-3 grid gap-2 md:grid-cols-3">
         <select value={accountType} onChange={(event) => setAccountType(event.target.value as 'client' | 'representative')} className="rounded-lg border border-slate-300 px-3 py-2 text-sm"><option value="client">Клиент</option><option value="representative">Представитель</option></select>
         <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="ФИО получателя" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
         <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" aria-label="Email для входа" placeholder="Email для входа" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
       </div>
-      {available ? <p className="mt-2 text-xs text-slate-600">CRM создаст одноразовый код и отправит его вместе со ссылкой для входа на эту почту.</p> : null}
+      {available ? <p className="mt-2 text-xs text-slate-600">На эту почту можно отправить ссылку и одноразовый код для входа.</p> : null}
       <div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-700">
         <CheckLabel label="Сроки" checked={rights.deadlines} onChange={(value) => setRights((old) => ({ ...old, deadlines: value }))} />
         <CheckLabel label="Документы" checked={rights.documents} onChange={(value) => setRights((old) => ({ ...old, documents: value }))} />
@@ -210,11 +281,14 @@ export function ClientPortalAccessPanel({ caseItem, documents, canPreview = fals
         }, 'Предпросмотр настроек доступа')} className="rounded-lg border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-800 disabled:opacity-50">
           {accesses.length > 0 ? 'Предпросмотр настроек' : 'Посмотреть как клиент'}
         </button> : null}
-        {available ? <button type="button" disabled={busy || !displayName.trim() || !email.trim()} onClick={() => void saveAndSend()} className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />} Предоставить доступ
+        {available ? <button type="button" disabled={busy || !displayName.trim() || !email.trim()} onClick={() => void saveAccess('email')} className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />} Предоставить доступ и отправить письмо
+        </button> : null}
+        {available && canPreview ? <button type="button" disabled={busy || !displayName.trim() || !email.trim()} onClick={() => void saveAccess('manual')} className="rounded-lg border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-800 disabled:opacity-50">
+          Предоставить доступ без письма
         </button> : null}
       </div>
-      {audit.length > 0 ? <details className="mt-3 rounded-lg border border-slate-200 px-3 py-2"><summary className="cursor-pointer text-sm font-medium text-slate-700">Последние действия ({audit.length})</summary><div className="mt-2 max-h-48 space-y-1 overflow-auto">{audit.map((item, index) => <div key={`${item.occurredAt}-${index}`} className="text-xs text-slate-500">{new Date(item.occurredAt).toLocaleString('ru-RU')} · {item.displayName || item.email || 'Система'} · {item.eventType === 'login_sent' ? 'Письмо для входа отправлено' : item.eventType}</div>)}</div></details> : null}
+      {audit.length > 0 ? <details className="mt-3 rounded-lg border border-slate-200 px-3 py-2"><summary className="cursor-pointer text-sm font-medium text-slate-700">Последние действия ({audit.length})</summary><div className="mt-2 max-h-48 space-y-1 overflow-auto">{audit.map((item, index) => <div key={`${item.occurredAt}-${index}`} className="text-xs text-slate-500">{new Date(item.occurredAt).toLocaleString('ru-RU')} · {item.displayName || item.email || 'Система'} · {inviteAuditLabels[item.eventType] ?? item.eventType}</div>)}</div></details> : null}
     </section>
   );
 }

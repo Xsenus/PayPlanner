@@ -1,9 +1,13 @@
+using System.Security.Claims;
 using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
+using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
@@ -20,6 +24,9 @@ public sealed class ClientPortalServiceTests
         await using var fixture = await Fixture.CreateAsync(enabled: false);
         var error = await Assert.ThrowsAsync<ClientPortalException>(() => fixture.CreateAccessAsync(1, fixture.Client1Id, fixture.Case1Id));
         Assert.Equal("feature_disabled", error.Code);
+        var invitationError = await Assert.ThrowsAsync<ClientPortalException>(() =>
+            fixture.Service.CreateLoginInvitationAsync(1, fixture.Case1Id, 7, "Администратор", CancellationToken.None));
+        Assert.Equal("feature_disabled", invitationError.Code);
         Assert.Empty(await fixture.Db.ClientPortalAccounts.ToListAsync());
     }
 
@@ -112,6 +119,145 @@ public sealed class ClientPortalServiceTests
         Assert.Single(await fixture.Db.ClientPortalLoginChallenges.Where(item => item.RevokedAt == null).ToListAsync());
         var audit = await fixture.Service.GetCaseAuditAsync(fixture.Case1Id, CancellationToken.None);
         Assert.Equal(2, audit.Count(item => item.EventType == "login_sent"));
+    }
+
+    [Fact]
+    public async Task Manual_invitation_works_once_without_sending_email_and_is_audited()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var account = await fixture.CreateAccessAsync(1, fixture.Client1Id, fixture.Case1Id);
+
+        var invitation = await fixture.Service.CreateLoginInvitationAsync(account.Id, fixture.Case1Id, 7, "Администратор", CancellationToken.None);
+
+        Assert.Empty(fixture.Email.Subjects);
+        Assert.Matches("^[0-9]{6}$", invitation.Code);
+        var url = new Uri(invitation.LoginUrl);
+        var challengeId = Guid.Parse(url.Segments[^1]);
+        var token = Uri.UnescapeDataString(url.Fragment["#token=".Length..]);
+        var challenge = await fixture.Db.ClientPortalLoginChallenges.AsNoTracking().SingleAsync();
+        Assert.Equal(challenge.PublicId, challengeId);
+        Assert.Equal(challenge.CreatedAt.AddHours(2), invitation.ExpiresAt);
+        Assert.Equal(64, challenge.TokenHash.Length);
+        Assert.Equal(64, challenge.OtpHash.Length);
+        Assert.DoesNotContain(token, challenge.TokenHash, StringComparison.Ordinal);
+        var audit = await fixture.Service.GetCaseAuditAsync(fixture.Case1Id, CancellationToken.None);
+        Assert.Single(audit, entry => entry.EventType == "login_prepared");
+        var staffAudit = await fixture.Db.ObjectAuditEvents.SingleAsync(entry => entry.Action == "ClientPortalLoginPrepared");
+        Assert.Equal(7, staffAudit.ActorUserId);
+        Assert.Equal(fixture.Case1Id, staffAudit.ObjectId);
+        Assert.DoesNotContain(token, staffAudit.MetadataJson ?? "", StringComparison.Ordinal);
+        Assert.DoesNotContain(invitation.Code, staffAudit.MetadataJson ?? "", StringComparison.Ordinal);
+
+        var session = await fixture.Service.VerifyLoginAsync(
+            challengeId, token, invitation.Code, null, null, CancellationToken.None);
+        Assert.NotNull(await fixture.Service.ResolveSessionAsync(session.SessionToken, null, null, CancellationToken.None));
+        var replay = await Assert.ThrowsAsync<ClientPortalException>(() =>
+            fixture.Service.VerifyLoginAsync(challengeId, token, invitation.Code, null, null, CancellationToken.None));
+        Assert.Equal("link_unavailable", replay.Code);
+    }
+
+    [Fact]
+    public async Task Manual_invitation_requires_matching_access_and_replaces_an_unused_email_invitation()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var account = await fixture.CreateAccessAsync(1, fixture.Client1Id, fixture.Case1Id);
+        var sent = await fixture.Service.SendLoginAsync(account.Id, CancellationToken.None, fixture.Case1Id);
+        var emailToken = fixture.Email.Token;
+
+        var noGrant = await Assert.ThrowsAsync<ClientPortalException>(() =>
+            fixture.Service.CreateLoginInvitationAsync(account.Id, fixture.Case2Id, 7, "Администратор", CancellationToken.None));
+        Assert.Equal("grant_not_found", noGrant.Code);
+        await fixture.Service.PreviewLoginAsync(sent.ChallengeId, emailToken, CancellationToken.None);
+
+        await fixture.Service.CreateLoginInvitationAsync(account.Id, fixture.Case1Id, 7, "Администратор", CancellationToken.None);
+        var oldLink = await Assert.ThrowsAsync<ClientPortalException>(() =>
+            fixture.Service.PreviewLoginAsync(sent.ChallengeId, emailToken, CancellationToken.None));
+        Assert.Equal("link_unavailable", oldLink.Code);
+        Assert.Single(fixture.Email.Subjects);
+
+        await fixture.Service.RevokeCaseAccessAsync(account.Id, fixture.Case1Id, 7, null, CancellationToken.None);
+        var revoked = await Assert.ThrowsAsync<ClientPortalException>(() =>
+            fixture.Service.CreateLoginInvitationAsync(account.Id, fixture.Case1Id, 7, "Администратор", CancellationToken.None));
+        Assert.Equal("account_unavailable", revoked.Code);
+    }
+
+    [Fact]
+    public async Task Concurrent_confirmation_of_a_manual_invitation_creates_one_session()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var account = await fixture.CreateAccessAsync(1, fixture.Client1Id, fixture.Case1Id);
+        var invitation = await fixture.Service.CreateLoginInvitationAsync(account.Id, fixture.Case1Id, 7, "Администратор", CancellationToken.None);
+        var url = new Uri(invitation.LoginUrl);
+        var challengeId = Guid.Parse(url.Segments[^1]);
+        var token = Uri.UnescapeDataString(url.Fragment["#token=".Length..]);
+
+        await using var firstDb = fixture.OpenSecondContext();
+        await using var secondDb = fixture.OpenSecondContext();
+        var firstService = fixture.CreateService(firstDb, new RecordingEmailService());
+        var secondService = fixture.CreateService(secondDb, new RecordingEmailService());
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task<string> ConfirmAsync(ClientPortalService service)
+        {
+            await start.Task;
+            try
+            {
+                await service.VerifyLoginAsync(challengeId, token, invitation.Code, null, null, CancellationToken.None);
+                return "confirmed";
+            }
+            catch (ClientPortalException ex)
+            {
+                return ex.Code;
+            }
+        }
+
+        var first = ConfirmAsync(firstService);
+        var second = ConfirmAsync(secondService);
+        start.SetResult();
+        Assert.Equal(new[] { "confirmed", "link_unavailable" }, (await Task.WhenAll(first, second)).OrderBy(item => item));
+        Assert.Single(await fixture.Db.ClientPortalSessions.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task Manual_invitation_requires_current_approved_admin_and_an_existing_case()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var account = await fixture.CreateAccessAsync(1, fixture.Client1Id, fixture.Case1Id);
+        var staff = new User
+        {
+            Email = "staff@example.test",
+            FullName = "Сотрудник",
+            Role = new Role { Name = "employee" },
+            IsApproved = true,
+        };
+        fixture.Db.Users.Add(staff);
+        await fixture.Db.SaveChangesAsync();
+        var controller = new ClientPortalAdminController(fixture.Service, fixture.Db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim(ClaimTypes.NameIdentifier, staff.Id.ToString()),
+                        new Claim(ClaimTypes.Role, "admin"),
+                    ], "Test")),
+                },
+            },
+        };
+
+        Assert.IsType<ForbidResult>((await controller.CreateLoginInvitation(fixture.Case1Id, account.Id, CancellationToken.None)).Result);
+        staff.Role = new Role { Name = "admin" };
+        staff.IsApproved = false;
+        await fixture.Db.SaveChangesAsync();
+        Assert.IsType<ForbidResult>((await controller.CreateLoginInvitation(fixture.Case1Id, account.Id, CancellationToken.None)).Result);
+        Assert.Empty(await fixture.Db.ClientPortalLoginChallenges.ToListAsync());
+
+        staff.IsApproved = true;
+        await fixture.Db.SaveChangesAsync();
+        Assert.IsType<NotFoundResult>((await controller.CreateLoginInvitation(int.MaxValue, account.Id, CancellationToken.None)).Result);
+        Assert.IsType<OkObjectResult>((await controller.CreateLoginInvitation(fixture.Case1Id, account.Id, CancellationToken.None)).Result);
+        Assert.Single(await fixture.Db.ClientPortalLoginChallenges.ToListAsync());
     }
 
     [Fact]
@@ -296,14 +442,28 @@ public sealed class ClientPortalServiceTests
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
-        private Fixture(SqliteConnection connection, PaymentContext db, RecordingEmailService email, ClientPortalService service, string storageRoot, ICaseDocumentStorage storage)
+        private readonly IConfiguration _configuration;
+        private readonly FixedOptionsMonitor _flags;
+
+        private Fixture(SqliteConnection connection, PaymentContext db, bool enabled, string storageRoot)
         {
             _connection = connection;
             Db = db;
-            Email = email;
-            Service = service;
             StorageRoot = storageRoot;
-            Storage = storage;
+            _configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["App:FrontendUrl"] = "https://crm.example.test",
+                    [ApplicationFileStoragePaths.RootPathConfigurationKey] = storageRoot,
+                })
+                .Build();
+            _flags = new FixedOptionsMonitor(new AppFeatureFlagsOptions
+            {
+                Legal = new LegalFeatureFlagsOptions { ClientPortal = enabled },
+            });
+            Storage = new LocalCaseDocumentStorage(configuration: _configuration);
+            Email = new RecordingEmailService();
+            Service = CreateService(db, Email);
         }
 
         public PaymentContext Db { get; }
@@ -318,7 +478,7 @@ public sealed class ClientPortalServiceTests
 
         public static async Task<Fixture> CreateAsync(bool enabled)
         {
-            var connection = new SqliteConnection("Data Source=:memory:");
+            var connection = new SqliteConnection($"Data Source=client-portal-{Guid.NewGuid():N};Mode=Memory;Cache=Shared;Pooling=False");
             await connection.OpenAsync();
             var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
             await db.Database.EnsureCreatedAsync();
@@ -329,28 +489,8 @@ public sealed class ClientPortalServiceTests
             db.ClientCases.AddRange(case1, case2);
             await db.SaveChangesAsync();
 
-            var email = new RecordingEmailService();
             var storageRoot = Path.Combine(Path.GetTempPath(), $"payplanner-client-portal-{Guid.NewGuid():N}");
-            var configuration = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["App:FrontendUrl"] = "https://crm.example.test",
-                    [ApplicationFileStoragePaths.RootPathConfigurationKey] = storageRoot,
-                })
-                .Build();
-            var flags = new FixedOptionsMonitor(new AppFeatureFlagsOptions
-            {
-                Legal = new LegalFeatureFlagsOptions { ClientPortal = enabled },
-            });
-            var storage = new LocalCaseDocumentStorage(configuration: configuration);
-            var service = new ClientPortalService(
-                db,
-                email,
-                configuration,
-                flags,
-                storage,
-                DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(storageRoot, "keys"))));
-            return new Fixture(connection, db, email, service, storageRoot, storage)
+            return new Fixture(connection, db, enabled, storageRoot)
             {
                 Client1Id = client1.Id,
                 Client2Id = client2.Id,
@@ -358,6 +498,13 @@ public sealed class ClientPortalServiceTests
                 Case2Id = case2.Id,
             };
         }
+
+        public PaymentContext OpenSecondContext()
+            => new(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(_connection.ConnectionString).Options);
+
+        public ClientPortalService CreateService(PaymentContext db, RecordingEmailService email)
+            => new(db, email, _configuration, _flags, Storage,
+                DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(StorageRoot, "keys"))));
 
         public Task<ClientPortalAdminAccountDto> CreateAccessAsync(int suffix, int clientId, int caseId)
             => Service.CreateOrUpdateAccessAsync(new ClientPortalAccessRequest

@@ -20,6 +20,7 @@ public interface IClientPortalService
     Task<List<ClientPortalAuditDto>> GetCaseAuditAsync(int caseId, CancellationToken ct);
     Task<ClientPortalCaseDto?> PreviewCaseAsync(int caseId, ClientPortalCasePreviewRequest request, int actorId, string actorName, CancellationToken ct);
     Task<ClientPortalChallengeCreatedDto> SendLoginAsync(int accountId, CancellationToken ct, int? caseId = null);
+    Task<ClientPortalLoginInvitationDto> CreateLoginInvitationAsync(int accountId, int caseId, int actorId, string actorName, CancellationToken ct);
     Task RevokeAccountAsync(int accountId, int actorId, string actorName, string? reason, CancellationToken ct);
     Task RevokeCaseAccessAsync(int accountId, int caseId, int actorId, string? reason, CancellationToken ct);
     Task<ClientPortalLoginPreviewDto> PreviewLoginAsync(Guid challengeId, string token, CancellationToken ct);
@@ -256,6 +257,38 @@ public sealed class ClientPortalService : IClientPortalService
 
     public async Task<ClientPortalChallengeCreatedDto> SendLoginAsync(int accountId, CancellationToken ct, int? caseId = null)
     {
+        var (account, challenge, grantId, invitation) = await IssueLoginAsync(accountId, caseId, ct);
+        try
+        {
+            await _email.SendEmailAsync(
+                account.Email,
+                "Вход в клиентский кабинет",
+                $"<h2>Клиентский кабинет</h2><p>{WebUtility.HtmlEncode(account.DisplayName)}, откройте защищённую ссылку:</p><p><a href=\"{WebUtility.HtmlEncode(invitation.LoginUrl)}\">Войти в кабинет</a></p><p>Код: <strong>{invitation.Code}</strong></p><p>Ссылка действует {ChallengeHours} часа.</p>",
+                true,
+                ct);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            challenge.RevokedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(CancellationToken.None);
+            throw Error("delivery_failed", "Не удалось отправить письмо; ссылка отключена.");
+        }
+
+        Audit(account.Id, grantId, "login_sent", "account", account.PublicId.ToString("D"), null, null);
+        await _db.SaveChangesAsync(ct);
+        return new ClientPortalChallengeCreatedDto { ChallengeId = challenge.PublicId, ExpiresAt = challenge.ExpiresAt, EmailHint = MaskEmail(account.Email) };
+    }
+
+    public async Task<ClientPortalLoginInvitationDto> CreateLoginInvitationAsync(
+        int accountId, int caseId, int actorId, string actorName, CancellationToken ct)
+    {
+        var issued = await IssueLoginAsync(accountId, caseId, ct, (actorId, actorName));
+        return issued.Invitation;
+    }
+
+    private async Task<(ClientPortalAccount Account, ClientPortalLoginChallenge Challenge, int? GrantId, ClientPortalLoginInvitationDto Invitation)> IssueLoginAsync(
+        int accountId, int? caseId, CancellationToken ct, (int Id, string Name)? generatedBy = null)
+    {
         EnsureEnabled();
 
         ClientPortalAccount account;
@@ -298,6 +331,21 @@ public sealed class ClientPortalService : IClientPortalService
                 MaxAttempts = MaxAttempts,
             };
             _db.ClientPortalLoginChallenges.Add(challenge);
+            if (generatedBy is { } actor && caseId is int invitationCaseId)
+            {
+                Audit(accountId, grantId, "login_prepared", "account", account.PublicId.ToString("D"), null, null);
+                _db.ObjectAuditEvents.Add(new ObjectAuditEvent
+                {
+                    ObjectType = "client-case",
+                    ObjectId = invitationCaseId,
+                    Action = "ClientPortalLoginPrepared",
+                    Description = "Создано приглашение в клиентский кабинет без отправки письма.",
+                    ActorUserId = actor.Id,
+                    ActorUserName = Truncate(actor.Name, 256),
+                    MetadataJson = JsonSerializer.Serialize(new { accountId }),
+                    CreatedAt = now,
+                });
+            }
             await _db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }
@@ -306,26 +354,12 @@ public sealed class ClientPortalService : IClientPortalService
             ?? _configuration["Frontend:BaseUrl"]
             ?? _configuration["Frontend:PublicUrl"]
             ?? "http://localhost:5173").TrimEnd('/');
-        var link = $"{baseUrl}/portal/login/{challenge.PublicId:D}#token={Uri.EscapeDataString(token)}";
-        try
+        return (account, challenge, grantId, new ClientPortalLoginInvitationDto
         {
-            await _email.SendEmailAsync(
-                account.Email,
-                "Вход в клиентский кабинет",
-                $"<h2>Клиентский кабинет</h2><p>{WebUtility.HtmlEncode(account.DisplayName)}, откройте защищённую ссылку:</p><p><a href=\"{WebUtility.HtmlEncode(link)}\">Войти в кабинет</a></p><p>Код: <strong>{otp}</strong></p><p>Ссылка действует {ChallengeHours} часа.</p>",
-                true,
-                ct);
-        }
-        catch (Exception) when (!ct.IsCancellationRequested)
-        {
-            challenge.RevokedAt = DateTime.UtcNow;
-            await _db.SaveChangesAsync(CancellationToken.None);
-            throw Error("delivery_failed", "Не удалось отправить письмо; ссылка отключена.");
-        }
-
-        Audit(account.Id, grantId, "login_sent", "account", account.PublicId.ToString("D"), null, null);
-        await _db.SaveChangesAsync(ct);
-        return new ClientPortalChallengeCreatedDto { ChallengeId = challenge.PublicId, ExpiresAt = challenge.ExpiresAt, EmailHint = MaskEmail(account.Email) };
+            LoginUrl = $"{baseUrl}/portal/login/{challenge.PublicId:D}#token={Uri.EscapeDataString(token)}",
+            Code = otp,
+            ExpiresAt = challenge.ExpiresAt,
+        });
     }
 
     public async Task RevokeAccountAsync(int accountId, int actorId, string actorName, string? reason, CancellationToken ct)
@@ -411,29 +445,48 @@ public sealed class ClientPortalService : IClientPortalService
         CancellationToken ct)
     {
         EnsureEnabled(publicSurface: true);
-        var challenge = await LoadChallengeAsync(challengeId, token, ct);
-        EnsureChallengeUsable(challenge);
-        if (!FixedTimeEquals(challenge.OtpHash, Hash($"{token}:{otp?.Trim()}")))
-        {
-            challenge.FailedAttempts++;
-            if (challenge.FailedAttempts >= challenge.MaxAttempts) challenge.RevokedAt = DateTime.UtcNow;
-            await _db.SaveChangesAsync(ct);
-            throw Error("invalid_confirmation", challenge.RevokedAt.HasValue ? "Ссылка заблокирована." : "Неверный код.");
-        }
-
-        challenge.ConsumedAt = DateTime.UtcNow;
+        ClientPortalLoginChallenge challenge;
+        ClientPortalSession session;
         var sessionToken = GenerateToken(48);
-        var session = new ClientPortalSession
+        await using (var transaction = await _db.Database.BeginTransactionAsync(ct))
         {
-            ClientPortalAccountId = challenge.ClientPortalAccountId,
-            TokenHash = Hash(sessionToken),
-            ExpiresAt = DateTime.UtcNow.AddHours(SessionHours),
-            IpHash = Hash($"{challenge.Account.PublicId:N}:{ip}"),
-            UserAgent = Truncate(userAgent?.Trim() ?? string.Empty, 512),
-        };
-        _db.ClientPortalSessions.Add(session);
-        Audit(challenge.Account.Id, null, "login_succeeded", "session", session.PublicId.ToString("D"), ip, userAgent);
-        await _db.SaveChangesAsync(ct);
+            if (_db.Database.IsNpgsql())
+            {
+                // Use the same account lock as issuance, then read the current challenge state.
+                await _db.Database.SqlQuery<int>($"""
+                    SELECT 1
+                    FROM "ClientPortalAccounts" AS account
+                    JOIN "ClientPortalLoginChallenges" AS challenge ON challenge."ClientPortalAccountId" = account."Id"
+                    WHERE challenge."PublicId" = {challengeId}
+                    FOR UPDATE OF account
+                    """).ToListAsync(ct);
+            }
+            challenge = await LoadChallengeAsync(challengeId, token, ct);
+            EnsureChallengeUsable(challenge);
+            var now = DateTime.UtcNow;
+            if (!FixedTimeEquals(challenge.OtpHash, Hash($"{token}:{otp?.Trim()}")))
+            {
+                challenge.FailedAttempts++;
+                if (challenge.FailedAttempts >= challenge.MaxAttempts) challenge.RevokedAt = now;
+                await _db.SaveChangesAsync(ct);
+                await transaction.CommitAsync(ct);
+                throw Error("invalid_confirmation", challenge.RevokedAt.HasValue ? "Ссылка заблокирована." : "Неверный код.");
+            }
+
+            challenge.ConsumedAt = now;
+            session = new ClientPortalSession
+            {
+                ClientPortalAccountId = challenge.ClientPortalAccountId,
+                TokenHash = Hash(sessionToken),
+                ExpiresAt = now.AddHours(SessionHours),
+                IpHash = Hash($"{challenge.Account.PublicId:N}:{ip}"),
+                UserAgent = Truncate(userAgent?.Trim() ?? string.Empty, 512),
+            };
+            _db.ClientPortalSessions.Add(session);
+            Audit(challenge.Account.Id, null, "login_succeeded", "session", session.PublicId.ToString("D"), ip, userAgent);
+            await _db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
         try
         {
             var loginAt = DateTime.UtcNow.ToString("dd.MM.yyyy HH:mm 'UTC'", CultureInfo.InvariantCulture);
@@ -992,6 +1045,12 @@ public sealed class ClientPortalGrantDto
     public bool CanViewMessages { get; set; }
 }
 public sealed class ClientPortalChallengeCreatedDto { public Guid ChallengeId { get; set; } public DateTime ExpiresAt { get; set; } public string EmailHint { get; set; } = ""; }
+public sealed class ClientPortalLoginInvitationDto
+{
+    public string LoginUrl { get; init; } = "";
+    public string Code { get; init; } = "";
+    public DateTime ExpiresAt { get; init; }
+}
 public sealed class ClientPortalCaseAccessDto
 {
     public int AccountId { get; set; }

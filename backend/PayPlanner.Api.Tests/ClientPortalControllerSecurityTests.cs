@@ -31,6 +31,25 @@ public sealed class ClientPortalControllerSecurityTests
     }
 
     [Fact]
+    public async Task ManualInvitationRequiresAdminAndDisablesCaching()
+    {
+        var endpoint = typeof(ClientPortalAdminController).GetMethod(nameof(ClientPortalAdminController.CreateLoginInvitation))!;
+        Assert.Equal("Admin", endpoint.DeclaringType!.GetCustomAttribute<AuthorizeAttribute>()?.Policy);
+        Assert.Null(endpoint.GetCustomAttribute<AllowAnonymousAttribute>());
+        var cache = Assert.IsType<ResponseCacheAttribute>(endpoint.GetCustomAttribute<ResponseCacheAttribute>());
+        Assert.True(cache.NoStore);
+        Assert.Equal(ResponseCacheLocation.None, cache.Location);
+        var controller = new ClientPortalAdminController(new PortalServiceStub(), null!)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+
+        var result = await controller.CreateLoginInvitation(1, 7, CancellationToken.None);
+
+        Assert.IsType<UnauthorizedResult>(result.Result);
+    }
+
+    [Fact]
     public async Task PreviewAppliesPrivateResponseAndBrowserIsolationHeaders()
     {
         var controller = CreateController(out _);
@@ -125,6 +144,7 @@ public sealed class ClientPortalControllerSecurityTests
         public Task<List<ClientPortalAuditDto>> GetCaseAuditAsync(int caseId, CancellationToken ct) => throw new NotSupportedException();
         public Task<ClientPortalCaseDto?> PreviewCaseAsync(int caseId, ClientPortalCasePreviewRequest request, int actorId, string actorName, CancellationToken ct) => throw new NotSupportedException();
         public Task<ClientPortalChallengeCreatedDto> SendLoginAsync(int accountId, CancellationToken ct, int? caseId = null) => throw new NotSupportedException();
+        public Task<ClientPortalLoginInvitationDto> CreateLoginInvitationAsync(int accountId, int caseId, int actorId, string actorName, CancellationToken ct) => throw new NotSupportedException();
         public Task RevokeAccountAsync(int accountId, int actorId, string actorName, string? reason, CancellationToken ct) => throw new NotSupportedException();
         public Task RevokeCaseAccessAsync(int accountId, int caseId, int actorId, string? reason, CancellationToken ct) => throw new NotSupportedException();
         public Task RevokeSessionAsync(string? token, bool all, CancellationToken ct) => Task.CompletedTask;
