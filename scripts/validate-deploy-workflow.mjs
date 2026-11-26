@@ -393,6 +393,12 @@ export function validateDeployWorkflow(source) {
       && downloaded.index < unpack.index && unpack.index < gate.index, `${id}: SDK check and downloaded runtime must precede execution`);
     requireValue(!jobs[id].steps.some(step => /dotnet (?:build|publish|restore)|\bMSBuild\b/.test(step.run ?? '')), `${id}: test runtime must not be rebuilt`);
   }
+  for (const [id, gate] of shardGates) {
+    const installed = command(id, 'npm ci');
+    const prepared = command(id, 'node scripts/prepare-synthetic-browser-ui.mjs');
+    requireValue(installed.index < prepared.index && prepared.index < gate.index,
+      `${id}: qualify the synthetic browser interface after dependency installation and before tests`);
+  }
   for (const [id, gate] of [...shardGates, ['backend-browser', restored]]) {
     requireValue(String(gate.step.env?.BackgroundServices__Enabled) === 'false' && String(gate.step.env?.Email__Enabled) === 'false', `${id}: test mail/background isolation missing`);
     requireValue(gate.step.env?.PAYPLANNER_TEST_POSTGRES === '${{ secrets.PAYPLANNER_XSENUS_TEST_POSTGRES }}'

@@ -427,6 +427,10 @@ jobs:
       - name: Install FE deps
         run: npm ci
 
+      - name: Prepare the synthetic browser interface
+        timeout-minutes: 10
+        run: node scripts/prepare-synthetic-browser-ui.mjs
+
       - name: Install browsers for writable and restored CRM verification
         run: node scripts/prepare-ci-browsers.mjs
 
@@ -547,6 +551,10 @@ jobs:
 
       - name: Install FE deps
         run: npm ci
+
+      - name: Prepare the synthetic browser interface
+        timeout-minutes: 10
+        run: node scripts/prepare-synthetic-browser-ui.mjs
 
       - name: Install browsers for writable and restored CRM verification
         run: node scripts/prepare-ci-browsers.mjs
@@ -669,6 +677,10 @@ jobs:
       - name: Install FE deps
         run: npm ci
 
+      - name: Prepare the synthetic browser interface
+        timeout-minutes: 10
+        run: node scripts/prepare-synthetic-browser-ui.mjs
+
       - name: Install browsers for writable and restored CRM verification
         run: node scripts/prepare-ci-browsers.mjs
 
@@ -789,6 +801,10 @@ jobs:
 
       - name: Install FE deps
         run: npm ci
+
+      - name: Prepare the synthetic browser interface
+        timeout-minutes: 10
+        run: node scripts/prepare-synthetic-browser-ui.mjs
 
       - name: Install browsers for writable and restored CRM verification
         run: node scripts/prepare-ci-browsers.mjs

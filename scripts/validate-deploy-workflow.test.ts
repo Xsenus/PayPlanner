@@ -37,6 +37,15 @@ describe('merged production workflow protections', () => {
     )))).toThrow();
   });
 
+  it.each(shardJobs)('requires preparing the synthetic browser UI before executing %s', id => {
+    const step = '      - name: Prepare the synthetic browser interface\n'
+      + '        timeout-minutes: 10\n        run: node scripts/prepare-synthetic-browser-ui.mjs\n\n';
+    expect(() => validateDeployWorkflow(replaceInJob(id, job => job.replace(step, '')))).toThrow();
+    expect(() => validateDeployWorkflow(replaceInJob(id, job => job.replace(step, '').replace(
+      '      - name: Install FE deps\n', step + '      - name: Install FE deps\n',
+    )))).toThrow();
+  });
+
   it('retains every mandatory gate and four independent qualified workers', () => {
     const jobs = parseWorkflow(workflow).jobs;
     expect(Object.keys(jobs).sort()).toEqual(allJobs.toSorted());
