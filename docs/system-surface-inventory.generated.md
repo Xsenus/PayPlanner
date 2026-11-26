@@ -7,8 +7,8 @@
 
 - Разделов frontend: 55.
 - Backend-контроллеров: 111.
-- HTTP endpoints: 976; с прямой тестовой связью: 691.
-- HTTP endpoints с точной ссылкой из документации: 282; критичных без такой ссылки: 529.
+- HTTP endpoints: 978; с прямой тестовой связью: 693.
+- HTTP endpoints с точной ссылкой из документации: 282; критичных без такой ссылки: 531.
 - Критичных endpoints без прямой тестовой связи: 238.
 - Реальных HTML-форм: 22; с найденной тестовой связью: 19.
 - Фоновых сервисов: 36; с найденной тестовой связью: 29.
@@ -90,7 +90,7 @@
 | DocumentImagePrintDialog | src/components/Documents/DocumentImagePrintDialog.tsx | 93 | да | docs/payplanner-company-roadmap-2026-10-14.md |
 | LegalEntityModal | src/components/LegalEntities/LegalEntityModal.tsx | 4061 | да | docs/action-map-pay-32-individual-client-2026-10-12.md, docs/company-autofill-ownership-checkpoint-2026-11-01.md, docs/company-automatic-read-ownership-checkpoint-2026-10-31.md, docs/company-branch-version-checkpoint-2026-10-31.md, docs/company-branches-ui-checkpoint-2026-10-30.md, docs/company-deletion-atomicity-checkpoint-2026-10-30.md, docs/company-finance-ownership-checkpoint-2026-10-31.md, docs/company-images-remaining-audit-2026-10-30.md, docs/company-payment-write-ownership-checkpoint-2026-10-31.md, docs/company-profile-concurrency-checkpoint-2026-10-30.md, docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/company-related-read-ownership-checkpoint-2026-10-31.md, docs/company-related-write-ownership-checkpoint-2026-10-31.md, docs/development-profile-max-planning-final-gate-2026-10-23.md, docs/full-project-audit-2026-06-10.md, docs/invoice-case-ownership-checkpoint-2026-10-31.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/payplanner-access-security-roadmap-2026-10-14.md, docs/payplanner-company-roadmap-2026-10-14.md, docs/payplanner-source-review-2026-11-11.md, docs/payplanner-work-order-2026-10-21.md |
 | MoneyOperations | src/components/Money/MoneyOperations.tsx | 6435 | да | docs/bank-integrations-api-verification-2026-10-09.md, docs/batch-operations-audit-coverage-2026-06-10.md, docs/company-reference-ownership-checkpoint-2026-11-01.md, docs/date-time-inventory.md, docs/deployment-manual-2026-10-22.md, docs/development-bank-import-verification-2026-10-16.md, docs/development-client-detail-visual-2026-10-24.md, docs/development-performance-audit-2026-10-23.md, docs/development-performance-implementation-2026-10-23.md, docs/development-roadmap-release-integration-2026-10-28.md, docs/development-test-speed-drafts-2026-10-24.md, docs/financial-cash-access-acceptance-report-2026-06-16.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/max-finance-provenance-review-2026-10-15.md, docs/max-latest-reply-drafts-2026-10-15.md, docs/max-review-and-replies-2026-10-16.md, docs/max-today-reply-drafts-2026-10-14.md, docs/payplanner-bank-import-guide-2026-10-24.md, docs/payplanner-bank-roadmap-2026-10-14.md |
-| ClientPortalPage | src/components/Public/ClientPortalPage.tsx | 223 | да | нет |
+| ClientPortalPage | src/components/Public/ClientPortalPage.tsx | 221 | да | нет |
 | RoleModal | src/components/Roles/RoleModal.tsx | 121 | нет | docs/full-project-audit-2026-06-10.md |
 | S3Storage | src/components/S3Storage/S3Storage.tsx | 773 | да | docs/date-time-inventory.md, docs/development-pause-plan-2026-09-30.md, docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/s3-storage-acceptance-checklist.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/unpushed-changes-map-2026-10-03.md |
 | TaskJournalSettings | src/components/Settings/TaskJournalSettings.tsx | 998 | да | docs/action-map-pay-20-task-cards-2026-10-12.md, docs/payplanner-task-billing-bulk-plan-2026-10-23.md, docs/payplanner-visual-comparison-2026-10-23.md, docs/task-template-current-state-2026-07-09.md |
@@ -181,7 +181,7 @@
 | CashOrdersController | backend/Controllers/CashOrdersController.cs | 21 | [Authorize] | да |
 | ClientBalancesController | backend/Controllers/ClientBalancesController.cs | 6 | не задано | да |
 | ClientPassportController | backend/Controllers/ClientPassportController.cs | 2 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
-| ClientPortalAdminController | backend/Controllers/ClientPortalAdminController.cs | 7 | [Authorize(Policy = "Admin")] | нет |
+| ClientPortalAdminController | backend/Controllers/ClientPortalAdminController.cs | 9 | [Authorize(Policy = "Admin")] | да |
 | ClientPortalController | backend/Controllers/ClientPortalController.cs | 10 | публичный ([AllowAnonymous]) | да |
 | ClientReferenceDataController | backend/Controllers/ClientReferenceDataController.cs | 3 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
 | ClientsController | backend/Controllers/ClientsController.cs | 12 | [Authorize] | да |
@@ -489,10 +489,10 @@
 | GET | api/notifications/settings | NotificationsController.GetSettings | чувствительные данные или операция | backend/Controllers/NotificationsController.cs:42 |
 | PUT | api/notifications/templates/{key} | NotificationsController.UpdateTemplate | изменение данных | backend/Controllers/NotificationsController.cs:99 |
 | POST | api/notifications/templates/{key}/reset | NotificationsController.ResetTemplate | изменение данных | backend/Controllers/NotificationsController.cs:116 |
-| POST | api/portal/admin/access | ClientPortalAdminController.SaveAccess | изменение данных | backend/Controllers/ClientPortalAdminController.cs:13 |
-| DELETE | api/portal/admin/accounts/{accountId:int} | ClientPortalAdminController.Revoke | изменение данных | backend/Controllers/ClientPortalAdminController.cs:91 |
-| DELETE | api/portal/admin/accounts/{accountId:int}/cases/{caseId:int} | ClientPortalAdminController.RevokeCaseAccess | изменение данных | backend/Controllers/ClientPortalAdminController.cs:119 |
-| POST | api/portal/admin/accounts/{accountId:int}/login | ClientPortalAdminController.SendLogin | изменение данных | backend/Controllers/ClientPortalAdminController.cs:78 |
+| POST | api/portal/admin/access | ClientPortalAdminController.SaveAccess | изменение данных | backend/Controllers/ClientPortalAdminController.cs:17 |
+| DELETE | api/portal/admin/accounts/{accountId:int} | ClientPortalAdminController.Revoke | изменение данных | backend/Controllers/ClientPortalAdminController.cs:163 |
+| DELETE | api/portal/admin/accounts/{accountId:int}/cases/{caseId:int} | ClientPortalAdminController.RevokeCaseAccess | изменение данных | backend/Controllers/ClientPortalAdminController.cs:191 |
+| POST | api/portal/admin/accounts/{accountId:int}/login | ClientPortalAdminController.SendLogin | изменение данных | backend/Controllers/ClientPortalAdminController.cs:117 |
 | GET | api/portal/cases/{casePublicId:guid} | ClientPortalController.GetCase | публичный доступ | backend/Controllers/ClientPortalController.cs:91 |
 | GET | api/portal/home | ClientPortalController.Home | публичный доступ | backend/Controllers/ClientPortalController.cs:69 |
 | GET | api/profile | ProfileController.GetProfile | чувствительные данные или операция | backend/Controllers/ProfileController.cs:46 |
@@ -658,13 +658,15 @@
 | POST | apply | ClientBalancesController | ApplyCredit | backend/Controllers/ClientBalancesController.cs:147 | не задано | да | docs/balance-application-cancel-fence-checkpoint-2026-10-31.md, docs/balance-application-durable-flow-checkpoint-2026-10-31.md, docs/balance-application-managed-route-checkpoint-2026-10-31.md, docs/company-autofill-ownership-checkpoint-2026-11-01.md, docs/development-bank-import-verification-2026-10-16.md, docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/payment-advance-history-checkpoint-2026-10-31.md, docs/payplanner-handoff-2026-10-21.md, docs/payplanner-release-roadmap-2026-10-14.md, docs/payplanner-storage-roadmap-2026-10-14.md, docs/quality-gates.md, docs/release-verification-history-2026-10-06.md, docs/service-balance-credit-guard-checkpoint-2026-10-31.md, docs/storage-resilience-runbook.md, docs/unpushed-changes-map-2026-10-03.md |
 | GET |  | ClientPassportController | Get | backend/Controllers/ClientPassportController.cs:33 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да | нет |
 | PUT |  | ClientPassportController | Upsert | backend/Controllers/ClientPassportController.cs:76 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)]; [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Edit)] | да | нет |
-| POST | api/portal/admin/access | ClientPortalAdminController | SaveAccess | backend/Controllers/ClientPortalAdminController.cs:13 | [Authorize(Policy = "Admin")] | нет | нет |
-| GET | api/portal/admin/accounts/{accountId:int} | ClientPortalAdminController | GetAccount | backend/Controllers/ClientPortalAdminController.cs:38 | [Authorize(Policy = "Admin")] | нет | нет |
-| GET | api/portal/admin/cases/{caseId:int}/accounts | ClientPortalAdminController | GetCaseAccounts | backend/Controllers/ClientPortalAdminController.cs:52 | [Authorize(Policy = "Admin")] | нет | нет |
-| GET | api/portal/admin/cases/{caseId:int}/audit | ClientPortalAdminController | GetCaseAudit | backend/Controllers/ClientPortalAdminController.cs:65 | [Authorize(Policy = "Admin")] | нет | нет |
-| POST | api/portal/admin/accounts/{accountId:int}/login | ClientPortalAdminController | SendLogin | backend/Controllers/ClientPortalAdminController.cs:78 | [Authorize(Policy = "Admin")] | нет | нет |
-| DELETE | api/portal/admin/accounts/{accountId:int} | ClientPortalAdminController | Revoke | backend/Controllers/ClientPortalAdminController.cs:91 | [Authorize(Policy = "Admin")] | нет | нет |
-| DELETE | api/portal/admin/accounts/{accountId:int}/cases/{caseId:int} | ClientPortalAdminController | RevokeCaseAccess | backend/Controllers/ClientPortalAdminController.cs:119 | [Authorize(Policy = "Admin")] | нет | нет |
+| POST | api/portal/admin/access | ClientPortalAdminController | SaveAccess | backend/Controllers/ClientPortalAdminController.cs:17 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/portal/admin/accounts/{accountId:int} | ClientPortalAdminController | GetAccount | backend/Controllers/ClientPortalAdminController.cs:42 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/portal/admin/cases/{caseId:int}/accounts | ClientPortalAdminController | GetCaseAccounts | backend/Controllers/ClientPortalAdminController.cs:56 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/portal/admin/cases/{caseId:int}/audit | ClientPortalAdminController | GetCaseAudit | backend/Controllers/ClientPortalAdminController.cs:69 | [Authorize(Policy = "Admin")] | нет | нет |
+| POST | api/portal/admin/cases/{caseId:int}/preview | ClientPortalAdminController | PreviewCase | backend/Controllers/ClientPortalAdminController.cs:82 | [Authorize(Policy = "Admin")] | да | нет |
+| POST | api/portal/admin/accounts/{accountId:int}/login | ClientPortalAdminController | SendLogin | backend/Controllers/ClientPortalAdminController.cs:117 | [Authorize(Policy = "Admin")] | нет | нет |
+| POST | api/portal/admin/cases/{caseId:int}/accounts/{accountId:int}/login-invitation | ClientPortalAdminController | CreateLoginInvitation | backend/Controllers/ClientPortalAdminController.cs:131 | [Authorize(Policy = "Admin")] | да | нет |
+| DELETE | api/portal/admin/accounts/{accountId:int} | ClientPortalAdminController | Revoke | backend/Controllers/ClientPortalAdminController.cs:163 | [Authorize(Policy = "Admin")] | нет | нет |
+| DELETE | api/portal/admin/accounts/{accountId:int}/cases/{caseId:int} | ClientPortalAdminController | RevokeCaseAccess | backend/Controllers/ClientPortalAdminController.cs:191 | [Authorize(Policy = "Admin")] | нет | нет |
 | POST | api/portal/auth/{challengeId:guid}/preview | ClientPortalController | Preview | backend/Controllers/ClientPortalController.cs:22 | публичный ([AllowAnonymous]) | да | нет |
 | POST | api/portal/auth/{challengeId:guid}/verify | ClientPortalController | Verify | backend/Controllers/ClientPortalController.cs:39 | публичный ([AllowAnonymous]) | да | нет |
 | GET | api/portal/home | ClientPortalController | Home | backend/Controllers/ClientPortalController.cs:69 | публичный ([AllowAnonymous]) | нет | нет |
