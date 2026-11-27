@@ -38,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        encoding: [default, utf8]
+        encoding: [new-consoles]
     env:
       PROBE_ENCODING: ${{ matrix.encoding }}
     steps:
@@ -69,9 +69,19 @@ jobs:
           run-id: ${{ env.PRIOR_RUN }}
           github-token: ${{ github.token }}
       - run: bash ../scripts/ci-full-release/run.sh unpack-runtime
+      - name: Set UTF-8 for new consoles on this disposable Windows runner
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'Expected an ephemeral runner' }
+          if (!(Test-Path HKCU:\Console)) { New-Item HKCU:\Console | Out-Null }
+          New-ItemProperty -Path HKCU:\Console -Name CodePage -Value 65001 -PropertyType DWord -Force | Out-Null
+          $application = (Get-Command dotnet).Source.Replace('\', '_')
+          $key = Join-Path HKCU:\Console $application
+          if (!(Test-Path -LiteralPath $key)) { New-Item -Path $key | Out-Null }
+          New-ItemProperty -LiteralPath $key -Name CodePage -Value 65001 -PropertyType DWord -Force | Out-Null
       - name: Run all four restored-runtime cases with bounded startup diagnostics
         run: |
-          if [[ "$PROBE_ENCODING" == utf8 ]]; then chcp.com 65001; fi
+          chcp.com 65001
           chcp.com
           mkdir -p test-results/restored-diagnostic
           hook_root="../scripts/ci-full-release/restore-diagnostic"
@@ -84,7 +94,7 @@ jobs:
             --Settings:test-results/restored-diagnostic/probe.runsettings \
             '--Logger:trx;LogFileName=results.trx' --ResultsDirectory:test-results/restored-diagnostic \
             '--TestCaseFilter:FullyQualifiedName=PayPlanner.Api.Tests.DatabaseRestoreDrillEndToEndPostgreSqlTests.FullModelBackupRestoresReadableManagedGenerationsWithoutSource' || exit_code=$?
-          if [[ -f "$PAYPLANNER_RESTORED_DIAGNOSTIC_FILE" ]]; then cat "$PAYPLANNER_RESTORED_DIAGNOSTIC_FILE"; fi
+          if [[ -f test-results/restored-diagnostic/startup.ndjson ]]; then cat test-results/restored-diagnostic/startup.ndjson; fi
           exit "$exit_code"
       - uses: actions/upload-artifact@v6
         if: ${{ !cancelled() }}
