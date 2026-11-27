@@ -17,7 +17,14 @@ function workflows() {
 }
 
 test('the release entry, hosted checks and hosted shard preserve the deployment contract', () => {
-  assert.equal(validateHostedRelease(workflows()).windowsWorkers, 4);
+  const result = validateHostedRelease(workflows());
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.deployNeeds, ['frontend', 'backend-format', 'backend']);
+  assert.deepEqual(result.artifacts, [
+    '${{ needs.backend.outputs.backend-artifact-id }}',
+    '${{ needs.frontend.outputs.frontend-artifact-id }}',
+  ]);
+  assert.equal(result.windowsWorkers, 4);
 });
 
 const weakenings = [

@@ -154,7 +154,8 @@ try {
     try {
       await checkpoint('login');
       await page.bringToFront();
-      await page.locator('input[type="email"]').fill(settings.email);
+      const loginEmail = page.getByLabel('Email', { exact: true });
+      await loginEmail.fill(settings.email);
       await page.locator('input[type="password"]').fill(settings.password);
       // The case render depends on the first authenticated reads. Use the
       // cold-start budget for those reads before timing the court controls.
@@ -164,7 +165,7 @@ try {
         return Promise.all([completeRead(casePath, 45000), completeRead(courtLogsPath, 45000)]);
       });
       await Promise.all([ready, page.getByRole('button', { name: 'Войти', exact: true }).click()]);
-      await page.locator('input[type="email"]').waitFor({ state: 'hidden' });
+      await loginEmail.waitFor({ state: 'hidden' });
       const courtTab = page.getByRole('button', { name: 'Суд', exact: true });
       await courtTab.waitFor();
       await caseReads.drain('document-tab');

@@ -187,5 +187,8 @@ export function validateHostedRelease({ entry, checks, shard, legacy }) {
   assert.equal(hosted.package.outputs['package-manifest-sha'], expression('steps.package.outputs.sha256'));
   assert.ok(step(hosted.package, 'Verify the original release archives and assemble the package').run.includes(
     'node scripts/prepare-deployment-package.mjs out "$GITHUB_SHA"'));
-  return { status: 'hosted-release-workflow-verified', windowsWorkers: shardJobs.length };
+  const artifacts = ['Download backend artifact', 'Download frontend artifact']
+    .map(name => step(delivery, name).env.EXPECTED_ARTIFACT_ID);
+  return { valid: true, gates: ['frontend', 'backend-format', 'backend'],
+    deployNeeds: delivery.needs, artifacts, windowsWorkers: shardJobs.length };
 }

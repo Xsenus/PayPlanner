@@ -296,6 +296,12 @@ jobs:
       - name: Build test shard tool with analyzers
         run: dotnet build tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj --no-restore -c Release -m:1 -nr:false -p:UseSharedCompilation=false
 
+      - name: Check all release workflow contracts before dispatching the shards
+        run: |
+          printf '%s\n' '<RunSettings><RunConfiguration><TreatNoTestsAsError>true</TreatNoTestsAsError></RunConfiguration></RunSettings>' >workflow-contract.runsettings
+          dotnet vstest backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll \
+            --Settings:workflow-contract.runsettings '--TestCaseFilter:FullyQualifiedName~LegalFeatureFlagCiGateTests'
+
       - name: Restore backend timing estimates
         uses: actions/cache/restore@v5
         with:

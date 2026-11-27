@@ -352,7 +352,8 @@ try {
       return route.continue();
     });
     await page.bringToFront();
-    await page.locator('input[type="email"]').fill(settings.email);
+    const loginEmail = page.getByLabel('Email', { exact: true });
+    await loginEmail.fill(settings.email);
     await page.locator('input[type="password"]').fill(settings.password);
     const initialCaseRead = page.waitForResponse(response => response.request().method() === 'POST'
       && response.url() === settings.api + '/api/auth/login').then(response => {
@@ -367,7 +368,7 @@ try {
       page.getByRole('button', { name: 'Войти', exact: true }).click()]);
     // The case readiness timeout starts only once the real case request is in flight.
     await Promise.all([
-      waitAtPhase(page.locator('input[type="email"]'), 'login-finished', { state: 'hidden' }),
+      waitAtPhase(loginEmail, 'login-finished', { state: 'hidden' }),
       waitAtPhase(page.getByRole('button', { name: 'Редактировать дело', exact: true }), 'case-ready'),
     ]);
     check((await caseRequest.response())?.status() === 200, 'The owned case details read failed.');

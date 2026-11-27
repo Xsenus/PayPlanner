@@ -123,10 +123,11 @@ try {
     const caseReads = (${createCaseReadLifecycle})(page,
       request => (${isCaseBoundaryRead})(request, settings.api, settings.caseId), 20000);
     try {
-      await page.locator('input[type="email"]').fill(settings.email);
+      const loginEmail = page.getByLabel('Email', { exact: true });
+      await loginEmail.fill(settings.email);
       await page.locator('input[type="password"]').fill(settings.password);
       await page.getByRole('button', { name: 'Войти', exact: true }).click();
-      await page.locator('input[type="email"]').waitFor({ state: 'hidden' });
+      await loginEmail.waitFor({ state: 'hidden' });
       let card = page;
       if (modal) {
         const casesTab = page.locator('main').getByRole('button', { name: 'Дела', exact: true });
