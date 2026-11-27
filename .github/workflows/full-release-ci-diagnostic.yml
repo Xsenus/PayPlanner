@@ -38,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        encoding: [new-consoles]
+        encoding: [managed-utf8]
     env:
       PROBE_ENCODING: ${{ matrix.encoding }}
     steps:

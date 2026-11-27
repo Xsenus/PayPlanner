@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -9,6 +10,7 @@ public static class StartupHook
 
     public static void Initialize()
     {
+        Console.OutputEncoding = new UTF8Encoding(false);
         var path = Environment.GetEnvironmentVariable("PAYPLANNER_RESTORED_DIAGNOSTIC_FILE");
         if (string.IsNullOrWhiteSpace(path)) return;
 
