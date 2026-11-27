@@ -16,7 +16,7 @@ env:
   UseSharedCompilation: 'false'
   DOTNET_gcServer: '0'
   DOTNET_GCConserveMemory: '9'
-  DOTNET_GCHeapHardLimit: '240000000'
+  DOTNET_GCHeapHardLimit: '280000000'
 
 jobs:
   compare:
@@ -46,6 +46,8 @@ jobs:
         env:
           CompilerResponseFile: ${{ github.workspace }}/subject/scripts/compiler-serial.rsp
         run: |
+          $os = Get-CimInstance Win32_OperatingSystem
+          "RAM before build: $([math]::Round($os.FreePhysicalMemory / 1MB, 2)) GiB free of $([math]::Round($os.TotalVisibleMemorySize / 1MB, 2)) GiB"
           if ((git rev-parse HEAD) -cne $env:SUBJECT_BASE -or (dotnet --version) -cne $env:SDK) { throw 'Unexpected baseline inputs.' }
           dotnet restore backend/PayPlanner.Api.sln --force --disable-parallel -p:PayPlannerReleaseAudit=true
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
