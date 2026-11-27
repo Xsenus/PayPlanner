@@ -1,0 +1,599 @@
+name: Hosted release checks
+
+on:
+  workflow_call:
+    outputs:
+      frontend-artifact-id:
+        value: ${{ jobs.frontend.outputs.frontend-artifact-id }}
+      frontend-sha:
+        value: ${{ jobs.frontend.outputs.frontend-sha }}
+      backend-key:
+        value: ${{ jobs.backend-build.outputs.backend-key }}
+      backend-sha:
+        value: ${{ jobs.backend-build.outputs.backend-sha }}
+      manifest-sha:
+        value: ${{ jobs.backend-build.outputs.manifest-sha }}
+      sdk-version:
+        value: ${{ jobs.backend-build.outputs.sdk-version }}
+      package-manifest-sha:
+        value: ${{ jobs.package.outputs.package-manifest-sha }}
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  DOTNET_PROCESSOR_COUNT: "1"
+  NODE_OPTIONS: "--max-old-space-size=1536"
+  UseSharedCompilation: "false"
+  DOTNET_gcServer: "0"
+  DOTNET_GCConserveMemory: "9"
+  BackgroundServices__Enabled: "false"
+  Email__Enabled: "false"
+  BE_CSPROJ: backend/PayPlanner.Api.csproj
+  BE_SLN: backend/PayPlanner.Api.sln
+  OUT_DIR: out
+  FE_API_URL: https://api.elitpravo.com/api
+
+jobs:
+  frontend:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    outputs:
+      frontend-artifact-id: ${{ steps.frontend-upload.outputs.artifact-id }}
+      frontend-sha: ${{ steps.frontend.outputs.sha256 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 32
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Use the canonical Windows temporary directory
+        shell: pwsh
+        run: |
+          $canonical = node -p "require('node:fs').realpathSync.native(require('node:os').tmpdir())"
+          if ($LASTEXITCODE -ne 0 -or !$canonical) { throw 'Cannot resolve the Windows temporary directory' }
+          "TEMP=$canonical", "TMP=$canonical" | Add-Content -LiteralPath $env:GITHUB_ENV
+
+      - name: Test local artifact store contract
+        run: node --test scripts/xsenus-artifact-store.node-tests.mjs
+
+      - name: Test bounded execution diagnostics
+        run: node --test scripts/report-backend-execution.node-tests.mjs
+
+      - name: Test reviewed deployment plan
+        run: node --test scripts/prepare-deployment-plan.node-tests.mjs
+
+      - name: Test read-only deployment access preflight
+        run: node --test scripts/windows-vps-access.node-tests.mjs
+
+      - name: Test qualified shard gate
+        run: node --test scripts/verify-qualified-shard-outputs.node-tests.mjs
+
+      - name: Install FE deps
+        run: npm ci
+
+      - name: Verify release gate dependencies
+        run: node scripts/validate-deploy-workflow.mjs
+
+      - name: Test the hosted release and artifact contracts
+        run: node --test scripts/hosted-release/hosted-release.node-tests.mjs
+
+      - name: Test deploy backup retention
+        run: bash scripts/prune-deploy-backups.test.sh
+
+      - name: Test Data Protection key preservation
+        run: bash scripts/preserve-data-protection-keys.test.sh
+
+      - name: Test storage backfill CLI
+        run: node --test scripts/storage-legacy-backfill.node-tests.mjs
+
+      - name: Test browser notification refresh observer
+        run: node --test scripts/task-notification-refresh-observer.node-tests.mjs
+
+      - name: Lint FE
+        run: npm run lint
+
+      - name: Typecheck FE
+        run: npm run typecheck
+
+      - name: Verify date/time audit
+        run: npm run audit:dates:test
+
+      - name: Verify source encoding
+        run: npm run audit:encoding
+
+      - name: Verify system surface inventory
+        run: npm run audit:surface:test && npm run audit:surface
+
+      - name: Audit FE packages
+        run: npm audit --audit-level=moderate
+
+      - name: Test qualified check reuse contract
+        run: node --test scripts/qualified-check-reuse.node-tests.mjs
+
+      - name: Test FE guard and unit
+        run: npm run test:ci
+
+      - name: Test legal feature flags readiness
+        env:
+          PAYPLANNER_READINESS_API_URL: ${{ env.FE_API_URL }}
+        run: npm run test:legal-flags:strict -- --warn-on-feature-flags-summary-failure
+
+      - name: Build FE
+        env:
+          VITE_API_URL: ${{ env.FE_API_URL }}
+        run: npm run build
+
+      - name: Prepare FE artifacts
+        run: |
+          mkdir -p "${{ env.OUT_DIR }}/fe"
+          cp -r dist/* "${{ env.OUT_DIR }}/fe/"
+          printf '%s\n' "${{ github.sha }}" > "${{ env.OUT_DIR }}/fe/deploy-revision.txt"
+
+      - name: Pack frontend artifact
+        run: tar -czf frontend.tar.gz -C "${{ env.OUT_DIR }}" fe
+
+      - name: Record exact frontend archive SHA-256
+        id: frontend
+        run: node scripts/hosted-release/transfer.mjs seal frontend.tar.gz
+
+      - name: Upload frontend build artifact
+        id: frontend-upload
+        uses: actions/upload-artifact@v6
+        with:
+          name: frontend-${{ github.run_attempt }}
+          path: frontend.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+
+  frontend-integration:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 32
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install FE deps
+        run: npm ci
+
+      - name: Install Chromium for frontend integration
+        run: npx playwright install chromium
+
+      - name: Test FE integration
+        run: npm run test:integration
+
+  backend-format:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    env:
+      DOTNET_GCHeapHardLimit: "180000000"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 32
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Cache downloaded NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-v1-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets', '**/NuGet.Config', '**/nuget.config', 'global.json') }}
+          restore-keys: ${{ runner.os }}-nuget-v1-
+
+      - name: Restore backend
+        run: dotnet restore "${{ env.BE_SLN }}" --force --disable-parallel -p:PayPlannerReleaseAudit=true
+
+      - name: Verify full API semantic formatting
+        run: dotnet format backend/PayPlanner.Api.csproj --verify-no-changes --no-restore --verbosity minimal
+
+      - name: Verify all Migrations whitespace formatting
+        env:
+          DOTNET_GCHeapHardLimit: "240000000"
+          CompilerResponseFile: ${{ github.workspace }}/scripts/compiler-serial.rsp
+        run: dotnet format whitespace backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --verify-no-changes --no-restore --verbosity diagnostic
+
+      - name: Verify all Migrations style formatting
+        env:
+          DOTNET_GCHeapHardLimit: "240000000"
+          CompilerResponseFile: ${{ github.workspace }}/scripts/compiler-serial.rsp
+        run: dotnet format style backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --verify-no-changes --no-restore --verbosity diagnostic
+
+      - name: Verify all Migrations analyzer formatting
+        env:
+          DOTNET_GCHeapHardLimit: "280000000"
+          CompilerResponseFile: ${{ github.workspace }}/scripts/compiler-serial.rsp
+        run: dotnet format analyzers backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --verify-no-changes --no-restore --verbosity diagnostic
+
+      - name: Verify full test shard tool semantic formatting
+        run: dotnet format tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj --verify-no-changes --no-restore --verbosity diagnostic
+
+      - name: Verify full storage probe semantic formatting
+        run: dotnet format tests/PayPlanner.StorageStageWriterProbe/PayPlanner.StorageStageWriterProbe.csproj --verify-no-changes --no-restore --verbosity diagnostic
+
+      - name: Verify full Tests semantic formatting
+        run: dotnet format backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --verify-no-changes --no-restore --verbosity diagnostic
+
+  backend-build:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    env:
+      DOTNET_GCHeapHardLimit: "240000000"
+      CompilerResponseFile: ${{ github.workspace }}/scripts/compiler-serial.rsp
+    outputs:
+      manifest-sha: ${{ steps.plan.outputs.manifest-sha }}
+      sdk-version: ${{ steps.plan.outputs.sdk-version }}
+      runtime-key: ${{ steps.runtime.outputs.key }}
+      runtime-sha: ${{ steps.runtime.outputs.sha256 }}
+      backend-key: ${{ steps.backend.outputs.key }}
+      backend-sha: ${{ steps.backend.outputs.sha256 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 32
+
+      - name: Setup Node for reference cache audit
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Cache downloaded NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-v1-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets', '**/NuGet.Config', '**/nuget.config', 'global.json') }}
+          restore-keys: ${{ runner.os }}-nuget-v1-
+
+      - name: Restore backend
+        run: dotnet restore "${{ env.BE_SLN }}" --force --disable-parallel -p:PayPlannerReleaseAudit=true
+
+      - name: Verify reference assembly cache contracts
+        run: npm run audit:reference-cache
+
+      - name: Build backend with analyzers
+        run: dotnet build backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore -c Release -m:1 -nr:false -p:UseSharedCompilation=false
+
+      - name: Build test shard tool with analyzers
+        run: dotnet build tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj --no-restore -c Release -m:1 -nr:false -p:UseSharedCompilation=false
+
+      - name: Restore backend timing estimates
+        uses: actions/cache/restore@v5
+        with:
+          path: payplanner-test-timings.json
+          key: backend-timings-hosted-v1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: backend-timings-hosted-v1-${{ runner.os }}-
+
+      - name: Discover complete backend test plan
+        id: plan
+        env:
+          BackgroundServices__Enabled: "false"
+          Email__Enabled: "false"
+          PAYPLANNER_TEST_TIMINGS: payplanner-test-timings.json
+        run: |
+          set -euo pipefail
+          dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll discover --assembly backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll --manifest test-plan.json --revision "${{ github.sha }}" --shards 4 --execution-profile bounded
+          printf 'manifest-sha=%s\n' "$(node -p "require('./test-plan.summary.json').ManifestSha256")" >> "$GITHUB_OUTPUT"
+          printf 'sdk-version=%s\n' "$(dotnet --version)" >> "$GITHUB_OUTPUT"
+
+      - name: Pack compiled test runtime
+        run: tar -czf test-runtime.tar.gz test-plan.json test-plan.summary.json backend/PayPlanner.Api.Tests/bin/Release/net9.0 tools/PayPlanner.TestShards/bin/Release/net9.0
+
+      - name: Record exact runtime cache key and SHA-256
+        id: runtime
+        run: node scripts/hosted-release/transfer.mjs seal test-runtime.tar.gz runtime
+
+      - name: Retain compiled test runtime for the current run
+        uses: actions/cache/save@v5
+        with:
+          path: test-runtime.tar.gz
+          key: ${{ steps.runtime.outputs.key }}
+
+      - name: Publish backend
+        run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release --no-build --no-restore -o "${{ env.OUT_DIR }}/be"
+
+      - name: Verify portable backend package
+        run: node --input-type=module -e "import { verifyPortablePackage } from './scripts/verify-xsenus-runner.mjs'; verifyPortablePackage();"
+
+      - name: Pack backend artifact
+        run: tar -czf backend.tar.gz -C "${{ env.OUT_DIR }}" be
+
+      - name: Record exact backend cache key and SHA-256
+        id: backend
+        run: node scripts/hosted-release/transfer.mjs seal backend.tar.gz backend
+
+      # Use the same gzip cache format on hosted Windows and XSENUS.
+      - name: Retain backend release archive for the current run
+        uses: actions/cache/save@v5
+        env:
+          PATH: 'C:\Program Files\Git\usr\bin;C:\Windows\System32;C:\Windows'
+        with:
+          path: backend.tar.gz
+          key: ${{ steps.backend.outputs.key }}
+
+  backend-test-0:
+    needs: [frontend, frontend-integration, backend-format, backend-build]
+    uses: ./.github/workflows/release-shard.yml
+    with:
+      shard: 0
+      runtime-key: ${{ needs.backend-build.outputs.runtime-key }}
+      runtime-sha: ${{ needs.backend-build.outputs.runtime-sha }}
+      manifest-sha: ${{ needs.backend-build.outputs.manifest-sha }}
+      sdk-version: ${{ needs.backend-build.outputs.sdk-version }}
+
+  backend-test-1:
+    needs: [frontend, frontend-integration, backend-format, backend-build]
+    uses: ./.github/workflows/release-shard.yml
+    with:
+      shard: 1
+      runtime-key: ${{ needs.backend-build.outputs.runtime-key }}
+      runtime-sha: ${{ needs.backend-build.outputs.runtime-sha }}
+      manifest-sha: ${{ needs.backend-build.outputs.manifest-sha }}
+      sdk-version: ${{ needs.backend-build.outputs.sdk-version }}
+
+  backend-test-2:
+    needs: [frontend, frontend-integration, backend-format, backend-build]
+    uses: ./.github/workflows/release-shard.yml
+    with:
+      shard: 2
+      runtime-key: ${{ needs.backend-build.outputs.runtime-key }}
+      runtime-sha: ${{ needs.backend-build.outputs.runtime-sha }}
+      manifest-sha: ${{ needs.backend-build.outputs.manifest-sha }}
+      sdk-version: ${{ needs.backend-build.outputs.sdk-version }}
+
+  backend-test-3:
+    needs: [frontend, frontend-integration, backend-format, backend-build]
+    uses: ./.github/workflows/release-shard.yml
+    with:
+      shard: 3
+      runtime-key: ${{ needs.backend-build.outputs.runtime-key }}
+      runtime-sha: ${{ needs.backend-build.outputs.runtime-sha }}
+      manifest-sha: ${{ needs.backend-build.outputs.manifest-sha }}
+      sdk-version: ${{ needs.backend-build.outputs.sdk-version }}
+
+  backend-union:
+    needs: [backend-build, backend-test-0, backend-test-1, backend-test-2, backend-test-3]
+    runs-on: windows-2025
+    timeout-minutes: 15
+    env:
+      RUNTIME_KEY: ${{ needs.backend-build.outputs.runtime-key }}
+      EXPECTED_SHA256: ${{ needs.backend-build.outputs.runtime-sha }}
+      EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+      EXPECTED_SDK_VERSION: ${{ needs.backend-build.outputs.sdk-version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 32
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ needs.backend-build.outputs.sdk-version }}
+      - name: Verify exact runtime cache key
+        run: node scripts/hosted-release/transfer.mjs verify-key runtime "$RUNTIME_KEY"
+      - name: Restore exact compiled test runtime
+        id: runtime
+        uses: actions/cache/restore@v5
+        with:
+          path: test-runtime.tar.gz
+          key: ${{ needs.backend-build.outputs.runtime-key }}
+          fail-on-cache-miss: true
+      - name: Verify and unpack compiled test runtime
+        env:
+          CACHE_HIT: ${{ steps.runtime.outputs.cache-hit }}
+        run: |
+          test "$CACHE_HIT" = true
+          bash scripts/hosted-release/run.sh unpack-runtime
+      - name: Download the four exact shard results
+        uses: actions/download-artifact@v7
+        with:
+          artifact-ids: ${{ format('{0},{1},{2},{3}', needs.backend-test-0.outputs.artifact-id, needs.backend-test-1.outputs.artifact-id, needs.backend-test-2.outputs.artifact-id, needs.backend-test-3.outputs.artifact-id) }}
+          path: test-results
+      - name: Verify complete backend case union
+        run: |
+          for shard in 0 1 2 3; do
+            matches=(test-results/backend-shard-"$shard"-*)
+            test "${#matches[@]}" -eq 1
+            test -d "${matches[0]}"
+            mv "${matches[0]}" "test-results/shard-$shard"
+          done
+          dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll verify --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --results-root test-results
+      - name: Produce timing estimates from the qualified full run
+        run: dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll timings --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --results-root test-results --output payplanner-test-timings.json
+      - name: Cache qualified backend timing estimates
+        uses: actions/cache/save@v5
+        with:
+          path: payplanner-test-timings.json
+          key: backend-timings-hosted-v1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+  backend-browser:
+    needs: [backend-build, backend-test-0, backend-test-1, backend-test-2, backend-test-3]
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      RUNTIME_KEY: ${{ needs.backend-build.outputs.runtime-key }}
+      EXPECTED_SHA256: ${{ needs.backend-build.outputs.runtime-sha }}
+      EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+      EXPECTED_SDK_VERSION: ${{ needs.backend-build.outputs.sdk-version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 32
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ needs.backend-build.outputs.sdk-version }}
+      - name: Verify disposable PostgreSQL 17
+        shell: pwsh
+        run: ./scripts/hosted-release/start-postgres.ps1 ./scripts/verify-xsenus-runner.mjs
+      - name: Set UTF-8 for new Windows consoles
+        shell: pwsh
+        run: ./scripts/hosted-release/set-hosted-console.ps1
+      - name: Install FE deps
+        run: npm ci
+      - name: Install and verify Chromium and Chrome
+        run: node scripts/hosted-release/prepare-browsers.mjs
+      - name: Install pinned Playwright CLI for writable CRM verification
+        run: |
+          npm install --global @playwright/cli@0.1.22
+          printf 'PAYPLANNER_TEST_PLAYWRIGHT_CLI=%s/@playwright/cli/playwright-cli.js\n' "$(npm root --global)" >> "$GITHUB_ENV"
+          printf 'PAYPLANNER_TEST_BROWSER=chrome\n' >> "$GITHUB_ENV"
+      - name: Verify exact runtime cache key
+        run: node scripts/hosted-release/transfer.mjs verify-key runtime "$RUNTIME_KEY"
+      - name: Restore exact compiled test runtime
+        id: runtime
+        uses: actions/cache/restore@v5
+        with:
+          path: test-runtime.tar.gz
+          key: ${{ needs.backend-build.outputs.runtime-key }}
+          fail-on-cache-miss: true
+      - name: Verify and unpack compiled test runtime
+        env:
+          CACHE_HIT: ${{ steps.runtime.outputs.cache-hit }}
+        run: |
+          test "$CACHE_HIT" = true
+          bash scripts/hosted-release/run.sh unpack-runtime
+      - name: Verify restored CRM through HTTP and browser
+        run: bash scripts/hosted-release/run.sh restored
+      - name: Preserve restored browser results
+        uses: actions/upload-artifact@v6
+        if: ${{ !cancelled() }}
+        with:
+          name: restored-browser-${{ github.run_attempt }}
+          path: test-results/restored-browser/
+          if-no-files-found: error
+          retention-days: 14
+
+  linux-filesystem:
+    needs: [backend-test-0, backend-test-1, backend-test-2, backend-test-3]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 32
+      - name: Run the exact Linux installer tests on isolated fixtures
+        run: bash scripts/hosted-release/run.sh linux
+
+  package:
+    needs: [frontend, backend-build, backend-browser, backend-union, linux-filesystem]
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      BACKEND_KEY: ${{ needs.backend-build.outputs.backend-key }}
+      BACKEND_SHA: ${{ needs.backend-build.outputs.backend-sha }}
+      FRONTEND_SHA: ${{ needs.frontend.outputs.frontend-sha }}
+    outputs:
+      package-manifest-sha: ${{ steps.package.outputs.sha256 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 32
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+      - name: Test Windows SSH deployment bridge
+        run: node --test scripts/windows-vps-deploy.node-tests.mjs
+      - name: Download the qualified frontend archive
+        uses: actions/download-artifact@v7
+        with:
+          artifact-ids: ${{ needs.frontend.outputs.frontend-artifact-id }}
+          path: .
+      - name: Verify exact backend cache key
+        env:
+          EXPECTED_SHA256: ${{ needs.backend-build.outputs.backend-sha }}
+        run: node scripts/hosted-release/transfer.mjs verify-key backend "$BACKEND_KEY"
+      - name: Restore exact backend release archive
+        id: backend
+        uses: actions/cache/restore@v5
+        env:
+          PATH: 'C:\Program Files\Git\usr\bin;C:\Windows\System32;C:\Windows'
+        with:
+          path: backend.tar.gz
+          key: ${{ needs.backend-build.outputs.backend-key }}
+          fail-on-cache-miss: true
+      - name: Verify the original release archives and assemble the package
+        id: package
+        env:
+          CACHE_HIT: ${{ steps.backend.outputs.cache-hit }}
+        run: |
+          test "$CACHE_HIT" = true
+          node scripts/hosted-release/transfer.mjs verify frontend.tar.gz "$FRONTEND_SHA"
+          node scripts/hosted-release/transfer.mjs verify backend.tar.gz "$BACKEND_SHA"
+          mkdir out
+          tar -xzf backend.tar.gz -C out
+          tar -xzf frontend.tar.gz -C out
+          node scripts/prepare-deployment-package.mjs out "$GITHUB_SHA"
+          tar --null --no-recursion -czf "payplanner_$GITHUB_SHA.tar.gz" -C out -T - <out/deployment-files.nul
+          sha256sum "payplanner_$GITHUB_SHA.tar.gz" >release-package.sha256
+          node scripts/hosted-release/transfer.mjs seal out/deployment-manifest.json
+      - name: Preserve the release package receipt
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-package-receipt-${{ github.run_attempt }}
+          path: |
+            release-package.sha256
+            out/deployment-manifest.json
+          if-no-files-found: error
+          retention-days: 14

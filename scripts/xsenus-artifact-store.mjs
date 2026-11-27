@@ -16,7 +16,7 @@ const maxEntries = 100_000;
 const maxReceiptBytes = 64 * 1024 ** 2;
 const packages = { frontend: 'frontend.tar.gz', backend: 'backend.tar.gz', 'test-runtime': 'test-runtime.tar.gz' };
 const kinds = [...Object.keys(packages), 'shard-diagnostics', 'qualified-shard', 'restored-diagnostics'];
-const jobs = ['frontend', 'backend-build', 'backend-format', 'backend-browser', 'backend', 'deploy', 'backend-test', ...[0, 1, 2, 3].map(n => `backend-test-${n}`)];
+const jobs = ['deploy-access', 'frontend', 'backend-build', 'backend-format', 'backend-browser', 'backend', 'deploy', 'backend-test', ...[0, 1, 2, 3].map(n => `backend-test-${n}`)];
 const receiptKeys = ['schema', 'repository', 'workflowRef', 'workflowSha', 'runId', 'producerAttempt', 'headSha', 'ref', 'event',
   'producerJob', 'runnerName', 'host', 'kind', 'shard', 'manifestSha', 'sdkVersion', 'runtimeArtifactId', 'diagnosticArtifactId',
   'retentionDays', 'publishedUtc', 'directories', 'files', 'totalBytes'];

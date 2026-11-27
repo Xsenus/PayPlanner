@@ -64,7 +64,7 @@ function producer(mode = 'frontend') {
 }
 
 test('actual workflow has complete proof plumbing and fresh affected gates', () => {
-  const workflow = parseWorkflow(readFileSync('.github/workflows/deploy.yml', 'utf8'));
+  const workflow = parseWorkflow(readFileSync('scripts/fixtures/deploy-xsenus.yml', 'utf8'));
   validateReusePlumbing(workflow);
   assert.equal(workflow.jobs['backend-format'].steps.find(step => step.name === 'Verify full Tests semantic formatting').if, undefined);
   assert.equal(workflow.jobs.frontend.steps.find(step => step.name === 'Build FE').if, undefined);

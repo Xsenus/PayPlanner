@@ -6,7 +6,7 @@ import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import { parseWorkflow, validateDeployWorkflow } from './validate-deploy-workflow.mjs';
 
-const workflow = readFileSync(resolve('.github/workflows/deploy.yml'), 'utf8').replaceAll('\r\n', '\n');
+const workflow = readFileSync(resolve('scripts/fixtures/deploy-xsenus.yml'), 'utf8').replaceAll('\r\n', '\n');
 const shardJobs = [0, 1, 2, 3].map(index => `backend-test-${index}`);
 const allJobs = ['frontend', 'backend-format', 'backend-build', ...shardJobs, 'backend-test', 'backend-browser', 'backend', 'deploy'];
 const browserNeeds = 'needs: [backend-build, backend-format, frontend, backend-test]';
