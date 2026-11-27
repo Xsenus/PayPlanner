@@ -1,0 +1,92 @@
+name: Parallel release performance profiles
+
+on:
+  push:
+    branches: [ci/release-performance-profile]
+
+permissions:
+  contents: read
+
+env:
+  SUBJECT_REVISION: ad121fcdf0e5eeb09e4cd5a5b2f8e6d2ae6923ca
+  SDK_VERSION: 9.0.321
+  BackgroundServices__Enabled: 'false'
+  Email__Enabled: 'false'
+
+jobs:
+  postgres:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Verify isolated PostgreSQL
+        run: ./scripts/ci-cases-pilot/start-postgres.ps1 ./scripts/verify-xsenus-runner.mjs
+      - name: Compare template clone and deletion time
+        run: ./scripts/ci-postgres-profile.ps1
+      - uses: actions/upload-artifact@v6
+        with:
+          name: postgres-template-profile
+          path: postgres-profile.json
+          if-no-files-found: error
+          retention-days: 14
+
+  migrations:
+    name: Migrations formatting (${{ matrix.check }})
+    runs-on: windows-2025
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - check: whitespace
+            heap: '240000000'
+          - check: style
+            heap: '240000000'
+          - check: analyzers
+            heap: '280000000'
+    env:
+      CHECK: ${{ matrix.check }}
+      DOTNET_GCHeapHardLimit: ${{ matrix.heap }}
+      DOTNET_PROCESSOR_COUNT: '1'
+      UseSharedCompilation: 'false'
+      DOTNET_gcServer: '0'
+      DOTNET_GCConserveMemory: '9'
+      CompilerResponseFile: ${{ github.workspace }}/scripts/compiler-serial.rsp
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.SUBJECT_REVISION }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.SDK_VERSION }}
+      - name: Restore and audit the same projects
+        run: |
+          if ((git rev-parse HEAD) -cne $env:SUBJECT_REVISION -or (dotnet --version) -cne $env:SDK_VERSION) { throw 'Unexpected inputs.' }
+          dotnet restore backend/PayPlanner.Api.sln --force --disable-parallel -p:PayPlannerReleaseAudit=true
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run the original migration formatting check
+        run: |
+          $timer = [Diagnostics.Stopwatch]::StartNew()
+          dotnet format $env:CHECK backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --verify-no-changes --no-restore --verbosity diagnostic
+          $code = $LASTEXITCODE
+          $timer.Stop()
+          [pscustomobject]@{
+            revision = $env:SUBJECT_REVISION
+            mode = $env:CHECK
+            sdk = $env:SDK_VERSION
+            image = $env:ImageVersion
+            checkedSeconds = [math]::Round($timer.Elapsed.TotalSeconds, 2)
+            exitCode = $code
+          } | ConvertTo-Json | Tee-Object -FilePath "format-$env:CHECK.json"
+          exit $code
+      - uses: actions/upload-artifact@v6
+        if: ${{ !cancelled() }}
+        with:
+          name: migration-format-${{ matrix.check }}
+          path: format-${{ matrix.check }}.json
+          if-no-files-found: ignore
+          retention-days: 14
