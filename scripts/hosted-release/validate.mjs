@@ -179,6 +179,8 @@ export function validateHostedRelease({ entry, checks, shard, legacy }) {
     }
   }
   assert.deepEqual(Object.keys(checks.on.workflow_call.outputs).sort(), Object.keys(outputs).sort());
+  assert.equal(hosted['backend-build'].env.DOTNET_GCHeapHardLimit, '280000000');
+  assert.equal(hosted['backend-build'].env.CompilerResponseFile, expression('github.workspace') + '/scripts/compiler-serial.rsp');
   for (const [name, producer] of Object.entries(outputs)) {
     assert.equal(checks.on.workflow_call.outputs[name].value, expression(`jobs.${producer}.outputs.${name}`));
   }

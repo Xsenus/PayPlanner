@@ -251,7 +251,7 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 60
     env:
-      DOTNET_GCHeapHardLimit: "240000000"
+      DOTNET_GCHeapHardLimit: "280000000"
       CompilerResponseFile: ${{ github.workspace }}/scripts/compiler-serial.rsp
     outputs:
       manifest-sha: ${{ steps.plan.outputs.manifest-sha }}
