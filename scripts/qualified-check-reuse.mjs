@@ -199,13 +199,18 @@ export async function boundedText(response) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-export async function previousQualification({ env = process.env, git, getJson, getLog, tools, now = Date.now(), bootTime = now - uptime() * 1000 }) {
+function requireQualificationContext(env) {
   const mode = env.GITHUB_JOB === 'frontend' ? 'frontend' : env.GITHUB_JOB === 'backend-format' ? 'format' : null;
   assert.ok(mode && env.GITHUB_ACTIONS === 'true' && env.COMPUTERNAME?.toUpperCase() === 'XSENUS'
     && env.GITHUB_REPOSITORY === 'Xsenus/PayPlanner' && env.GITHUB_REF === 'refs/heads/main'
     && env.GITHUB_SHA === env.GITHUB_WORKFLOW_SHA && /^[a-f0-9]{40}$/.test(env.GITHUB_SHA)
     && /^[1-9][0-9]{0,14}$/.test(env.GITHUB_RUN_ID ?? '') && /^[1-9][0-9]{0,3}$/.test(env.GITHUB_RUN_ATTEMPT ?? '')
     && /^(push|workflow_dispatch)$/.test(env.GITHUB_EVENT_NAME), 'Authenticated main context required');
+  return mode;
+}
+
+export async function previousQualification({ env = process.env, git, getJson, getLog, tools, now = Date.now(), bootTime = now - uptime() * 1000 }) {
+  const mode = requireQualificationContext(env);
   assert.equal(git(['rev-parse', 'HEAD']).trim(), env.GITHUB_SHA);
   assert.equal(git(['status', '--porcelain=v1', '--untracked-files=normal']).trim(), '', 'Working inputs changed');
   assert.equal(git(['ls-files', '--others', '--ignored', '--exclude-standard', '--', '.env', '.env.*']).trim(), '', 'Unpinned local environment file');
@@ -275,6 +280,7 @@ async function main() {
   let result;
   try {
     assert.ok(token, 'Read-only Actions access required');
+    requireQualificationContext(process.env);
     const npm = execFileSync(process.execPath, [resolve(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js'), '--version'],
       { env: childEnv, encoding: 'utf8', windowsHide: true, timeout: 20_000 }).trim();
     const tools = { node: process.versions.node, npm, sdk: mode === 'format' ? execFileSync('dotnet', ['--version'], { env: childEnv, encoding: 'utf8', windowsHide: true, timeout: 20_000 }).trim() : undefined };
