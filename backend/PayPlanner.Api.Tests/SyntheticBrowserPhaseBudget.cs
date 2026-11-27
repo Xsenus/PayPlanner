@@ -3,10 +3,12 @@ namespace PayPlanner.Api.Tests;
 /// <summary>Cold preparation has its own bound; each browser family retains its original assertion deadline.</summary>
 internal sealed class SyntheticBrowserPhaseBudget
 {
+    private const string TaskBrowserReady = "TASK_UPLOAD_STAGE_BROWSER_READY";
     private readonly string? browserStartMarker;
     private readonly Action<TimeSpan> reschedule;
     private readonly TimeSpan browserBudget;
     private bool browserStarted;
+    private bool taskBrowserLaunching;
 
     internal SyntheticBrowserPhaseBudget(bool financial, Action<TimeSpan> reschedule, bool chat = false,
         bool retirement = false, bool taskUpload = false, bool generated = false, bool court = false)
@@ -18,7 +20,7 @@ internal sealed class SyntheticBrowserPhaseBudget
         browserStartMarker = financial ? "PP_FINANCIAL_BROWSER_PHASE cli-open"
             : chat ? "PP_CHAT_BROWSER_PHASE cli-open"
             : retirement ? "PP_CASE_RETIREMENT_BROWSER_PHASE cli-open"
-            : taskUpload ? "TASK_UPLOAD_STAGE_BROWSER_READY"
+            : taskUpload ? TaskBrowserReady
             : generated ? "PP_GENERATED_BROWSER_PHASE cli-open"
             : court ? "PP_COURT_BROWSER_PHASE cli-open" : null;
         this.reschedule = reschedule;
@@ -31,8 +33,16 @@ internal sealed class SyntheticBrowserPhaseBudget
 
     internal void ObserveLine(string line)
     {
-        // One transition only: repeated child output cannot extend the deadline.
-        if (browserStartMarker is null || browserStarted || line != browserStartMarker) return;
+        if (browserStartMarker is null || browserStarted) return;
+        if (browserStartMarker == TaskBrowserReady && !taskBrowserLaunching && line == "TASK_UPLOAD_STAGE_VITE_ENTRY_READY")
+        {
+            // A cold build can exhaust almost the whole preparation budget before Chromium is launched.
+            taskBrowserLaunching = true;
+            reschedule(TimeSpan.FromSeconds(90));
+            return;
+        }
+        // Repeated stage output cannot extend the launch or assertion deadline.
+        if (line != browserStartMarker) return;
         browserStarted = true;
         reschedule(browserBudget);
     }

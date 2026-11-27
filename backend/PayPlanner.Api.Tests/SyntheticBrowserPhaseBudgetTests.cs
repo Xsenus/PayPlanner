@@ -5,13 +5,16 @@ namespace PayPlanner.Api.Tests;
 public sealed class SyntheticBrowserPhaseBudgetTests
 {
     [Fact]
-    public void ColdTaskPreparationHasItsOwnBoundAndDoesNotStartTheAssertionWindow()
+    public void ColdTaskPreparationAndChromiumLaunchHaveSeparateBoundedDeadlines()
     {
         var deadlines = new List<TimeSpan>();
         var budget = new SyntheticBrowserPhaseBudget(false, deadlines.Add, taskUpload: true);
-        foreach (var line in new[] { "TASK_UPLOAD_STAGE_MODULES_READY", "TASK_UPLOAD_STAGE_VITE_ENTRY_READY",
+        foreach (var line in new[] { "TASK_UPLOAD_STAGE_MODULES_READY", "TASK_UPLOAD_STAGE_VITE_ENTRY_READY extra",
             "PP_CASE_RETIREMENT_BROWSER_PHASE cli-open", "PP_FINANCIAL_BROWSER_PHASE cli-open" }) budget.ObserveLine(line);
         Assert.Equal(new[] { TimeSpan.FromMinutes(5) }, deadlines);
+        for (var index = 0; index < 100; index++) budget.ObserveLine("TASK_UPLOAD_STAGE_VITE_ENTRY_READY");
+        budget.ObserveLine("TASK_UPLOAD_STAGE_BROWSER_STARTING_bundled");
+        Assert.Equal(new[] { TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(90) }, deadlines);
     }
 
     [Fact]
@@ -19,8 +22,9 @@ public sealed class SyntheticBrowserPhaseBudgetTests
     {
         var deadlines = new List<TimeSpan>();
         var budget = new SyntheticBrowserPhaseBudget(false, deadlines.Add, taskUpload: true);
+        budget.ObserveLine("TASK_UPLOAD_STAGE_VITE_ENTRY_READY");
         budget.ObserveLine("TASK_UPLOAD_STAGE_BROWSER_READY");
-        Assert.Equal(new[] { TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(90) }, deadlines);
+        Assert.Equal(new[] { TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(90), TimeSpan.FromSeconds(90) }, deadlines);
     }
 
     [Fact]
@@ -32,7 +36,7 @@ public sealed class SyntheticBrowserPhaseBudgetTests
             "TASK_UPLOAD_STAGE_BROWSER_VERSION_1", "TASK_UPLOAD_STAGE_AUTHENTICATED" }) budget.ObserveLine(line);
         Assert.Equal(new[] { TimeSpan.FromMinutes(5) }, deadlines);
         for (var index = 0; index < 100; index++) budget.ObserveLine("TASK_UPLOAD_STAGE_BROWSER_READY");
-        foreach (var line in new[] { "TASK_UPLOAD_STAGE_AUTHENTICATED", "TASK_UPLOAD_QUEUE_READY", "TASK_UPLOAD_STAGE_QUEUE_COMPLETED" }) budget.ObserveLine(line);
+        foreach (var line in new[] { "TASK_UPLOAD_STAGE_VITE_ENTRY_READY", "TASK_UPLOAD_STAGE_AUTHENTICATED", "TASK_UPLOAD_QUEUE_READY", "TASK_UPLOAD_STAGE_QUEUE_COMPLETED" }) budget.ObserveLine(line);
         Assert.Equal(new[] { TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(90) }, deadlines);
     }
 

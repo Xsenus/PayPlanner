@@ -805,9 +805,33 @@ public partial class ProviderSpecificSqlTests
         Assert.Equal(1, actRollbackMethod.Split("await numbering.LockAsync(cancellationToken);", StringSplitOptions.None).Length - 1);
         Approve("backend/Services/SpreadsheetImportService.Rollback.cs", actRollbackSource, "RollbackActAsync", actRollbackStart, actRollbackEnd,
             ["""await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"Acts\" WHERE \"Id\" = {operation.EntityId.Value} FOR UPDATE NOWAIT").ToArrayAsync(cancellationToken);"""]);
-        Assert.Equal(107, approved.Count(statement => statement.Contains("FOR UPDATE", StringComparison.Ordinal)));
+
+        const string portalPath = "backend/Services/ClientPortalService.cs";
+        var portalSource = ReadSource(portalPath);
+        var issueStart = portalSource.IndexOf("> IssueLoginAsync(", StringComparison.Ordinal);
+        var issueEnd = portalSource.IndexOf("public async Task RevokeAccountAsync(", issueStart, StringComparison.Ordinal);
+        Assert.True(issueStart >= 0 && issueEnd > issueStart);
+        const string issueLock = """$"SELECT 1 FROM \"ClientPortalAccounts\" WHERE \"Id\" = {accountId} FOR UPDATE").ToListAsync(ct);""";
+        AssertOrdered(portalSource[issueStart..issueEnd], "BeginTransactionAsync(ct)",
+            "if (_db.Database.IsNpgsql())", issueLock, "account = await _db.ClientPortalAccounts.AsNoTracking()",
+            "_db.ClientPortalLoginChallenges.Add(challenge)", "transaction.CommitAsync(ct)");
+        Approve(portalPath, portalSource, "IssueLoginAsync", issueStart, issueEnd, [issueLock]);
+
+        var verifyStart = portalSource.IndexOf("public async Task<ClientPortalSessionCreatedDto> VerifyLoginAsync(", StringComparison.Ordinal);
+        var verifyEnd = portalSource.IndexOf("public async Task<ClientPortalSessionContext?> ResolveSessionAsync(", verifyStart, StringComparison.Ordinal);
+        Assert.True(verifyStart >= 0 && verifyEnd > verifyStart);
+        const string verifyLock = "FOR UPDATE OF account";
+        AssertOrdered(portalSource[verifyStart..verifyEnd], "BeginTransactionAsync(ct)",
+            "if (_db.Database.IsNpgsql())", "FROM \"ClientPortalAccounts\" AS account",
+            "JOIN \"ClientPortalLoginChallenges\" AS challenge ON challenge.\"ClientPortalAccountId\" = account.\"Id\"",
+            "WHERE challenge.\"PublicId\" = {challengeId}", verifyLock,
+            "challenge = await LoadChallengeAsync(challengeId, token, ct)", "EnsureChallengeUsable(challenge)",
+            "challenge.ConsumedAt = now", "_db.ClientPortalSessions.Add(session)", "transaction.CommitAsync(ct)");
+        Approve(portalPath, portalSource, "VerifyLoginAsync", verifyStart, verifyEnd, [verifyLock]);
+
+        Assert.Equal(109, approved.Count(statement => statement.Contains("FOR UPDATE", StringComparison.Ordinal)));
         Assert.Equal(129, approved.Count(statement => statement.Contains("FOR SHARE", StringComparison.Ordinal)));
-        Assert.Equal(236, approved.Count);
+        Assert.Equal(238, approved.Count);
 
         // Exact identities include owner, method range, line and complete SQL call.
         // An extra statement in any other production file/method remains a failure.
