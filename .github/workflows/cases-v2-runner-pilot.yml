@@ -1,0 +1,167 @@
+name: CasesV2 Windows runner pilot
+
+on:
+  push:
+    branches: [ci/cases-v2-runner-pilot]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cases-v2-windows-runner-pilot
+  cancel-in-progress: false
+
+env:
+  PILOT_REVISION: ad121fcdf0e5eeb09e4cd5a5b2f8e6d2ae6923ca
+  PILOT_SDK: 9.0.321
+  BackgroundServices__Enabled: 'false'
+  Email__Enabled: 'false'
+  DOTNET_PROCESSOR_COUNT: '1'
+  UseSharedCompilation: 'false'
+  DOTNET_gcServer: '0'
+  DOTNET_GCConserveMemory: '9'
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 75
+    outputs:
+      runtime-sha: ${{ steps.pack.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Check out the original test subject
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.PILOT_REVISION }}
+          path: subject
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.PILOT_SDK }}
+      - name: Verify disposable PostgreSQL preflight
+        run: ./scripts/ci-cases-pilot/start-postgres.ps1 ./subject/scripts/verify-xsenus-runner.mjs
+      - name: Build the audited test runtime once
+        working-directory: subject
+        env:
+          DOTNET_GCHeapHardLimit: '240000000'
+          CompilerResponseFile: ${{ github.workspace }}/subject/scripts/compiler-serial.rsp
+        run: |
+          if ((git rev-parse HEAD) -cne $env:PILOT_REVISION) { throw 'Unexpected subject revision.' }
+          if ((dotnet --version) -cne $env:PILOT_SDK) { throw 'Unexpected SDK.' }
+          dotnet restore backend/PayPlanner.Api.sln --force --disable-parallel -p:PayPlannerReleaseAudit=true
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run audit:reference-cache
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet build backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore -c Release -m:1 -nr:false -p:UseSharedCompilation=false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet build tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj --no-restore -c Release -m:1 -nr:false -p:UseSharedCompilation=false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Discover and verify the exact case catalogue
+        run: |
+          foreach ($component in @('backend/PayPlanner.Api.Tests', 'tools/PayPlanner.TestShards')) {
+            New-Item -ItemType Directory -Path "runtime/$component/bin/Release" -Force | Out-Null
+            Copy-Item -LiteralPath "subject/$component/bin/Release/net9.0" -Destination "runtime/$component/bin/Release/net9.0" -Recurse
+          }
+          Copy-Item -LiteralPath subject/global.json -Destination runtime/global.json
+          Copy-Item -LiteralPath subject/scripts/verify-xsenus-runner.mjs -Destination runtime/verify-xsenus-runner.mjs
+          dotnet runtime/tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll discover --assembly runtime/backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll --manifest runtime/test-plan.json --revision "$env:PILOT_REVISION" --shards 4 --execution-profile bounded --timings scripts/ci-cases-pilot/reference-timings.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./scripts/ci-cases-pilot/plan.ps1 -Runtime runtime -Revision $env:PILOT_REVISION
+      - name: Pack runtime and record its SHA-256
+        id: pack
+        run: |
+          tar -czf runtime.tar.gz -C runtime .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "sha=$((Get-FileHash -LiteralPath runtime.tar.gz).Hash)" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+      - uses: actions/upload-artifact@v6
+        with:
+          name: cases-pilot-runtime
+          path: runtime.tar.gz
+          compression-level: 0
+          retention-days: 2
+          if-no-files-found: error
+
+  sequential:
+    needs: [build]
+    runs-on: windows-2025
+    timeout-minutes: 330
+    env:
+      PILOT_SHARDS: '0,1,2,3'
+      PILOT_MODE: sequential
+    steps: &run_cases
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.PILOT_SDK }}
+      - uses: actions/download-artifact@v7
+        with:
+          name: cases-pilot-runtime
+      - name: Verify and unpack the same runtime
+        env:
+          RUNTIME_SHA: ${{ needs.build.outputs.runtime-sha }}
+        run: |
+          if ((Get-FileHash -LiteralPath runtime.tar.gz).Hash -cne $env:RUNTIME_SHA) { throw 'Runtime hash mismatch.' }
+          New-Item -ItemType Directory -Path runtime | Out-Null
+          tar -xzf runtime.tar.gz -C runtime
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Set up the isolated PostgreSQL service
+        run: ./scripts/ci-cases-pilot/start-postgres.ps1 ./runtime/verify-xsenus-runner.mjs
+      - name: Measure qualified case execution
+        run: ./scripts/ci-cases-pilot/run.ps1 -Runtime runtime -Results results -Shards $env:PILOT_SHARDS
+      - name: Preserve native results and timing
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: cases-pilot-${{ env.PILOT_MODE }}
+          path: results/
+          retention-days: 14
+          if-no-files-found: error
+
+  parallel:
+    needs: [build, sequential]
+    runs-on: windows-2025
+    timeout-minutes: 250
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - lane: a
+            shards: '0,2'
+          - lane: b
+            shards: '1,3'
+    name: Parallel Windows runner ${{ matrix.lane }}
+    env:
+      PILOT_SHARDS: ${{ matrix.shards }}
+      PILOT_MODE: parallel-${{ matrix.lane }}
+    steps: *run_cases
+
+  compare:
+    needs: [build, sequential, parallel]
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.PILOT_SDK }}
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: cases-pilot-*
+          path: comparison
+      - name: Verify both exact test unions and report speed
+        env:
+          RUNTIME_SHA: ${{ needs.build.outputs.runtime-sha }}
+        run: ./scripts/ci-cases-pilot/compare.ps1 -Artifacts comparison -RuntimeSha $env:RUNTIME_SHA
+      - uses: actions/upload-artifact@v6
+        with:
+          name: cases-pilot-comparison
+          path: comparison/pilot-comparison.json
+          retention-days: 14
+          if-no-files-found: error
