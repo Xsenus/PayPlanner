@@ -37,7 +37,14 @@ Push-Location $source
 try {
     $baseHash = (Get-FileHash -LiteralPath $dll).Hash
     $before = Invoke-ExactCases 'baseline' $sample 153
+    $originalSourceHash = (Get-FileHash -LiteralPath $testFile).Hash
     Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $testFile) -Destination $testFile
+    $candidate = Get-Item -LiteralPath $testFile
+    if ((Get-FileHash -LiteralPath $candidate.FullName).Hash -ceq $originalSourceHash) {
+        throw 'The candidate source matches the baseline.'
+    }
+    # Copy-Item preserves the checkout timestamp. Mark the actual changed source for MSBuild.
+    $candidate.LastWriteTimeUtc = [DateTime]::UtcNow
     & dotnet build $project --no-restore -c Release -m:1 -nr:false -p:UseSharedCompilation=false
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $candidateHash = (Get-FileHash -LiteralPath $dll).Hash
