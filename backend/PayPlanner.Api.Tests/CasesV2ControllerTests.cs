@@ -15160,6 +15160,12 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
     private static async Task<PaymentContext> CreateContextAsync(IInterceptor? interceptor = null, bool useObjectAuditModel = true,
         params IInterceptor[] additionalInterceptors)
     {
+        if (interceptor is null && additionalInterceptors.Length == 0)
+        {
+            return await SqliteTestContextFactory.CreateAsync(useObjectAuditModel);
+        }
+
+        // Let scenario interceptors observe the same schema initialization as before.
         var connection = new SqliteConnection("DataSource=:memory:");
         await connection.OpenAsync();
         var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()

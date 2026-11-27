@@ -1,0 +1,64 @@
+name: CasesV2 SQLite fixture check
+
+on:
+  push:
+    branches: [ci/cases-v2-sqlite-optimization]
+
+permissions:
+  contents: read
+
+env:
+  SUBJECT_BASE: 2fc6ae80b8f5dded990205d9997882e7aaeebe1c
+  SDK: 9.0.321
+  BackgroundServices__Enabled: 'false'
+  Email__Enabled: 'false'
+  DOTNET_PROCESSOR_COUNT: '1'
+  UseSharedCompilation: 'false'
+  DOTNET_gcServer: '0'
+  DOTNET_GCConserveMemory: '9'
+  DOTNET_GCHeapHardLimit: '240000000'
+
+jobs:
+  compare:
+    runs-on: windows-2025
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.SUBJECT_BASE }}
+          path: subject
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: 463b4aa0fe1719b61c623f73830a69625298f836
+          path: pilot
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.SDK }}
+      - name: Verify isolated PostgreSQL
+        run: ./pilot/scripts/ci-cases-pilot/start-postgres.ps1 ./subject/scripts/verify-xsenus-runner.mjs
+      - name: Restore and build the baseline with analyzers
+        working-directory: subject
+        env:
+          CompilerResponseFile: ${{ github.workspace }}/subject/scripts/compiler-serial.rsp
+        run: |
+          if ((git rev-parse HEAD) -cne $env:SUBJECT_BASE -or (dotnet --version) -cne $env:SDK) { throw 'Unexpected baseline inputs.' }
+          dotnet restore backend/PayPlanner.Api.sln --force --disable-parallel -p:PayPlannerReleaseAudit=true
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet build backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore -c Release -m:1 -nr:false -p:UseSharedCompilation=false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Compare the same cases on the same runner
+        env:
+          CompilerResponseFile: ${{ github.workspace }}/subject/scripts/compiler-serial.rsp
+        run: ./scripts/ci-cases-sqlite-check.ps1
+      - uses: actions/upload-artifact@v6
+        if: ${{ !cancelled() }}
+        with:
+          name: cases-v2-sqlite-check
+          path: sqlite-results/
+          retention-days: 14
+          if-no-files-found: ignore
