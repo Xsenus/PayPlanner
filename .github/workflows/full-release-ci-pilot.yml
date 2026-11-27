@@ -1,0 +1,255 @@
+name: Full release CI on four hosted Windows runners
+
+on:
+  push:
+    branches: [ci/full-release-ci-pilot]
+
+permissions:
+  contents: read
+
+env:
+  SUBJECT_SHA: ad121fcdf0e5eeb09e4cd5a5b2f8e6d2ae6923ca
+  PILOT_SDK: 9.0.321
+  DOTNET_PROCESSOR_COUNT: '1'
+  NODE_OPTIONS: --max-old-space-size=1536
+  UseSharedCompilation: 'false'
+  DOTNET_gcServer: '0'
+  DOTNET_GCConserveMemory: '9'
+  BackgroundServices__Enabled: 'false'
+  Email__Enabled: 'false'
+  FE_API_URL: https://api.elitpravo.com/api
+
+defaults:
+  run:
+    shell: bash
+    working-directory: subject
+
+jobs:
+  frontend:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    outputs:
+      sha: ${{ steps.frontend.outputs.sha }}
+    steps:
+      - &automation
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/ci-full-release
+            scripts/ci-cases-pilot
+      - &source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.SUBJECT_SHA }}
+          path: subject
+          persist-credentials: false
+          fetch-depth: 32
+      - &node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: subject/package-lock.json
+      - name: Contracts, lint, unit tests, audits and frontend package
+        id: frontend
+        run: bash ../scripts/ci-full-release/run.sh frontend
+      - uses: actions/upload-artifact@v6
+        with:
+          name: full-ci-frontend
+          path: subject/frontend.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+
+  frontend-integration:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - *automation
+      - *source
+      - *node
+      - name: Complete frontend integration catalogue
+        run: bash ../scripts/ci-full-release/run.sh frontend-integration
+
+  backend-format:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    env:
+      FORMAT_COMPILER_RESPONSE: ${{ github.workspace }}/subject/scripts/compiler-serial.rsp
+    steps:
+      - *automation
+      - *source
+      - &sdk
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.PILOT_SDK }}
+      - name: All seven backend formatting checks
+        run: bash ../scripts/ci-full-release/run.sh format
+
+  backend-build:
+    runs-on: windows-2025
+    timeout-minutes: 75
+    env:
+      DOTNET_GCHeapHardLimit: '280000000'
+      CompilerResponseFile: ${{ github.workspace }}/subject/scripts/compiler-serial.rsp
+    outputs:
+      runtime-sha: ${{ steps.build.outputs.runtime-sha }}
+      manifest-sha: ${{ steps.build.outputs.manifest-sha }}
+    steps:
+      - *automation
+      - *source
+      - *node
+      - *sdk
+      - name: Audited restore, analyzed compilation, exact discovery and publish
+        id: build
+        run: bash ../scripts/ci-full-release/run.sh build
+      - uses: actions/upload-artifact@v6
+        with:
+          name: full-ci-backend-runtime
+          path: |
+            subject/test-runtime.tar.gz
+            subject/test-plan.summary.json
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+  backend-shard:
+    name: Backend shard ${{ matrix.shard }}
+    needs: [frontend, frontend-integration, backend-format, backend-build]
+    runs-on: windows-2025
+    timeout-minutes: 300
+    strategy:
+      max-parallel: 4
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      RUNTIME_SHA: ${{ needs.backend-build.outputs.runtime-sha }}
+      EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+      SHARD: ${{ matrix.shard }}
+    steps:
+      - *automation
+      - *source
+      - *node
+      - *sdk
+      - &postgres
+        name: Verify disposable PostgreSQL 17 and denied production database access
+        shell: pwsh
+        run: ../scripts/ci-cases-pilot/start-postgres.ps1 ./scripts/verify-xsenus-runner.mjs
+      - name: Prepare the browser prerequisites and synthetic build
+        run: bash ../scripts/ci-full-release/run.sh setup-browsers synthetic
+      - &runtime
+        uses: actions/download-artifact@v7
+        with:
+          name: full-ci-backend-runtime
+          path: subject
+      - &unpack
+        name: Check runtime archive, manifest and SDK
+        run: bash ../scripts/ci-full-release/run.sh unpack-runtime
+      - name: Run every scheduled native test case
+        run: bash ../scripts/ci-full-release/run.sh shard "$SHARD"
+      - name: Report bounded execution diagnostics
+        if: always()
+        run: node scripts/report-backend-execution.mjs "$SHARD"
+      - uses: actions/upload-artifact@v6
+        if: ${{ !cancelled() }}
+        with:
+          name: shard-${{ matrix.shard }}
+          path: subject/test-results/shard-${{ matrix.shard }}/
+          if-no-files-found: error
+          retention-days: 14
+
+  backend-union:
+    needs: [backend-build, backend-shard]
+    runs-on: windows-2025
+    timeout-minutes: 15
+    env:
+      RUNTIME_SHA: ${{ needs.backend-build.outputs.runtime-sha }}
+      EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+    steps:
+      - *automation
+      - *source
+      - *sdk
+      - *runtime
+      - *unpack
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: shard-*
+          path: subject/test-results
+      - name: Verify the exact four-shard union and produce qualified timings
+        run: bash ../scripts/ci-full-release/run.sh union
+      - uses: actions/upload-artifact@v6
+        with:
+          name: full-ci-backend-qualification
+          path: |
+            subject/backend-qualification.json
+            subject/qualified-timings.json
+          if-no-files-found: error
+          retention-days: 14
+
+  backend-restored:
+    needs: [backend-build, backend-shard]
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      RUNTIME_SHA: ${{ needs.backend-build.outputs.runtime-sha }}
+      EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+    steps:
+      - *automation
+      - *source
+      - *node
+      - *sdk
+      - *postgres
+      - name: Prepare both required browsers
+        run: bash ../scripts/ci-full-release/run.sh setup-browsers
+      - *runtime
+      - *unpack
+      - name: Verify restored CRM through actual HTTP and browser
+        run: bash ../scripts/ci-full-release/run.sh restored
+      - uses: actions/upload-artifact@v6
+        if: ${{ !cancelled() }}
+        with:
+          name: full-ci-restored-results
+          path: subject/test-results/restored-browser/
+          if-no-files-found: error
+          retention-days: 14
+
+  linux-filesystem:
+    needs: [backend-shard]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - *automation
+      - *source
+      - name: Original Linux filesystem and installer checks on isolated fixtures
+        run: bash ../scripts/ci-full-release/run.sh linux
+
+  release-package:
+    needs: [frontend, backend-build, backend-union, backend-restored, linux-filesystem]
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      RUNTIME_SHA: ${{ needs.backend-build.outputs.runtime-sha }}
+      EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+      FRONTEND_SHA: ${{ needs.frontend.outputs.sha }}
+    steps:
+      - *automation
+      - *source
+      - *node
+      - *sdk
+      - *runtime
+      - *unpack
+      - uses: actions/download-artifact@v7
+        with:
+          name: full-ci-frontend
+          path: subject
+      - name: Verify the Windows deployment bridge and assemble the package
+        run: bash ../scripts/ci-full-release/run.sh package
+      - uses: actions/upload-artifact@v6
+        with:
+          name: full-ci-package-receipt
+          path: |
+            subject/release-package.sha256
+            subject/portable-map.json
+          if-no-files-found: error
+          retention-days: 14
