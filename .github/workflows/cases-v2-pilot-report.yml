@@ -1,0 +1,41 @@
+name: Verify saved CasesV2 pilot results
+
+on:
+  push:
+    branches: [ci/cases-v2-pilot-report]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  compare:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      PILOT_RUN: '45930582546'
+      PILOT_ATTEMPT: '1'
+      PILOT_RUNTIME_SHA: 77120B727F88F9A9C1E4B6097450A7E2C8B7D8223B21679BABBFB3DF2D6F2277
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 9.0.321
+      - uses: actions/download-artifact@v7
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ env.PILOT_RUN }}
+          pattern: cases-pilot-*
+          path: comparison
+      - name: Verify both test unions and GitHub runner assignments
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci-cases-pilot/compare.ps1 -Artifacts comparison -RuntimeSha $env:PILOT_RUNTIME_SHA -WorkflowRun $env:PILOT_RUN -Attempt $env:PILOT_ATTEMPT
+      - uses: actions/upload-artifact@v6
+        with:
+          name: cases-pilot-verified-comparison
+          path: comparison/pilot-comparison.json
+          if-no-files-found: error
+          retention-days: 14

@@ -1,4 +1,9 @@
-param([Parameter(Mandatory)][string]$Artifacts, [Parameter(Mandatory)][string]$RuntimeSha)
+param(
+    [Parameter(Mandatory)][string]$Artifacts,
+    [Parameter(Mandatory)][string]$RuntimeSha,
+    [Parameter(Mandatory)][long]$WorkflowRun,
+    [Parameter(Mandatory)][int]$Attempt
+)
 
 $ErrorActionPreference = 'Stop'
 $Artifacts = (Resolve-Path -LiteralPath $Artifacts).Path
@@ -36,7 +41,18 @@ $timings = foreach ($source in @($sequentialRoot, $parallelA, $parallelB)) {
     $timing
 }
 $serial, $a, $b = $timings
-if ($a.machine -eq $b.machine) { throw 'Expected two separate parallel machines.' }
+$jobData = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$WorkflowRun/attempts/$Attempt/jobs"
+if ($LASTEXITCODE -ne 0) { throw 'Could not verify GitHub runner allocation.' }
+$availableJobs = ($jobData | ConvertFrom-Json).jobs
+$runnerJobs = foreach ($name in @('sequential', 'Parallel Windows runner a', 'Parallel Windows runner b')) {
+    $job = @($availableJobs | Where-Object name -CEQ $name)
+    if ($job.Count -ne 1 -or $job[0].conclusion -ne 'success' -or $job[0].runner_id -le 0 -or
+        $job[0].runner_group_name -ne 'GitHub Actions' -or $job[0].labels -notcontains 'windows-2025') {
+        throw "Unexpected GitHub runner assignment for $name."
+    }
+    $job[0]
+}
+if ($runnerJobs[1].runner_id -eq $runnerJobs[2].runner_id) { throw 'Expected two distinct GitHub runner allocations.' }
 $starts = @([DateTimeOffset]::Parse($a.startedUtc), [DateTimeOffset]::Parse($b.startedUtc)) | Sort-Object
 $finishes = @([DateTimeOffset]::Parse($a.finishedUtc), [DateTimeOffset]::Parse($b.finishedUtc)) | Sort-Object
 if ($starts[-1] -ge $finishes[0]) { throw 'The two runner intervals did not overlap.' }
@@ -51,10 +67,14 @@ $comparison = [pscustomobject]@{
     parallelSeconds = [math]::Round($parallelSeconds, 2)
     overlappingSeconds = [math]::Round(($finishes[0] - $starts[-1]).TotalSeconds, 2)
     savedSeconds = [math]::Round($serial.elapsedSeconds - $parallelSeconds, 2)
+    savedPercent = [math]::Round(100 * (1 - $parallelSeconds / $serial.elapsedSeconds), 2)
     speedup = [math]::Round($serial.elapsedSeconds / $parallelSeconds, 3)
     sameRunnerImage = @($timings.runnerImage | Sort-Object -Unique).Count -eq 1
     sameSdk = @($timings.sdk | Sort-Object -Unique).Count -eq 1
     samePostgres = @($timings.postgres | Sort-Object -Unique).Count -eq 1
+    sourceRun = $WorkflowRun
+    sourceAttempt = $Attempt
+    runnerAllocations = @($runnerJobs | Select-Object id,name,runner_id,runner_name)
     timings = $timings
 }
 $comparison | ConvertTo-Json -Depth 6 | Tee-Object -FilePath (Join-Path $Artifacts 'pilot-comparison.json')
@@ -68,4 +88,5 @@ $comparison | ConvertTo-Json -Depth 6 | Tee-Object -FilePath (Join-Path $Artifac
     "- Overlap: $($comparison.overlappingSeconds) s"
     "- Speedup: $($comparison.speedup)x"
     "- Matching SDK, runner image and PostgreSQL: $($comparison.sameSdk), $($comparison.sameRunnerImage), $($comparison.samePostgres)"
+    "- Source run: $WorkflowRun, attempt $Attempt"
 ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY

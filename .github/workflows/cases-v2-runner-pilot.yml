@@ -144,6 +144,9 @@ jobs:
     needs: [build, sequential, parallel]
     runs-on: windows-2025
     timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v6
         with:
@@ -158,7 +161,8 @@ jobs:
       - name: Verify both exact test unions and report speed
         env:
           RUNTIME_SHA: ${{ needs.build.outputs.runtime-sha }}
-        run: ./scripts/ci-cases-pilot/compare.ps1 -Artifacts comparison -RuntimeSha $env:RUNTIME_SHA
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci-cases-pilot/compare.ps1 -Artifacts comparison -RuntimeSha $env:RUNTIME_SHA -WorkflowRun $env:GITHUB_RUN_ID -Attempt $env:GITHUB_RUN_ATTEMPT
       - uses: actions/upload-artifact@v6
         with:
           name: cases-pilot-comparison
