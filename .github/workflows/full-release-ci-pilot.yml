@@ -5,10 +5,13 @@ on:
     branches: [ci/full-release-ci-pilot]
 
 permissions:
+  actions: read
   contents: read
 
 env:
   SUBJECT_SHA: ad121fcdf0e5eeb09e4cd5a5b2f8e6d2ae6923ca
+  PRIOR_RUN: '45952135312'
+  PRIOR_WORKFLOW_SHA: 44d4033415842e1dc3e157c8a3b8493f38459208
   PILOT_SDK: 9.0.321
   DOTNET_PROCESSOR_COUNT: '1'
   NODE_OPTIONS: --max-old-space-size=1536
@@ -51,6 +54,12 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: subject/package-lock.json
+      - name: Use the canonical Windows temporary directory for the frontend gate
+        shell: pwsh
+        run: |
+          $canonical = node -p "require('node:fs').realpathSync.native(require('node:os').tmpdir())"
+          if ($LASTEXITCODE -ne 0 -or !$canonical) { throw 'Cannot resolve the Windows temporary directory' }
+          "TEMP=$canonical", "TMP=$canonical" | Add-Content -LiteralPath $env:GITHUB_ENV
       - name: Contracts, lint, unit tests, audits and frontend package
         id: frontend
         run: bash ../scripts/ci-full-release/run.sh frontend
@@ -67,8 +76,21 @@ jobs:
     steps:
       - *automation
       - *source
-      - *node
+      - &reuse
+        name: Verify existing successful evidence from the first hosted attempt
+        id: prior
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ../scripts/ci-full-release/reuse-gate.ps1
+      - if: steps.prior.outputs.reused != 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: subject/package-lock.json
       - name: Complete frontend integration catalogue
+        if: steps.prior.outputs.reused != 'true'
         run: bash ../scripts/ci-full-release/run.sh frontend-integration
 
   backend-format:
@@ -79,11 +101,13 @@ jobs:
     steps:
       - *automation
       - *source
-      - &sdk
+      - *reuse
+      - if: steps.prior.outputs.reused != 'true'
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.PILOT_SDK }}
       - name: All seven backend formatting checks
+        if: steps.prior.outputs.reused != 'true'
         run: bash ../scripts/ci-full-release/run.sh format
 
   backend-build:
@@ -99,10 +123,22 @@ jobs:
       - *automation
       - *source
       - *node
-      - *sdk
+      - &sdk
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.PILOT_SDK }}
       - name: Audited restore, analyzed compilation, exact discovery and publish
         id: build
         run: bash ../scripts/ci-full-release/run.sh build
+      - uses: actions/upload-artifact@v6
+        if: failure() && steps.build.outcome == 'failure'
+        with:
+          name: full-ci-failed-discovery
+          path: |
+            subject/test-plan.json
+            subject/test-plan.summary.json
+          if-no-files-found: ignore
+          retention-days: 3
       - uses: actions/upload-artifact@v6
         with:
           name: full-ci-backend-runtime
