@@ -23,6 +23,14 @@ verify_portable_package() {
   node --input-type=module -e "import { verifyPortablePackage } from './scripts/verify-xsenus-runner.mjs'; verifyPortablePackage();"
 }
 
+configure_test_console() {
+  test "$RUNNER_ENVIRONMENT" = github-hosted
+  chcp.com 65001
+  hook="$helper/console-utf8"
+  dotnet build "$hook/ConsoleUtf8.csproj" -c Release --nologo
+  export DOTNET_STARTUP_HOOKS="$(cygpath -w "$hook/bin/Release/net9.0/ConsoleUtf8.dll")"
+}
+
 case "${1:?Expected CI phase}" in
   frontend)
     check_subject
@@ -136,6 +144,7 @@ case "${1:?Expected CI phase}" in
     git archive "$SUBJECT_SHA" tools/PayPlanner.TestShards | tar -xf - -C recovery-src
     git apply --directory=recovery-src "$helper/batch-recovery.patch"
     dotnet build recovery-src/tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj -c Release -m:1 -nr:false
+    configure_test_console
     recovery_tool="recovery-src/$tool"
     previous="prior-shards/shard-$shard"
     dotnet "$recovery_tool" run --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" \
@@ -144,6 +153,7 @@ case "${1:?Expected CI phase}" in
     ;;
   restored)
     check_subject
+    configure_test_console
     mkdir -p test-results/restored-browser
     printf '%s\n' '<RunSettings><RunConfiguration><TreatNoTestsAsError>true</TreatNoTestsAsError></RunConfiguration></RunSettings>' >test-results/restored-browser/gate.runsettings
     native_exit=0

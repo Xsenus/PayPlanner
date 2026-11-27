@@ -12,6 +12,8 @@ env:
   SUBJECT_SHA: ad121fcdf0e5eeb09e4cd5a5b2f8e6d2ae6923ca
   PRIOR_RUN: '45954084478'
   PRIOR_WORKFLOW_SHA: cba284c361df8c595fa182a3818ddaa7005720bc
+  PREVIOUS_REPAIR_RUN: '45969237106'
+  PREVIOUS_REPAIR_SHA: da9ad74cfcf16b03a7f08e61e1fd1607f01556a0
   RUNTIME_SHA: 2e5209ab9fd3be77bd3aa20ef826643c53f68ac21239740c5741e882de6011f2
   EXPECTED_MANIFEST_SHA: 1774BB6ADE84EBD8280044B9FEF8486FFCD92A4034A15833BB4B61472FE02EFD
   FRONTEND_SHA: 47ddf6a139d9c9d9d540b779aa42cd80f09c9b2606b53515d6b7193b31cdc986
@@ -57,7 +59,7 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 300
     strategy:
-      max-parallel: 4
+      max-parallel: 3
       fail-fast: false
       matrix: ${{ fromJSON(needs.prior-evidence.outputs.shards) }}
     env:
@@ -76,7 +78,7 @@ jobs:
         with:
           name: shard-${{ matrix.shard }}
           path: subject/prior-shards/shard-${{ matrix.shard }}
-          run-id: ${{ env.PRIOR_RUN }}
+          run-id: ${{ matrix.sourceRun }}
           github-token: ${{ github.token }}
       - name: Retain an already qualified full shard
         if: matrix.conclusion == 'success'
@@ -111,6 +113,11 @@ jobs:
       - name: Prepare the browser prerequisites and synthetic build
         if: matrix.conclusion != 'success'
         run: bash ../scripts/ci-full-release/run.sh setup-browsers synthetic
+      - &console
+        if: env.RECOVER != 'false'
+        name: Set UTF-8 for all new hosted Windows consoles
+        shell: pwsh
+        run: ../scripts/ci-full-release/set-hosted-console.ps1
       - &runtime
         if: env.RECOVER != 'false'
         uses: actions/download-artifact@v7
@@ -172,6 +179,7 @@ jobs:
       - *node
       - *sdk
       - *postgres
+      - *console
       - name: Prepare both required browsers
         run: bash ../scripts/ci-full-release/run.sh setup-browsers
       - *runtime
@@ -187,7 +195,7 @@ jobs:
           retention-days: 14
 
   linux-filesystem:
-    needs: [backend-shard]
+    needs: [prior-evidence]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
