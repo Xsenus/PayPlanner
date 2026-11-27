@@ -2,7 +2,7 @@ name: Parallel release performance profiles
 
 on:
   push:
-    branches: [ci/release-performance-profile]
+    branches: [ci/release-performance-profile, ci/postgres-fixture-profile]
 
 permissions:
   contents: read
@@ -34,6 +34,7 @@ jobs:
 
   migrations:
     name: Migrations formatting (${{ matrix.check }})
+    if: github.ref_name == 'ci/release-performance-profile'
     runs-on: windows-2025
     timeout-minutes: 45
     strategy:

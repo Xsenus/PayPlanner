@@ -3,7 +3,7 @@ if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or !$env:PAYPLANNER_TEST_POSTGR
     throw 'Expected the disposable PostgreSQL cluster on a hosted runner.'
 }
 $testConnection = [Data.Common.DbConnectionStringBuilder]::new()
-$testConnection.ConnectionString = $env:PAYPLANNER_TEST_POSTGRES
+$testConnection.set_ConnectionString($env:PAYPLANNER_TEST_POSTGRES)
 if ($testConnection['Host'] -ne '127.0.0.1' -or $testConnection['Port'] -ne '5433' -or
     $testConnection['Database'] -ne 'postgres' -or $testConnection['Username'] -ne 'payplanner_ci') {
     throw 'Unexpected PostgreSQL endpoint.'
