@@ -451,6 +451,17 @@ jobs:
         with:
           path: payplanner-test-timings.json
           key: backend-timings-hosted-v1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Preserve the exact test manifest and native qualification
+        uses: actions/upload-artifact@v6
+        with:
+          name: backend-qualification-${{ github.run_attempt }}
+          path: |
+            test-plan.json
+            test-plan.summary.json
+            test-results/aggregate-qualification.json
+            payplanner-test-timings.json
+          if-no-files-found: error
+          retention-days: 14
 
   backend-browser:
     needs: [backend-build, backend-test-0, backend-test-1, backend-test-2, backend-test-3]
