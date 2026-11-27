@@ -114,6 +114,11 @@ case "${1:?Expected CI phase}" in
     printf 'PAYPLANNER_TEST_PLAYWRIGHT_CLI=%s/@playwright/cli/playwright-cli.js\n' "$(npm root --global)" >>"$GITHUB_ENV"
     printf '%s\n' 'PAYPLANNER_TEST_BROWSER=chrome' >>"$GITHUB_ENV"
     ;;
+  setup-pdf)
+    check_subject
+    python -m pip install --disable-pip-version-check --only-binary=:all: 'PyMuPDF==1.27.2.2'
+    python -I -c "import fitz; assert fitz.VersionBind == '1.27.2.2'; print(fitz.VersionBind)"
+    ;;
   shard)
     check_subject
     shard="${2:?Expected a shard number}"
@@ -122,6 +127,20 @@ case "${1:?Expected CI phase}" in
     dotnet "$tool" run --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" \
       --shard "$shard" --results "test-results/shard-$shard" --workers auto --suite all 2>&1 |
       tee "test-results/shard-$shard.log"
+    ;;
+  recover-shard)
+    check_subject
+    shard="${2:?Expected a shard number}"
+    [[ "$shard" =~ ^[0-3]$ ]]
+    mkdir -p recovery-src test-results
+    git archive "$SUBJECT_SHA" tools/PayPlanner.TestShards | tar -xf - -C recovery-src
+    git apply --directory=recovery-src "$helper/batch-recovery.patch"
+    dotnet build recovery-src/tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj -c Release -m:1 -nr:false
+    recovery_tool="recovery-src/$tool"
+    previous="prior-shards/shard-$shard"
+    dotnet "$recovery_tool" run --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" \
+      --shard "$shard" --results "test-results/shard-$shard" --workers auto --suite all \
+      --prior-results "$previous"
     ;;
   restored)
     check_subject

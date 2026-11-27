@@ -1,0 +1,79 @@
+--- a/tools/PayPlanner.TestShards/BoundedTestRunner.cs
++++ b/tools/PayPlanner.TestShards/BoundedTestRunner.cs
+@@ -6,7 +6,7 @@
+
+ internal static class BoundedTestRunner
+ {
+-    public static async Task<int> RunAsync(TestPlan plan, string manifest, string hash, int shard, string directory, string workers, string suite, string vstestConsolePath)
++    public static async Task<int> RunAsync(TestPlan plan, string manifest, string hash, int shard, string directory, string workers, string suite, string vstestConsolePath, string? priorResults = null)
+     {
+         ShardPlan.Require(!Directory.Exists(directory) && !File.Exists(directory), "Preserve existing shard results.");
+         var partitionCount = 1;
+@@ -135,7 +135,34 @@
+             var admitted = HostResources.Read();
+             var admittedWorkers = ExecutionScheduling.WorkerBudget(workers, admitted.AvailableBytes, admitted.Processors);
+             partitionCount = ExecutionScheduling.PartitionCapacity(workers, admitted.Processors);
++            if (priorResults is not null)
++            {
++                var previous = JsonSerializer.Deserialize<ShardRun>(
++                    File.ReadAllBytes(Path.Combine(priorResults, "run.json")), ShardPlan.Json);
++                ShardPlan.Require(previous is not null && previous.SchemaVersion == ShardPlan.SchemaVersion
++                    && previous.Revision == plan.Revision && previous.ManifestSha256 == hash && previous.Shard == shard
++                    && previous.Suite == suite && previous.AssemblySha256 == plan.Artifacts.Single(pin => pin.Path == plan.AssemblyPath).Sha256
++                    && previous.FinishedUtc >= previous.StartedUtc && previous.ExitCode != 0 && previous.BatchCount == partitionCount,
++                    "Previous execution did not use the same manifest, runtime and partition capacity.");
++            }
+             batches = ExecutionScheduling.Batches(plan, shard, suite, partitionCount);
++            var pending = new List<ExecutionBatch>();
++            foreach (var batch in batches)
++            {
++                var source = priorResults is null ? null : Path.Combine(priorResults, "batches", batch.Id);
++                if (source is null || !File.Exists(Path.Combine(source, "qualification.json")))
++                {
++                    pending.Add(batch);
++                    continue;
++                }
++                BatchResults.Verify(plan, hash, shard, batch, source);
++                var target = Path.Combine(directory, "batches", batch.Id);
++                Directory.CreateDirectory(target);
++                foreach (var file in Directory.GetFiles(source))
++                    File.Copy(file, Path.Combine(target, Path.GetFileName(file)));
++                Record(new { Kind = "reused-qualified-batch", batch.Id, batch.Lane, Cases = batch.Cases.Length });
++                Console.WriteLine(JsonSerializer.Serialize(new { Batch = batch.Id, Status = "verified-and-reused", Cases = batch.Cases.Length }));
++            }
+             Record(new
+             {
+                 Kind = "initial-budget",
+@@ -145,7 +172,7 @@
+                 admitted.AvailableBytes,
+                 admitted.Processors
+             });
+-            await BoundedBatchScheduler.RunAsync(batches, workers, partitionCount, HostResources.Read, ExecuteBatch,
++            await BoundedBatchScheduler.RunAsync(pending, workers, partitionCount, HostResources.Read, ExecuteBatch,
+                 value => Record(new
+                 {
+                     value.Kind,
+--- a/tools/PayPlanner.TestShards/Program.cs
++++ b/tools/PayPlanner.TestShards/Program.cs
+@@ -151,6 +151,8 @@
+         var suite = options.Remove("suite", out var requestedSuite) ? requestedSuite : "all";
+         ShardPlan.Require(workers is "auto" or "1" or "2" or "4", "Workers must be auto, 1, 2 or 4.");
+         ShardPlan.Require(suite is "all" or "fast" or "heavy", "Suite must be all, fast or heavy.");
++        var priorResults = options.Remove("prior-results", out var priorPath) ? Path.GetFullPath(priorPath) : null;
++        ShardPlan.Require(priorResults is null || suite == "all", "Recovery requires the full shard suite.");
+         ExactOptions(options, "manifest", "manifest-sha", "shard", "results");
+         var manifest = Path.GetFullPath(options["manifest"]);
+         var hash = options["manifest-sha"];
+@@ -159,10 +161,11 @@
+         var shard = ParseInt(options["shard"]);
+         _ = ShardPlan.Filter(plan, shard);
+         var results = Path.GetFullPath(options["results"]);
++        ShardPlan.Require(priorResults is null || plan.Execution is not null, "Recovery requires bounded execution.");
+         if (plan.Execution is not null)
+         {
+             ExecutionScheduling.RequireSerialXunit(Path.GetDirectoryName(ShardPlan.Resolve(manifest, plan.AssemblyPath))!);
+-            return await BoundedTestRunner.RunAsync(plan, manifest, hash, shard, results, workers, suite, Path.Combine(await LocateSdkAsync(), "vstest.console.dll"));
++            return await BoundedTestRunner.RunAsync(plan, manifest, hash, shard, results, workers, suite, Path.Combine(await LocateSdkAsync(), "vstest.console.dll"), priorResults);
+         }
+         ShardPlan.Require(suite == "all", "A partial suite requires a bounded execution manifest.");
+         ShardPlan.Require(!Directory.Exists(results) && !File.Exists(results), "Preserve existing shard results.");
