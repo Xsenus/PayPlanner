@@ -36,6 +36,7 @@ const weakenings = [
   ['allow deployment before hosted checks finish', data => { data.entry.jobs.deploy.needs.splice(1, 1); }],
   ['skip a mandatory compile or formatting command', data => { data.checks.jobs['backend-format'].steps.pop(); }],
   ['package a partial backend test union', data => { data.checks.jobs['backend-union'].needs.pop(); }],
+  ['schedule backend tests before the installer and package checks', data => { data.checks.jobs['backend-test-0'].needs.pop(); }],
   ['skip package qualification for the exact delivered files', data => { data.entry.jobs.deploy.steps = data.entry.jobs.deploy.steps.filter(step => !step.name.startsWith('Match the package manifest')); }],
   ['allow an error to turn into a passing job', data => { data.shard.jobs.shard.steps[0]['continue-on-error'] = true; }],
 ];

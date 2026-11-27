@@ -357,7 +357,7 @@ jobs:
           key: ${{ steps.backend.outputs.key }}
 
   backend-test-0:
-    needs: [frontend, frontend-integration, backend-format, backend-build]
+    needs: [frontend, frontend-integration, backend-format, backend-build, package]
     uses: ./.github/workflows/release-shard.yml
     with:
       shard: 0
@@ -367,7 +367,7 @@ jobs:
       sdk-version: ${{ needs.backend-build.outputs.sdk-version }}
 
   backend-test-1:
-    needs: [frontend, frontend-integration, backend-format, backend-build]
+    needs: [frontend, frontend-integration, backend-format, backend-build, package]
     uses: ./.github/workflows/release-shard.yml
     with:
       shard: 1
@@ -377,7 +377,7 @@ jobs:
       sdk-version: ${{ needs.backend-build.outputs.sdk-version }}
 
   backend-test-2:
-    needs: [frontend, frontend-integration, backend-format, backend-build]
+    needs: [frontend, frontend-integration, backend-format, backend-build, package]
     uses: ./.github/workflows/release-shard.yml
     with:
       shard: 2
@@ -387,7 +387,7 @@ jobs:
       sdk-version: ${{ needs.backend-build.outputs.sdk-version }}
 
   backend-test-3:
-    needs: [frontend, frontend-integration, backend-format, backend-build]
+    needs: [frontend, frontend-integration, backend-format, backend-build, package]
     uses: ./.github/workflows/release-shard.yml
     with:
       shard: 3
@@ -536,7 +536,7 @@ jobs:
           retention-days: 14
 
   linux-filesystem:
-    needs: [backend-test-0, backend-test-1, backend-test-2, backend-test-3]
+    needs: [frontend-integration]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -549,7 +549,9 @@ jobs:
         run: bash scripts/hosted-release/run.sh linux
 
   package:
-    needs: [frontend, backend-build, backend-browser, backend-union, linux-filesystem]
+    # Build the exact package early. The caller can use it only after all
+    # hosted jobs, including the native union and restored browser, succeed.
+    needs: [frontend, backend-build, linux-filesystem]
     runs-on: windows-2025
     timeout-minutes: 20
     env:

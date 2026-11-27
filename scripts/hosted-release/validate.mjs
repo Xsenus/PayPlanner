@@ -135,10 +135,10 @@ export function validateHostedRelease({ entry, checks, shard, legacy }) {
   assert.equal(checks.defaults.run.shell, 'bash');
   requireDependency(hosted, {
     ...Object.fromEntries(prerequisites.map(name => [name, []])),
-    ...Object.fromEntries(shardJobs.map(name => [name, prerequisites])),
+    ...Object.fromEntries(shardJobs.map(name => [name, [...prerequisites, 'package']])),
     'backend-union': ['backend-build', ...shardJobs], 'backend-browser': ['backend-build', ...shardJobs],
-    'linux-filesystem': shardJobs,
-    package: ['frontend', 'backend-build', 'backend-browser', 'backend-union', 'linux-filesystem'],
+    'linux-filesystem': ['frontend-integration'],
+    package: ['frontend', 'backend-build', 'linux-filesystem'],
   });
   for (const [name, job] of Object.entries(hosted)) {
     if (shardJobs.includes(name)) {
