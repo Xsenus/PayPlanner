@@ -1,6 +1,10 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers;
@@ -8,7 +12,7 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Authorize(Policy = "Admin")]
 [Route("api/portal/admin")]
-public sealed class ClientPortalAdminController(IClientPortalService service) : ControllerBase
+public sealed class ClientPortalAdminController(IClientPortalService service, PaymentContext db) : ControllerBase
 {
     [HttpPost("access")]
     public async Task<ActionResult<ClientPortalAdminAccountDto>> SaveAccess(
@@ -75,12 +79,80 @@ public sealed class ClientPortalAdminController(IClientPortalService service) : 
         }
     }
 
+    [HttpPost("cases/{caseId:int}/preview")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<ActionResult<ClientPortalCaseDto>> PreviewCase(
+        int caseId,
+        [FromBody] ClientPortalCasePreviewRequest request,
+        CancellationToken ct)
+    {
+        var actorId = GetActorId();
+        if (actorId is not > 0)
+        {
+            return Unauthorized();
+        }
+
+        var access = await db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Cases, ct, requireApprovedUser: true);
+        if (access?.Visibility.IsAdmin != true || access.Permission?.CanView != true)
+        {
+            return Forbid();
+        }
+        if (!await db.ClientCases.AsNoTracking().ApplyClientCaseVisibility(access.Visibility).AnyAsync(item => item.Id == caseId, ct))
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            var preview = await service.PreviewCaseAsync(
+                caseId, request, actorId.Value, User.Identity?.Name ?? "Администратор", ct);
+            return preview is null ? NotFound() : Ok(preview);
+        }
+        catch (ClientPortalException ex)
+        {
+            return MapError(ex);
+        }
+    }
+
     [HttpPost("accounts/{accountId:int}/login")]
-    public async Task<ActionResult<ClientPortalChallengeCreatedDto>> SendLogin(int accountId, CancellationToken ct)
+    public async Task<ActionResult<ClientPortalChallengeCreatedDto>> SendLogin(
+        int accountId, [FromQuery] int? caseId, CancellationToken ct)
     {
         try
         {
-            return Ok(await service.SendLoginAsync(accountId, ct));
+            return Ok(await service.SendLoginAsync(accountId, ct, caseId));
+        }
+        catch (ClientPortalException ex)
+        {
+            return MapError(ex);
+        }
+    }
+
+    [HttpPost("cases/{caseId:int}/accounts/{accountId:int}/login-invitation")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<ActionResult<ClientPortalLoginInvitationDto>> CreateLoginInvitation(
+        int caseId, int accountId, CancellationToken ct)
+    {
+        var actorId = GetActorId();
+        if (actorId is not > 0)
+        {
+            return Unauthorized();
+        }
+
+        var access = await db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Cases, ct, requireApprovedUser: true);
+        if (access?.Visibility.IsAdmin != true || access.Permission is not { CanView: true, CanEdit: true })
+        {
+            return Forbid();
+        }
+        if (!await db.ClientCases.AsNoTracking().ApplyClientCaseVisibility(access.Visibility).AnyAsync(item => item.Id == caseId, ct))
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            return Ok(await service.CreateLoginInvitationAsync(
+                accountId, caseId, actorId.Value, User.Identity?.Name ?? "Администратор", ct));
         }
         catch (ClientPortalException ex)
         {

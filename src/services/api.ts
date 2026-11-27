@@ -245,6 +245,7 @@ export interface AppFeatureFlagsDto {
 }
 
 export interface ClientPortalLoginPreview { displayName: string; emailHint: string; expiresAt: string }
+export interface ClientPortalLoginInvitation { loginUrl: string; code: string; expiresAt: string }
 export interface ClientPortalCaseListItem { publicId: string; title: string; caseNumber: string; caseType: string; status: string; stage: string; dueDate?: string | null }
 export interface ClientPortalHome {
   displayName: string; items: ClientPortalCaseListItem[]; total: number; page: number; pageSize: number;
@@ -272,6 +273,9 @@ export interface ClientPortalAccessRequest {
   legalEntityId?: number | null; clientCaseId: number; canViewCaseSummary: boolean; canViewDeadlines: boolean;
   canViewDocuments: boolean; canViewFinance: boolean; canViewApprovals: boolean; canViewMessages: boolean; documentIds: number[];
 }
+export type ClientPortalCasePreviewRequest = { accountId: number } | Pick<
+  ClientPortalAccessRequest, 'email' | 'canViewDeadlines' | 'canViewDocuments' | 'canViewFinance' | 'canViewApprovals' | 'documentIds'
+>;
 
 export type AppReleaseItemType = 'new' | 'improved' | 'fixed' | 'important';
 
@@ -7626,6 +7630,14 @@ export class ApiService {
     return this.request<ClientPortalCaseAccess[]>(`/portal/admin/cases/${caseId}/accounts`);
   }
 
+  async previewClientPortalCase(caseId: number, payload: ClientPortalCasePreviewRequest) {
+    return this.request<ClientPortalCase>(`/portal/admin/cases/${caseId}/preview`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      cache: 'no-store',
+    });
+  }
+
   async getClientPortalAudit(caseId: number) {
     return this.request<ClientPortalAudit[]>(`/portal/admin/cases/${caseId}/audit`);
   }
@@ -7637,10 +7649,17 @@ export class ApiService {
     });
   }
 
-  async sendClientPortalLogin(accountId: number) {
+  async sendClientPortalLogin(accountId: number, caseId: number) {
     return this.request<{ challengeId: string; expiresAt: string; emailHint: string }>(
-      `/portal/admin/accounts/${accountId}/login`,
+      `/portal/admin/accounts/${accountId}/login?caseId=${caseId}`,
       { method: 'POST' },
+    );
+  }
+
+  async createClientPortalLoginInvitation(caseId: number, accountId: number) {
+    return this.request<ClientPortalLoginInvitation>(
+      `/portal/admin/cases/${caseId}/accounts/${accountId}/login-invitation`,
+      { method: 'POST', cache: 'no-store' },
     );
   }
 

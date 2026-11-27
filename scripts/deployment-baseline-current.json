@@ -26,9 +26,9 @@
     "sendRealNotificationsForSmoke": false,
     "sourceOrArtifactRebuild": false
   },
-  "previousRevision": "109faa2090db3fad5c9caebe7df04b3e715357b0",
-  "expectedPreviousApiSha256": "8602475244501ae29791c763e8f4ad8bd6bf2031f282061380ba4c8c6ce4d277",
-  "expectedPreviousMigrationsSha256": "4082b959ce97d74839df3b57def33787cb981a6a4e8bfc2af485f5b4c910f28f",
+  "previousRevision": "ad121fcdf0e5eeb09e4cd5a5b2f8e6d2ae6923ca",
+  "expectedPreviousApiSha256": "208d4cc2d4a86b3b8c89e383690c6b4809c456f15ea8f9f134960d1a2f9d1cd8",
+  "expectedPreviousMigrationsSha256": "9b9bddc7ed4e309ef940750ab87f8095830645422252e11a007f101c3221543a",
   "expectedMigration": null,
   "expectedAddedProtectedTables": [],
   "expectedBaselineMigrations": [
@@ -1176,50 +1176,24 @@
     }
   ],
   "expectedBaselineMigrationIdsSha256": "bf2b5530e4ad9c54a2b91d110c65a52df453d22a971daabae9495184d1b9e55a",
-  "expectedReleaseCatalogSha256": "56ee45e388614d945631038c74d79135147e5d15beceafb1256c7db1e58b7a4d",
+  "expectedReleaseCatalogSha256": "e5559c4519782173825b894c8e3739dd49df70d741a680ef8ea47a253cac9c13",
   "expectedReleaseSeeds": [
     {
-      "releaseId": "2026-11-18-court-binding-stored-in-instance",
-      "version": "1.14.946",
-      "releasedAt": "2026-11-20T03:15:03Z",
-      "title": "Судебные реквизиты в карточке инстанции",
-      "summary": "Судебная проверка учитывает реквизиты, сохранённые в инстанции дела.",
+      "releaseId": "2026-11-27-client-portal-preview-and-invitations",
+      "version": "1.14.947",
+      "releasedAt": "2026-11-27T00:20:00Z",
+      "title": "Предпросмотр клиентского кабинета и одноразовый вход",
+      "summary": "В карточке дела администратор может проверить, что увидит клиент, и подготовить приглашение для входа.",
       "isActive": true,
       "source": "agent",
       "items": [
         {
-          "type": "fixed",
-          "text": "Если номер дела или ссылка сохранены в судебной инстанции, карточка дела показывает, где находятся реквизиты. Для ссылки на КАД Арбитр проверка подсказывает, как открыть источник и внести сведения вручную."
-        }
-      ]
-    },
-    {
-      "releaseId": "2026-11-20-sudrf-source-instance-identification",
-      "version": "1.14.945",
-      "releasedAt": "2026-11-20T03:15:02Z",
-      "title": "Первая инстанция и апелляция в судебном деле",
-      "summary": "При привязке карточки суда CRM сверяет инстанцию и УИД.",
-      "isActive": true,
-      "source": "agent",
-      "items": [
+          "type": "new",
+          "text": "В блоке «Клиентский кабинет» кнопка «Посмотреть как клиент» показывает карточку дела с выбранными правами доступа."
+        },
         {
-          "type": "fixed",
-          "text": "В разделе «Суд» CRM предупреждает, если ссылка открывает карточку другой инстанции или УИД отличается. В движении дела дата судебного события отображается отдельно от даты публикации."
-        }
-      ]
-    },
-    {
-      "releaseId": "2026-11-20-task-recurrence-visible-on-reopen",
-      "version": "1.14.944",
-      "releasedAt": "2026-11-20T03:15:01Z",
-      "title": "Сохранённый повтор виден в задаче и журнале",
-      "summary": "Настройки повтора отображаются после повторного открытия задачи.",
-      "isActive": true,
-      "source": "agent",
-      "items": [
-        {
-          "type": "fixed",
-          "text": "При открытии повторяющейся задачи карточка показывает сохранённое расписание. Отметка «Повторяется» видна в карточке, в списке и на доске журнала задач."
+          "type": "new",
+          "text": "Если клиентский кабинет включён, ссылку и одноразовый код можно отправить на почту из CRM или скопировать и передать клиенту вручную. Приглашение действует два часа и подходит для одного входа."
         }
       ]
     }

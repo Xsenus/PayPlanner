@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Briefcase, CalendarDays, Download, FileText, Loader2, LogOut, MessageSquare, ReceiptText, Search, ShieldCheck, UserRound } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Briefcase, Loader2, LogOut, MessageSquare, Search, ShieldCheck, UserRound } from 'lucide-react';
 
 import {
   apiService,
@@ -10,10 +10,8 @@ import {
 } from '../../services/api';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { getClientPortalChallengeId } from '../../utils/clientPortalRoute';
-
-function formatDate(value?: string | null) {
-  return value ? new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium' }).format(new Date(value)) : '—';
-}
+import { formatMediumRussianDate } from '../../utils/dateUtils';
+import { ClientPortalCaseDetails } from './ClientPortalCaseDetails';
 
 function readLoginToken(challengeId: string) {
   const key = `pp:client-portal:${challengeId}`;
@@ -209,7 +207,7 @@ export function ClientPortalPage() {
             <div className="mt-2 grid gap-2 md:grid-cols-2">
               {home.upcomingActions.map((item) => (
                 <button key={`${item.casePublicId}-${item.dueAt}-${item.title}`} type="button" onClick={() => void openCase(item.casePublicId)} className="rounded-xl bg-white p-3 text-left text-sm shadow-sm">
-                  <span className="font-semibold text-slate-900">{formatDate(item.dueAt)} · {item.title}</span>
+                  <span className="font-semibold text-slate-900">{formatMediumRussianDate(item.dueAt)} · {item.title}</span>
                   <span className="mt-1 block text-xs text-slate-500">{item.caseTitle}</span>
                 </button>
               ))}
@@ -242,35 +240,11 @@ export function ClientPortalPage() {
           </section>
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             {!selectedCase ? <div className="grid min-h-64 place-items-center text-center text-slate-500"><div><Briefcase className="mx-auto h-9 w-9" /><p className="mt-2 text-sm">Выберите дело слева.</p></div></div> : (
-              <div className="space-y-4">
-                <div><h2 className="text-xl font-semibold text-slate-950">{selectedCase.title}</h2><p className="text-sm text-slate-500">{selectedCase.caseNumber} · {selectedCase.stage || selectedCase.status}</p></div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <PortalBlock icon={<CalendarDays className="h-4 w-4" />} title="Сроки" empty="Нет открытых сроков" items={selectedCase.deadlines.map((item) => `${formatDate(item.dueAt)} — ${item.title}`)} />
-                  <div className="rounded-xl border border-slate-200 p-3">
-                    <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-800"><FileText className="h-4 w-4" />Документы</h3>
-                    {selectedCase.documents.length === 0 ? <p className="mt-2 text-sm text-slate-500">Нет доступных документов</p> : (
-                      <ul className="mt-2 space-y-2">{selectedCase.documents.map((item) => (
-                        <li key={item.publicId}><button type="button" onClick={() => void downloadDocument(item.publicId, item.name)} disabled={downloadingDocumentId === item.publicId} className="inline-flex items-center gap-2 text-left text-sm text-blue-700 hover:underline disabled:opacity-60">{downloadingDocumentId === item.publicId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}{item.name} · версия {item.version}</button></li>
-                      ))}</ul>
-                    )}
-                  </div>
-                  <PortalBlock icon={<ReceiptText className="h-4 w-4" />} title="Финансы" empty="Нет доступных начислений" items={selectedCase.invoices.map((item) => `${item.number || 'Счёт'} — ${item.amount.toLocaleString('ru-RU')} ₽`)} />
-                  <PortalBlock icon={<FileText className="h-4 w-4" />} title="Акты и договоры" empty="Нет доступных актов и договоров" items={[
-                    ...(selectedCase.acts ?? []).map((item) => `Акт ${item.number || 'без номера'} — ${item.amount.toLocaleString('ru-RU')} ₽`),
-                    ...(selectedCase.contracts ?? []).map((item) => `Договор ${item.number || 'без номера'}${item.amount != null ? ` — ${item.amount.toLocaleString('ru-RU')} ₽` : ''}`),
-                  ]} />
-                  <PortalBlock icon={<CalendarDays className="h-4 w-4" />} title="События" empty="Нет доступных событий" items={(selectedCase.events ?? []).map((item) => `${formatDate(item.occurredAt)} — ${item.title}`)} />
-                  <PortalBlock icon={<ShieldCheck className="h-4 w-4" />} title="Согласования" empty="Нет доступных согласований" items={selectedCase.approvals.map((item) => `Версия ${item.version} · ${item.status}`)} />
-                </div>
-              </div>
+              <ClientPortalCaseDetails details={selectedCase} onDownload={(id, name) => void downloadDocument(id, name)} downloadingDocumentId={downloadingDocumentId} />
             )}
           </section>
         </div>
       </div>
     </main>
   );
-}
-
-function PortalBlock({ icon, title, empty, items }: { icon: ReactNode; title: string; empty: string; items: string[] }) {
-  return <div className="rounded-xl border border-slate-200 p-3"><h3 className="flex items-center gap-2 text-sm font-semibold text-slate-800">{icon}{title}</h3>{items.length === 0 ? <p className="mt-2 text-sm text-slate-500">{empty}</p> : <ul className="mt-2 space-y-2">{items.map((item, index) => <li key={`${item}-${index}`} className="text-sm text-slate-700">{item}</li>)}</ul>}</div>;
 }

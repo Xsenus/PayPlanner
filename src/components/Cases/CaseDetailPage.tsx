@@ -1540,6 +1540,7 @@ export function CaseDetailPage(props: CaseDetailPageProps) {
     ? (...args: Args) => { if (owner.capture()) callback(...args); } : undefined;
   if (!captureAuthSessionIdentity().authenticated) return <p className="p-3 text-sm text-slate-600">Войдите в систему, чтобы открыть дело.</p>;
   return <CaseDetailScreen key={owner.scope} {...props} screenOwner={owner} retainedEditorDraft={retainedEditor.current.draft} markedViewedCaseIdRef={markedViewedCaseIdRef}
+    canPreviewClientPortal={user?.role?.name?.toLowerCase() === 'admin'}
     onBack={() => { if (owner.capture()) props.onBack(); }}
     onOpenClient={guard(props.onOpenClient)} onOpenLegalEntity={guard(props.onOpenLegalEntity)}
     onOpenFinance={guard(props.onOpenFinance)} onCreateInvoice={guard(props.onCreateInvoice)}
@@ -1548,6 +1549,7 @@ export function CaseDetailPage(props: CaseDetailPageProps) {
 
 function CaseDetailScreen({
   screenOwner,
+  canPreviewClientPortal,
   retainedEditorDraft,
   markedViewedCaseIdRef,
   caseId,
@@ -1572,7 +1574,7 @@ function CaseDetailScreen({
   canExportTasks = false,
   canSendMessenger = false,
   canSendToYandexDisk = false,
-}: CaseDetailPageProps & { screenOwner: CaseOperationParent; retainedEditorDraft: { current: CaseEditDraft | null }; markedViewedCaseIdRef: { current: number | null } }) {
+}: CaseDetailPageProps & { screenOwner: CaseOperationParent; canPreviewClientPortal: boolean; retainedEditorDraft: { current: CaseEditDraft | null }; markedViewedCaseIdRef: { current: number | null } }) {
   const { confirm, prompt } = useDialog();
   const { capture: captureScreen, begin: beginScreenOperation, busy: pageBusy } = screenOwner;
   const viewStateActor = useMemo(() => captureAuthSessionIdentity().actor, []);
@@ -4524,7 +4526,12 @@ function CaseDetailScreen({
 
         {error ? <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
         {notice ? <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-800">{notice}</div> : null}
-        {canEdit ? <ClientPortalAccessPanel caseItem={caseItem} documents={documents} /> : null}
+        {canEdit ? <ClientPortalAccessPanel
+          key={caseItem.id}
+          caseItem={caseItem}
+          documents={documents}
+          canPreview={canPreviewClientPortal}
+        /> : null}
         {stageTransitionPrompt ? (
           <StageTransitionActions
             prompt={stageTransitionPrompt}

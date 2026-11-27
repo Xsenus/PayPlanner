@@ -60,3 +60,7 @@ export function toRuDate(value: string | Date | null | undefined): string {
   const [y, m, d] = ymd.split('-');
   return `${d}.${m}.${y}`;
 }
+
+export function formatMediumRussianDate(value?: string | null): string {
+  return value ? new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium' }).format(new Date(value)) : '—';
+}
