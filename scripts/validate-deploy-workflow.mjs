@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { validateReusePlumbing, validateReuseStep } from './qualified-check-reuse.mjs';
+import { validateHostedRelease } from './hosted-release/validate.mjs';
 
 function requireValue(condition, message) {
   if (!condition) throw new Error(message);
@@ -533,7 +534,18 @@ export function validateDeployWorkflow(source) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     requireValue(process.argv.length <= 3, 'Usage: node scripts/validate-deploy-workflow.mjs [workflow-path]');
-    console.log(JSON.stringify(validateDeployWorkflow(readFileSync(resolve(process.argv[2] ?? '.github/workflows/deploy.yml'), 'utf8'))));
+    const source = readFileSync(resolve(process.argv[2] ?? '.github/workflows/deploy.yml'), 'utf8');
+    const entry = parseWorkflow(source);
+    const readWorkflow = path => parseWorkflow(readFileSync(resolve(path), 'utf8'));
+    const result = entry.jobs?.['backend-format']?.uses
+      ? validateHostedRelease({
+        entry,
+        checks: readWorkflow('.github/workflows/release-checks.yml'),
+        shard: readWorkflow('.github/workflows/release-shard.yml'),
+        legacy: readWorkflow('scripts/fixtures/deploy-xsenus.yml'),
+      })
+      : validateDeployWorkflow(source);
+    console.log(JSON.stringify(result));
   } catch (error) {
     console.error(`Deploy workflow validation failed: ${error.message}`);
     process.exitCode = 1;

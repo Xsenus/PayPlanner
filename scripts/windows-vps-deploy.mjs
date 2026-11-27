@@ -228,7 +228,7 @@ export async function haltDeployment(config, options = {}) {
 
 export async function checkDeploymentAccess(config, options = {}) {
   const context = contextFromEnvironment(config.childEnv, options.platform ?? process.platform);
-  assert.equal(context.producerJob, 'frontend', 'Read-only access is checked before release gates');
+  assert.ok(['deploy-access', 'frontend'].includes(context.producerJob), 'Read-only access is checked before release gates');
   assert.equal(context.headSha, config.sha);
   assert.equal(context.workflowSha, config.sha);
   await withConnection(config, ({ execute, sshArgs, destination }) => {

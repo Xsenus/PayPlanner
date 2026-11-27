@@ -58,6 +58,16 @@ test('deployment access preflight performs only authenticated true before any qu
   assert.ok(!existsSync(state.directory()));
 });
 
+test('the dedicated release-access job performs the same read-only check', async t => {
+  const config = accessFixture(t);
+  config.childEnv.GITHUB_JOB = 'deploy-access';
+  const state = harness(config);
+  await checkDeploymentAccess(config, state.options);
+  assert.deepEqual(state.calls.map(call => call.tool), ['ssh-keyscan.exe', 'ssh.exe']);
+  assert.equal(state.calls.at(-1).args.at(-1), 'true');
+  assert.ok(!existsSync(state.directory()));
+});
+
 test('deployment access preflight rejects a local, foreign, wrong-role or wrong-revision context before credentials', async t => {
   for (const [name, value] of [['GITHUB_ACTIONS', 'false'], ['GITHUB_JOB', 'deploy'], ['GITHUB_REF', 'refs/heads/other'],
     ['GITHUB_SHA', 'b'.repeat(40)], ['GITHUB_WORKFLOW_SHA', 'b'.repeat(40)], ['RUNNER_NAME', 'other']]) {

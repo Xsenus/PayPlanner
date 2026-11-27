@@ -284,13 +284,15 @@ public sealed class LegalFeatureFlagCiGateTests
     private static string ReadWorkflowAndDeployment(string root)
     {
         var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"));
+        Assert.Contains("uses: ./.github/workflows/release-checks.yml", workflow, StringComparison.Ordinal);
+        var hostedChecks = File.ReadAllText(Path.Combine(root, ".github", "workflows", "release-checks.yml"));
         var bridge = File.ReadAllText(Path.Combine(root, "scripts", "windows-vps-deploy.mjs"));
         Assert.Contains("node scripts/windows-vps-deploy.mjs", workflow, StringComparison.Ordinal);
         Assert.Contains("const controlFiles = ['deploy-vps.sh',", bridge, StringComparison.Ordinal);
         Assert.Contains("writeFileSync(join(directory, name), content.get(join(config.root, 'scripts', name)), { flag: 'wx' })", bridge, StringComparison.Ordinal);
         Assert.Contains("...controlFiles.map(name => join(directory, name))", bridge, StringComparison.Ordinal);
         Assert.Contains("bash ${shellQuote(control + '/deploy-vps.sh')} --execute ${name} ${digest}", bridge, StringComparison.Ordinal);
-        return workflow + "\n" + File.ReadAllText(Path.Combine(root, "scripts", "deploy-vps.sh"));
+        return workflow + "\n" + hostedChecks + "\n" + File.ReadAllText(Path.Combine(root, "scripts", "deploy-vps.sh"));
     }
 
     private static string FindRepositoryRoot()

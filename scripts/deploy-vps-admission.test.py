@@ -85,7 +85,7 @@ class DeliveryAdmissionTests(unittest.TestCase):
 
     def test_admits_the_reviewed_current_baseline_with_exact_release_catalog(self):
         for filename, versions in [('deployment-baseline-act-annual.json', range(943, 914, -1)),
-                                   ('deployment-baseline-current.json', range(946, 943, -1))]:
+                                   ('deployment-baseline-current.json', [947])]:
             with self.subTest(filename=filename):
                 self.use_payment_reconciliation_baseline(filename)
                 self.assertEqual([seed['version'] for seed in self.plan['expectedReleaseSeeds']], [f'1.14.{version}' for version in versions])

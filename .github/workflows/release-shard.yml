@@ -1,0 +1,121 @@
+name: Verify one backend shard
+
+on:
+  workflow_call:
+    inputs:
+      shard:
+        type: number
+        required: true
+      runtime-key:
+        type: string
+        required: true
+      runtime-sha:
+        type: string
+        required: true
+      manifest-sha:
+        type: string
+        required: true
+      sdk-version:
+        type: string
+        required: true
+    outputs:
+      artifact-id:
+        value: ${{ jobs.shard.outputs.artifact-id }}
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_PROCESSOR_COUNT: "1"
+  NODE_OPTIONS: "--max-old-space-size=1536"
+  UseSharedCompilation: "false"
+  DOTNET_gcServer: "0"
+  DOTNET_GCConserveMemory: "9"
+  DOTNET_GCHeapHardLimit: "C0000000"
+  BackgroundServices__Enabled: "false"
+  Email__Enabled: "false"
+  SHARD: ${{ inputs.shard }}
+  RUNTIME_KEY: ${{ inputs.runtime-key }}
+  EXPECTED_SHA256: ${{ inputs.runtime-sha }}
+  EXPECTED_MANIFEST_SHA: ${{ inputs.manifest-sha }}
+  EXPECTED_SDK_VERSION: ${{ inputs.sdk-version }}
+
+jobs:
+  shard:
+    runs-on: windows-2025
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      artifact-id: ${{ steps.results.outputs.artifact-id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Setup qualified .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ inputs.sdk-version }}
+      - name: Verify the disposable PostgreSQL 17 instance
+        shell: pwsh
+        run: ./scripts/hosted-release/start-postgres.ps1 ./scripts/verify-xsenus-runner.mjs
+      - name: Set UTF-8 for new Windows consoles
+        shell: pwsh
+        run: ./scripts/hosted-release/set-hosted-console.ps1
+      - name: Setup Python for the PDF verification
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Verify the PDF inspection dependency
+        run: |
+          python -m pip install --disable-pip-version-check --only-binary=:all: PyMuPDF==1.27.2.2
+          python -I -c "import fitz; assert fitz.VersionBind == '1.27.2.2'; print(fitz.VersionBind)"
+      - name: Install FE deps
+        run: npm ci
+      - name: Prepare the synthetic browser interface
+        timeout-minutes: 10
+        run: node scripts/prepare-synthetic-browser-ui.mjs
+      - name: Install and verify Chromium and Chrome
+        run: node scripts/hosted-release/prepare-browsers.mjs
+      - name: Install pinned Playwright CLI for writable CRM verification
+        run: |
+          npm install --global @playwright/cli@0.1.22
+          printf 'PAYPLANNER_TEST_PLAYWRIGHT_CLI=%s/@playwright/cli/playwright-cli.js\n' "$(npm root --global)" >> "$GITHUB_ENV"
+          printf 'PAYPLANNER_TEST_BROWSER=chrome\n' >> "$GITHUB_ENV"
+      - name: Verify exact runtime cache key
+        run: node scripts/hosted-release/transfer.mjs verify-key runtime "$RUNTIME_KEY"
+      - name: Restore exact compiled test runtime
+        id: runtime
+        uses: actions/cache/restore@v5
+        with:
+          path: test-runtime.tar.gz
+          key: ${{ inputs.runtime-key }}
+          fail-on-cache-miss: true
+      - name: Verify and unpack compiled test runtime
+        env:
+          CACHE_HIT: ${{ steps.runtime.outputs.cache-hit }}
+        run: |
+          test "$CACHE_HIT" = true
+          bash scripts/hosted-release/run.sh unpack-runtime
+      - name: Run exact backend test shard
+        run: bash scripts/hosted-release/run.sh shard "$SHARD"
+      - name: Report bounded execution diagnostics
+        if: always()
+        run: node scripts/report-backend-execution.mjs "$SHARD"
+      - name: Preserve exact shard results
+        id: results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: backend-shard-${{ inputs.shard }}-${{ github.run_attempt }}
+          path: test-results/shard-${{ inputs.shard }}/
+          if-no-files-found: error
+          retention-days: 14

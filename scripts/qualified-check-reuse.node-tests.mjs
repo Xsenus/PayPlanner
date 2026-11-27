@@ -63,8 +63,8 @@ function producer(mode = 'frontend') {
   return { run, job, sha: oldSha, mode, runner: 'PayPlanner-XSENUS', tools: { ...tools }, log: { ...tools }, now, bootTime: now - 86_400_000 };
 }
 
-test('actual workflow has complete proof plumbing and fresh affected gates', () => {
-  const workflow = parseWorkflow(readFileSync('.github/workflows/deploy.yml', 'utf8'));
+test('the legacy workflow fixture has complete proof plumbing and fresh affected gates', () => {
+  const workflow = parseWorkflow(readFileSync('scripts/fixtures/deploy-xsenus.yml', 'utf8'));
   validateReusePlumbing(workflow);
   assert.equal(workflow.jobs['backend-format'].steps.find(step => step.name === 'Verify full Tests semantic formatting').if, undefined);
   assert.equal(workflow.jobs.frontend.steps.find(step => step.name === 'Build FE').if, undefined);

@@ -32,6 +32,10 @@ function installBrowser(name) {
 export async function prepareCiBrowsers(env = process.env, platform = process.platform,
   install = installBrowser, probe = verifyBrowser) {
   requireTrustedHost(env, platform);
+  return prepareVerifiedBrowsers(install, probe);
+}
+
+export async function prepareVerifiedBrowsers(install = installBrowser, probe = verifyBrowser) {
   // Chromium is versioned by the lockfile's Playwright package. Chrome is a
   // system channel: Playwright's CI installer downloads its MSI on every call,
   // even when a working installation already exists. Verify that installation
