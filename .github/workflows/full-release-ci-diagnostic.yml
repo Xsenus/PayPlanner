@@ -1,0 +1,95 @@
+name: Diagnose the Windows restored-runtime fixture
+
+on:
+  push:
+    branches: [ci/full-release-ci-diagnostic]
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  SUBJECT_SHA: ad121fcdf0e5eeb09e4cd5a5b2f8e6d2ae6923ca
+  PRIOR_RUN: '45954084478'
+  PRIOR_WORKFLOW_SHA: cba284c361df8c595fa182a3818ddaa7005720bc
+  RUNTIME_SHA: 2e5209ab9fd3be77bd3aa20ef826643c53f68ac21239740c5741e882de6011f2
+  EXPECTED_MANIFEST_SHA: 1774BB6ADE84EBD8280044B9FEF8486FFCD92A4034A15833BB4B61472FE02EFD
+  FRONTEND_SHA: 47ddf6a139d9c9d9d540b779aa42cd80f09c9b2606b53515d6b7193b31cdc986
+  PILOT_SDK: 9.0.321
+  DOTNET_PROCESSOR_COUNT: '1'
+  NODE_OPTIONS: --max-old-space-size=1536
+  UseSharedCompilation: 'false'
+  DOTNET_gcServer: '0'
+  DOTNET_GCConserveMemory: '9'
+  BackgroundServices__Enabled: 'false'
+  Email__Enabled: 'false'
+  FE_API_URL: https://api.elitpravo.com/api
+
+defaults:
+  run:
+    shell: bash
+    working-directory: subject
+
+jobs:
+  restored-diagnostic:
+    name: Restored runtime probe (${{ matrix.encoding }})
+    runs-on: windows-2025
+    timeout-minutes: 22
+    strategy:
+      fail-fast: false
+      matrix:
+        encoding: [default, utf8]
+    env:
+      PROBE_ENCODING: ${{ matrix.encoding }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/ci-full-release
+            scripts/ci-cases-pilot
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.SUBJECT_SHA }}
+          path: subject
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.PILOT_SDK }}
+      - name: Verify disposable PostgreSQL 17 and denied production database access
+        shell: pwsh
+        run: ../scripts/ci-cases-pilot/start-postgres.ps1 ./scripts/verify-xsenus-runner.mjs
+      - uses: actions/download-artifact@v7
+        with:
+          name: full-ci-backend-runtime
+          path: subject
+          run-id: ${{ env.PRIOR_RUN }}
+          github-token: ${{ github.token }}
+      - run: bash ../scripts/ci-full-release/run.sh unpack-runtime
+      - name: Run all four restored-runtime cases with bounded startup diagnostics
+        run: |
+          if [[ "$PROBE_ENCODING" == utf8 ]]; then chcp.com 65001; fi
+          chcp.com
+          mkdir -p test-results/restored-diagnostic
+          hook_root="../scripts/ci-full-release/restore-diagnostic"
+          dotnet build "$hook_root/StartupHook.csproj" -c Release --nologo
+          export DOTNET_STARTUP_HOOKS="$(cygpath -w "$(realpath "$hook_root/bin/Release/net9.0/StartupHook.dll")")"
+          export PAYPLANNER_RESTORED_DIAGNOSTIC_FILE="$(cygpath -w "$PWD/test-results/restored-diagnostic/startup.ndjson")"
+          printf '%s\n' '<RunSettings><RunConfiguration><TreatNoTestsAsError>true</TreatNoTestsAsError></RunConfiguration></RunSettings>' >test-results/restored-diagnostic/probe.runsettings
+          exit_code=0
+          dotnet vstest backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll \
+            --Settings:test-results/restored-diagnostic/probe.runsettings \
+            '--Logger:trx;LogFileName=results.trx' --ResultsDirectory:test-results/restored-diagnostic \
+            '--TestCaseFilter:FullyQualifiedName=PayPlanner.Api.Tests.DatabaseRestoreDrillEndToEndPostgreSqlTests.FullModelBackupRestoresReadableManagedGenerationsWithoutSource' || exit_code=$?
+          if [[ -f "$PAYPLANNER_RESTORED_DIAGNOSTIC_FILE" ]]; then cat "$PAYPLANNER_RESTORED_DIAGNOSTIC_FILE"; fi
+          exit "$exit_code"
+      - uses: actions/upload-artifact@v6
+        if: ${{ !cancelled() }}
+        with:
+          name: restored-probe-${{ matrix.encoding }}
+          path: subject/test-results/restored-diagnostic/
+          if-no-files-found: error
+          retention-days: 3
