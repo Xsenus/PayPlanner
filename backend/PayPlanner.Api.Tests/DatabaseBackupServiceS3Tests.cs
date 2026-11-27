@@ -92,10 +92,10 @@ public sealed class DatabaseBackupServiceS3Tests
                 FullName = "Synthetic restore operator",
                 IsApproved = true,
                 PhotoUrl = UserPhotoStoragePaths.RequestPath + "/http.png",
-                Role = new Role { Name = "admin", Permissions = [new RolePermission { Section = "cases", CanView = true, ViewScope = "all" }] },
+                Role = new Role { Name = "admin", Permissions = [new RolePermission { Section = "cases", CanView = true, CanEdit = true, ViewScope = "all" }] },
             };
             user.PasswordHash = new PasswordHasher<User>().HashPassword(user, password);
-            var clientCase = new ClientCase { Client = new Client { Name = "Synthetic HTTP case" } };
+            var clientCase = new ClientCase { Title = "Synthetic HTTP case", Client = new Client { Name = "Synthetic HTTP case" } };
             var document = new ClientCaseDocument
             {
                 ClientCase = clientCase,

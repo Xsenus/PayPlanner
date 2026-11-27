@@ -196,11 +196,11 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                         Email = "native-runtime@example.test",
                         FullName = "Synthetic restore operator",
                         IsApproved = true,
-                        Role = new Role { Name = "admin", Permissions = [new RolePermission { Section = "cases", CanView = true, ViewScope = "all" }] },
+                        Role = new Role { Name = "admin", Permissions = [new RolePermission { Section = "cases", CanView = true, CanEdit = true, ViewScope = "all" }] },
                         PhotoUrl = "https://old-host.example.test/user-photos/photo.png",
                     };
                     user.PasswordHash = new PasswordHasher<User>().HashPassword(user, password);
-                    var clientCase = new ClientCase { Client = new Client { Name = "Native runtime" } };
+                    var clientCase = new ClientCase { Title = "Native runtime", Client = new Client { Name = "Native runtime" } };
                     source.AddRange(user, clientCase);
                     await source.SaveChangesAsync();
                     var passport = new ClientPassport

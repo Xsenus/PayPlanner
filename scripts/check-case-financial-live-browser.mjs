@@ -180,7 +180,7 @@ try {
       }
       firstHandled();
     });
-    const loginEmail = page.locator('input[type="email"]');
+    const loginEmail = page.getByLabel('Email', { exact: true });
     await loginEmail.waitFor({ state: 'visible' });
     await checkpoint('login-read-boundary');
     await initialReads.drain('client-navigation');
@@ -188,7 +188,7 @@ try {
     await loginEmail.fill(settings.email);
     await page.locator('input[type="password"]').fill(settings.password);
     await page.getByRole('button', { name: 'Войти', exact: true }).click();
-    await page.locator('input[type="email"]').waitFor({ state: 'hidden' });
+    await loginEmail.waitFor({ state: 'hidden' });
     await checkpoint('authenticated');
     await page.getByRole('button', { name: 'Заказ-наряд', exact: true }).waitFor();
     try {

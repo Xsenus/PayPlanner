@@ -37,7 +37,8 @@ const browserPhases = new Set([
   'ui-build', 'preview-listen', 'launch-msedge', 'launch-chrome', 'launch-chromium',
   'browser-context', 'new-page', 'login-navigation', 'login-email', 'login-password', 'login-submit',
   'login-complete', 'user-menu', 'user-name', 'avatar', 'document-button', 'document-download',
-  'download-read', 'activity-drain', 'notification-drain', 'final-assertions', 'browser-close', 'vite-close', 'done',
+  'download-read', 'client-portal-preview', 'activity-drain', 'notification-drain', 'final-assertions',
+  'browser-close', 'vite-close', 'done',
 ]);
 let browserPhase = 'ui-build';
 const recordBrowserPhase = (nextPhase, event = 'enter', error) => {
@@ -147,7 +148,8 @@ try {
   recordBrowserPhase('login-navigation');
   await page.goto(`${ui}/cases/${caseId}?ppCaseTab=documents`, { waitUntil: 'domcontentloaded' });
   recordBrowserPhase('login-email');
-  await page.locator('input[type="email"]').fill(process.env.RESTORED_SMOKE_EMAIL);
+  const loginEmail = page.getByLabel('Email', { exact: true });
+  await loginEmail.fill(process.env.RESTORED_SMOKE_EMAIL);
   recordBrowserPhase('login-password');
   await page.locator('input[type="password"]').fill(process.env.RESTORED_SMOKE_PASSWORD);
   // Observe existing activity responses throughout login and loading. Start the
@@ -155,7 +157,7 @@ try {
   recordBrowserPhase('login-submit');
   await page.getByRole('button', { name: 'Войти', exact: true }).click();
   recordBrowserPhase('login-complete');
-  await page.locator('input[type="email"]').waitFor({ state: 'hidden' });
+  await loginEmail.waitFor({ state: 'hidden' });
   recordBrowserPhase('user-menu');
   await page.getByRole('button', { name: 'Меню пользователя', exact: true }).click();
   recordBrowserPhase('user-name');
@@ -183,6 +185,24 @@ try {
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   assert.deepEqual(Buffer.concat(chunks), Buffer.from(process.env.RESTORED_SMOKE_DOCUMENT_BASE64, 'base64'));
+
+  phase = 'client-portal-preview';
+  recordBrowserPhase('client-portal-preview');
+  const previewButton = page.getByRole('button', { name: 'Посмотреть как клиент', exact: true });
+  await previewButton.waitFor();
+  const previewUrl = `${api.origin}/api/portal/admin/cases/${caseId}/preview`;
+  const [portalResponse] = await Promise.all([
+    page.waitForResponse(response => response.url() === previewUrl && response.request().method() === 'POST'),
+    previewButton.click(),
+  ]);
+  assert.equal(portalResponse.status(), 200, 'The administrator must be able to preview this case.');
+  const portalCase = await portalResponse.json();
+  assert.ok(typeof portalCase.title === 'string' && portalCase.title.trim(), 'The preview must return the case title.');
+  const portalView = page.getByRole('region', { name: 'Предпросмотр клиентского кабинета', exact: true });
+  await portalView.getByRole('heading', { name: portalCase.title, exact: true }).waitFor();
+  await portalView.getByRole('button', { name: 'Закрыть предпросмотр', exact: true }).click();
+  await portalView.waitFor({ state: 'hidden' });
+
   assert.ok(activityStarted > 0, 'The real case page must begin its existing activity request.');
   recordBrowserPhase('activity-drain');
   if (activityRequests.size) {

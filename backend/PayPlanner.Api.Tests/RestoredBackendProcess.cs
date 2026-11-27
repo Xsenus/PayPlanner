@@ -205,7 +205,7 @@ internal sealed class RestoredBackendProcess : IAsyncDisposable
             const string browserPhasePattern =
                 "\\APP_RESTORED_BROWSER_PHASE \\{\"Phase\":\"(?:ui-build|preview-listen|launch-msedge|launch-chrome|launch-chromium|browser-context|new-page"
                 + "|login-navigation|login-email|login-password|login-submit|login-complete|user-menu|user-name|avatar"
-                + "|document-button|document-download|download-read|activity-drain|notification-drain|final-assertions|browser-close|vite-close|done)\",\"Event\":\"(?:enter|failed|attempt-failed)\","
+                + "|document-button|document-download|download-read|client-portal-preview|activity-drain|notification-drain|final-assertions|browser-close|vite-close|done)\",\"Event\":\"(?:enter|failed|attempt-failed)\","
                 + "\"ElapsedMs\":(?:0|[1-9][0-9]{0,8}),\"ProcessUptimeMs\":(?:0|[1-9][0-9]{0,8}),"
                 + "\"BrowserErrors\":(?:0|[1-9][0-9]{0,8}),\"OutsideRequests\":(?:0|[1-9][0-9]{0,8}),"
                 + "\"FailedRequests\":(?:0|[1-9][0-9]{0,8}),\"PendingNotifications\":(?:0|[1-9][0-9]{0,8}),"
